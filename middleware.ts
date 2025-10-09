@@ -136,7 +136,7 @@ export function middleware(request: NextRequest) {
   // Add CSP header
   response.headers.set('Content-Security-Policy', CSP_HEADER)
   
-  // Admin route protection
+  // Admin route protection - Only protect /admin routes
   if (isAdminRoute(pathname)) {
     // Check for Supabase session cookies
     const sessionCookie = request.cookies.get('sb-session-active')
