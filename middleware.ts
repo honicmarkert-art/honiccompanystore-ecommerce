@@ -92,9 +92,9 @@ function validateCSRFToken(request: NextRequest): boolean {
   return token === cookieToken
 }
 
-// Admin route protection
+// Admin route protection - Hidden path for security
 function isAdminRoute(pathname: string): boolean {
-  return pathname.startsWith('/admin')
+  return pathname.startsWith('/siem-dashboard')
 }
 
 // API route protection
@@ -136,7 +136,7 @@ export function middleware(request: NextRequest) {
   // Add CSP header
   response.headers.set('Content-Security-Policy', CSP_HEADER)
   
-  // Admin route protection - Only protect /admin routes
+  // Admin route protection - Only protect /siem-dashboard routes
   if (isAdminRoute(pathname)) {
     // Check for Supabase session cookies
     const sessionCookie = request.cookies.get('sb-session-active')
