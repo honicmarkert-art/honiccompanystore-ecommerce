@@ -262,14 +262,7 @@ export function useProducts(): UseProductsReturn {
       setError(err instanceof Error ? err.message : 'Failed to fetch products')
       preloadPromise = null
       
-      // If fetch fails, try to load fallback data
-      try {
-        const { allProducts } = await import('@/data/products')
-        setProducts(allProducts)
-        setError(null)
-      } catch (fallbackError) {
-        console.error('Error loading fallback products:', fallbackError)
-      }
+      // Fallback data removed - relying on API only
     } finally {
       setIsLoading(false)
     }
