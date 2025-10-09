@@ -70,3 +70,4 @@ tmp-*
 *.test.js
 *.spec.js
 next-env.d.ts
+.vercel
