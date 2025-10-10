@@ -1,5 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Make environment variables available during build
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -145,10 +151,8 @@ const nextConfig = {
   // Navigation and prefetching optimizations
   trailingSlash: false, // Consistent URL structure
   skipTrailingSlashRedirect: true, // Avoid redirects
-  // Enable static optimization  
-  // Disable static page generation completely to avoid build-time API calls
-  // This is needed because API routes try to initialize Supabase during build
-  staticPageGenerationTimeout: 1000,
+  // Enable static optimization
+  output: 'standalone', // Optimize for deployment
   // Enhanced Security Headers and Performance Optimizations
   async headers() {
     return [
