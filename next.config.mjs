@@ -145,8 +145,10 @@ const nextConfig = {
   // Navigation and prefetching optimizations
   trailingSlash: false, // Consistent URL structure
   skipTrailingSlashRedirect: true, // Avoid redirects
-  // Enable static optimization
-  output: 'standalone', // Optimize for deployment
+  // Enable static optimization  
+  // Disable static page generation completely to avoid build-time API calls
+  // This is needed because API routes try to initialize Supabase during build
+  staticPageGenerationTimeout: 1000,
   // Enhanced Security Headers and Performance Optimizations
   async headers() {
     return [
