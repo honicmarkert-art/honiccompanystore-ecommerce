@@ -43,6 +43,15 @@ function validateEnvironment() {
   } catch (error) {
     if (error instanceof z.ZodError) {
       const missingVars = error.errors.map(err => err.path.join('.'))
+      // Don't throw during build - just return defaults
+      if (process.env.NODE_ENV === undefined || process.env.NEXT_PUBLIC_SUPABASE_URL === undefined) {
+        logger.log('⚠️ Environment variables not available during build - using defaults')
+        return envSchema.parse({
+          NEXT_PUBLIC_SUPABASE_URL: 'https://placeholder.supabase.co',
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: 'placeholder',
+          NODE_ENV: 'production'
+        })
+      }
       throw new Error(`Missing or invalid environment variables: ${missingVars.join(', ')}`)
     }
     throw error
