@@ -13,7 +13,6 @@ export function RoutePrefetcher() {
       router.prefetch('/')
       router.prefetch('/products')
       router.prefetch('/cart')
-      router.prefetch('/admin')
       router.prefetch('/auth/login')
       router.prefetch('/account')
       router.prefetch('/categories')
@@ -25,11 +24,6 @@ export function RoutePrefetcher() {
       router.prefetch('/account/messages')
       router.prefetch('/account/coupons')
       router.prefetch('/account/coins')
-      
-      // Admin sub-routes
-      router.prefetch('/admin/products')
-      router.prefetch('/admin/orders')
-      router.prefetch('/admin/users')
     }
 
     // Use requestIdleCallback for better performance

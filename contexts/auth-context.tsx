@@ -145,7 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Handle role-based routing
   const handleRoleBasedRouting = useCallback((role: 'user' | 'admin', currentPath: string) => {
     // Only redirect if user is trying to access admin pages without admin privileges
-    if (role === 'user' && currentPath.startsWith('/admin')) {
+    if (role === 'user' && (currentPath.startsWith('/admin') || currentPath.startsWith('/siem-dashboard'))) {
     startTransition(() => {
           router.replace('/')
       })
@@ -221,7 +221,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       
-      console.log('Login response:', result) // Debug log
 
       if (!result.success) {
         // Handle failed login
@@ -379,6 +378,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null)
         setIsAuthenticated(false)
         setIsAdmin(false)
+        
+        // Clear 2FA session
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('admin-2fa-verified')
+          sessionStorage.removeItem('admin-2fa-time')
+        }
         
         // Show success message
         toast({

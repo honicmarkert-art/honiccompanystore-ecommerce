@@ -13,6 +13,7 @@ import { Eye, EyeOff, Mail, Lock, User, Phone } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -192,18 +193,18 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[380px] max-h-[60vh] p-0 top-[35%] mx-auto">
+      <DialogContent className="sm:max-w-[380px] max-h-[60vh] p-0 top-[35%] mx-auto bg-white dark:bg-gray-900">
         <DialogHeader className="px-4 pt-3 pb-1">
-          <DialogTitle className="text-center text-base font-bold">
+          <DialogTitle className="text-center text-base font-bold text-gray-900 dark:text-gray-100">
             Welcome to Honic Co.
           </DialogTitle>
         </DialogHeader>
 
         {currentTab === 'login' ? (
-          <Card className="border-0 shadow-none mt-4">
+          <Card className="border-0 shadow-none mt-4 bg-white dark:bg-gray-900">
             <CardHeader className="px-4 pb-1">
-              <CardTitle className="text-sm">Sign In to Your Account</CardTitle>
-              <CardDescription className="text-xs">
+              <CardTitle className="text-sm text-gray-900 dark:text-gray-100">Sign In to Your Account</CardTitle>
+              <CardDescription className="text-xs text-gray-600 dark:text-gray-400">
                 Enter your credentials to access your account
               </CardDescription>
             </CardHeader>
@@ -221,7 +222,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
               )}
               <form onSubmit={handleLogin} className="space-y-2">
                 <div className="space-y-1">
-                  <Label htmlFor="login-email" className="text-xs">Email</Label>
+                  <Label htmlFor="login-email" className="text-xs text-gray-900 dark:text-gray-100">Email</Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <Input
@@ -237,7 +238,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="login-password" className="text-xs">Password</Label>
+                  <Label htmlFor="login-password" className="text-xs text-gray-900 dark:text-gray-100">Password</Label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <Input
@@ -273,11 +274,11 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       id="remember"
                       className="rounded border-gray-300"
                     />
-                    <Label htmlFor="remember" className="text-xs">
+                    <Label htmlFor="remember" className="text-xs text-gray-900 dark:text-gray-100">
                       Remember me
                     </Label>
                   </div>
-                  <Button type="button" variant="link" className="text-xs text-orange-500">
+                  <Button type="button" variant="link" className="text-xs text-orange-500 hover:text-orange-600">
                     Forgot password?
                   </Button>
                 </div>
@@ -290,12 +291,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
               <div className="mt-2">
                 <Separator className="my-2" />
                 <div className="text-center">
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
                     Don't have an account?{' '}
                     <Button
                       type="button"
                       variant="link"
-                      className="text-orange-500 p-0 h-auto text-xs"
+                      className="text-orange-500 hover:text-orange-600 p-0 h-auto text-xs"
                       onClick={() => setCurrentTab('register')}
                     >
                       Create one here
@@ -306,10 +307,10 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
             </CardContent>
           </Card>
         ) : (
-          <Card className="border-0 shadow-none mt-4">
+          <Card className="border-0 shadow-none mt-4 bg-white dark:bg-gray-900">
             <CardHeader className="px-4 pb-1">
-              <CardTitle className="text-sm">Create Your Account</CardTitle>
-              <CardDescription className="text-xs">
+              <CardTitle className="text-sm text-gray-900 dark:text-gray-100">Create Your Account</CardTitle>
+              <CardDescription className="text-xs text-gray-600 dark:text-gray-400">
                 Join Honic Co. and start your journey
               </CardDescription>
             </CardHeader>
@@ -327,7 +328,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
               )}
               <form onSubmit={handleRegister} className="space-y-1.5">
                 <div className="space-y-1">
-                  <Label htmlFor="register-fullname" className="text-xs">Full Name *</Label>
+                  <Label htmlFor="register-fullname" className="text-xs text-gray-900 dark:text-gray-100">Full Name *</Label>
                   <div className="relative">
                     <User className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <Input
@@ -343,7 +344,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="register-email" className="text-xs">Email *</Label>
+                  <Label htmlFor="register-email" className="text-xs text-gray-900 dark:text-gray-100">Email *</Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <Input
@@ -359,7 +360,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="register-phone" className="text-xs">Phone</Label>
+                  <Label htmlFor="register-phone" className="text-xs text-gray-900 dark:text-gray-100">Phone</Label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <Input
@@ -375,7 +376,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   <div className="space-y-1">
-                    <Label htmlFor="register-password" className="text-xs">Password *</Label>
+                    <Label htmlFor="register-password" className="text-xs text-gray-900 dark:text-gray-100">Password *</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                       <Input
@@ -408,7 +409,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                   </div>
 
                   <div className="space-y-1">
-                    <Label htmlFor="register-confirm-password" className="text-xs">Confirm *</Label>
+                    <Label htmlFor="register-confirm-password" className="text-xs text-gray-900 dark:text-gray-100">Confirm *</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                       <Input
@@ -445,15 +446,15 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                     className="rounded border-gray-300"
                     required
                   />
-                  <Label htmlFor="terms" className="text-xs">
+                  <Label htmlFor="terms" className="text-xs text-gray-900 dark:text-gray-100">
                     I agree to the{' '}
-                    <Button type="button" variant="link" className="text-orange-500 p-0 h-auto text-xs">
+                    <Link href="/services/terms-of-service" className="text-orange-500 hover:text-orange-600 underline" onClick={(e) => { e.stopPropagation(); onClose(); }}>
                       Terms
-                    </Button>{' '}
+                    </Link>{' '}
                     and{' '}
-                    <Button type="button" variant="link" className="text-orange-500 p-0 h-auto text-xs">
+                    <Link href="/services/privacy-policy" className="text-orange-500 hover:text-orange-600 underline" onClick={(e) => { e.stopPropagation(); onClose(); }}>
                       Privacy
-                    </Button>
+                    </Link>
                   </Label>
                 </div>
 
@@ -465,12 +466,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
               <div className="mt-1.5">
                 <Separator className="my-1.5" />
                 <div className="text-center">
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
                     Already have an account?{' '}
                     <Button
                       type="button"
                       variant="link"
-                      className="text-orange-500 p-0 h-auto text-xs"
+                      className="text-orange-500 hover:text-orange-600 p-0 h-auto text-xs"
                       onClick={() => setCurrentTab('login')}
                     >
                       Sign in here

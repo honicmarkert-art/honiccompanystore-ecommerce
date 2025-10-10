@@ -419,19 +419,7 @@ export default function LandingPage() {
 
                 {/* Account/Sign in */}
               {user ? (
-                <>
-                  <UserProfile />
-                  {(user.role === 'admin' || user.profile?.is_admin) && (
-                    <Button 
-                      className="bg-purple-600 hover:bg-purple-700 text-xs sm:text-sm px-2 py-1 flex items-center space-x-1"
-                      onClick={() => router.push('/admin')}
-                    >
-                      <Shield className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="hidden sm:inline">Admin Panel</span>
-                      <span className="sm:hidden">Admin</span>
-                    </Button>
-                  )}
-                </>
+                <UserProfile />
               ) : (
                   <div className="flex items-center space-x-2">
                     <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => openAuthModal('login')}>

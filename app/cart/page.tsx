@@ -816,11 +816,6 @@ function CartPageContent() {
                                     </h3>
                                   </Link>
                                   
-                                  {item.variants[0]?.variantId && item.variants[0].variantId !== 'default' && (
-                                    <p className={cn("text-[9px] sm:text-xs mt-0.5", themeClasses.textNeutralSecondary)}>
-                                      Variant: {item.variants[0].variantId}
-                                    </p>
-                                  )}
 
                                   {/* Price Display */}
                                   <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">

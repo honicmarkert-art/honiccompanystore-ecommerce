@@ -331,6 +331,7 @@ export function useCart() {
     
     // Normalize variant id so simple products always use a single key
     const normalizedVariantId: string = buildCanonicalVariantId(variantId, variantAttributes)
+    
 
     // Use provided price immediately for faster response
     let finalVariantPrice: number = variantPrice || 0
@@ -401,6 +402,7 @@ export function useCart() {
         setCart(updatedCart)
         setCartTotalItems(prev => prev + quantity)
         setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
+        
       } else {
         // Add new variant to existing product
         const newVariant: SelectedVariant = {
@@ -411,9 +413,6 @@ export function useCart() {
           sku: variantSku,
           image: variantImage
         }
-
-
-
 
         const updatedCart = cart.map(item => {
           if (item.productId === productId) {
@@ -433,6 +432,7 @@ export function useCart() {
       setCart(updatedCart)
       setCartTotalItems(prev => prev + quantity)
         setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
+        
       }
     } else {
 
@@ -459,6 +459,8 @@ export function useCart() {
         }
       }
 
+      console.log('  - Creating new cart item with variant:', newVariant)
+      
       const newItem: CartItem = {
           id: Date.now(), // Temporary ID
           productId,
@@ -487,11 +489,11 @@ export function useCart() {
 
       setCart(prev => {
         const newCart = [...prev, newItem]
-
         return newCart
       })
         setCartTotalItems(prev => prev + quantity)
       setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
+      
     }
 
     // Call API for authenticated users in background (non-blocking)

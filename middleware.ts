@@ -136,6 +136,12 @@ export function middleware(request: NextRequest) {
   // Add CSP header
   response.headers.set('Content-Security-Policy', CSP_HEADER)
   
+  // Block old /admin path - redirect to home
+  if (pathname.startsWith('/admin')) {
+    const homeUrl = new URL('/', request.url)
+    return NextResponse.redirect(homeUrl)
+  }
+
   // Admin route protection - Only protect /siem-dashboard routes
   if (isAdminRoute(pathname)) {
     // Check for Supabase session cookies

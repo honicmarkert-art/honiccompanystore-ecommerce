@@ -178,9 +178,9 @@ export default function ProductDetailPage() {
   
   // "You May Also Like" rotation state - changes every 30 seconds
   const [relatedProductsRotation, setRelatedProductsRotation] = useState(0)
-  // Responsive product count: 16 on mobile, 32 on desktop
+   // Responsive product count: 15 on mobile, 32 on desktop
   const [isMobile, setIsMobile] = useState(false)
-  const RELATED_PRODUCTS_COUNT_MOBILE = 16
+  const RELATED_PRODUCTS_COUNT_MOBILE = 15
   const RELATED_PRODUCTS_COUNT_DESKTOP = 32
   const ROTATION_INTERVAL = 30000 // 30 seconds
   
@@ -551,6 +551,7 @@ export default function ProductDetailPage() {
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
   const [selectedAttributes, setSelectedAttributes] = useState<{ [key: string]: string | string[] | undefined }>({})
   const [variantSelectionStep, setVariantSelectionStep] = useState<number>(0) // For multi-dependent logic
+  const [hasAutoSelected, setHasAutoSelected] = useState(false) // Track if we've auto-selected on mount
 
   // New states for video and 360° view dialogs
   const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false)
@@ -1074,7 +1075,10 @@ export default function ProductDetailPage() {
 
   // Update selected variant when attributes change
   useEffect(() => {
-    if (!displayProduct?.variants || Object.keys(selectedAttributes).length === 0) return
+    
+    if (!displayProduct?.variants || Object.keys(selectedAttributes).length === 0) {
+      return
+    }
     
     let matchingVariant = null
     
@@ -1450,12 +1454,23 @@ export default function ProductDetailPage() {
 
   // Auto-select the first option for each attribute on initial load
   useEffect(() => {
-    if (!displayProduct?.variants || displayProduct.variants.length === 0) return
-    if (!attributeTypes || attributeTypes.length === 0) return
+    if (!displayProduct?.variants || displayProduct.variants.length === 0) {
+      return
+    }
+    if (!attributeTypes || attributeTypes.length === 0) {
+      return
+    }
+    
+    // Only auto-select once
+    if (hasAutoSelected) {
+      return
+    }
 
     // Only initialize once when nothing is selected yet
     const hasAnySelection = Object.values(selectedAttributes).some(v => v !== undefined && v !== null && v !== '')
-    if (hasAnySelection) return
+    if (hasAnySelection) {
+      return
+    }
 
     const initialSelection: { [key: string]: string | string[] } = {}
     attributeTypes.forEach((attrType: string) => {
@@ -1467,8 +1482,9 @@ export default function ProductDetailPage() {
 
     if (Object.keys(initialSelection).length > 0) {
       setSelectedAttributes(initialSelection)
+      setHasAutoSelected(true)
     }
-  }, [displayProduct?.variants, attributeTypes])
+  }, [displayProduct?.variants, attributeTypes, hasAutoSelected])
 
   // Get the current unit price based on selected attributes (MEMOIZED for performance)
   const getCurrentUnitPrice = useMemo((): number => {
@@ -1550,6 +1566,15 @@ export default function ProductDetailPage() {
       
       
       if (currentSelectedCount === 0) {
+        // If no attribute types available, treat as simple product
+        if (attributeTypes.length === 0) {
+          const fallbackPrice = getCurrentUnitPrice
+          
+          addItem(product.id, quantity, undefined, {}, fallbackPrice)
+          
+          return
+        }
+        
         // No attributes selected - auto-select first option for each attribute
         const newSelectedAttributes: { [key: string]: string | string[] } = {}
         
@@ -1584,12 +1609,6 @@ export default function ProductDetailPage() {
             undefined, // sku
             undefined  // image
           )
-          
-          toast({
-            title: "Added to Cart!",
-            description: `${quantity} x ${product.name} (${Object.entries(firstCombination).map(([key, value]) => `${key}: ${value}`).join(', ')}) added to your cart.`,
-            duration: 500, // Success message: 500ms (within 300-1000ms range)
-          })
         }
         return
       }
@@ -1638,11 +1657,7 @@ export default function ProductDetailPage() {
         }
       })
       
-      toast({
-        title: "Added to Cart!",
-        description: `${totalItemsAdded} items (${combinations.length} combinations) added to your cart. Total: ${formatPrice(totalPrice)}`,
-        duration: 500, // Success message: 500ms (within 300-1000ms range)
-      })
+      // Toast notification handled by cart hook
       
     } else {
       // Check if this is a simple product with no variants/attributes
@@ -1653,18 +1668,14 @@ export default function ProductDetailPage() {
         // Add to cart immediately (optimistic update)
         addItem(product.id, quantity, undefined, {}, fallbackPrice)
         
-        // Show success message immediately
-        toast({
-          title: "Added to Cart!", 
-          description: `${quantity} x ${product.name} added to your cart.`,
-          duration: 500, // Success message: 500ms (within 300-1000ms range)
-        })
+        // Toast notification handled by cart hook
         return
       }
       
       // Simple case: single item with base quantity
-      if (selectedVariant) {
-        // Prepare variant attributes for the new cart system
+      // If we have selected attributes, use them even if selectedVariant is null
+      if (Object.keys(selectedAttributes).length > 0) {
+        
         const variantAttributes: { [key: string]: string | string[] } = {}
         
         // Add selected attributes
@@ -1674,8 +1685,8 @@ export default function ProductDetailPage() {
           }
         })
         
-        // Add variant-specific attributes
-        if (selectedVariant.attributes) {
+        // Add variant-specific attributes if we have a selected variant
+        if (selectedVariant?.attributes) {
           Object.entries(selectedVariant.attributes).forEach(([key, value]) => {
             if (value && !variantAttributes[key]) {
               variantAttributes[key] = String(value)
@@ -1684,37 +1695,32 @@ export default function ProductDetailPage() {
         }
         
         const currentPrice = getCurrentUnitPrice
+        const combinationKey = Object.entries(variantAttributes).map(([key, value]) => `${key}:${value}`).join('-')
+        const variantId = selectedVariant?.id || `combination-0-${combinationKey}`
+        
         
         // Add to cart immediately (optimistic update)
         addItem(
           product.id, 
           quantity, 
-          selectedVariant.id,
+          variantId,
           variantAttributes,
           currentPrice,
-          selectedVariant.sku,
-          selectedVariant.image
+          selectedVariant?.sku,
+          selectedVariant?.image
         )
         
-        // Show success message immediately
-        toast({
-          title: "Added to Cart!",
-          description: `${quantity} x ${product.name} (${formatVariantHierarchy(variantAttributes)}) added to your cart.`,
-          duration: 500, // Success message: 500ms (within 300-1000ms range)
-        })
+        
+        // Toast notification handled by cart hook
       } else {
+        
         const fallbackPrice = getCurrentUnitPrice
         
         // Fallback: add product without variant
         // Add to cart immediately (optimistic update)
         addItem(product.id, quantity, undefined, {}, fallbackPrice)
         
-        // Show success message immediately
-        toast({
-          title: "Added to Cart!", 
-          description: `${quantity} x ${product.name} added to your cart.`,
-          duration: 500, // Success message: 500ms (within 300-1000ms range)
-        })
+        // Toast notification handled by cart hook
       }
     }
   }
@@ -2589,40 +2595,45 @@ export default function ProductDetailPage() {
               </span>
             </div>
 
-            <div className="flex items-baseline gap-2 mt-4">
-              <span className={cn("text-3xl sm:text-4xl lg:text-5xl font-bold", themeClasses.mainText)}>{formatPrice(currentPrice)}</span>
-              {currentOriginalPrice > currentPrice && (
-                <span className={cn("text-sm sm:text-base line-through", themeClasses.textNeutralSecondary)}>
-                  {formatPrice(currentOriginalPrice)}
+            <div className="mt-4">
+              {/* First Row: Main Price + Original Price */}
+              <div className="flex items-baseline gap-2">
+                <span className={cn("text-3xl sm:text-4xl lg:text-5xl font-bold", themeClasses.mainText)}>
+                  {formatPrice(currentPrice)}
                 </span>
-              )}
-              {currentOriginalPrice > currentPrice && (
-                <span className={cn(
-                  "text-white text-xs font-semibold px-1 py-0.5 rounded text-center",
-                  backgroundColor === "white" ? "bg-red-500" : "bg-red-600"
-                )}>
-                  Save {formatPrice(currentOriginalPrice - currentPrice)}
-                </span>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handlePriceAlertClick}
-                className={cn(
-                  "ml-auto",
-                  "border border-transparent lg:border",
-                  backgroundColor === "dark"
-                    ? "text-white hover:text-yellow-500 lg:border-neutral-600"
-                    : "text-blue-600 hover:text-blue-700 lg:border-neutral-300",
-                  hasPriceAlert && "text-green-600 hover:text-green-700"
+                {currentOriginalPrice > currentPrice && (
+                  <span className={cn("text-sm sm:text-base line-through", themeClasses.textNeutralSecondary)}>
+                    {formatPrice(currentOriginalPrice)}
+                  </span>
                 )}
-              >
-                <BellDot className={cn("w-4 h-4 sm:w-5 sm:h-5", hasPriceAlert ? "text-green-600" : "text-gray-400")} />
-                <span className="hidden sm:inline ml-1">
-                  {hasPriceAlert ? "Alert Set" : "Price Alert"}
-                </span>
-                <span className="sr-only">Price Alert</span>
-              </Button>
+              </div>
+              
+              {/* Second Row: Reminder Button (left) + Save Amount (right) */}
+              {currentOriginalPrice > currentPrice && (
+                <div className="flex items-center justify-between mt-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handlePriceAlertClick}
+                    className={cn(
+                      "border border-transparent lg:border",
+                      backgroundColor === "dark"
+                        ? "text-white hover:text-yellow-500 lg:border-neutral-600"
+                        : "text-blue-600 hover:text-blue-700 lg:border-neutral-300",
+                      hasPriceAlert && "text-green-600 hover:text-green-700"
+                    )}
+                  >
+                    {hasPriceAlert ? "✓ Alert Set" : "Set Price Alert"}
+                  </Button>
+                  
+                  <span className={cn(
+                    "text-white text-xs font-semibold px-2 py-1 rounded text-center",
+                    backgroundColor === "white" ? "bg-red-500" : "bg-red-600"
+                  )}>
+                    Save {formatPrice(currentOriginalPrice - currentPrice)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className={cn("flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm mt-2", themeClasses.textNeutralSecondary)}>
@@ -3060,42 +3071,47 @@ export default function ProductDetailPage() {
                 {Object.keys(selectedAttributes).length > 0 ? (
                   <div 
                     key={`preview-${JSON.stringify(individualQuantities)}-${quantity}`}
-                    className={cn("border rounded-lg p-3 mt-4 shadow-sm", themeClasses.cardBg, themeClasses.cardBorder)}
+                    className={cn("border rounded-lg p-2 sm:p-3 mt-4 shadow-sm", themeClasses.cardBg, themeClasses.cardBorder)}
                   >
-                      <div className="flex items-center justify-between">
-                      {/* Left side - Summary info */}
-                      <div className="flex items-center gap-4">
-                        <div className="text-center">
-                          <span className={cn("text-xs", themeClasses.textNeutralSecondary)}>Unit Price</span>
-                          <div className={cn("text-sm font-semibold", themeClasses.mainText)}>
+                      {/* All items in one row with labels above and values below */}
+                      <div className="flex items-end justify-between gap-2">
+                        {/* Unit Price */}
+                        <div className="text-center flex-1">
+                          <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Unit Price</div>
+                          <div className={cn("text-xs sm:text-sm font-semibold", themeClasses.mainText)}>
                             {formatPrice(getCurrentUnitPrice)}
+                          </div>
                         </div>
-                      </div>
-                        <div className="text-center">
-                          <span className={cn("text-xs", themeClasses.textNeutralSecondary)}>Total Items</span>
-                          <div className={cn("text-sm font-semibold", themeClasses.mainText)}>
+                        
+                        {/* Total Items */}
+                        <div className="text-center flex-1">
+                          <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Total Items</div>
+                          <div className={cn("text-xs sm:text-sm font-semibold", themeClasses.mainText)}>
                             {calculateTrueTotalItems}
-                      </div>
-                    </div>
-                        <div className="text-center">
-                          <span className={cn("text-xs", themeClasses.textNeutralSecondary)}>Total Price</span>
-                          <div className={cn("text-lg font-bold text-green-600", themeClasses.mainText)}>
+                          </div>
+                        </div>
+                        
+                        {/* Total Price */}
+                        <div className="text-center flex-1">
+                          <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Total Price</div>
+                          <div className={cn("text-sm sm:text-lg font-bold text-green-600", themeClasses.mainText)}>
                             {formatPrice(calculateTrueTotalPrice)}
-                  </div>
+                          </div>
+                        </div>
+                        
+                        {/* Preview Button */}
+                        <div className="flex-1">
+                          <Button
+                            onClick={() => setIsSelectionPreviewOpen(true)}
+                            className={cn(
+                              "hover:bg-blue-700 text-white px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium w-full",
+                              backgroundColor === "white" ? "bg-blue-600" : "bg-blue-700"
+                            )}
+                          >
+                            Preview
+                          </Button>
                         </div>
                       </div>
-                      
-                      {/* Right side - Preview button */}
-                      <Button
-                        onClick={() => setIsSelectionPreviewOpen(true)}
-                        className={cn(
-                          "hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium",
-                          backgroundColor === "white" ? "bg-blue-600" : "bg-blue-700"
-                        )}
-                      >
-                        Preview Details
-                      </Button>
-                    </div>
                   </div>
                 ) : null}
               </div>
@@ -3292,40 +3308,13 @@ export default function ProductDetailPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  // Add items to cart using the same logic as handleAddToCart
-                  if (Object.keys(individualQuantities).length > 0) {
-                    // Use individual quantities logic (like dialog)
-                    const combinations = generateAttributeCombinations(selectedAttributes)
-                    
-                    combinations.forEach((combination, index) => {
-                      const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-                      const qty = getIndividualQuantity(combinationKey)
-                      const unitPrice = calculatePriceForCombination(combination)
-                      
-                      if (qty > 0) {
-                        const variantId = `combination-${index}-${combinationKey}`
-                        addItem(product.id, qty, variantId, combination, unitPrice, undefined, undefined)
-                      }
-                    })
-                  } else {
-                    // Simple case
-                    if (selectedVariant) {
-                      const variantAttributes: { [key: string]: string | string[] } = {}
-                      Object.entries(selectedAttributes).forEach(([key, value]) => {
-                        if (value) variantAttributes[key] = value
-                      })
-                      if (selectedVariant.attributes) {
-                        Object.entries(selectedVariant.attributes).forEach(([key, value]) => {
-                          if (value && !variantAttributes[key]) variantAttributes[key] = String(value)
-                        })
-                      }
-                      addItem(product.id, quantity, selectedVariant.id, variantAttributes, getCurrentUnitPrice, selectedVariant.sku, selectedVariant.image)
-                    } else {
-                      addItem(product.id, quantity, undefined, {}, getCurrentUnitPrice)
-                    }
-                  }
-                  // Navigate to cart page with optimization
-                  navigateWithPrefetch('/cart', { priority: 'high' })
+                  // First, call handleAddToCart to ensure item is added (with auto-select if needed)
+                  handleAddToCart()
+                  
+                  // Then navigate to cart page after a short delay to ensure cart is updated
+                  setTimeout(() => {
+                    navigateWithPrefetch('/cart', { priority: 'high' })
+                  }, 100)
                 }}
                 className={cn(
                   "flex-1 py-2 sm:py-3 text-sm sm:text-lg group border border-transparent hover:border-white/20 hover:bg-transparent",
@@ -3674,7 +3663,7 @@ export default function ProductDetailPage() {
 
       {/* Related Products Section */}
       <section className="py-8 border-t">
-        <div className="container px-4 sm:px-6 lg:px-8">
+        <div className="container px-1 sm:px-2 lg:px-3">
           <div className="flex items-center justify-between mb-6">
             <h2 className={cn("text-xl font-bold", themeClasses.mainText)}>You May Also Like</h2>
             <OptimizedLink 

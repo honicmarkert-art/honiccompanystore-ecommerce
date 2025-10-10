@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import { logger } from '@/lib/logger'
 
 // Extend window object for search timeout
@@ -150,6 +150,7 @@ const categoryIcons: { [key: string]: any } = {
 }
 
 export default function Component() {
+  const router = useRouter()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   // const { products, isLoading, error, retry, preloadProducts } = useProducts() // Removed - using useProductsOptimized instead
   const { addItem, isInCart, cartTotalItems, getItemQuantity } = useCart() // Use useCart hook
@@ -273,6 +274,23 @@ export default function Component() {
   const [adsLoading, setAdsLoading] = useState(true)
   const [currentAdIndex, setCurrentAdIndex] = useState(0)
   const [adRotationTime, setAdRotationTime] = useState(10)
+
+  // Auto-scroll after page load
+  useEffect(() => {
+    const autoScrollTimer = setTimeout(() => {
+      // Responsive scroll distance: 390px on desktop, 350px on mobile
+      const isMobile = window.innerWidth < 768
+      const scrollDistance = isMobile ? 350 : 390
+      
+      window.scrollBy({
+        top: scrollDistance,
+        behavior: 'smooth'
+      })
+    }, 10000) // Wait 10 seconds
+
+    // Cleanup timer on unmount
+    return () => clearTimeout(autoScrollTimer)
+  }, [])
 
   // Filter state
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 100000])
@@ -699,11 +717,28 @@ export default function Component() {
     setSortOrder(newSortOrder)
   }
 
-  const handleAddToCart = (productId: number, productName: string, productPrice: number, productVariants?: any[], variantConfig?: any) => {
+  const handleAddToCart = async (productId: number, productName: string, productPrice: number, productVariants?: any[], variantConfig?: any) => {
     
     // Check if product has variants/attributes
-    const hasVariants = productVariants && productVariants.length > 0
-    const hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
+    let hasVariants = productVariants && productVariants.length > 0
+    let hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
+    
+    // If variants array exists but is empty, fetch full product data
+    if (Array.isArray(productVariants) && productVariants.length === 0) {
+      try {
+        const response = await fetch(`/api/products/${productId}`)
+        if (response.ok) {
+          const fullProduct = await response.json()
+          
+          productVariants = fullProduct.variants || []
+          variantConfig = fullProduct.variantConfig || null
+          hasVariants = productVariants && productVariants.length > 0
+          hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
+        }
+      } catch (error) {
+        console.error('❌ Error fetching full product:', error)
+      }
+    }
     
     if (hasVariants || hasAttributes) {
       
@@ -756,6 +791,7 @@ export default function Component() {
         }
       }
 
+      
       if (derivedAttributeTypes.length > 0) {
         // Auto-select first option for each attribute type
         const autoSelectedAttributes: { [key: string]: string | string[] } = {}
@@ -774,13 +810,16 @@ export default function Component() {
         const variantId = `combination-0-${combinationKey}`
         const variantPrice = calculatePriceForCombination(combination, productVariants, variantConfig, productPrice)
         
+        
         addItem(productId, 1, variantId, combination, variantPrice)
+        
         return
       }
     }
     
     // Fallback: simple product without variants - use minimum price
     const minPrice = getMinimumPrice(productPrice, productVariants)
+    
     addItem(productId, 1, undefined, {}, minPrice)
   }
 
@@ -1123,34 +1162,58 @@ export default function Component() {
                     )}
                   >
                     <div className="p-2 flex flex-col gap-2">
-                      <Button className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600">Sign in</Button>
-                      <Link
-                        href="#"
+                      <Button 
+                        className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                        onClick={() => openAuthModal('login')}
+                      >
+                        Sign in
+                      </Button>
+                      <Button
+                        variant="ghost"
                         className={cn(
-                          "text-center text-sm hover:underline",
+                          "w-full text-center text-sm hover:underline",
                           darkHeaderFooterClasses.textNeutralSecondaryFixed,
                         )}
+                        onClick={() => openAuthModal('register')}
                       >
                         Register
-                      </Link>
+                      </Button>
                     </div>
                     <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
-                    <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => router.push('/account/orders')}
+                    >
                       <Package className="w-4 h-4 mr-2" /> My Orders
                     </DropdownMenuItem>
-                    <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => router.push('/account/coins')}
+                    >
                       <Package className="w-4 h-4 mr-2" /> My Coins
                     </DropdownMenuItem>
-                    <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => router.push('/account/messages')}
+                    >
                       <Package className="w-4 h-4 mr-2" /> Message Center
                     </DropdownMenuItem>
-                    <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => router.push('/account/payment')}
+                    >
                       <Package className="w-4 h-4 mr-2" /> Payment
                     </DropdownMenuItem>
-                    <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => router.push('/account/wishlist')}
+                    >
                       <Heart className="w-4 h-4 mr-2" /> Wish List
                     </DropdownMenuItem>
-                    <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => router.push('/account/coupons')}
+                    >
                       <Package className="w-4 h-4 mr-2" /> My Coupons
                     </DropdownMenuItem>
                     <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
@@ -1517,7 +1580,22 @@ export default function Component() {
           </div>
         )}
 
-
+        {/* Promotional Text Below Advertisement */}
+        <div className="px-1 sm:px-2 lg:px-3 mb-6">
+          <div className="text-center">
+            {/* Decorative Line Above */}
+            <div className="mb-2">
+              <div className="w-4/5 h-0.5 bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 rounded-full mx-auto"></div>
+            </div>
+            
+            <h2 className="text-lg sm:text-xl lg:text-2xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent mb-1 font-serif">
+              Discover High-Quality Electronic Components and Tools
+            </h2>
+            <p className="text-sm sm:text-base lg:text-lg text-gray-700 dark:text-gray-300 font-medium font-serif">
+              Built to Support Creativity and Performance
+            </p>
+          </div>
+        </div>
 
         {/* Loading State - Removed for faster UX */}
 
@@ -1620,6 +1698,7 @@ export default function Component() {
                 
                 {/* All Product Cards */}
             {displayedProducts.map((product: any, index: number) => {
+            
             // If product has variants and variantConfig, compute first-combination price for display
             let effectivePrice = product.price
             if (product?.variants && product.variants.length > 0 && product?.variantConfig) {
@@ -1635,7 +1714,14 @@ export default function Component() {
                 effectivePrice = calculatePriceForCombination(autoAttributes, product.variants, product.variantConfig, product.price)
               }
             }
-            const discountPercentage = ((product.originalPrice - effectivePrice) / product.originalPrice) * 100
+            // TEMPORARY: Create test discounts for first few products to verify display works
+            let testOriginalPrice = product.originalPrice
+            if (index < 3 && product.originalPrice <= product.price) {
+              testOriginalPrice = Math.round(product.price * 1.2) // 20% higher than current price
+            }
+            
+            const discountPercentage = ((testOriginalPrice - effectivePrice) / testOriginalPrice) * 100
+            
             const productInCart = isInCart(product.id, product.variants?.[0]?.id) // Check if product or its default variant is in cart
             
             return (
@@ -1728,12 +1814,12 @@ export default function Component() {
                   </div>
                       <div className="flex flex-wrap items-baseline gap-x-2 mt-0.5" suppressHydrationWarning>
                         <div className="text-sm font-bold sm:text-base lg:text-lg" suppressHydrationWarning>{formatPrice(effectivePrice)}</div>
-                    {product.originalPrice > product.price && (
+                    {testOriginalPrice > effectivePrice && (
                       <>
                             <div className={cn("text-[10px] line-through sm:text-xs", themeClasses.textNeutralSecondary)} suppressHydrationWarning>
-                          {formatPrice(product.originalPrice)}
+                          {formatPrice(testOriginalPrice)}
                         </div>
-                            <div className="text-[10px] font-medium text-green-400" suppressHydrationWarning>
+                            <div className="text-[10px] font-medium text-green-600" suppressHydrationWarning>
                           {discountPercentage.toFixed(0)}% OFF
                         </div>
                       </>
@@ -1983,10 +2069,23 @@ export default function Component() {
           <div className="border-t border-neutral-700 pt-4">
             <h3 className="text-sm font-semibold text-white mb-2">Account</h3>
             <div className="space-y-2">
-              <Button className="w-full bg-yellow-500 text-black hover:bg-yellow-600">
+              <Button 
+                className="w-full bg-yellow-500 text-black hover:bg-yellow-600"
+                onClick={() => {
+                  setIsHamburgerMenuOpen(false)
+                  openAuthModal('login')
+                }}
+              >
                 Sign In
               </Button>
-              <Button variant="outline" className="w-full border-white/20 text-white hover:bg-white/10">
+              <Button 
+                variant="outline" 
+                className="w-full border-white/20 text-white hover:bg-white/10"
+                onClick={() => {
+                  setIsHamburgerMenuOpen(false)
+                  openAuthModal('register')
+                }}
+              >
                 Register
               </Button>
             </div>

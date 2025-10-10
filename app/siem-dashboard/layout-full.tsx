@@ -87,7 +87,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const fetchOrderCounts = async () => {
     try {
       const timestamp = Date.now()
-      const pendingRes = await fetch(`/api/admin/orders?t=${timestamp}`, { cache: 'no-store' })
+      const pendingRes = await fetch(`/api/siem-dashboard/orders?t=${timestamp}`, { cache: 'no-store' })
       
       
       const pendingData = pendingRes.ok ? await pendingRes.json() : { orders: [] }
@@ -96,7 +96,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       let confirmedOrders = 0
       try {
-        const confirmedRes = await fetch(`/api/admin/confirmed-orders?t=${timestamp}`, { cache: 'no-store' })
+        const confirmedRes = await fetch(`/api/siem-dashboard/confirmed-orders?t=${timestamp}`, { cache: 'no-store' })
         if (confirmedRes.ok) {
           const confirmedData = await confirmedRes.json()
           confirmedOrders = confirmedData.orders?.length || 0
@@ -122,10 +122,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
-      // Clear 2FA session
-      sessionStorage.removeItem('admin-2fa-verified')
-      sessionStorage.removeItem('admin-2fa-time')
-      
       await signOut()
     } catch (error) {
       toast({

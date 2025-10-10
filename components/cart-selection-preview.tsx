@@ -58,8 +58,8 @@ export function CartSelectionPreview({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className={cn(
         "max-w-lg max-h-[70vh] overflow-y-auto",
-        themeClasses.dialogSheetBg,
-        themeClasses.dialogSheetBorder
+        themeClasses.cardBg,
+        themeClasses.cardBorder
       )}>
         <DialogHeader>
           <DialogTitle className={cn("text-lg font-bold", themeClasses.mainText)}>
@@ -119,80 +119,85 @@ export function CartSelectionPreview({
                 
                 return (
                   <div key={variant.variantId} className={cn(
-                    "flex items-center justify-between p-2 rounded border",
+                    "p-2 rounded border space-y-2",
                     "bg-white dark:bg-gray-800",
                     "border-gray-300 dark:border-gray-600"
                   )}>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={cn(
-                          "text-xs font-medium",
-                          "text-gray-700 dark:text-gray-300"
-                        )}>
-                          {index + 1}.
-                        </span>
-                        <span className={cn(
-                          "text-xs",
-                          "text-gray-900 dark:text-gray-100"
-                        )}>
-                          {Object.keys(variant.attributes).length > 0 
-                            ? Object.entries(variant.attributes).map(([key, value]) => 
-                                `${key}: ${value}`
-                              ).join(', ')
-                            : 'Standard Product'
-                          }
-                        </span>
+                    {/* First Row: Selection Text */}
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "text-xs font-medium",
+                        "text-gray-700 dark:text-gray-300"
+                      )}>
+                        {index + 1}.
+                      </span>
+                      <span className={cn(
+                        "text-xs font-medium flex-1",
+                        "text-gray-900 dark:text-gray-100"
+                      )}>
+                        {Object.keys(variant.attributes).length > 0 
+                          ? Object.entries(variant.attributes).map(([key, value]) => 
+                              `${key}: ${value}`
+                            ).join(', ')
+                          : 'Standard Product'
+                        }
+                      </span>
+                    </div>
+                    
+                    {/* Second Row: Left side (Price + Quantity) | Right side (Total) */}
+                    <div className="flex items-center justify-between">
+                      {/* Left side: Product amount and quantity changer */}
+                      <div className="flex items-center gap-3">
                         <span className={cn(
                           "text-xs font-semibold",
                           "text-gray-900 dark:text-gray-100"
                         )}>
                           {formatPrice(variant.price)}
                         </span>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <div className={cn(
-                        "flex items-center border-2 rounded",
-                        "border-gray-300 dark:border-gray-600",
-                        "bg-white dark:bg-gray-800"
-                      )}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleQuantityChange(variant.variantId, -1)}
-                          disabled={qty <= 0}
-                          className={cn(
-                            "h-6 w-6 rounded-none border-r",
-                            "border-gray-300 dark:border-gray-600",
-                            "hover:bg-gray-100 dark:hover:bg-gray-700"
-                          )}
-                        >
-                          <Minus className="w-3 h-3" />
-                        </Button>
-                        <span className={cn(
-                          "px-2 py-0.5 text-xs font-medium min-w-[1.5rem] text-center border-r",
+                        
+                        <div className={cn(
+                          "flex items-center border-2 rounded",
                           "border-gray-300 dark:border-gray-600",
-                          "bg-gray-50 dark:bg-gray-700",
-                          "text-gray-900 dark:text-gray-100"
+                          "bg-white dark:bg-gray-800"
                         )}>
-                          {qty}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleQuantityChange(variant.variantId, 1)}
-                          className={cn(
-                            "h-6 w-6 rounded-none",
-                            "hover:bg-gray-100 dark:hover:bg-gray-700"
-                          )}
-                        >
-                          <Plus className="w-3 h-3" />
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleQuantityChange(variant.variantId, -1)}
+                            disabled={qty <= 0}
+                            className={cn(
+                              "h-6 w-6 rounded-none border-r",
+                              "border-gray-300 dark:border-gray-600",
+                              "hover:bg-gray-100 dark:hover:bg-gray-700"
+                            )}
+                          >
+                            <Minus className="w-3 h-3" />
+                          </Button>
+                          <span className={cn(
+                            "px-2 py-0.5 text-xs font-medium min-w-[1.5rem] text-center border-r",
+                            "border-gray-300 dark:border-gray-600",
+                            "bg-gray-50 dark:bg-gray-700",
+                            "text-gray-900 dark:text-gray-100"
+                          )}>
+                            {qty}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleQuantityChange(variant.variantId, 1)}
+                            className={cn(
+                              "h-6 w-6 rounded-none",
+                              "hover:bg-gray-100 dark:hover:bg-gray-700"
+                            )}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </Button>
+                        </div>
                       </div>
                       
+                      {/* Right side: Total cost */}
                       <div className="text-right">
-                        <span className="text-xs font-semibold text-green-600 dark:text-green-400">
+                        <span className="text-sm font-bold text-green-600 dark:text-green-400">
                           {formatPrice(subtotal)}
                         </span>
                       </div>

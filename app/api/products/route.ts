@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
         id, name, price, original_price, description, 
         image, category, brand, rating, reviews, 
         in_stock, stock_quantity, free_delivery, same_day_delivery,
-        created_at, updated_at,
+        created_at, updated_at, variant_config,
         product_variants (*)
       `)
     } else {
