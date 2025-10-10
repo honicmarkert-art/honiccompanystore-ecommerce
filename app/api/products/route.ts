@@ -250,18 +250,57 @@ export async function GET(request: NextRequest) {
       const { fuzzySearchProducts } = await import('@/lib/fuzzy-search')
       const sanitized = securityUtils.sanitizeInput(search)
       
-      // Convert products to searchable format
-      const searchableProducts = products.map((p: any) => ({
-        id: p.id,
-        name: p.name || '',
-        description: p.description || '',
-        category: p.category || '',
-        brand: p.brand || '',
-        price: p.price || 0,
-        sku: p.sku,
-        model: p.model,
-        tags: [] // Could add tags if available
-      }))
+      // Convert products to searchable format - include variant data
+      const searchableProducts = products.map((p: any) => {
+        // Use product_variants (raw from database) instead of variants (transformed)
+        const rawVariants = p.product_variants || []
+        
+        // Collect all variant data for comprehensive search
+        const variantSkus = rawVariants.map((v: any) => v.sku).filter(Boolean)
+        const variantNames = rawVariants.map((v: any) => v.name).filter(Boolean)
+        
+        // Collect variant attributes (regular attributes object)
+        const variantAttributes = rawVariants.flatMap((v: any) => 
+          v.attributes ? Object.values(v.attributes) : []
+        ).filter(Boolean)
+        
+        // Collect variant primaryValues (for primary-dependent variants)
+        const variantPrimaryValues = rawVariants.flatMap((v: any) => 
+          v.primary_values?.map((pv: any) => pv.value) || []
+        ).filter(Boolean)
+        
+        // Collect variant multiValues (for multi-select attributes)
+        const variantMultiValues = rawVariants.flatMap((v: any) => 
+          v.multi_values ? Object.values(v.multi_values).flat() : []
+        ).filter(Boolean)
+        
+        // Combine all searchable text including all variant data
+        const combinedText = [
+          p.name || '',
+          p.description || '',
+          p.category || '',
+          p.brand || '',
+          p.sku || '',
+          p.model || '',
+          ...variantSkus,
+          ...variantNames,
+          ...variantAttributes,
+          ...variantPrimaryValues,
+          ...variantMultiValues
+        ].join(' ')
+        
+        return {
+          id: p.id,
+          name: combinedText, // Use combined text for comprehensive search
+          description: p.description || '',
+          category: p.category || '',
+          brand: p.brand || '',
+          price: p.price || 0,
+          sku: p.sku,
+          model: p.model,
+          tags: []
+        }
+      })
       
       // Perform fuzzy search with synonym expansion
       const searchResults = fuzzySearchProducts(searchableProducts, sanitized, {

@@ -4,9 +4,12 @@ import { logger } from '@/lib/logger'
 import { analyzeImage, extractSearchKeywords, extractKeywordsFromFilename } from '@/lib/image-recognition'
 import { fuzzySearchProducts } from '@/lib/fuzzy-search'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 export async function GET() {
   return NextResponse.json({ 
@@ -91,18 +94,57 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Convert to searchable format
-    const searchableProducts = allProducts.map((product: any) => ({
-      id: product.id,
-      name: product.name || '',
-      description: product.description || '',
-      category: product.category || '',
-      brand: product.brand || '',
-      price: product.price || 0,
-      sku: product.sku,
-      model: product.model,
-      tags: []
-    }))
+    // Convert to searchable format - include variant data
+    const searchableProducts = allProducts.map((product: any) => {
+      // Use product_variants (raw from database) or variants (if already transformed)
+      const rawVariants = product.product_variants || product.variants || []
+      
+      // Collect all variant data for comprehensive search
+      const variantSkus = rawVariants.map((v: any) => v.sku).filter(Boolean)
+      const variantNames = rawVariants.map((v: any) => v.name).filter(Boolean)
+      
+      // Collect variant attributes (regular attributes object)
+      const variantAttributes = rawVariants.flatMap((v: any) => 
+        v.attributes ? Object.values(v.attributes) : []
+      ).filter(Boolean)
+      
+      // Collect variant primaryValues (for primary-dependent variants)  
+      const variantPrimaryValues = rawVariants.flatMap((v: any) => 
+        (v.primary_values || v.primaryValues)?.map((pv: any) => pv.value) || []
+      ).filter(Boolean)
+      
+      // Collect variant multiValues (for multi-select attributes)
+      const variantMultiValues = rawVariants.flatMap((v: any) => 
+        (v.multi_values || v.multiValues) ? Object.values(v.multi_values || v.multiValues).flat() : []
+      ).filter(Boolean)
+      
+      // Combine all searchable text including all variant data
+      const combinedText = [
+        product.name || '',
+        product.description || '',
+        product.category || '',
+        product.brand || '',
+        product.sku || '',
+        product.model || '',
+        ...variantSkus,
+        ...variantNames,
+        ...variantAttributes,
+        ...variantPrimaryValues,
+        ...variantMultiValues
+      ].join(' ')
+      
+      return {
+        id: product.id,
+        name: combinedText, // Use combined text for comprehensive search
+        description: product.description || '',
+        category: product.category || '',
+        brand: product.brand || '',
+        price: product.price || 0,
+        sku: product.sku,
+        model: product.model,
+        tags: []
+      }
+    })
 
     // Use fuzzy search with all extracted keywords
     let searchResults: any[] = []

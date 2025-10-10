@@ -71,7 +71,8 @@ export default function LandingPage() {
     serviceAiImages,
     serviceStemImages,
     serviceHomeImages,
-    serviceImageRotationTime
+    serviceImageRotationTime,
+    settings: adminSettings
   } = useCompanyContext()
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
@@ -745,15 +746,21 @@ export default function LandingPage() {
               <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <Mail className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
-                  <span className="text-xs sm:text-sm">info@{companyName?.toLowerCase().replace(/\s+/g, '') || 'honicco'}.com</span>
+                  <span className="text-xs sm:text-sm">
+                    {adminSettings?.contactEmail || `info@${companyName?.toLowerCase().replace(/\s+/g, '') || 'honicco'}.com`}
+                  </span>
                 </div>
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <Phone className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
-                  <span className="text-xs sm:text-sm">+255 123 456 789</span>
+                  <span className="text-xs sm:text-sm">
+                    {adminSettings?.contactPhone || '+255 123 456 789'}
+                  </span>
                 </div>
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
-                  <span className="text-xs sm:text-sm">Dar es Salaam, Tanzania</span>
+                  <span className="text-xs sm:text-sm">
+                    {adminSettings?.address || 'Dar es Salaam, Tanzania'}
+                  </span>
                 </div>
               </div>
 

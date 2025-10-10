@@ -1,5 +1,0 @@
-902b9d7 - Trigger Vercel deployment
-5385ac3 - Fix: Remove all debug console.logs, fix auth modal dark theme background, activate auth modal links and menu items navigation
-6f65f43 - Add test pages to debug siem-dashboard routing issue
-b8ca9c6 - Implement enhanced admin security: hidden path, role-based access, and 2FA
-2e8969a - Fix middleware to only protect admin routes, not entire site
