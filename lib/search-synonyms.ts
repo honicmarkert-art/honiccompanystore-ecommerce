@@ -187,3 +187,4 @@ export function getSearchVariations(query: string): {
  * // Returns: ['usb cable', 'usb', 'cable', 'usb cord', 'wire', 'lead', ...]
  */
 
+

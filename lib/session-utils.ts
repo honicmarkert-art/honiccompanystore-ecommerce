@@ -24,3 +24,4 @@ export function clearSessionCookie() {
 export function hasSessionCookie(): boolean {
   return getSessionCookie() !== null
 }
+

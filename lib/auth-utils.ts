@@ -14,8 +14,8 @@ export function createAuthenticatedClient(request: NextRequest) {
   }
 
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
     {
       global: {
         headers: {
@@ -51,8 +51,8 @@ export async function validateUserSession(request: NextRequest) {
  */
 export function createServiceClient() {
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.SUPABASE_SERVICE_ROLE_KEY || ''
   )
 }
 
@@ -103,8 +103,8 @@ export class ClientAuthHelper {
 
   constructor() {
     this.supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
     )
   }
 
@@ -159,6 +159,7 @@ export class ClientAuthHelper {
     })
   }
 }
+
 
 
 

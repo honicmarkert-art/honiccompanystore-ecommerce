@@ -215,3 +215,4 @@ export function getSearchSuggestions(
  * fuzzySearchProducts(products, 'adapter')        // Finds both (synonym expansion)
  */
 
+

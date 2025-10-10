@@ -346,3 +346,4 @@ export function isSuspiciousUserAgent(userAgent: string): boolean {
   // Check if it's a suspicious pattern
   return suspiciousPatterns.some(pattern => pattern.test(userAgent))
 }
+

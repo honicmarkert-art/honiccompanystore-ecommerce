@@ -6,8 +6,8 @@ import { logger } from '@/lib/logger'
 export function getSupabase(request: NextRequest) {
   let response = NextResponse.next()
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
     {
       cookies: {
         get(name: string) {
@@ -82,8 +82,8 @@ export async function validateAuth(request: NextRequest) {
 // Helper to get user and role from database
 export async function getUserAndRole(userId: string) {
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
   )
 
   const { data: profile, error } = await supabase
@@ -102,4 +102,5 @@ export async function getUserAndRole(userId: string) {
 
   return { role: userRole, profile }
 }
+
 

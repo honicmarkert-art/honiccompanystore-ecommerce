@@ -24,8 +24,8 @@ class DatabaseOptimizer {
 
   private constructor() {
     this.supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || ''
     )
     this.logger = Logger.getInstance()
   }
@@ -470,6 +470,7 @@ class DatabaseOptimizer {
 
 // Export singleton instance
 export const dbOptimizer = DatabaseOptimizer.getInstance()
+
 
 
 
