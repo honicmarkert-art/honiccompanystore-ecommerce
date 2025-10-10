@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
     
     // Create Supabase client with proper cookie handling
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
       {
         cookies: {
           get(name: string) {
@@ -264,4 +264,5 @@ export async function DELETE() {
   response.cookies.set('sb-user-role', '', { httpOnly: false, secure: options.secure, sameSite: 'lax' as const, path: '/', maxAge: 0 })
   return response
 }
+
 

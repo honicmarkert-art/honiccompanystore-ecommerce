@@ -147,8 +147,8 @@ export async function GET(request: NextRequest) {
   try {
     // Create Supabase client
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
       {
         cookies: {
           get(name: string) {
@@ -421,8 +421,8 @@ export async function POST(request: NextRequest) {
     
     // Create Supabase client
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
       {
         cookies: {
           get(name: string) {
@@ -610,3 +610,4 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+

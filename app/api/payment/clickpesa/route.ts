@@ -276,8 +276,8 @@ async function handleClickPesaWebhook(request: NextRequest) {
 
     // Initialize Supabase client
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || ''
     )
 
     // Find order by reference
@@ -498,3 +498,4 @@ async function handleClickPesaWebhook(request: NextRequest) {
     )
   }
 }
+

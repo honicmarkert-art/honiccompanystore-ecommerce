@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 // GET - Fetch advertisement rotation time for public use
 export async function GET() {
@@ -27,6 +27,7 @@ export async function GET() {
     return NextResponse.json({ rotationTime: 10 }) // Default to 10 seconds
   }
 }
+
 
 
 
