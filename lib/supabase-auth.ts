@@ -5,22 +5,22 @@ import { logger } from '@/lib/logger'
 // Environment variables with fallbacks
 const supabaseUrl = 
   process.env.NEXT_PUBLIC_SUPABASE_URL || 
-  process.env.SUPABASE_URL || ''
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 
 const supabaseAnonKey = 
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
-  process.env.SUPABASE_ANON_KEY || ''
+  process.env.SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvYm9ib2NsZGZqaGRrcGp5dXVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ1NDE4MDUsImV4cCI6MjA3MDExNzgwNX0.Icmvt4EZuTJXf97K_LU14ICaAIikVurWb9j0m_WNEsY'
 
-// Create Supabase client with custom options (with fallback for build time)
-export const supabase = supabaseUrl && supabaseAnonKey 
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true
-      }
-    })
-  : null as any // Fallback during build, will be real client at runtime
+// Create Supabase client with custom options
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true
+  }
+})
 
 // Rate limiting for failed login attempts
 const loginAttempts = new Map<string, { count: number, lastAttempt: Date, lockedUntil?: Date }>()
@@ -515,4 +515,3 @@ export const supabaseAuth = {
     }
   }
 } 
-

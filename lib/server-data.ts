@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null as any
+const supabase = createClient(supabaseUrl, supabaseKey)
 
 export interface Product {
   id: number
@@ -49,11 +49,6 @@ export interface Category {
 
 export async function getServerSideProducts(limit = 20, offset = 0): Promise<Product[]> {
   try {
-    if (!supabase) {
-      console.error('Supabase client not initialized')
-      return []
-    }
-    
     const { data, error } = await supabase
       .from('products')
       .select(`
@@ -123,11 +118,6 @@ export async function getServerSideProducts(limit = 20, offset = 0): Promise<Pro
 
 export async function getServerSideCategories(): Promise<Category[]> {
   try {
-    if (!supabase) {
-      console.error('Supabase client not initialized')
-      return []
-    }
-    
     const { data, error } = await supabase
       .from('categories')
       .select('*')
@@ -216,7 +206,6 @@ export async function getServerSideProductById(id: number): Promise<Product | nu
     return null
   }
 }
-
 
 
 

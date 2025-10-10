@@ -427,4 +427,3 @@ export const getConfigStatus = () => {
     checksumKey: CLICKPESA_CHECKSUM_KEY ? `${CLICKPESA_CHECKSUM_KEY.substring(0, 8)}...` : "Not configured"
   }
 }
-

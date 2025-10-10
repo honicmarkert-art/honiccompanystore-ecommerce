@@ -23,11 +23,10 @@ class DatabaseOptimizer {
   private logger: Logger
 
   private constructor() {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-    
-    // Only create client if env vars are available (runtime)
-    this.supabase = (url && key ? createClient(url, key) : null) as any
+    this.supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+    )
     this.logger = Logger.getInstance()
   }
 

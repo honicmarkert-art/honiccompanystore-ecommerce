@@ -18,10 +18,6 @@ import {
 } from "@/lib/clickpesa-api"
 import { createClient } from '@supabase/supabase-js'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   try {
     // Log the incoming request for debugging
@@ -279,10 +275,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
     logger.log('ClickPesa webhook received:', webhookData)
 
     // Initialize Supabase client
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-    
-    const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null as any
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''`nconst supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''`n`nconst supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null as any
 
     // Find order by reference
     const { data: order, error: orderError } = await supabase

@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enhancedCache } from '@/lib/performance-monitor'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
 // POST - Clear the API cache
 export async function POST(request: NextRequest) {
   try {

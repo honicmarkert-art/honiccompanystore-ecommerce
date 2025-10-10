@@ -1,9 +1,6 @@
 import { getServerSideProducts, getServerSideCategories } from '@/lib/server-data'
 import { ProductsClientPage } from '../client-page'
 
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
-
 /**
  * On-demand products page with server-side rendering
  * 
