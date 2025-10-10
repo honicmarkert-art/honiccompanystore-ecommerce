@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { 
-
-
-// Force dynamic rendering - don't pre-render during build
-
-export const dynamic = 'force-dynamic'
-
-export const runtime = 'nodejs'
   isClickPesaConfigured,
   getConfigStatus,
   CLICKPESA_CLIENT_ID,
   CLICKPESA_API_KEY,
   CLICKPESA_CHECKSUM_KEY
 } from "@/lib/clickpesa-api"
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 // GET /api/debug/clickpesa - Debug ClickPesa configuration and connectivity
 export async function GET(request: NextRequest) {
