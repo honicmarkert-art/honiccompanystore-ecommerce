@@ -9,14 +9,7 @@ const supabaseUrl =
 
 const supabaseAnonKey = 
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
-  process.env.SUPABASE_ANON_KEY ||
-  (() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('⚠️ NEXT_PUBLIC_SUPABASE_ANON_KEY is not set. Please add it to your .env.local file.')
-      return ''
-    }
-    throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY is required in production')
-  })()
+  process.env.SUPABASE_ANON_KEY || ''
 
 // Debug logging (only in development)
 if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
@@ -27,21 +20,23 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
   logger.log('Using Key (first 20 chars):', supabaseAnonKey.substring(0, 20) + '...')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true
-  },
-  db: {
-    schema: 'public'
-  },
-  global: {
-    headers: {
-      'X-Client-Info': 'aliexpress-clone'
-    }
-  }
-})
+export const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      },
+      db: {
+        schema: 'public'
+      },
+      global: {
+        headers: {
+          'X-Client-Info': 'aliexpress-clone'
+        }
+      }
+    })
+  : null as any // Fallback during build
 
 // Auth helper functions
 export const auth = {
