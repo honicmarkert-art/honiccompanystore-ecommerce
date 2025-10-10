@@ -1,4 +1,10 @@
 export default function NewSiemDashboard() {
+}
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic'
+
+export default function NewSiemDashboard() {
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold">New SIEM Dashboard</h1>
