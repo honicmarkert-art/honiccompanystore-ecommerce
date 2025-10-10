@@ -49,6 +49,11 @@ export interface Category {
 
 export async function getServerSideProducts(limit = 20, offset = 0): Promise<Product[]> {
   try {
+    if (!supabase) {
+      console.error('Supabase client not initialized')
+      return []
+    }
+    
     const { data, error } = await supabase
       .from('products')
       .select(`
@@ -118,6 +123,11 @@ export async function getServerSideProducts(limit = 20, offset = 0): Promise<Pro
 
 export async function getServerSideCategories(): Promise<Category[]> {
   try {
+    if (!supabase) {
+      console.error('Supabase client not initialized')
+      return []
+    }
+    
     const { data, error } = await supabase
       .from('categories')
       .select('*')
