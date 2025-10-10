@@ -9,6 +9,10 @@ import {
 } from '@/lib/payment-tokenization'
 import { Logger } from '@/lib/error-handler'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // GET /api/payment/test - Test payment tokenization system
 export async function GET(request: NextRequest) {
   const logger = Logger.getInstance()

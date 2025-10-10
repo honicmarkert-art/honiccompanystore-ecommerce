@@ -3,6 +3,10 @@ import { createServerClient } from '@supabase/ssr'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // Comprehensive validation schema for all admin settings
 const adminSettingsSchema = z.object({
   // Company Branding

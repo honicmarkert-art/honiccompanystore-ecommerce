@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { performanceMonitor } from '@/lib/performance-monitor'
 import { createSecureResponse } from '@/lib/secure-api'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 /**
  * GET - Get performance metrics
  */

@@ -16,6 +16,10 @@ import {
 import { dbOptimizer } from '@/lib/database-optimizer'
 import { cacheInvalidator } from '@/lib/cache'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // POST /api/checkout - Process checkout with stock enforcement
 export async function POST(request: NextRequest) {
   const logger = Logger.getInstance()

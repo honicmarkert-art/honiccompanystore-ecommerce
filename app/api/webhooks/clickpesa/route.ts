@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // ClickPesa webhook handler
 export async function POST(request: NextRequest) {
   try {

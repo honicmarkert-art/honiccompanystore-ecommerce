@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { z } from 'zod'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 const companySettingsSchema = z.object({
   companyName: z.string().min(1, 'Company name is required'),
   companyColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color format'),

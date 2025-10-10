@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { validateAuth, copyCookies } from '@/lib/auth-server'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // GET /api/cart - Return full cart with product details
 export async function GET(request: NextRequest) {
   const { user, error: authError, response, supabase } = await validateAuth(request)

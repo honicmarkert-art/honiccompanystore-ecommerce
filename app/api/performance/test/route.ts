@@ -4,6 +4,10 @@ import { cache } from '@/lib/cache'
 import { measurePerformance } from '@/lib/error-handler'
 import { Logger } from '@/lib/error-handler'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // GET /api/performance/test - Test performance optimizations
 export async function GET(request: NextRequest) {
   const logger = Logger.getInstance()

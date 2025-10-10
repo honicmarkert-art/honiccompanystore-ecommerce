@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { users } from '@/lib/demo-users'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // GET - Fetch all users
 export async function GET(request: NextRequest) {
   try {

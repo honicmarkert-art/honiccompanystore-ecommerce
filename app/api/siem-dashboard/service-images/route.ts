@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // Service IDs mapping
 const SERVICE_IDS = {
   'retail': 'retail-sales',

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, getTokenFromRequest } from '@/lib/auth'
 import { findUserById } from '@/lib/users'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 export async function GET(request: NextRequest) {
   try {
     // Get token from request

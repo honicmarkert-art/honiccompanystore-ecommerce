@@ -3,6 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 import { generateOrderIds, formatPickupId } from '@/lib/order-ids'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 function getSupabaseClient() {
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL

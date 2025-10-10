@@ -5,6 +5,10 @@ import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { logAuthFailure } from '@/lib/security-monitor'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
   password: z.string().min(1, 'Password is required'),

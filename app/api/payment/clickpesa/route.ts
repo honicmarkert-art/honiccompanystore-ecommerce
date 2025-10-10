@@ -18,6 +18,10 @@ import {
 } from "@/lib/clickpesa-api"
 import { createClient } from '@supabase/supabase-js'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   try {
     // Log the incoming request for debugging

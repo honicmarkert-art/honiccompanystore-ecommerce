@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { validateServerSession } from '@/lib/security-server'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // Simple security functions
 const logSecurityEvent = (action: string, userId?: string, details?: any) => {
   logger.log(`Security Event: ${action} by user ${userId}`, details)

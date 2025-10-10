@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 export async function GET(request: NextRequest) {
   try {
     // Simple authentication check - you can add a secret key for security

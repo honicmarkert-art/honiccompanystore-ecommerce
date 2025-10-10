@@ -7,6 +7,10 @@ import { createSecureApiHandler, createSecureResponse, createErrorResponse } fro
 import { securityUtils } from '@/lib/secure-config'
 import { logger } from '@/lib/logger'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // Simple security functions
 const logSecurityEvent = (action: string, userId?: string, details?: any) => {
   logger.security(`${action} by user ${userId}`, userId, details)

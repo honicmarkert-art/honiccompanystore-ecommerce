@@ -3,6 +3,10 @@ import { z } from 'zod'
 import { generateToken, hashPassword, validatePassword } from '@/lib/auth'
 import { findUserByEmail, createUser, validateUserData } from '@/lib/users'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // Validation schema
 const registerSchema = z.object({
   name: z.string()

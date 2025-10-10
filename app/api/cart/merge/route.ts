@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAuth, copyCookies } from '@/lib/auth-server'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 // POST /api/cart/merge - Merge guest cart with server cart
 export async function POST(request: NextRequest) {
   const { user, error: authError, response, supabase } = await validateAuth(request)

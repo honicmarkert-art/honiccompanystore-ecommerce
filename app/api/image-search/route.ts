@@ -4,6 +4,10 @@ import { logger } from '@/lib/logger'
 import { analyzeImage, extractSearchKeywords, extractKeywordsFromFilename } from '@/lib/image-recognition'
 import { fuzzySearchProducts } from '@/lib/fuzzy-search'
 
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 export async function GET() {
   return NextResponse.json({ 
     message: 'Image search API is working',
