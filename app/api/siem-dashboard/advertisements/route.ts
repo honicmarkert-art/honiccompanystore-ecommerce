@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 // GET - Fetch all advertisements
 export async function GET() {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
     
     const { data: advertisements, error } = await supabase
       .from('advertisements')
@@ -29,7 +29,7 @@ export async function GET() {
 // POST - Create new advertisement
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
     
     const formData = await request.formData()
     const file = formData.get('file') as File
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
 // PUT - Update advertisement details
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
     const body = await request.json()
     const { id, title, description, link_url, display_order, placement } = body
     
@@ -153,7 +153,7 @@ export async function PUT(request: NextRequest) {
 // PATCH - Update advertisement (toggle active status)
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
     const body = await request.json()
     const { id, is_active } = body
     
@@ -183,7 +183,7 @@ export async function PATCH(request: NextRequest) {
 // DELETE - Delete advertisement
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
     

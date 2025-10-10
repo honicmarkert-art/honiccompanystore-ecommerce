@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 // GET - Fetch advertisement rotation time setting
 export async function GET() {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
     
     // Try the new schema first (direct column)
     const { data: newData, error: newError } = await supabase
@@ -45,7 +45,7 @@ export async function GET() {
 // POST - Save advertisement rotation time setting
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
     const body = await request.json()
     const { rotationTime } = body
     
