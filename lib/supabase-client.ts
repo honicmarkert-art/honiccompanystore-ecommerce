@@ -1,27 +1,32 @@
 import { createClient } from '@supabase/supabase-js'
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+
 // Client-side Supabase client for browser usage
-export const supabaseClient = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-  {
-    auth: {
-      persistSession: true,        // Store session in localStorage
-      autoRefreshToken: true,      // Automatically refresh expired tokens
-      detectSessionInUrl: true,    // Detect auth tokens in URL
-      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-      storageKey: 'supabase.auth.token'
-    },
-    db: {
-      schema: 'public'
-    },
-    global: {
-      headers: {
-        'X-Client-Info': 'aliexpress-clone-client'
+export const supabaseClient = supabaseUrl && supabaseAnonKey
+  ? createClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        auth: {
+          persistSession: true,        // Store session in localStorage
+          autoRefreshToken: true,      // Automatically refresh expired tokens
+          detectSessionInUrl: true,    // Detect auth tokens in URL
+          storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+          storageKey: 'supabase.auth.token'
+        },
+        db: {
+          schema: 'public'
+        },
+        global: {
+          headers: {
+            'X-Client-Info': 'aliexpress-clone-client'
+          }
+        }
       }
-    }
-  }
-)
+    )
+  : null as any
 
 // Client-side auth helper functions
 export const clientAuth = {
