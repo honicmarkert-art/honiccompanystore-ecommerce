@@ -119,7 +119,7 @@ export function UserProfile() {
                 }
                 
                 // Reload page to apply theme changes
-                window.location.reload()
+                router.refresh()
               }
             }}
           >

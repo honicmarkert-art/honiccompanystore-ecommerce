@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import { logger } from '@/lib/logger'
 
 export interface Product {
@@ -80,6 +81,7 @@ let preloadPromise: Promise<Product[]> | null = null
 let isInitialized = false
 
 export function useProducts(): UseProductsReturn {
+  const pathname = usePathname()
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -196,7 +198,7 @@ export function useProducts(): UseProductsReturn {
 
       // Create new fetch promise with timeout and minimal payload for better performance
       // For admin pages, we need full data including variants
-      const isAdminPage = window.location.pathname.startsWith('/admin')
+      const isAdminPage = pathname.startsWith('/admin')
       const apiUrl = isAdminPage ? '/api/products' : '/api/products?minimal=true'
       
       preloadPromise = Promise.race([

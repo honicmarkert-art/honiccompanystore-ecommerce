@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 // Use service role key for admin operations (bypasses RLS)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -31,20 +34,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'video/mp4']
     if (!allowedTypes.includes(file.type)) {
       logger.log('❌ Invalid file type:', file.type)
       return NextResponse.json({ 
-        error: 'Invalid file type. Please upload a PNG, JPG, GIF, or WebP image.' 
+        error: 'Invalid file type. Please upload a PNG, JPG, GIF, WebP image, or MP4 video.' 
       }, { status: 400 })
     }
 
-    // Validate file size (10MB max)
-    const maxSize = 10 * 1024 * 1024 // 10MB
+    // Validate file size (50MB max for videos, 10MB max for images)
+    const isVideo = file.type.startsWith('video/')
+    const maxSize = isVideo ? 50 * 1024 * 1024 : 10 * 1024 * 1024 // 50MB for videos, 10MB for images
     if (file.size > maxSize) {
       logger.log('❌ File too large:', file.size)
       return NextResponse.json({ 
-        error: 'File too large. Maximum size is 10MB.' 
+        error: isVideo 
+          ? 'File too large. Maximum size for videos is 50MB.' 
+          : 'File too large. Maximum size for images is 10MB.' 
       }, { status: 400 })
     }
 

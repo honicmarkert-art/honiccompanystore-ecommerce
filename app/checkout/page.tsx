@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
 import { LazyImage } from "@/components/lazy-image"
@@ -71,6 +72,7 @@ export default function CheckoutPage() {
 }
 
 function CheckoutPageContent() {
+  const router = useRouter()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem } = useCart()
   const { user } = useAuth()
@@ -310,8 +312,8 @@ function CheckoutPageContent() {
             amount: String(orderData.totalAmount),
             currency: 'TZS',
             orderId: reference,
-            returnUrl: `${window.location.origin}/checkout/return?orderReference=${reference}`,
-            cancelUrl: `${window.location.origin}/checkout/return?orderReference=${reference}`,
+            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
+            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
             customerDetails: {
               fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
               email: formData.billingAddress.email || formData.shippingAddress.email,
@@ -340,7 +342,7 @@ function CheckoutPageContent() {
             }
             
             // Redirect to ClickPesa
-            window.location.href = data.checkoutLink
+            router.push(data.checkoutLink)
             clickpesaRedirectSuccess = true
             return // This will exit the function and prevent showing success page
           } else {
@@ -551,7 +553,7 @@ function CheckoutPageContent() {
   const handleBack = () => {
     if (currentStep === 0) {
       // If on delivery option step, go back to cart
-      window.location.href = '/cart'
+      router.push('/cart')
     } else {
       // Otherwise, go to previous step
       setCurrentStep(prev => Math.max(prev - 1, 0))

@@ -157,15 +157,15 @@ export function useAdminSettings() {
   useEffect(() => {
     const fetchAdminSettings = async () => {
       try {
-        const response = await fetch('/api/admin/settings')
+        const response = await fetch(`/api/admin/settings?cb=${Date.now()}`)
         if (response.ok) {
           const data = await response.json()
           setSettings({ ...DEFAULT_ADMIN_SETTINGS, ...data })
         } else {
-          console.warn('Failed to fetch admin settings, using defaults')
+          console.warn('⚠️ [Admin Settings] Failed to fetch admin settings, using defaults. Status:', response.status)
         }
       } catch (error) {
-        console.error('Error fetching admin settings:', error)
+        console.error('❌ [Admin Settings] Error fetching admin settings:', error)
         console.warn('Using default admin settings')
       } finally {
         setIsLoaded(true)
@@ -178,6 +178,7 @@ export function useAdminSettings() {
   // Update a specific setting
   const updateSetting = async (key: string, value: any) => {
     try {
+
       const response = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: {
@@ -189,26 +190,62 @@ export function useAdminSettings() {
       })
 
       if (response.ok) {
-        setSettings(prev => ({ ...prev, [key]: value }))
+        const responseData = await response.json()
+        
+        // Use the returned value from API if available (for verification)
+        const apiReturnedValue = responseData.heroBackgroundImage || responseData[key]
+        if (apiReturnedValue && apiReturnedValue !== value) {
+        }
+        
+        // Cache-bust for image-like settings
+        const isImageKey = key === 'heroBackgroundImage' || key.endsWith('Image') || key.endsWith('Images')
+        const nextValue = ((): any => {
+          if (typeof value === 'string' && isImageKey) {
+            const sep = value.includes('?') ? '&' : '?'
+            const cacheBustedValue = `${value}${sep}v=${Date.now()}`
+            return cacheBustedValue
+          }
+          return value
+        })()
+        
+        setSettings(prev => ({ ...prev, [key]: nextValue }))
+        try { 
+          localStorage.setItem('settings_cache_bust', String(Date.now()))
+        } catch {}
+        
         return true
       } else {
         const errorData = await response.json().catch(() => ({}))
-        console.error('Failed to update setting:', key)
-        console.error('Error details:', errorData)
-        console.error('Status:', response.status)
+        console.error(`❌ [Admin Settings] Failed to update setting ${key}:`, {
+          status: response.status,
+          error: errorData,
+          timestamp: new Date().toISOString()
+        })
         
         // Handle missing database columns gracefully
         if (response.status === 400 || response.status === 500) {
           logger.log(`⚠️ ${key} column may not be available in database yet or validation failed.`)
           logger.log(`Error message:`, errorData.error || errorData.details)
-          // Still update local state for immediate UI feedback
-          setSettings(prev => ({ ...prev, [key]: value }))
+          // Still update local state for immediate UI feedback with cache-bust
+          const isImageKey = key === 'heroBackgroundImage' || key.endsWith('Image') || key.endsWith('Images')
+          const nextValue = ((): any => {
+            if (typeof value === 'string' && isImageKey) {
+              const sep = value.includes('?') ? '&' : '?'
+              const cacheBustedValue = `${value}${sep}v=${Date.now()}`
+              return cacheBustedValue
+            }
+            return value
+          })()
+          setSettings(prev => ({ ...prev, [key]: nextValue }))
+          try { 
+            localStorage.setItem('settings_cache_bust', String(Date.now()))
+          } catch {}
           return true
         }
         return false
       }
     } catch (error) {
-      console.error('Error updating setting:', error)
+      console.error(`❌ [Admin Settings] Error updating setting ${key}:`, error)
       return false
     }
   }

@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { logger } from '@/lib/logger'
 
 // Extend window object for search timeout
@@ -20,6 +20,7 @@ import { useRobustApi } from "@/hooks/use-robust-api"
 import { useInfiniteProducts } from "@/hooks/use-infinite-products"
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger"
 import { SearchModal } from "@/components/search-modal"
+import { SearchSuggestions } from "@/components/search-suggestions"
 import {
   Search,
   ShoppingCart,
@@ -57,6 +58,8 @@ import {
   RefreshCcw,
   Wallet,
   Mail,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -151,6 +154,7 @@ const categoryIcons: { [key: string]: any } = {
 
 export default function Component() {
   const router = useRouter()
+  const pathname = usePathname()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   // const { products, isLoading, error, retry, preloadProducts } = useProducts() // Removed - using useProductsOptimized instead
   const { addItem, isInCart, cartTotalItems, getItemQuantity } = useCart() // Use useCart hook
@@ -167,6 +171,15 @@ export default function Component() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   // Initialize search state from URL query ?search= on mount and when URL changes
   const urlSearchParams = useSearchParams()
+  
+  // Debug: Log current URL state
+  useEffect(() => {
+    const currentUrl = `${pathname}${urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : ''}`
+    console.log('🔍 Products Page - Current URL:', currentUrl)
+    console.log('🔍 Products Page - Search params:', urlSearchParams?.toString())
+  }, [pathname, urlSearchParams])
+  
+  
   useEffect(() => {
     const initial = (urlSearchParams?.get('search') || '').trim()
     // Only update when query differs to avoid loops
@@ -176,8 +189,11 @@ export default function Component() {
     }
   }, [urlSearchParams])
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
+  const [searchModalInitialTab, setSearchModalInitialTab] = useState<'text' | 'image'>('text')
   const [imageSearchResults, setImageSearchResults] = useState<any[]>([])
   const [imageSearchKeywords, setImageSearchKeywords] = useState<string[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
 
   // Debounce category changes to prevent rapid-fire API requests
   useEffect(() => {
@@ -228,6 +244,15 @@ export default function Component() {
     setImageSearchKeywords([])
   }, [])
 
+  // Handle suggestion click
+  const handleSuggestionClick = useCallback((suggestion: string) => {
+    setSearchTerm(suggestion)
+    setDebouncedSearchTerm(suggestion)
+    setShowSuggestions(false)
+    setIsSearchFocused(false)
+    router.push(`/products?search=${encodeURIComponent(suggestion)}`)
+  }, [router])
+
   // Removed useRobustProducts hook - was causing duplicate API calls!
   // Filter functions are now implemented locally below
   
@@ -274,6 +299,14 @@ export default function Component() {
   const [adsLoading, setAdsLoading] = useState(true)
   const [currentAdIndex, setCurrentAdIndex] = useState(0)
   const [adRotationTime, setAdRotationTime] = useState(10)
+  
+  // Touch swipe state for advertisements
+  const [touchStart, setTouchStart] = useState<number | null>(null)
+  const [touchEnd, setTouchEnd] = useState<number | null>(null)
+  
+  // Mobile category rotation state
+  const [mobileCategoryStartIndex, setMobileCategoryStartIndex] = useState(0)
+  const MOBILE_CATEGORIES_PER_ROW = 4 // Reduced to 4 to prevent overlapping
 
   // Auto-scroll after page load
   useEffect(() => {
@@ -371,6 +404,7 @@ export default function Component() {
     const fetchAds = async () => {
       try {
         setAdsLoading(true)
+        console.log('📢 [Advertisements] Starting products page ads fetch...')
         
         // Check cache for advertisements
         const cachedAds = localStorage.getItem('ads_cache')
@@ -379,8 +413,16 @@ export default function Component() {
         const now = Date.now()
         const cacheAge = cacheTimestamp ? now - parseInt(cacheTimestamp) : Infinity
         
+        console.log('📢 [Advertisements] Cache status:', {
+          hasCachedAds: !!cachedAds,
+          hasCachedRotation: !!cachedRotation,
+          cacheAge: cacheAge,
+          useCache: cacheAge < 2 * 60 * 1000
+        })
+        
         // Use cache if it's less than 2 minutes old
         if (cachedAds && cachedRotation && cacheAge < 2 * 60 * 1000) {
+          console.log('✅ [Advertisements] Using cached ads data')
           setAdvertisements(JSON.parse(cachedAds))
           setAdRotationTime(parseInt(cachedRotation))
           setAdsLoading(false)
@@ -390,38 +432,51 @@ export default function Component() {
         // Add delay to prevent simultaneous API calls
         await new Promise(resolve => setTimeout(resolve, 200))
         
+        const cacheBust = typeof window !== 'undefined' ? (localStorage.getItem('settings_cache_bust') || Date.now()) : Date.now()
+        console.log('📢 [Advertisements] Fetching fresh ads with cache-bust:', cacheBust)
+        
         const [adsResponse, rotationResponse] = await Promise.all([
-          fetch('/api/advertisements?placement=products'),
-          fetch('/api/advertisements/rotation-time')
+          fetch(`/api/advertisements?placement=products&cb=${cacheBust}`, { cache: 'no-store' }),
+          fetch(`/api/advertisements/rotation-time?cb=${cacheBust}`, { cache: 'no-store' })
         ])
         
         if (adsResponse.ok) {
           const data = await adsResponse.json()
+          console.log('✅ [Advertisements] Successfully fetched products ads:', {
+            count: data?.length || 0,
+            timestamp: new Date().toISOString()
+          })
           setAdvertisements(data || [])
           localStorage.setItem('ads_cache', JSON.stringify(data || []))
         } else if (adsResponse.status === 429) {
-          console.warn('Rate limited when fetching ads, using cached data if available')
+          console.warn('⚠️ [Advertisements] Rate limited when fetching ads, using cached data if available')
           if (cachedAds) {
             setAdvertisements(JSON.parse(cachedAds))
           }
+        } else {
+          console.warn('⚠️ [Advertisements] Failed to fetch advertisements:', adsResponse.status)
         }
         
         if (rotationResponse.ok) {
           const rotationData = await rotationResponse.json()
+          console.log('✅ [Advertisements] Successfully fetched rotation time:', rotationData)
           setAdRotationTime(rotationData.rotationTime || 10)
           localStorage.setItem('ads_rotation_cache', (rotationData.rotationTime || 10).toString())
         } else if (rotationResponse.status === 429) {
-          console.warn('Rate limited when fetching rotation time, using cached data if available')
+          console.warn('⚠️ [Advertisements] Rate limited when fetching rotation time, using cached data if available')
           if (cachedRotation) {
             setAdRotationTime(parseInt(cachedRotation))
           }
+        } else {
+          console.warn('⚠️ [Advertisements] Failed to fetch rotation time:', rotationResponse.status)
         }
         
         // Update cache timestamp
         localStorage.setItem('ads_cache_timestamp', now.toString())
+        console.log('💾 [Advertisements] Updated cache timestamp:', now)
         
       } catch (error) {
-        console.error('Error fetching advertisements:', error)
+        console.error('❌ [Advertisements] Error fetching advertisements:', error)
       } finally {
         setAdsLoading(false)
       }
@@ -439,6 +494,47 @@ export default function Component() {
     
     return () => clearInterval(interval)
   }, [advertisements.length, adRotationTime])
+
+  // Auto-rotate mobile categories every 1 minute
+  useEffect(() => {
+    if (!categories || categories.length <= MOBILE_CATEGORIES_PER_ROW) return
+    
+    const interval = setInterval(() => {
+      setMobileCategoryStartIndex((prevIndex) => {
+        const maxStartIndex = Math.max(0, categories.length - MOBILE_CATEGORIES_PER_ROW)
+        return prevIndex >= maxStartIndex ? 0 : prevIndex + 1
+      })
+    }, 60000) // 1 minute = 60000ms
+    
+    return () => clearInterval(interval)
+  }, [categories, MOBILE_CATEGORIES_PER_ROW])
+
+  // Touch swipe handlers for advertisements
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null)
+    setTouchStart(e.targetTouches[0].clientX)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX)
+  }
+
+  const handleTouchEnd = () => {
+    if (!touchStart || !touchEnd) return
+    
+    const distance = touchStart - touchEnd
+    const isLeftSwipe = distance > 50
+    const isRightSwipe = distance < -50
+
+    if (isLeftSwipe && advertisements.length > 1) {
+      // Swipe left - next ad
+      setCurrentAdIndex((prev) => (prev + 1) % advertisements.length)
+    }
+    if (isRightSwipe && advertisements.length > 1) {
+      // Swipe right - previous ad
+      setCurrentAdIndex((prev) => prev === 0 ? advertisements.length - 1 : prev - 1)
+    }
+  }
 
   // Helper function to calculate minimum price from variants
   const getMinimumPrice = (productPrice: number, variants?: any[]): number => {
@@ -490,6 +586,31 @@ export default function Component() {
 
   // Use image search results if available, otherwise use infinite products
   const products = imageSearchResults.length > 0 ? imageSearchResults : adaptedInfiniteProducts as any
+
+  // Shuffle products every 20 minutes deterministically using a time-based seed
+  const shuffledProducts = useMemo(() => {
+    if (!products || products.length === 0) return []
+    
+    // 20-minute window seed
+    const windowMs = 20 * 60 * 1000
+    const seed = Math.floor(Date.now() / windowMs)
+    // Simple seeded shuffle (Fisher-Yates variant)
+    const seededRandom = (() => {
+      let s = seed ^ 0x9e3779b9
+      return () => {
+        // xorshift32
+        s ^= s << 13; s ^= s >>> 17; s ^= s << 5
+        // Convert to [0,1)
+        return ((s >>> 0) / 4294967296)
+      }
+    })()
+    const copy = products.slice()
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(seededRandom() * (i + 1))
+      ;[copy[i], copy[j]] = [copy[j], copy[i]]
+    }
+    return copy
+  }, [products])
   const isLoading = infiniteLoading || (activeCategory !== debouncedCategory) || (searchTerm !== debouncedSearchTerm) || (debouncedSearchTerm.trim().length === 1) // Show loading while debouncing or typing single character
   const error = infiniteError
 
@@ -498,7 +619,8 @@ export default function Component() {
   const displayedProducts = useMemo(() => {
     // Remove duplicates only (API handles filtering & sorting)
     const seen = new Set<number>()
-    const uniqueProducts = products.filter((product: any) => {
+    const sourceList = shuffledProducts.length > 0 ? shuffledProducts : products
+    const uniqueProducts = sourceList.filter((product: any) => {
       if (seen.has(product.id)) return false
       seen.add(product.id)
       return true
@@ -507,7 +629,7 @@ export default function Component() {
     // Limit to PRODUCTS_PER_PAGE (120) for current page
     const limitedProducts = uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
     return limitedProducts
-  }, [products, PRODUCTS_PER_PAGE])
+  }, [shuffledProducts, products, PRODUCTS_PER_PAGE])
   
   // Note: Price filtering, category filtering, and sorting are now done server-side
   // The API endpoint handles these parameters automatically
@@ -920,7 +1042,16 @@ export default function Component() {
 
           {/* Search Bar Container - Moved to start */}
           <div className="flex-1 min-w-0 mx-2 sm:mx-3 md:mx-4 lg:mx-6 xl:mx-8 2xl:mx-10 flex items-center relative" suppressHydrationWarning>
-            <form className="relative flex-1 flex items-center" onSubmit={(e) => e.preventDefault()} suppressHydrationWarning>
+            <form 
+              className="relative flex-1 flex items-center" 
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (searchTerm.trim()) {
+                  handleModalTextSearch(searchTerm.trim())
+                }
+              }} 
+              suppressHydrationWarning
+            >
               {/* Search Input */}
               <div className="relative flex-1" suppressHydrationWarning>
               <Search
@@ -934,7 +1065,7 @@ export default function Component() {
                 type="search"
                 placeholder="Search for products..."
                 className={cn(
-                    "w-full pl-8 sm:pl-10 pr-16 sm:pr-20 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
+                    "w-full pl-8 sm:pl-10 pr-20 sm:pr-28 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
                     darkHeaderFooterClasses.inputBg,
                     darkHeaderFooterClasses.inputBorder,
                     darkHeaderFooterClasses.textNeutralPrimary,
@@ -943,21 +1074,67 @@ export default function Component() {
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value)
+                  setShowSuggestions(true)
                   // Debouncing is now handled by useEffect
+                }}
+                onFocus={() => {
+                  setIsSearchFocused(true)
+                  if (searchTerm.length >= 2) {
+                    setShowSuggestions(true)
+                  }
+                }}
+                onBlur={() => {
+                  // Delay hiding suggestions to allow clicks
+                  setTimeout(() => {
+                    setIsSearchFocused(false)
+                    setShowSuggestions(false)
+                  }, 200)
                 }}
                   suppressHydrationWarning
               />
+              
+              {/* Search Suggestions */}
+              <SearchSuggestions
+                query={searchTerm}
+                onSuggestionClick={handleSuggestionClick}
+                isVisible={showSuggestions && isSearchFocused}
+                className="mt-1"
+              />
               {/* Search Loading Indicator */}
               {searchTerm && searchTerm !== debouncedSearchTerm && (
-                <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                <div className="absolute right-20 sm:right-24 top-1/2 -translate-y-1/2">
                   <div className="animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full"></div>
                 </div>
               )}
+              {/* Search Button */}
+              <button
+                type="submit"
+                onClick={(e) => {
+                  e.preventDefault()
+                  if (searchTerm.trim()) {
+                    handleModalTextSearch(searchTerm.trim())
+                  }
+                }}
+                disabled={!searchTerm.trim()}
+                className={cn(
+                  "absolute right-12 sm:right-16 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors",
+                  searchTerm.trim() 
+                    ? cn(darkHeaderFooterClasses.textNeutralSecondaryFixed, "hover:bg-neutral-200 dark:hover:bg-neutral-700")
+                    : "text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                )}
+                title={searchTerm.trim() ? "Search products" : "Enter search term"}
+              >
+                <Search className="w-3 h-3 sm:w-4 sm:h-4" />
+              </button>
+              
               {/* Image Search Button */}
               <button
-                onClick={() => setIsSearchModalOpen(true)}
+                onClick={() => {
+                  setSearchModalInitialTab('image')
+                  setIsSearchModalOpen(true)
+                }}
                 className={cn(
-                  "absolute right-8 sm:right-10 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center",
+                  "absolute right-6 sm:right-8 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center",
                   darkHeaderFooterClasses.textNeutralSecondaryFixed,
                   "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
                 )}
@@ -1255,53 +1432,195 @@ export default function Component() {
               )}>
         <div className="flex items-center justify-center h-auto sm:h-8 px-1 sm:px-2 lg:px-4 xl:px-6 2xl:px-8 py-1 sm:py-0">
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-2 lg:gap-3 xl:gap-4 overflow-visible sm:overflow-x-auto scrollbar-hide">
-            {[
-              { name: "All", icon: <Home className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> },
-              ...(categoriesLoading ? [] : categoriesList.slice(0, 10).map((category) => {
-                const IconComponent = categoryIcons[category.name] || categoryIcons.default
-                return {
-                  name: category.name,
-                  icon: <IconComponent className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                }
-              }))
-            ].map((category) => (
-              <button
-                key={category.name}
-                onClick={() => {
-                  if (category.name === "All") {
-                    // Clear category filter to show all products
-                    setSearchTerm("") // Clear search term
-                    setDebouncedSearchTerm("") // Clear debounced search term
-                    setActiveCategory(null) // Clear active category
-                    clearFilters()
-                  } else {
+            {/* All Categories Button - Always visible */}
+            <button
+              onClick={() => {
+                // Clear category filter to show all products
+                setSearchTerm("") // Clear search term
+                setDebouncedSearchTerm("") // Clear debounced search term
+                setActiveCategory(null) // Clear active category
+                clearFilters()
+              }}
+              className={cn(
+                "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
+                activeCategory === null
+                  ? themeClasses.mainBg === "bg-white min-h-screen"
+                    ? "text-black bg-amber-200/60"
+                    : "text-black bg-stone-300/60"
+                  : themeClasses.mainBg === "bg-white min-h-screen"
+                    ? "text-black hover:text-black hover:bg-amber-200/40"
+                    : "text-black hover:text-black hover:bg-stone-300/40"
+              )}
+            >
+              <Home className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+              <span>All</span>
+            </button>
+
+            {/* Mobile Categories - Only show 5 with rotation */}
+            {!categoriesLoading && categoriesList.slice(mobileCategoryStartIndex, mobileCategoryStartIndex + MOBILE_CATEGORIES_PER_ROW).map((category) => {
+              const IconComponent = categoryIcons[category.name] || categoryIcons.default
+              return (
+                <button
+                  key={category.name}
+                  onClick={() => {
                     // Filter by specific category
                     setSearchTerm("") // Clear search term when filtering by category
                     setDebouncedSearchTerm("") // Clear debounced search term
                     setActiveCategory(category.name) // Set active category
                     // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
-                  }
-                }}
-                className={cn(
-                  "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
-                  (category.name === "All" ? activeCategory === null : activeCategory === category.name)
-                    ? themeClasses.mainBg === "bg-white min-h-screen"
-                      ? "text-black bg-amber-200/60"
-                      : "text-black bg-stone-300/60"
-                    : themeClasses.mainBg === "bg-white min-h-screen"
-                      ? "text-black hover:text-black hover:bg-amber-200/40"
-                      : "text-black hover:text-black hover:bg-stone-300/40"
-                )}
-              >
-                {category.icon}
-                <span>{category.name}</span>
-              </button>
-            ))}
+                  }}
+                  className={cn(
+                    "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
+                    activeCategory === category.name
+                      ? themeClasses.mainBg === "bg-white min-h-screen"
+                        ? "text-black bg-amber-200/60"
+                        : "text-black bg-stone-300/60"
+                      : themeClasses.mainBg === "bg-white min-h-screen"
+                        ? "text-black hover:text-black hover:bg-amber-200/40"
+                        : "text-black hover:text-black hover:bg-stone-300/40"
+                  )}
+                >
+                  <IconComponent className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                  <span>{category.name}</span>
+                </button>
+              )
+            })}
+
+            {/* Desktop Categories - Show all (hidden on mobile) */}
+            {!categoriesLoading && categoriesList.slice(0, 10).map((category) => {
+              const IconComponent = categoryIcons[category.name] || categoryIcons.default
+              return (
+                <button
+                  key={`desktop-${category.name}`}
+                  onClick={() => {
+                    // Filter by specific category
+                    setSearchTerm("") // Clear search term when filtering by category
+                    setDebouncedSearchTerm("") // Clear debounced search term
+                    setActiveCategory(category.name) // Set active category
+                    // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
+                  }}
+                  className={cn(
+                    "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
+                    activeCategory === category.name
+                      ? themeClasses.mainBg === "bg-white min-h-screen"
+                        ? "text-black bg-amber-200/60"
+                        : "text-black bg-stone-300/60"
+                      : themeClasses.mainBg === "bg-white min-h-screen"
+                        ? "text-black hover:text-black hover:bg-amber-200/40"
+                        : "text-black hover:text-black hover:bg-stone-300/40"
+                  )}
+                >
+                  <IconComponent className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                  <span>{category.name}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       </nav>
 
       <main className={cn("flex-1 pt-32 xs:pt-28 sm:pt-32", themeClasses.mainBg)} suppressHydrationWarning>
+
+        {/* Ads Container - Above filter buttons */}
+        {!adsLoading && advertisements.length > 0 && (
+          <div className="px-1 sm:px-2 lg:px-3 mb-6">
+            <div 
+              className="w-full relative"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              {/* Previous Arrow */}
+              {advertisements.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setCurrentAdIndex((prev) => prev === 0 ? advertisements.length - 1 : prev - 1)
+                  }}
+                  className="absolute left-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  aria-label="Previous ad"
+                >
+                  <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+                </button>
+              )}
+              
+              {/* Next Arrow */}
+              {advertisements.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setCurrentAdIndex((prev) => (prev + 1) % advertisements.length)
+                  }}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  aria-label="Next ad"
+                >
+                  <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+                </button>
+              )}
+
+              {advertisements[currentAdIndex] && (
+                <Link 
+                  href={advertisements[currentAdIndex].link_url || "/products"}
+                  className="block cursor-pointer h-32 sm:h-48 relative z-10"
+                >
+                  <div className="relative overflow-hidden hover:scale-105 transition-all duration-500 rounded-sm h-full bg-gray-100 dark:bg-gray-800">
+                    {advertisements[currentAdIndex].media_type === 'image' ? (
+                      <LazyImage
+                        key={currentAdIndex}
+                        src={advertisements[currentAdIndex].media_url}
+                        alt={advertisements[currentAdIndex].title}
+                        fill
+                        className="object-contain transition-opacity duration-500"
+                        priority={currentAdIndex === 0} // Priority for first ad
+                        quality={85}
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 100vw, 1200px"
+                      />
+                    ) : (
+                      <video
+                        key={currentAdIndex}
+                        src={advertisements[currentAdIndex].media_url}
+                        className="w-full h-full object-contain transition-opacity duration-500"
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                      />
+                    )}
+                    {/* Ad Title Overlay */}
+                    {advertisements[currentAdIndex].title && (
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                        <p className="text-white text-xs sm:text-sm font-medium truncate" suppressHydrationWarning>
+                          {advertisements[currentAdIndex].title}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </Link>
+              )}
+              
+              {/* Ad Navigation Dots */}
+              {advertisements.length > 1 && (
+                <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
+                  {advertisements.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        setCurrentAdIndex(index)
+                      }}
+                      className={`w-2 h-2 rounded-full transition-all ${
+                        index === currentAdIndex 
+                          ? 'bg-white w-6' 
+                          : 'bg-white/50 hover:bg-white/75'
+                      }`}
+                      aria-label={`Go to ad ${index + 1}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Filter and Sort Section */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
@@ -1513,72 +1832,6 @@ export default function Component() {
           </div>
         </div>
 
-        {/* Ads Container - Above product grid */}
-        {!adsLoading && advertisements.length > 0 && (
-          <div className="px-1 sm:px-2 lg:px-3 mb-6">
-            <div className="w-full relative">
-              {advertisements[currentAdIndex] && (
-                <Link 
-                  href={advertisements[currentAdIndex].link_url || "/products"}
-                  className="block cursor-pointer h-32 sm:h-48 relative z-10"
-                >
-                  <div className="relative overflow-hidden hover:scale-105 transition-all duration-500 rounded-sm h-full bg-gray-100 dark:bg-gray-800">
-                    {advertisements[currentAdIndex].media_type === 'image' ? (
-                      <LazyImage
-                        key={currentAdIndex}
-                        src={advertisements[currentAdIndex].media_url}
-                        alt={advertisements[currentAdIndex].title}
-                        fill
-                        className="object-contain transition-opacity duration-500"
-                        priority={currentAdIndex === 0} // Priority for first ad
-                        quality={85}
-                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 100vw, 1200px"
-                      />
-                    ) : (
-                      <video
-                        key={currentAdIndex}
-                        src={advertisements[currentAdIndex].media_url}
-                        className="w-full h-full object-contain transition-opacity duration-500"
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                      />
-                    )}
-                    {/* Ad Title Overlay */}
-                    {advertisements[currentAdIndex].title && (
-                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                        <p className="text-white text-xs sm:text-sm font-medium truncate" suppressHydrationWarning>
-                          {advertisements[currentAdIndex].title}
-                        </p>
-            </div>
-                    )}
-                  </div>
-                </Link>
-              )}
-              {/* Ad Navigation Dots */}
-              {advertisements.length > 1 && (
-                <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
-                  {advertisements.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        setCurrentAdIndex(index)
-                      }}
-                      className={`w-2 h-2 rounded-full transition-all ${
-                        index === currentAdIndex 
-                          ? 'bg-white w-6' 
-                          : 'bg-white/50 hover:bg-white/75'
-                      }`}
-                      aria-label={`Go to ad ${index + 1}`}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Promotional Text Below Advertisement */}
         <div className="px-1 sm:px-2 lg:px-3 mb-6">
@@ -1588,12 +1841,10 @@ export default function Component() {
               <div className="w-4/5 h-0.5 bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 rounded-full mx-auto"></div>
             </div>
             
-            <h2 className="text-lg sm:text-xl lg:text-2xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent mb-1 font-serif">
-              Discover High-Quality Electronic Components and Tools
+            <h2 className="text-sm sm:text-lg md:text-xl lg:text-2xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent mb-1 font-serif whitespace-nowrap overflow-hidden text-ellipsis">
+              Quality-Trusted Component Store
             </h2>
-            <p className="text-sm sm:text-base lg:text-lg text-gray-700 dark:text-gray-300 font-medium font-serif">
-              Built to Support Creativity and Performance
-            </p>
+            {/* Removed promotional subheading per request */}
           </div>
         </div>
 
@@ -1618,7 +1869,7 @@ export default function Component() {
                   </Button>
                   <Button
                     variant="outline"
-                onClick={() => window.location.reload()}
+                onClick={() => router.refresh()}
                     className={cn(
                       "border-neutral-300 hover:bg-neutral-100",
                       themeClasses.mainText,
@@ -1683,7 +1934,7 @@ export default function Component() {
                 </p>
                 <Button
                   variant="outline"
-                  onClick={() => window.location.reload()}
+                  onClick={() => router.refresh()}
                   className={cn(
                     "border-neutral-300 hover:bg-neutral-100",
                     themeClasses.mainText,
@@ -1738,7 +1989,7 @@ export default function Component() {
                     suppressHydrationWarning
               >
                     <OptimizedLink 
-                      href={`/products/${product.id}`} 
+                      href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.get('search') || searchTerm)?.trim() ? `?search=${encodeURIComponent((urlSearchParams?.get('search') || searchTerm).trim())}` : (urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}`)}`} 
                       className="block relative aspect-square overflow-hidden" 
                       prefetch={false}
                       priority="low"
@@ -1791,7 +2042,14 @@ export default function Component() {
                   </div>
                     </OptimizedLink>
                     <CardContent className="p-1 flex-1 flex flex-col justify-between" suppressHydrationWarning>
-                      <h3 className="text-xs font-semibold sm:text-sm lg:text-base" suppressHydrationWarning>{product.name}</h3>
+                      <OptimizedLink 
+                        href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.get('search') || searchTerm)?.trim() ? `?search=${encodeURIComponent((urlSearchParams?.get('search') || searchTerm).trim())}` : (urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}`)}`}
+                        className="block"
+                        prefetch={false}
+                        priority="low"
+                      >
+                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 transition-colors" suppressHydrationWarning>{product.name}</h3>
+                      </OptimizedLink>
                   <div
                     className={cn(
                       "flex items-center gap-1 text-[10px] mt-0.5 sm:text-xs",
@@ -2101,6 +2359,7 @@ export default function Component() {
         onImageSearch={handleImageSearch}
         currentSearchTerm={searchTerm}
         onSearchTermChange={setSearchTerm}
+        initialTab={searchModalInitialTab}
       />
     </div>
   )

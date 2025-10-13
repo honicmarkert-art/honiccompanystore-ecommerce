@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ServiceCardWithRotation } from '@/components/service-card-with-rotation'
 import { OptimizedLink } from '@/components/optimized-link'
+import { PromotionalCartPopup } from '@/components/promotional-cart-popup'
 import { logger } from '@/lib/logger'
 import { 
   Search, 
@@ -82,8 +83,10 @@ export default function LandingPage() {
   const [email, setEmail] = useState('')
   const [ads, setAds] = useState<any[]>([])
   const [adRotation, setAdRotation] = useState<number>(5000)
+  const [isPromotionalCartOpen, setIsPromotionalCartOpen] = useState(false)
+  const [promotionalProducts, setPromotionalProducts] = useState<any[]>([])
 
-  // Debug logging for service images
+  // Debug logging for service images and hero background
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
       logger.log('🏠 Landing Page - Service Images:', {
@@ -96,24 +99,105 @@ export default function LandingPage() {
     }
   }, [serviceRetailImages, servicePrototypingImages, servicePcbImages, serviceAiImages, serviceStemImages])
 
+
   // Fetch admin-controlled advertisements (same API as product list)
   useEffect(() => {
     let cancelled = false
     const loadAds = async () => {
       try {
+        const cacheBust = typeof window !== 'undefined' ? (localStorage.getItem('settings_cache_bust') || Date.now()) : Date.now()
+        
         const [adsRes, rotRes] = await Promise.all([
-          fetch('/api/advertisements?placement=home'),
-          fetch('/api/advertisements/rotation-time')
+          fetch(`/api/advertisements?placement=home&cb=${cacheBust}`, { cache: 'no-store' }),
+          fetch(`/api/advertisements/rotation-time?cb=${cacheBust}`, { cache: 'no-store' })
         ])
+        
         if (!cancelled) {
-          if (adsRes.ok) setAds(await adsRes.json())
-          if (rotRes.ok) setAdRotation(await rotRes.json())
+          if (adsRes.ok) {
+            const adsData = await adsRes.json()
+            setAds(adsData)
+          } else {
+            console.warn('⚠️ [Advertisements] Failed to fetch home ads:', adsRes.status)
+          }
+          
+          if (rotRes.ok) {
+            const rotationData = await rotRes.json()
+            setAdRotation(rotationData)
+          } else {
+            console.warn('⚠️ [Advertisements] Failed to fetch rotation time:', rotRes.status)
+          }
         }
-      } catch {}
+      } catch (error) {
+        console.error('❌ [Advertisements] Error fetching home ads:', error)
+      }
     }
     loadAds()
     return () => { cancelled = true }
   }, [])
+
+  // Fetch promotional products and show popup after 5 seconds
+  useEffect(() => {
+    const fetchPromotionalProducts = async () => {
+      try {
+        // Fetch more products to find ones with real images
+        const response = await fetch('/api/products?limit=20')
+        if (response.ok) {
+          const data = await response.json()
+          
+          // Filter products with real images (not placeholder)
+          const productsWithRealImages = (data.products || []).filter((product: any) => 
+            product.image && !product.image.includes('placeholder')
+          )
+          
+          // Take first 3 products with real images
+          const selectedProducts = productsWithRealImages.slice(0, 3)
+          
+          setPromotionalProducts(selectedProducts)
+        }
+      } catch (error) {
+        console.error('Error fetching promotional products:', error)
+      }
+    }
+
+    fetchPromotionalProducts()
+
+    // Show popup after 5 seconds
+    const timer = setTimeout(() => {
+      setIsPromotionalCartOpen(true)
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Rotate promotional products every 10 seconds
+  useEffect(() => {
+    if (!isPromotionalCartOpen) return
+
+    const interval = setInterval(async () => {
+      try {
+        // Get random offset to fetch different products each time
+        const randomOffset = Math.floor(Math.random() * 50) // Random offset 0-49
+        const response = await fetch(`/api/products?limit=20&offset=${randomOffset}`)
+        if (response.ok) {
+          const data = await response.json()
+          
+          // Filter products with real images (not placeholder)
+          const productsWithRealImages = (data.products || []).filter((product: any) => 
+            product.image && !product.image.includes('placeholder')
+          )
+          
+          // Take first 3 products with real images
+          const selectedProducts = productsWithRealImages.slice(0, 3)
+          
+          setPromotionalProducts(selectedProducts)
+        }
+      } catch (error) {
+        console.error('Error rotating promotional products:', error)
+      }
+    }, 10000) // 10 seconds
+
+    return () => clearInterval(interval)
+  }, [isPromotionalCartOpen])
 
   const handleSearch = () => {
     if (searchTerm.trim()) {
@@ -491,7 +575,11 @@ export default function LandingPage() {
         <div 
           className={`absolute inset-0 ${heroBackgroundImage ? 'hero-bg-responsive' : ''}`}
           style={{
-            backgroundImage: heroBackgroundImage ? `url(${heroBackgroundImage})` : 'none',
+            backgroundImage: heroBackgroundImage ? (() => {
+              const cacheBust = typeof window !== 'undefined' ? (localStorage.getItem('settings_cache_bust') || Date.now()) : Date.now()
+              const finalUrl = `${heroBackgroundImage}${heroBackgroundImage.includes('?') ? '&' : '?' }cb=${cacheBust}`
+              return `url(${finalUrl})`
+            })() : 'none',
             backgroundColor: heroBackgroundImage ? 'transparent' : undefined,
             backgroundPosition: heroBackgroundImage ? 'center center' : undefined,
             backgroundRepeat: heroBackgroundImage ? 'no-repeat' : undefined
@@ -560,21 +648,43 @@ export default function LandingPage() {
             </div>
 
             {/* Frequently Searched */}
-            <div className={`flex items-center space-x-1 sm:space-x-2 md:space-x-4 flex-wrap gap-1 sm:gap-2 ${heroTaglineAlignment === 'center' ? 'justify-center' : heroTaglineAlignment === 'right' ? 'justify-end' : 'justify-start'}`}>
-              <span className="text-gray-300 text-xs sm:text-sm whitespace-nowrap">Frequently searched:</span>
-              {frequentlySearched.map((term, index) => (
-                <Badge
-                  key={index}
-                  variant="secondary"
-                  className="bg-gray-800 text-gray-300 hover:bg-gray-700 cursor-pointer text-xs px-2 py-1"
-                  onClick={() => {
-                    setSearchTerm(term)
-                    router.push(`/products?search=${encodeURIComponent(term)}`)
-                  }}
+            <div className={`w-full max-w-2xl mb-4 sm:mb-6 md:mb-8 ${heroTaglineAlignment === 'center' ? 'mx-auto' : heroTaglineAlignment === 'right' ? 'ml-auto' : ''}`}>
+              <div className="flex items-center space-x-1 sm:space-x-2 md:space-x-4 flex-wrap gap-1 sm:gap-2">
+                <span className="text-gray-300 text-xs sm:text-sm whitespace-nowrap">Frequently searched:</span>
+                {frequentlySearched.map((term, index) => (
+                  <Badge
+                    key={index}
+                    variant="secondary"
+                    className="bg-gray-800 text-gray-300 hover:bg-gray-700 cursor-pointer text-xs sm:text-xs px-1 sm:px-2 py-0.5 sm:py-1"
+                    onClick={() => {
+                      setSearchTerm(term)
+                      router.push(`/products?search=${encodeURIComponent(term)}`)
+                    }}
+                  >
+                    {term}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Hero Call-to-Action */}
+            <div className="mt-8 sm:mt-12 text-center">
+              <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white mb-4 sm:mb-6">
+                Electronics You Need, Just a Click Away!
+              </h2>
+              <p className="text-base sm:text-lg md:text-xl text-blue-100 mb-6 sm:mb-8 max-w-2xl mx-auto">
+                Discover our extensive collection of high-quality electronic components, tools, and innovative solutions for all your projects.
+              </p>
+              <div className="mb-8 sm:mb-12">
+                <Button
+                  size="lg"
+                  className="bg-white text-blue-600 hover:bg-blue-50 text-base sm:text-lg px-6 sm:px-8 py-3 sm:py-4 font-semibold shadow-lg hover:shadow-xl transition-all duration-300"
+                  onClick={() => router.push('/products')}
                 >
-                  {term}
-                </Badge>
-              ))}
+                  <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                  Shop Now
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -910,6 +1020,14 @@ export default function LandingPage() {
         </div>
       </footer>
       </div>
+
+      {/* Promotional Cart Popup */}
+      <PromotionalCartPopup
+        isOpen={isPromotionalCartOpen}
+        onClose={() => setIsPromotionalCartOpen(false)}
+        products={promotionalProducts}
+      />
+
 
     </div>
   )

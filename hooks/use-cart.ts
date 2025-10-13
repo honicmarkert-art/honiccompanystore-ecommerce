@@ -459,7 +459,6 @@ export function useCart() {
         }
       }
 
-      console.log('  - Creating new cart item with variant:', newVariant)
       
       const newItem: CartItem = {
           id: Date.now(), // Temporary ID

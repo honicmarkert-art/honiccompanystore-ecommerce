@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic'
 
 
 import { useState, useMemo, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import {
   Plus,
@@ -48,6 +49,7 @@ import { ProductForm } from "./product-form"
 import { SecurityGuard } from "@/components/security-guard"
 
 export default function AdminProducts() {
+  const router = useRouter()
   return (
     <SecurityGuard requireAuth={true} requireAdmin={true}>
       <AdminProductsContent />
@@ -180,7 +182,7 @@ function AdminProductsContent() {
                     if (errorMessage.includes('Authentication required') || errorMessage.includes('401')) {
                       alert('Your session has expired. Please log in again to continue.')
                       // Optionally redirect to login
-                      window.location.href = '/auth/login'
+                      router.push('/auth/login')
                       return
                     }
                     
@@ -221,7 +223,7 @@ function AdminProductsContent() {
                 const result = await response.json()
                 if (result.success) {
                   // Refresh the products list
-                  window.location.reload()
+                  router.refresh()
                 } else {
                 }
               } catch (error) {

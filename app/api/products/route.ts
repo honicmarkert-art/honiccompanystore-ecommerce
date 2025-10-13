@@ -290,14 +290,14 @@ export async function GET(request: NextRequest) {
         ].join(' ')
         
         return {
-          id: p.id,
+        id: p.id,
           name: combinedText, // Use combined text for comprehensive search
-          description: p.description || '',
-          category: p.category || '',
-          brand: p.brand || '',
-          price: p.price || 0,
-          sku: p.sku,
-          model: p.model,
+        description: p.description || '',
+        category: p.category || '',
+        brand: p.brand || '',
+        price: p.price || 0,
+        sku: p.sku,
+        model: p.model,
           tags: []
         }
       })
@@ -313,12 +313,52 @@ export async function GET(request: NextRequest) {
       const searchResultIds = new Set(searchResults.map(r => r.id))
       filteredProducts = products.filter((p: any) => searchResultIds.has(p.id))
       
-      // Sort by search relevance score
-      const scoreMap = new Map(searchResults.map(r => [r.id, r.searchScore || 0]))
+      // Sort by boosted relevance score (prioritize exact and high-coverage matches)
+      const normalize = (value: string | null | undefined) => {
+        return (value || '')
+          .toLowerCase()
+          .trim()
+          .replace(/[\/_\-,:]+/g, ' ')
+          .replace(/[^a-z0-9\s]/g, '')
+          .replace(/\s+/g, ' ')
+      }
+
+      const normalizedQuery = normalize(sanitized)
+      const idToOriginalName = new Map<number, string>((products as any[]).map(p => [p.id, p.name || '']))
+
+      const DOMAIN_TERMS = ['lora', 'rf', 'transceiver', 'transceiver module', 'rf module', 'rf transceiver', 'rf transceiver module']
+
+      const scoreMap = new Map<number, number>(
+        searchResults.map(r => {
+          const base = r.searchScore || 0
+          const originalName = idToOriginalName.get(r.id) || ''
+          const normalizedName = normalize(originalName)
+
+          let boost = 0
+          if (normalizedName === normalizedQuery) boost += 1.0
+          else if (normalizedName.startsWith(normalizedQuery)) boost += 0.6
+          else if (normalizedName.includes(normalizedQuery)) boost += 0.4
+
+          // Domain-specific small boosts when present in name and query intent
+          for (const term of DOMAIN_TERMS) {
+            if (normalizedName.includes(term) && normalizedQuery.includes(term.split(' ')[0])) {
+              boost += 0.15
+            }
+          }
+
+          // Slight penalty for very long names to avoid noise dominating
+          if (originalName && originalName.length > 80) {
+            boost -= 0.05
+          }
+
+          return [r.id, base + boost] as [number, number]
+        })
+      )
+
       filteredProducts.sort((a: any, b: any) => {
         const scoreA = scoreMap.get(a.id) || 0
         const scoreB = scoreMap.get(b.id) || 0
-        return scoreB - scoreA  // Higher score first
+        return scoreB - scoreA // Higher boosted score first
       })
       
       logger.log(`Fuzzy search: "${search}" matched ${filteredProducts.length}/${products.length} products`)

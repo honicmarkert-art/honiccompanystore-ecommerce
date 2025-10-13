@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { LogIn, LogOut, Shield, User, AlertTriangle } from 'lucide-react'
@@ -19,6 +20,7 @@ interface AuthStatus {
 }
 
 export function AuthStatusIndicator() {
+  const router = useRouter()
   const { user, isAuthenticated, logout } = useAuth()
   const [authStatus, setAuthStatus] = useState<AuthStatus>({
     authenticated: false,
@@ -72,7 +74,7 @@ export function AuthStatusIndicator() {
       <div className="flex items-center space-x-2">
         <AlertTriangle className="h-4 w-4 text-red-500" />
         <span className="text-sm text-red-600">Not authenticated</span>
-        <Button size="sm" variant="outline" onClick={() => window.location.href = '/auth/login'}>
+        <Button size="sm" variant="outline" onClick={() => router.push('/auth/login')}>
           <LogIn className="h-3 w-3 mr-1" />
           Login
         </Button>

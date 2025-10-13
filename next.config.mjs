@@ -245,7 +245,7 @@ const nextConfig = {
           // Content Security Policy
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: https://qobobocldfjhdkpjyuuq.supabase.co https://*.supabase.co; connect-src 'self' https://api.clickpesa.com https://qobobocldfjhdkpjyuuq.supabase.co wss://qobobocldfjhdkpjyuuq.supabase.co https://www.google.com https://vision.googleapis.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';"
+            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: https://qobobocldfjhdkpjyuuq.supabase.co https://*.supabase.co; connect-src 'self' https://api.clickpesa.com https://qobobocldfjhdkpjyuuq.supabase.co wss://qobobocldfjhdkpjyuuq.supabase.co https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';"
           },
           // Security Headers
           {

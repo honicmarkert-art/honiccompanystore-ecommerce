@@ -35,7 +35,7 @@ function CheckoutReturnContent() {
   if (orderReference === '{orderReference}' || !orderReference || orderReference.includes('orderReference=')) {
     // Try to extract from the full URL string (handles malformed URLs with duplicate parameters)
     if (typeof window !== 'undefined') {
-      const fullUrl = window.location.href
+      const fullUrl = typeof window !== 'undefined' ? window.location.href : ''
       const orderRefMatch = fullUrl.match(/orderReference=([A-Za-z0-9-]{32,36})/)
       if (orderRefMatch) {
         orderReference = orderRefMatch[1]
@@ -76,7 +76,7 @@ function CheckoutReturnContent() {
   if (paymentStatus === '{status}' || !paymentStatus) {
     // Try to extract real status from the full URL
     if (typeof window !== 'undefined') {
-      const fullUrl = window.location.href
+      const fullUrl = typeof window !== 'undefined' ? window.location.href : ''
       const statusMatch = fullUrl.match(/status=(FAILED|SUCCESS|PENDING|CANCELLED)/i)
       if (statusMatch) {
         paymentStatus = statusMatch[1]
@@ -170,8 +170,8 @@ function CheckoutReturnContent() {
           amount: String(orderData.totalAmount),
           currency: orderData.currency || 'TZS',
           orderId: orderData.referenceId,
-          returnUrl: `${window.location.origin}/checkout/return?orderReference=${orderData.referenceId}`,
-          cancelUrl: `${window.location.origin}/checkout/return?orderReference=${orderData.referenceId}`,
+          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
+          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
           customerDetails: {
             fullName: orderData.billingAddress?.fullName || orderData.shippingAddress?.fullName || '',
             email: orderData.billingAddress?.email || orderData.shippingAddress?.email || '',
@@ -188,7 +188,7 @@ function CheckoutReturnContent() {
       if (response.ok) {
         const data = await response.json()
         if (data.checkoutUrl || data.checkoutLink) {
-          window.location.href = data.checkoutUrl || data.checkoutLink
+          router.push(data.checkoutUrl || data.checkoutLink)
         } else {
           console.error('No checkout URL received:', data)
           // Fallback to checkout page
@@ -253,8 +253,8 @@ function CheckoutReturnContent() {
           amount: String(orderData?.totalAmount || 0),
           currency: orderData?.currency || 'TZS',
           orderId: newReferenceId, // Use new reference ID
-          returnUrl: `${window.location.origin}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
-          cancelUrl: `${window.location.origin}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
+          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
+          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
           customerDetails: {
             fullName: orderData?.billingAddress?.fullName || orderData?.shippingAddress?.fullName || 'Customer',
             email: orderData?.billingAddress?.email || orderData?.shippingAddress?.email || '',
@@ -272,7 +272,7 @@ function CheckoutReturnContent() {
       
       if (result.success && (result.checkoutUrl || result.checkoutLink)) {
         // Redirect to ClickPesa checkout
-        window.location.href = result.checkoutUrl || result.checkoutLink
+        router.push(result.checkoutUrl || result.checkoutLink)
       } else {
         console.error('Failed to regenerate checkout link:', result)
         alert(`Payment system is temporarily unavailable. ${result.error || 'Please contact support or try again later.'}`)

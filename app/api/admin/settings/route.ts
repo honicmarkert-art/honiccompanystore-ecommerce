@@ -165,6 +165,7 @@ export async function GET(request: NextRequest) {
     )
 
     // Get admin settings from admin_settings table
+    console.log('🔍 [Admin Settings API] Fetching settings from database...')
     const { data: settings, error: settingsError } = await supabase
       .from('admin_settings')
       .select('*')
@@ -172,7 +173,7 @@ export async function GET(request: NextRequest) {
       .single()
 
     if (settingsError) {
-      console.error('Error fetching admin settings:', settingsError)
+      console.error('❌ [Admin Settings API] Error fetching admin settings:', settingsError)
       // Return default settings if no settings exist or table doesn't exist
       return NextResponse.json({
         companyName: 'honiccompanystore',
@@ -278,6 +279,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Map database fields to API response format
+    console.log('🔍 [Admin Settings API] Raw database settings:', {
+      hero_background_image: settings.hero_background_image,
+      company_name: settings.company_name,
+      timestamp: new Date().toISOString()
+    })
+    
     const mappedSettings = {
       companyName: settings.company_name || 'honiccompanystore',
       companyColor: settings.company_color || '#3B82F6',
@@ -388,6 +395,12 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    console.log('✅ [Admin Settings API] Returning mapped settings:', {
+      heroBackgroundImage: mappedSettings.heroBackgroundImage,
+      companyName: mappedSettings.companyName,
+      timestamp: new Date().toISOString()
+    })
+    
     return NextResponse.json(mappedSettings)
 
   } catch (error) {
@@ -419,10 +432,11 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
     
-    // Create Supabase client
+    // Create Supabase client with service role for admin operations
+    console.log('🔑 [Admin Settings API] Using service role key for admin operations')
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
       {
         cookies: {
           get(name: string) {
@@ -459,6 +473,7 @@ export async function POST(request: NextRequest) {
     }
     if (validatedData.heroBackgroundImage !== undefined) {
       try {
+        console.log('🖼️ [Admin Settings API] Setting hero_background_image:', validatedData.heroBackgroundImage)
         dbData.hero_background_image = validatedData.heroBackgroundImage
       } catch (error) {
         logger.log('⚠️ hero_background_image column not available, skipping update')
@@ -578,8 +593,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (updateError) {
-      console.error('❌ Database update error:', updateError)
-      console.error('❌ Error details:', JSON.stringify(updateError, null, 2))
+      console.error('❌ [Admin Settings API] Database update error:', updateError)
+      console.error('❌ [Admin Settings API] Error details:', JSON.stringify(updateError, null, 2))
       return NextResponse.json(
         { 
           error: 'Failed to update admin settings',
@@ -590,9 +605,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log('✅ [Admin Settings API] Successfully updated database with hero image:', dbData.hero_background_image)
+
+    // Re-select to verify persistence and return the final stored value
+    const { data: verifyRow, error: verifyError } = await supabase
+      .from('admin_settings')
+      .select('hero_background_image, updated_at')
+      .eq('id', 1)
+      .single()
+
+    if (verifyError) {
+      console.error('⚠️ [Admin Settings API] Verification select failed:', verifyError)
+    } else {
+      console.log('🔎 [Admin Settings API] Verification row:', verifyRow)
+      if (dbData.hero_background_image && verifyRow?.hero_background_image !== dbData.hero_background_image) {
+        console.warn('⚠️ [Admin Settings API] Mismatch after update:', {
+          attempted: dbData.hero_background_image,
+          stored: verifyRow?.hero_background_image
+        })
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'Admin settings updated successfully'
+      message: 'Admin settings updated successfully',
+      heroBackgroundImage: verifyRow?.hero_background_image ?? dbData.hero_background_image
     })
 
   } catch (error) {

@@ -1,9 +1,10 @@
 "use client"
 
-import React, { useRef, useState } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { Camera, X, Upload, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useImageSearch } from '@/hooks/use-image-search'
+import { Button } from '@/components/ui/button'
 
 interface ImageSearchInputProps {
   onImageSearch: (products: any[], keywords: string[]) => void
@@ -77,6 +78,33 @@ export function ImageSearchInput({ onImageSearch, className, placeholder = "Sear
     fileInputRef.current?.click()
   }
 
+  // Handle paste from clipboard (Ctrl+V)
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      // Find image item in clipboard
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile()
+          if (file) {
+            handleFileSelect(file)
+            e.preventDefault()
+          }
+          break
+        }
+      }
+    }
+
+    // Add paste event listener to document
+    document.addEventListener('paste', handlePaste)
+    
+    return () => {
+      document.removeEventListener('paste', handlePaste)
+    }
+  }, [])
+
   return (
     <div className={cn("relative", className)}>
       <input
@@ -97,13 +125,29 @@ export function ImageSearchInput({ onImageSearch, className, placeholder = "Sear
           onDrop={handleDrop}
           onDragOver={handleDragOver}
         >
-          <div className="text-center">
-            <Camera className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-              {placeholder}
+          <div className="text-center py-2">
+            <Camera className="w-10 h-10 mx-auto mb-3 text-gray-400" />
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Drag an image here
             </p>
-            <p className="text-xs text-gray-500 dark:text-gray-500">
-              Click to upload or drag & drop
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+              or
+            </p>
+            <Button 
+              type="button"
+              variant="outline" 
+              size="sm"
+              className="mb-3"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleUploadClick()
+              }}
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Upload a photo
+            </Button>
+            <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+              *For a quick search hit <kbd className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs font-mono">CTRL+V</kbd> to paste an image
             </p>
           </div>
         </div>
@@ -116,13 +160,18 @@ export function ImageSearchInput({ onImageSearch, className, placeholder = "Sear
               alt="Selected for search"
               className="w-full h-32 object-cover rounded-lg border"
             />
-            <button
-              onClick={handleClear}
-              className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
+
+          {/* Clear Image Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleClear}
+            className="w-full"
+          >
+            <X className="w-4 h-4 mr-2" />
+            Clear Image
+          </Button>
 
           {/* Search Button */}
           <div className="flex gap-2">

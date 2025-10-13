@@ -1,6 +1,9 @@
 "use client"
 
 import { DialogTrigger } from "@/components/ui/dialog"
+import { SearchSuggestions } from "@/components/search-suggestions"
+import { SearchModal } from "@/components/search-modal"
+import { QuantityLimitModal } from "@/components/quantity-limit-modal"
 
 import type React from "react"
 
@@ -78,7 +81,7 @@ import { useSharedDataCache } from "@/contexts/shared-data-cache"
 import { OptimizedLink, useOptimizedNavigation } from "@/components/optimized-link"
 import { type ProductVariant } from "@/hooks/use-products" // Import types from hook
 import { useCart, formatVariantHierarchy } from "@/hooks/use-cart" // Import useCart hook
-import { useParams, useRouter, usePathname } from "next/navigation"
+import { useParams, useRouter, usePathname, useSearchParams } from "next/navigation"
 import { useCompanyContext } from "@/components/company-provider"
 // import { getPreviousPageName } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth-context"
@@ -93,6 +96,7 @@ export default function ProductDetailPage() {
   const params = useParams()
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { navigateWithPrefetch } = useOptimizedNavigation()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { products, isLoading, preloadProducts, fetchFullProductDetails } = useProducts()
@@ -103,7 +107,19 @@ export default function ProductDetailPage() {
   const { formatPrice, currency, setCurrency } = useCurrency()
   
   // Optimized API for product details with input validation
-  const productId = params.id as string
+  // Support URLs like /products/2-slug by extracting leading digits
+  const rawProductParam = params.id as string
+  const leadingDigits = (rawProductParam.match(/^\d+/) || [rawProductParam])[0]
+  const productId = leadingDigits
+  
+  // Get return URL from search params to preserve search state
+  const returnTo = searchParams?.get('returnTo') || '/products'
+  
+  // Debug: Log the return URL to see what we're getting
+  useEffect(() => {
+    console.log('🔍 Product Detail - returnTo URL:', returnTo)
+    console.log('🔍 Product Detail - searchParams:', searchParams?.toString())
+  }, [returnTo, searchParams])
   
   // Validate product ID (but don't return early - violates Rules of Hooks!)
   const isValidProductId = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
@@ -167,6 +183,12 @@ export default function ProductDetailPage() {
   
   // Search state
   const [searchTerm, setSearchTerm] = useState("")
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [isSearchFocused, setIsSearchFocused] = useState(false)
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
+  const [searchModalInitialTab, setSearchModalInitialTab] = useState<'text' | 'image'>('text')
+  const [imageSearchResults, setImageSearchResults] = useState<any[]>([])
+  const [imageSearchKeywords, setImageSearchKeywords] = useState<string[]>([])
   
   // Handle search submission - redirect to products page with search query
   const handleSearch = useCallback((e: React.FormEvent) => {
@@ -175,6 +197,32 @@ export default function ProductDetailPage() {
       router.push(`/products?search=${encodeURIComponent(searchTerm.trim())}`)
     }
   }, [searchTerm, router])
+
+  // Handle suggestion click
+  const handleSuggestionClick = useCallback((suggestion: string) => {
+    setSearchTerm(suggestion)
+    setShowSuggestions(false)
+    setIsSearchFocused(false)
+    router.push(`/products?search=${encodeURIComponent(suggestion)}`)
+  }, [router])
+
+  // Handle text search from modal
+  const handleModalTextSearch = useCallback((query: string) => {
+    setSearchTerm(query)
+    router.push(`/products?search=${encodeURIComponent(query)}`)
+  }, [router])
+
+  // Handle image search from modal
+  const handleImageSearch = useCallback((products: any[], keywords: string[]) => {
+    setImageSearchResults(products)
+    setImageSearchKeywords(keywords)
+    // Redirect to products page with image search results
+    const searchParams = new URLSearchParams()
+    if (keywords.length > 0) {
+      searchParams.set('image_search', keywords.join(' '))
+    }
+    router.push(`/products?${searchParams.toString()}`)
+  }, [router])
   
   // "You May Also Like" rotation state - changes every 30 seconds
   const [relatedProductsRotation, setRelatedProductsRotation] = useState(0)
@@ -516,6 +564,14 @@ export default function ProductDetailPage() {
   const [quantity, setQuantity] = useState(1)
   const [mainImage, setMainImage] = useState(product?.image || null)
   const [isManualImageSelection, setIsManualImageSelection] = useState(false)
+  const [isQuantityLimitModalOpen, setIsQuantityLimitModalOpen] = useState(false)
+  
+  // Auto-set quantity to 5 for products under 500 TZS
+  useEffect(() => {
+    if (product && product.price < 500) {
+      setQuantity(5)
+    }
+  }, [product])
 
   // New states for functionality
   const [wishlistCount, setWishlist] = useState(0) // For demonstration, a simple count
@@ -544,9 +600,9 @@ export default function ProductDetailPage() {
 
   // Optimize navigation with useCallback
   const handleBackNavigation = useCallback(() => {
-    // Use optimized navigation for better performance
-    navigateWithPrefetch('/products', { priority: 'medium' })
-  }, [navigateWithPrefetch])
+    // Prefer returning to preserved URL with search state
+    navigateWithPrefetch(returnTo || '/products', { priority: 'medium' })
+  }, [navigateWithPrefetch, returnTo])
 
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
   const [selectedAttributes, setSelectedAttributes] = useState<{ [key: string]: string | string[] | undefined }>({})
@@ -1121,8 +1177,10 @@ export default function ProductDetailPage() {
   // Update quantity when selections change
   useEffect(() => {
     const newQuantity = calculateQuantityFromSelections()
-    setQuantity(newQuantity)
-  }, [selectedAttributes])
+    // For products under 500 TZS, ensure minimum quantity is 5
+    const finalQuantity = product && product.price < 500 ? Math.max(5, newQuantity) : newQuantity
+    setQuantity(finalQuantity)
+  }, [selectedAttributes, product])
 
   // Initialize individual quantities when attributes are selected
   useEffect(() => {
@@ -1401,17 +1459,40 @@ export default function ProductDetailPage() {
 
 
   const handleQuantityChange = (delta: number) => {
-    setQuantity((prev) => Math.max(1, prev + delta))
+    setQuantity((prev) => {
+      const newQuantity = prev + delta
+      // For products under 500 TZS, minimum quantity is 5
+      const minQuantity = product && product.price < 500 ? 5 : 1
+      
+      // If trying to go below minimum for low-price products, show modal
+      if (product && product.price < 500 && newQuantity < 5 && delta < 0) {
+        setIsQuantityLimitModalOpen(true)
+        return prev // Don't change quantity
+      }
+      
+      return Math.max(minQuantity, newQuantity)
+    })
   }
 
   // Handle individual quantity changes for each combination
   const handleIndividualQuantityChange = (combinationKey: string, delta: number) => {
     setIndividualQuantities(prev => {
       const currentQty = prev[combinationKey] || quantity
-      const newQty = Math.max(1, currentQty + delta)
+      const newQty = currentQty + delta
+      
+      // For products under 500 TZS, minimum quantity is 5
+      const minQuantity = product && product.price < 500 ? 5 : 1
+      
+      // If trying to go below minimum for low-price products, show modal
+      if (product && product.price < 500 && newQty < 5 && delta < 0) {
+        setIsQuantityLimitModalOpen(true)
+        return prev // Don't change quantity
+      }
+      
+      const finalQty = Math.max(minQuantity, newQty)
       const newQuantities = {
         ...prev,
-        [combinationKey]: newQty
+        [combinationKey]: finalQty
       }
       
       return newQuantities
@@ -1812,7 +1893,7 @@ export default function ProductDetailPage() {
         >
           <div className="flex items-center h-16 px-4 sm:px-6 lg:px-8 w-full">
             <OptimizedLink
-              href="/products"
+              href={returnTo}
               prefetch="hover"
               priority="medium"
               className={cn(
@@ -1849,7 +1930,7 @@ export default function ProductDetailPage() {
         >
           <div className="flex items-center h-16 px-4 sm:px-6 lg:px-8 w-full">
             <OptimizedLink
-              href="/products"
+              href={returnTo}
               prefetch="hover"
               priority="medium"
               className={cn(
@@ -1870,7 +1951,7 @@ export default function ProductDetailPage() {
               The product you're looking for doesn't exist or has been removed.
             </p>
             <OptimizedLink
-              href="/products"
+              href={returnTo}
               prefetch="hover"
               priority="high"
               className="inline-flex items-center px-6 py-3 bg-yellow-500 text-neutral-950 rounded-md hover:bg-yellow-600 transition-colors"
@@ -1976,7 +2057,23 @@ export default function ProductDetailPage() {
                   type="search"
                   placeholder="Search for products..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value)
+                    setShowSuggestions(true)
+                  }}
+                  onFocus={() => {
+                    setIsSearchFocused(true)
+                    if (searchTerm.length >= 2) {
+                      setShowSuggestions(true)
+                    }
+                  }}
+                  onBlur={() => {
+                    // Delay hiding suggestions to allow clicks
+                    setTimeout(() => {
+                      setIsSearchFocused(false)
+                      setShowSuggestions(false)
+                    }, 200)
+                  }}
                   className={cn(
                     "w-full pl-8 sm:pl-10 pr-16 sm:pr-20 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-sm",
                     darkHeaderFooterClasses.inputBg,
@@ -1986,69 +2083,28 @@ export default function ProductDetailPage() {
                   )}
                 />
                 
+                {/* Search Suggestions */}
+                <SearchSuggestions
+                  query={searchTerm}
+                  onSuggestionClick={handleSuggestionClick}
+                  isVisible={showSuggestions && isSearchFocused}
+                  className="mt-1"
+                />
+                
                 {/* Camera/Search by Image Button */}
-                <Dialog>
-                  <DialogTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <button
+                  onClick={() => {
+                    setSearchModalInitialTab('image')
+                    setIsSearchModalOpen(true)
+                  }}
                   className={cn(
-                        "absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 h-6 w-6 sm:h-8 sm:w-8 rounded-full hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
+                    "absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 h-6 w-6 sm:h-8 sm:w-8 rounded-full hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors flex items-center justify-center",
                         darkHeaderFooterClasses.textNeutralSecondaryFixed,
                   )}
+                  title="Search by image"
                 >
                       <ScanSearch className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="sr-only">Search by image</span>
-                </Button>
-                  </DialogTrigger>
-                  <DialogContent
-                className={cn(
-                      "sm:max-w-[480px] p-6",
-                      darkHeaderFooterClasses.dialogSheetBg,
-                      darkHeaderFooterClasses.textNeutralPrimary,
-                      darkHeaderFooterClasses.dialogSheetBorder,
-                    )}
-                  >
-                    <DialogHeader className="flex flex-row items-center justify-between pb-4">
-                      <DialogTitle className={cn("text-xl font-bold", darkHeaderFooterClasses.textNeutralPrimary)}>
-                        Search by image
-                      </DialogTitle>
-                      <DialogClose asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className={cn(
-                            darkHeaderFooterClasses.textNeutralSecondaryFixed,
-                            darkHeaderFooterClasses.buttonGhostHoverBg,
-                          )}
-                        >
-                          <X className="w-5 h-5" />
-                          <span className="sr-only">Close</span>
-                        </Button>
-                      </DialogClose>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <p className={cn("text-sm", darkHeaderFooterClasses.textNeutralSecondaryFixed)}>
-                        Find what you love with better prices on {companyName} by using an image search
-                      </p>
-                      <div
-                        className={cn(
-                          "border-2 border-dashed rounded-lg p-8 text-center flex flex-col items-center justify-center gap-4",
-                          darkHeaderFooterClasses.inputBorder,
-                          darkHeaderFooterClasses.inputBg,
-                        )}
-                      >
-                        <ImageIcon className={cn("w-12 h-12", darkHeaderFooterClasses.textNeutralSecondaryFixed)} />
-                        <p className={darkHeaderFooterClasses.textNeutralSecondaryFixed}>Drag an image here</p>
-                        <p className={darkHeaderFooterClasses.textNeutralSecondaryFixed}>or</p>
-                        <Button className="bg-red-600 text-white hover:bg-red-700">Upload a photo</Button>
-                      </div>
-                      <p className={cn("text-xs mt-2", darkHeaderFooterClasses.textNeutralSecondaryFixed)}>
-                        *For a quick search hit CTRL+V to paste an image into the search box
-                      </p>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                </button>
               </div>
             </form>
           </div>
@@ -2596,44 +2652,92 @@ export default function ProductDetailPage() {
             </div>
 
             <div className="mt-4">
-              {/* First Row: Main Price + Original Price */}
-              <div className="flex items-baseline gap-2">
-                <span className={cn("text-3xl sm:text-4xl lg:text-5xl font-bold", themeClasses.mainText)}>
-                  {formatPrice(currentPrice)}
+              {/* Desktop: All in one row - prices on left, Set Price Alert on right */}
+              <div className="hidden lg:block">
+                <div className="flex items-baseline justify-between">
+                  {/* Left side: Prices */}
+                  <div className="flex items-baseline gap-2">
+                    {/* Main Price */}
+                    <span className={cn("text-3xl sm:text-4xl lg:text-5xl font-bold", themeClasses.mainText)}>
+                      {formatPrice(currentPrice)}
+                    </span>
+                    
+                    {/* Original Price + Save Badge */}
+              {currentOriginalPrice > currentPrice && (
+                      <div className="flex items-baseline gap-2">
+                <span className={cn("text-sm sm:text-base line-through", themeClasses.textNeutralSecondary)}>
+                  {formatPrice(currentOriginalPrice)}
                 </span>
-                {currentOriginalPrice > currentPrice && (
-                  <span className={cn("text-sm sm:text-base line-through", themeClasses.textNeutralSecondary)}>
-                    {formatPrice(currentOriginalPrice)}
-                  </span>
+                <span className={cn(
+                          "text-white text-xs font-semibold px-2 py-1 rounded text-center",
+                  backgroundColor === "white" ? "bg-red-500" : "bg-red-600"
+                )}>
+                  Save {formatPrice(currentOriginalPrice - currentPrice)}
+                </span>
+                      </div>
+              )}
+                  </div>
+                  
+                  {/* Right side: Set Price Alert */}
+                  {currentOriginalPrice > currentPrice && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handlePriceAlertClick}
+                className={cn(
+                  "border border-transparent lg:border",
+                  backgroundColor === "dark"
+                    ? "text-white hover:text-yellow-500 lg:border-neutral-600"
+                    : "text-blue-600 hover:text-blue-700 lg:border-neutral-300",
+                  hasPriceAlert && "text-green-600 hover:text-green-700"
                 )}
+              >
+                      {hasPriceAlert ? "✓ Alert Set" : "Set Price Alert"}
+                    </Button>
+                  )}
+                </div>
               </div>
               
-              {/* Second Row: Reminder Button (left) + Save Amount (right) */}
-              {currentOriginalPrice > currentPrice && (
-                <div className="flex items-center justify-between mt-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handlePriceAlertClick}
-                    className={cn(
-                      "border border-transparent lg:border",
-                      backgroundColor === "dark"
-                        ? "text-white hover:text-yellow-500 lg:border-neutral-600"
-                        : "text-blue-600 hover:text-blue-700 lg:border-neutral-300",
-                      hasPriceAlert && "text-green-600 hover:text-green-700"
-                    )}
-                  >
-                    {hasPriceAlert ? "✓ Alert Set" : "Set Price Alert"}
-                  </Button>
-                  
-                  <span className={cn(
-                    "text-white text-xs font-semibold px-2 py-1 rounded text-center",
-                    backgroundColor === "white" ? "bg-red-500" : "bg-red-600"
-                  )}>
-                    Save {formatPrice(currentOriginalPrice - currentPrice)}
-                  </span>
+              {/* Mobile: Stacked layout */}
+              <div className="lg:hidden">
+                <div className="flex items-baseline gap-2">
+                  <span className={cn("text-3xl sm:text-4xl lg:text-5xl font-bold", themeClasses.mainText)}>
+                    {formatPrice(currentPrice)}
+                </span>
+                  {currentOriginalPrice > currentPrice && (
+                    <span className={cn("text-sm sm:text-base line-through", themeClasses.textNeutralSecondary)}>
+                      {formatPrice(currentOriginalPrice)}
+                    </span>
+                  )}
                 </div>
-              )}
+                
+                {/* Mobile: Action Buttons below prices */}
+                {currentOriginalPrice > currentPrice && (
+                  <div className="flex items-center justify-between mt-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handlePriceAlertClick}
+                      className={cn(
+                        "border border-transparent lg:border",
+                        backgroundColor === "dark"
+                          ? "text-white hover:text-yellow-500 lg:border-neutral-600"
+                          : "text-blue-600 hover:text-blue-700 lg:border-neutral-300",
+                        hasPriceAlert && "text-green-600 hover:text-green-700"
+                      )}
+                    >
+                      {hasPriceAlert ? "✓ Alert Set" : "Set Price Alert"}
+              </Button>
+                    
+                    <span className={cn(
+                      "text-white text-xs font-semibold px-2 py-1 rounded text-center",
+                      backgroundColor === "white" ? "bg-red-500" : "bg-red-600"
+                    )}>
+                      Save {formatPrice(currentOriginalPrice - currentPrice)}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className={cn("flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm mt-2", themeClasses.textNeutralSecondary)}>
@@ -3080,38 +3184,38 @@ export default function ProductDetailPage() {
                           <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Unit Price</div>
                           <div className={cn("text-xs sm:text-sm font-semibold", themeClasses.mainText)}>
                             {formatPrice(getCurrentUnitPrice)}
-                          </div>
                         </div>
+                      </div>
                         
                         {/* Total Items */}
                         <div className="text-center flex-1">
                           <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Total Items</div>
                           <div className={cn("text-xs sm:text-sm font-semibold", themeClasses.mainText)}>
                             {calculateTrueTotalItems}
-                          </div>
-                        </div>
+                      </div>
+                    </div>
                         
                         {/* Total Price */}
                         <div className="text-center flex-1">
                           <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Total Price</div>
                           <div className={cn("text-sm sm:text-lg font-bold text-green-600", themeClasses.mainText)}>
                             {formatPrice(calculateTrueTotalPrice)}
-                          </div>
-                        </div>
-                        
-                        {/* Preview Button */}
-                        <div className="flex-1">
-                          <Button
-                            onClick={() => setIsSelectionPreviewOpen(true)}
-                            className={cn(
-                              "hover:bg-blue-700 text-white px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium w-full",
-                              backgroundColor === "white" ? "bg-blue-600" : "bg-blue-700"
-                            )}
-                          >
-                            Preview
-                          </Button>
                         </div>
                       </div>
+                      
+                        {/* Preview Button */}
+                        <div className="flex-1">
+                      <Button
+                        onClick={() => setIsSelectionPreviewOpen(true)}
+                        className={cn(
+                              "hover:bg-blue-700 text-white px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium w-full",
+                          backgroundColor === "white" ? "bg-blue-600" : "bg-blue-700"
+                        )}
+                      >
+                            Preview
+                      </Button>
+                        </div>
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -3240,7 +3344,18 @@ export default function ProductDetailPage() {
                   id="quantity"
                   type="number"
                   value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Number.parseInt(e.target.value) || 1))}
+                  onChange={(e) => {
+                    const newQuantity = Number.parseInt(e.target.value) || 1
+                    const minQuantity = product && product.price < 500 ? 5 : 1
+                    
+                    // If trying to go below minimum for low-price products, show modal
+                    if (product && product.price < 500 && newQuantity < 5) {
+                      setIsQuantityLimitModalOpen(true)
+                      return // Don't change quantity
+                    }
+                    
+                    setQuantity(Math.max(minQuantity, newQuantity))
+                  }}
                   className={cn(
                     "w-12 sm:w-16 text-center border-x rounded-none h-8 sm:h-9 focus:ring-0 focus:border-blue-500 bg-white",
                     "border-neutral-200",
@@ -3313,7 +3428,7 @@ export default function ProductDetailPage() {
                   
                   // Then navigate to cart page after a short delay to ensure cart is updated
                   setTimeout(() => {
-                    navigateWithPrefetch('/cart', { priority: 'high' })
+                  navigateWithPrefetch('/cart', { priority: 'high' })
                   }, 100)
                 }}
                 className={cn(
@@ -3667,7 +3782,7 @@ export default function ProductDetailPage() {
           <div className="flex items-center justify-between mb-6">
             <h2 className={cn("text-xl font-bold", themeClasses.mainText)}>You May Also Like</h2>
             <OptimizedLink 
-              href="/products" 
+              href={returnTo} 
               prefetch="hover"
               priority="medium"
               className={cn("text-sm font-medium hover:underline", themeClasses.textNeutralSecondary)}
@@ -3690,7 +3805,7 @@ export default function ProductDetailPage() {
                     )}
                   >
                     <OptimizedLink 
-                      href={`/products/${relatedProduct.id}`} 
+                      href={`/products/${relatedProduct.id}-${encodeURIComponent(relatedProduct.slug || relatedProduct.name || 'product')}?returnTo=${encodeURIComponent(returnTo)}`} 
                       className="block relative aspect-square overflow-hidden"
                       prefetch="hover"
                       priority="medium"
@@ -4513,6 +4628,24 @@ export default function ProductDetailPage() {
         </div>
       )}
       
+      {/* Search Modal */}
+      <SearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        onTextSearch={handleModalTextSearch}
+        onImageSearch={handleImageSearch}
+        currentSearchTerm={searchTerm}
+        onSearchTermChange={setSearchTerm}
+        initialTab={searchModalInitialTab}
+      />
+      
+      {/* Quantity Limit Modal */}
+      <QuantityLimitModal
+        isOpen={isQuantityLimitModalOpen}
+        onClose={() => setIsQuantityLimitModalOpen(false)}
+        productName={product?.name}
+      />
+      
     </div>
   )
 }
@@ -4620,5 +4753,6 @@ function SettingsIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
       {/* Admin Edit Dialogs - Removed to fix errors */}
 

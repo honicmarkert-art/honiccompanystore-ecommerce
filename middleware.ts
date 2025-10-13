@@ -34,11 +34,11 @@ const SECURITY_HEADERS = {
 // Content Security Policy
 const CSP_HEADER = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com",
+  "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://va.vercel-scripts.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https: http:",
   "font-src 'self' https://fonts.gstatic.com",
-  "connect-src 'self' https://*.supabase.co https://api.clickpesa.com wss://*.supabase.co",
+  "connect-src 'self' https://*.supabase.co https://api.clickpesa.com wss://*.supabase.co https://va.vercel-scripts.com",
   "media-src 'self' data: blob: https: http:",
   "object-src 'none'",
   "base-uri 'self'",
