@@ -541,8 +541,48 @@ export function useCart() {
             })
           }
         } else {
+          // Handle auth/session edge cases gracefully
+          if (response.status === 401) {
+            try {
+              // Attempt a silent session refresh, then retry once
+              await fetch('/api/auth/session', { credentials: 'include' })
+              const retry = await fetch('/api/cart', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(requestBody)
+              })
+              if (retry.ok) {
+                const retryData = await retry.json()
+                await loadServerCart()
+                if (retryData.partialStock) {
+                  const { partialStock } = retryData
+                  toast({
+                    title: "Partial Stock Added",
+                    description: `${retryData.message}\n\n${partialStock.restockMessage}\n\n${partialStock.customerCare.message}\n\nContact: ${partialStock.customerCare.contactInfo.email} | ${partialStock.customerCare.contactInfo.phone}`,
+                    variant: "default",
+                    duration: 8000,
+                  })
+                } else {
+                  toast({ title: "Added to cart", description: "Item has been added to your cart successfully.", duration: 500 })
+                }
+                return
+              }
+            } catch {}
+
+            // Still unauthorized: keep optimistic local cart, inform user
+            toast({
+              title: "You're signed out",
+              description: "We kept the item in your temporary cart. Please sign in to sync.",
+              variant: "destructive",
+              duration: 6000,
+            })
+            // Do not rollback; leave optimistic state as-is
+            return
+          }
+
           const errorData = await response.json()
-          
+
           if (errorData.error === 'Product out of stock') {
             toast({
               title: "Out of Stock",
@@ -559,7 +599,7 @@ export function useCart() {
             })
           }
 
-          // Rollback optimistic update
+          // For other errors, rollback optimistic update
           await loadServerCart()
         }
       } catch (error) {
