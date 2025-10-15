@@ -32,6 +32,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
   const router = useRouter()
   const [authError, setAuthError] = useState<string>("")
   const [authSuccess, setAuthSuccess] = useState<string>("")
+  const [rememberMe, setRememberMe] = useState(false)
 
   // Update current tab when defaultTab prop changes
   useEffect(() => {
@@ -69,19 +70,19 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     }
 
     try {
-      const result = await signIn(loginForm.email, loginForm.password, false, true)
+      const result = await signIn(loginForm.email, loginForm.password, rememberMe, true)
       if (!result.success) {
         // Show inline error and let AuthContext toast as well
         setAuthError(result.error || "Login failed. Please try again.")
       } else {
         setAuthSuccess("Login successful! Welcome back.")
+        // Auto-close after successful login (short delay for UX)
         setTimeout(() => {
-          onClose()
-          // Redirect to checkout if redirectUrl is provided
           if (redirectUrl) {
             router.push(redirectUrl)
           }
-        }, 1000)
+          onClose()
+        }, 800)
       }
     } catch (error) {
       toast({
@@ -143,16 +144,10 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
       )
       
       if (result.success) {
-        // Show success message
+        // Show success inline only (no toast, no auto-close)
         setAuthSuccess(result.message || "Account created successfully! Please check your email to verify your account.")
-        setAuthError("") // Clear any previous errors
-        
-        toast({
-          title: "Registration Successful! 🎉",
-          description: result.message || "Your account has been created. Please check your email to verify your account.",
-          variant: "default"
-        })
-        
+        setAuthError("")
+
         // Clear form
         setRegisterForm({
           fullName: '',
@@ -161,22 +156,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
           password: '',
           confirmPassword: ''
         })
-        
-        // Close modal after a short delay
-        setTimeout(() => {
-          onClose()
-          setAuthSuccess("") // Clear success message
-        }, 3000)
       } else {
         // Show specific error message
         setAuthError(result.error || "Registration failed. Please try again.")
         
-        // Also show toast for better visibility
-        toast({
-          title: "Registration Failed",
-          description: result.error || "Please check your information and try again.",
-          variant: "destructive"
-        })
+        // Keep toast for errors
+        toast({ title: "Registration Failed", description: result.error || "Please check your information and try again.", variant: "destructive" })
       }
     } catch (error) {
       console.error('Registration error:', error)
@@ -192,8 +177,20 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[380px] max-h-[60vh] p-0 top-[35%] mx-auto bg-white dark:bg-gray-900">
+    <Dialog 
+      open={isOpen}
+      onOpenChange={(open) => {
+        // Only close when explicitly requested
+        if (!open) onClose()
+      }}
+    >
+      <DialogContent 
+        className="w-[calc(100vw-2rem)] sm:max-w-[380px] max-h-[70vh] p-0 top-[35%] mx-auto bg-white dark:bg-gray-900 rounded-lg overflow-y-auto overscroll-contain"
+        // Prevent accidental close due to outside interactions (e.g., browser prompts)
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader className="px-4 pt-3 pb-1">
           <DialogTitle className="text-center text-base font-bold text-gray-900 dark:text-gray-100">
             Welcome to Honic Co.
@@ -273,6 +270,8 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       type="checkbox"
                       id="remember"
                       className="rounded border-gray-300"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
                     />
                     <Label htmlFor="remember" className="text-xs text-gray-900 dark:text-gray-100">
                       Remember me

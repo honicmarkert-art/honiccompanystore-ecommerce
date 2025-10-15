@@ -338,25 +338,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (name: string, email: string, password: string, confirmPassword: string, phone?: string) => {
     try {
-      // For now, return a placeholder response
-      // You can implement actual signup logic here
-        toast({
-        title: "Registration Not Implemented",
-        description: "Registration functionality is not yet implemented.",
-        variant: "destructive"
-      })
-        return { 
-          success: false, 
-        error: "Registration not implemented yet",
-        type: 'NOT_IMPLEMENTED'
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => {
+        if (!controller.signal.aborted) controller.abort()
+      }, 10000)
+
+      let result: any
+      try {
+        const response = await fetch('/api/auth/supabase-register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          signal: controller.signal,
+          body: JSON.stringify({ name, email, password, confirmPassword, phone })
+        })
+        clearTimeout(timeoutId)
+        result = await response.json()
+      } catch (fetchError) {
+        clearTimeout(timeoutId)
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          toast({ title: 'Registration Timeout', description: 'Please try again.', variant: 'destructive' })
+          return { success: false, error: 'TIMEOUT', type: 'TIMEOUT' }
+        }
+        throw fetchError
       }
+
+      if (result?.success) {
+        toast({ title: 'Account Created', description: 'Please sign in to continue.' })
+        // Open login modal in-place via global event (no redirect)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('open-auth-modal', { detail: { tab: 'login' } }))
+        }
+        return { success: true }
+      }
+
+      toast({ title: 'Registration Failed', description: result?.error || 'Please try again.', variant: 'destructive' })
+      return { success: false, error: result?.error, type: result?.type }
     } catch (error) {
       console.error('Registration error:', error)
-      return { 
-        success: false, 
-        error: "Network error. Please check your connection and try again.",
-        type: 'NETWORK_ERROR'
-      }
+      toast({ title: 'Registration Error', description: 'Network error. Please try again.', variant: 'destructive' })
+      return { success: false, error: 'NETWORK_ERROR', type: 'NETWORK_ERROR' }
     }
   }
 

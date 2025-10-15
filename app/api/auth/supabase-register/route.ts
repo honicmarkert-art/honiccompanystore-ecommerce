@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAuth } from '@/lib/supabase-auth'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, email, password, confirmPassword } = body
+    const { name, email, password, confirmPassword, phone } = body
 
     if (!name || !email || !password || !confirmPassword) {
       return NextResponse.json(
@@ -21,7 +24,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const result = await supabaseAuth.signUp(name, email, password, confirmPassword)
+    const result = await supabaseAuth.signUp(name, email, password, confirmPassword, phone)
 
     if (result.success) {
       return NextResponse.json({
