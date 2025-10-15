@@ -328,6 +328,7 @@ export function useCart() {
     variantSku?: string,
     variantImage?: string
   ) => {
+    // Guests are allowed: we update local cart and skip server calls below.
     
     // Normalize variant id so simple products always use a single key
     const normalizedVariantId: string = buildCanonicalVariantId(variantId, variantAttributes)

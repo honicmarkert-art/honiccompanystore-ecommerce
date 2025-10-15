@@ -172,11 +172,9 @@ export default function Component() {
   // Initialize search state from URL query ?search= on mount and when URL changes
   const urlSearchParams = useSearchParams()
   
-  // Debug: Log current URL state
+  // Debug removed
   useEffect(() => {
-    const currentUrl = `${pathname}${urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : ''}`
-    console.log('🔍 Products Page - Current URL:', currentUrl)
-    console.log('🔍 Products Page - Search params:', urlSearchParams?.toString())
+    // no-op
   }, [pathname, urlSearchParams])
   
   
@@ -404,7 +402,6 @@ export default function Component() {
     const fetchAds = async () => {
       try {
         setAdsLoading(true)
-        console.log('📢 [Advertisements] Starting products page ads fetch...')
         
         // Check cache for advertisements
         const cachedAds = localStorage.getItem('ads_cache')
@@ -413,12 +410,7 @@ export default function Component() {
         const now = Date.now()
         const cacheAge = cacheTimestamp ? now - parseInt(cacheTimestamp) : Infinity
         
-        console.log('📢 [Advertisements] Cache status:', {
-          hasCachedAds: !!cachedAds,
-          hasCachedRotation: !!cachedRotation,
-          cacheAge: cacheAge,
-          useCache: cacheAge < 2 * 60 * 1000
-        })
+        
         
         // Use cache if it's less than 2 minutes old
         if (cachedAds && cachedRotation && cacheAge < 2 * 60 * 1000) {
@@ -433,7 +425,6 @@ export default function Component() {
         await new Promise(resolve => setTimeout(resolve, 200))
         
         const cacheBust = typeof window !== 'undefined' ? (localStorage.getItem('settings_cache_bust') || Date.now()) : Date.now()
-        console.log('📢 [Advertisements] Fetching fresh ads with cache-bust:', cacheBust)
         
         const [adsResponse, rotationResponse] = await Promise.all([
           fetch(`/api/advertisements?placement=products&cb=${cacheBust}`, { cache: 'no-store' }),
@@ -442,10 +433,6 @@ export default function Component() {
         
         if (adsResponse.ok) {
           const data = await adsResponse.json()
-          console.log('✅ [Advertisements] Successfully fetched products ads:', {
-            count: data?.length || 0,
-            timestamp: new Date().toISOString()
-          })
           setAdvertisements(data || [])
           localStorage.setItem('ads_cache', JSON.stringify(data || []))
         } else if (adsResponse.status === 429) {
@@ -459,7 +446,6 @@ export default function Component() {
         
         if (rotationResponse.ok) {
           const rotationData = await rotationResponse.json()
-          console.log('✅ [Advertisements] Successfully fetched rotation time:', rotationData)
           setAdRotationTime(rotationData.rotationTime || 10)
           localStorage.setItem('ads_rotation_cache', (rotationData.rotationTime || 10).toString())
         } else if (rotationResponse.status === 429) {
@@ -473,7 +459,6 @@ export default function Component() {
         
         // Update cache timestamp
         localStorage.setItem('ads_cache_timestamp', now.toString())
-        console.log('💾 [Advertisements] Updated cache timestamp:', now)
         
       } catch (error) {
         console.error('❌ [Advertisements] Error fetching advertisements:', error)

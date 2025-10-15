@@ -25,6 +25,9 @@ import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/hooks/use-toast'
 import { ProtectedRoute } from '@/components/protected-route'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { supabase } from '@/lib/supabase-auth'
 
 interface Order {
   id: string
@@ -52,6 +55,14 @@ function AccountPageContent() {
   const [activeCoupons, setActiveCoupons] = useState<Coupon[]>([])
   const [coins, setCoins] = useState(1250)
   const [unreadMessages, setUnreadMessages] = useState(3)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState('')
+  const [password1, setPassword1] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
 
   useEffect(() => {
     // Mock data
@@ -101,6 +112,98 @@ function AccountPageContent() {
       }
     ])
   }, [])
+
+  // Load profile from API (requires supabase access token)
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) return
+      setProfileLoading(true)
+      try {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const token = sessionData.session?.access_token
+        if (!token) { setProfileLoading(false); return }
+        const res = await fetch('/api/user/profile', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        const json = await res.json()
+        if (res.ok && json?.profile) {
+          setFullName(json.profile.full_name || user.user_metadata?.full_name || '')
+          setPhone(json.profile.phone || user.user_metadata?.phone || '')
+          setAvatarUrl(user?.user_metadata?.avatar_url || '')
+        } else {
+          setFullName(user?.user_metadata?.full_name || '')
+          setPhone(user?.user_metadata?.phone || '')
+          setAvatarUrl(user?.user_metadata?.avatar_url || '')
+        }
+      } catch {}
+      setProfileLoading(false)
+    }
+    loadProfile()
+  }, [user])
+
+  const saveProfile = async () => {
+    try {
+      setProfileSaving(true)
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (!token) {
+        toast({ title: 'Not authenticated', description: 'Please login again', variant: 'destructive' })
+        setProfileSaving(false)
+        return
+      }
+      const res = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ full_name: fullName, phone })
+      })
+      const json = await res.json()
+      if (res.ok) {
+        // Save avatar to auth metadata
+        await supabase.auth.updateUser({ data: { full_name: fullName, phone, avatar_url: avatarUrl } })
+        toast({ title: 'Profile saved', description: 'Your details were updated.' })
+      } else {
+        toast({ title: 'Failed to save', description: json?.error || 'Try again', variant: 'destructive' })
+      }
+    } catch (e) {
+      toast({ title: 'Error', description: 'Could not save profile', variant: 'destructive' })
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  const uploadAvatar = async (file: File) => {
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('type', 'image')
+      form.append('context', 'profile')
+      const resp = await fetch('/api/media/upload', { method: 'POST', body: form })
+      const data = await resp.json()
+      if (!resp.ok) throw new Error(data?.error || 'Upload failed')
+      setAvatarUrl(data.url)
+      toast({ title: 'Avatar uploaded' })
+    } catch (e) {
+      toast({ title: 'Upload failed', description: 'Please try another image', variant: 'destructive' })
+    }
+  }
+
+  const changePassword = async () => {
+    if (!password1 || password1.length < 8 || password1 !== password2) {
+      toast({ title: 'Invalid password', description: 'Ensure passwords match and are 8+ chars', variant: 'destructive' })
+      return
+    }
+    try {
+      setIsChangingPassword(true)
+      const { error } = await supabase.auth.updateUser({ password: password1 })
+      if (error) throw error
+      setPassword1(''); setPassword2('')
+      toast({ title: 'Password updated' })
+    } catch (e) {
+      toast({ title: 'Failed to update password', variant: 'destructive' })
+    } finally {
+      setIsChangingPassword(false)
+    }
+  }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -170,17 +273,12 @@ function AccountPageContent() {
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center space-x-4 mb-4">
-          <Avatar className="w-16 h-16">
-            <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${getUserName()}`} />
-            <AvatarFallback>{getUserInitials()}</AvatarFallback>
-          </Avatar>
-          <div>
-            <h1 className="text-3xl font-bold">Welcome back, {getUserName()}!</h1>
-            <p className="text-muted-foreground">{user?.email}</p>
-          </div>
-        </div>
+        {/* Remove avatar/email and welcome headline from Overview header */}
       </div>
+
+      {/* Profile editing moved to Settings page - removed from Overview */}
+
+      {/* Security moved to Settings page */}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">

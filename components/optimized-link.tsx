@@ -43,7 +43,7 @@ export function OptimizedLink({
   const [isPrefetched, setIsPrefetched] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const linkRef = useRef<HTMLAnchorElement>(null)
-  const prefetchTimeoutRef = useRef<NodeJS.Timeout>()
+  const prefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Handle prefetching based on strategy
   const handlePrefetch = useCallback(async () => {

@@ -117,8 +117,7 @@ export default function ProductDetailPage() {
   
   // Debug: Log the return URL to see what we're getting
   useEffect(() => {
-    console.log('🔍 Product Detail - returnTo URL:', returnTo)
-    console.log('🔍 Product Detail - searchParams:', searchParams?.toString())
+    // debug removed
   }, [returnTo, searchParams])
   
   // Validate product ID (but don't return early - violates Rules of Hooks!)

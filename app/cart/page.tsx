@@ -156,7 +156,7 @@ function CartPageContent() {
     })
   }
 
-  const handleSaveForLater = useCallback(() => {
+  const handleSaveForLater = useCallback(async () => {
     if (cart.length === 0) {
       toast({
         title: "No items to save",
@@ -165,16 +165,36 @@ function CartPageContent() {
       })
       return
     }
-    
-    startTransition(() => {
-      setSavedForLater(prev => ([...prev, ...cart]))
-      clearCart()
-    })
-    toast({
-      title: "Items saved for later",
-      description: `${cart.length} items have been moved to your saved items.`,
-    })
-  }, [cart, clearCart, toast])
+    if (!isAuthenticated) {
+      openAuthModal('login')
+      return
+    }
+
+    try {
+      const items = cart.map((i) => ({
+        productId: i.productId,
+        name: i.product?.name,
+        price: i.totalPrice || i.product?.price,
+        image: i.product?.image
+      }))
+      const res = await fetch('/api/user/saved-later', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ items })
+      })
+      if (!res.ok) throw new Error('Failed')
+      startTransition(() => {
+        clearCart()
+      })
+      toast({
+        title: "Items saved for later",
+        description: `${cart.length} items have been moved to your saved items.`,
+      })
+    } catch {
+      toast({ title: 'Failed to save for later', variant: 'destructive' })
+    }
+  }, [cart, clearCart, toast, isAuthenticated, openAuthModal])
 
   const handleAddToWishlist = (productId: number) => {
     const isAlreadyInWishlist = wishlist.some(wishlistItem => 
