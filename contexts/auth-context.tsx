@@ -67,16 +67,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true)
       
-      // Check for session indicator cookie first to avoid unnecessary API calls
-      const sessionActive = document.cookie.includes('sb-session-active=true')
-      if (!sessionActive) {
-        setUser(null)
-        setIsAuthenticated(false)
-        setIsAdmin(false)
-        setLoading(false)
-              return
-            }
-            
       // Use the official session API to check authentication with timeout
       const controller = new AbortController()
       const timeoutId = setTimeout(() => {
