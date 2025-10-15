@@ -570,15 +570,29 @@ export function useCart() {
               }
             } catch {}
 
-            // Still unauthorized: keep optimistic local cart, inform user
-            toast({
-              title: "You're signed out",
-              description: "We kept the item in your temporary cart. Please sign in to sync.",
-              variant: "destructive",
-              duration: 6000,
-            })
-            // Do not rollback; leave optimistic state as-is
-            return
+            // Still unauthorized after retry
+            if (!isAuthenticated) {
+              // Guest: keep optimistic local cart and inform user
+              toast({
+                title: "You're signed out",
+                description: "We kept the item in your temporary cart. Please sign in to sync.",
+                variant: "destructive",
+                duration: 6000,
+              })
+              // Do not rollback; leave optimistic state as-is
+              return
+            } else {
+              // Auth state says logged-in but server refused: treat as transient server issue
+              toast({
+                title: "Error",
+                description: "Failed to sync cart. We'll keep your item locally and try again.",
+                variant: "destructive",
+                duration: 6000,
+              })
+              // Keep optimistic state; schedule a background reload attempt
+              setTimeout(() => { loadServerCart().catch(() => {}) }, 1500)
+              return
+            }
           }
 
           const errorData = await response.json()
