@@ -60,6 +60,11 @@ import {
   Mail,
   ChevronLeft,
   ChevronRight,
+  MessageSquare,
+  CreditCard,
+  Coins,
+  Ticket,
+  Settings,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -159,7 +164,12 @@ export default function Component() {
   // const { products, isLoading, error, retry, preloadProducts } = useProducts() // Removed - using useProductsOptimized instead
   const { addItem, isInCart, cartTotalItems, getItemQuantity } = useCart() // Use useCart hook
   const { toast } = useToast() // Initialize toast
-  const { companyName, companyColor, companyLogo } = useCompanyContext()
+  const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  
+  // Fallback logo system - use local logo if API is not loaded or logo is not available
+  const fallbackLogo = "/android-chrome-512x512.png"
+  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
+  const isUsingFallbackLogo = !companyLoaded || !companyLogo || companyLogo === fallbackLogo
   const { user, isAuthenticated } = useAuth() // Add auth context
   const { openAuthModal } = useGlobalAuthModal() // Add auth modal
   const { currency, setCurrency, formatPrice } = useCurrency() // Use global currency context
@@ -167,23 +177,24 @@ export default function Component() {
   const [searchTerm, setSearchTerm] = useState("")
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [activeBrand, setActiveBrand] = useState<string | null>(null)
-  const [debouncedCategory, setDebouncedCategory] = useState<string | null>(null)
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   // Initialize search state from URL query ?search= on mount and when URL changes
   const urlSearchParams = useSearchParams()
   
-  // Debug removed
+  // Debug: Log current URL state
   useEffect(() => {
-    // no-op
+    const currentUrl = `${pathname}${urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : ''}`
   }, [pathname, urlSearchParams])
-  
-  
+
+
   useEffect(() => {
     const initial = (urlSearchParams?.get('search') || '').trim()
     // Only update when query differs to avoid loops
     if (initial && initial !== searchTerm) {
       setSearchTerm(initial)
-      setDebouncedSearchTerm(initial)
+    }
+    const urlCategory = urlSearchParams?.get('category') || null
+    if (urlCategory && urlCategory !== activeCategory) {
+      setActiveCategory(urlCategory)
     }
   }, [urlSearchParams])
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
@@ -193,34 +204,21 @@ export default function Component() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [isSearchFocused, setIsSearchFocused] = useState(false)
 
-  // Debounce category changes to prevent rapid-fire API requests
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedCategory(activeCategory)
-    }, 300) // 300ms debounce
+  // Submit search (updates URL and triggers server-side filtering)
+  const submitSearch = useCallback(() => {
+    const query = (searchTerm || '').trim()
+    const params = new URLSearchParams(urlSearchParams?.toString() || '')
+    if (query) {
+      params.set('search', query)
+    } else {
+      params.delete('search')
+    }
+    // keep other filters; drop returnTo to avoid loops
+    params.delete('returnTo')
+    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+    router.push(nextUrl)
+  }, [router, urlSearchParams, searchTerm])
 
-    return () => clearTimeout(timer)
-  }, [activeCategory])
-
-  // Debounce search term changes to prevent rapid-fire API requests
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm)
-    }, 500) // 500ms debounce for search (longer than category)
-
-    return () => clearTimeout(timer)
-  }, [searchTerm])
-
-  // Use the debounced category for filtering
-  const activeCategoryForFilter = useMemo(() => {
-    return debouncedCategory || undefined
-  }, [debouncedCategory])
-
-  // Use the debounced search term for filtering (only if it's at least 2 characters or empty)
-  const activeSearchForFilter = useMemo(() => {
-    const trimmed = debouncedSearchTerm.trim()
-    return trimmed.length >= 2 || trimmed.length === 0 ? trimmed : undefined
-  }, [debouncedSearchTerm])
 
   // Handle image search results
   const handleImageSearch = useCallback((products: any[], keywords: string[]) => {
@@ -228,15 +226,12 @@ export default function Component() {
     setImageSearchKeywords(keywords)
     // Clear other filters when doing image search
     setActiveCategory(null)
-    setDebouncedCategory(null)
     setSearchTerm("")
-    setDebouncedSearchTerm("")
   }, [])
 
   // Handle text search from modal
   const handleModalTextSearch = useCallback((query: string) => {
     setSearchTerm(query)
-    setDebouncedSearchTerm(query)
     // Clear image search results
     setImageSearchResults([])
     setImageSearchKeywords([])
@@ -245,7 +240,6 @@ export default function Component() {
   // Handle suggestion click
   const handleSuggestionClick = useCallback((suggestion: string) => {
     setSearchTerm(suggestion)
-    setDebouncedSearchTerm(suggestion)
     setShowSuggestions(false)
     setIsSearchFocused(false)
     router.push(`/products?search=${encodeURIComponent(suggestion)}`)
@@ -253,6 +247,20 @@ export default function Component() {
 
   // Removed useRobustProducts hook - was causing duplicate API calls!
   // Filter functions are now implemented locally below
+  
+  // Hardcoded fallback categories for immediate display
+  const fallbackCategories = [
+    { id: 'fallback-1', name: 'Electronics', slug: 'electronics' },
+    { id: 'fallback-2', name: 'Microcontrollers', slug: 'microcontrollers' },
+    { id: 'fallback-3', name: 'Sensors', slug: 'sensors' },
+    { id: 'fallback-4', name: 'Motors', slug: 'motors' },
+    { id: 'fallback-5', name: 'LEDs', slug: 'leds' },
+    { id: 'fallback-6', name: 'Resistors', slug: 'resistors' },
+    { id: 'fallback-7', name: 'Capacitors', slug: 'capacitors' },
+    { id: 'fallback-8', name: 'Connectors', slug: 'connectors' },
+    { id: 'fallback-9', name: 'Tools', slug: 'tools' },
+    { id: 'fallback-10', name: 'Accessories', slug: 'accessories' }
+  ]
   
   // Categories state using robust API
   const { data: categories, isLoading: categoriesLoading, error: categoriesError, refetch: refetchCategories } = useRobustApi<any[]>({
@@ -262,12 +270,25 @@ export default function Component() {
     rateLimitCooldown: 60000
   })
 
+  // Track if we're using fallback categories
+  const [isUsingFallbackCategories, setIsUsingFallbackCategories] = useState(true)
+
   // Normalize categories response into array of { id, name, slug }
   const categoriesList = useMemo(() => {
+    // If API is loading or failed, use fallback categories
+    if (categoriesLoading || categoriesError || !categories) {
+      setIsUsingFallbackCategories(true)
+      return fallbackCategories
+    }
+
     // Some endpoints return { categories: string[] }, others may return an array directly
     const raw = Array.isArray(categories) ? categories : (categories as any)?.categories
-    if (!Array.isArray(raw)) return []
-    return raw.map((item: any, index: number) => {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      setIsUsingFallbackCategories(true)
+      return fallbackCategories
+    }
+
+    const apiCategories = raw.map((item: any, index: number) => {
       const name = typeof item === 'string' ? item : item?.name
       const slug = typeof item === 'string' ? item : item?.slug
       const normalizedSlug = (slug || name || '')
@@ -281,7 +302,16 @@ export default function Component() {
         slug: normalizedSlug,
       }
     }).filter(c => c.name)
-  }, [categories])
+
+    // If API returned valid categories, use them; otherwise fallback
+    if (apiCategories.length > 0) {
+      setIsUsingFallbackCategories(false)
+      return apiCategories
+    } else {
+      setIsUsingFallbackCategories(true)
+      return fallbackCategories
+    }
+  }, [categories, categoriesLoading, categoriesError])
 
 
 
@@ -291,6 +321,7 @@ export default function Component() {
   
   // Hamburger menu state
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
+
 
   // Advertisements state
   const [advertisements, setAdvertisements] = useState<any[]>([])
@@ -329,12 +360,12 @@ export default function Component() {
   const [isPriceFilterOpen, setIsPriceFilterOpen] = useState(false)
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false)
   const [isCategoriesNavOpen, setIsCategoriesNavOpen] = useState(false)
-  const [sortOrder, setSortOrder] = useState('featured')
+  const [sortOrder, setSortOrder] = useState('price-low')
 
   // Pagination state - URL-based page number
   const [currentPage, setCurrentPage] = useState(1)
   const PRODUCTS_PER_PAGE = 120
-  const BATCH_SIZE = 20 // Load 20 at a time with infinite scroll
+  const BATCH_SIZE = 24 // Load 24 at a time with infinite scroll
   
   // Get page from URL on mount
   useEffect(() => {
@@ -361,16 +392,15 @@ export default function Component() {
   } = useInfiniteProducts({
     limit: BATCH_SIZE,
     initialOffset, // Start from page offset
-    category: activeCategoryForFilter,
+    // Server-side filtering with PostgreSQL full-text search
+    category: activeCategory || undefined,
     brand: activeBrand || undefined,
-    search: activeSearchForFilter || undefined, // Use filtered debounced search term
+    search: searchTerm || undefined,
     sortBy: sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
-    // Server-side filtering - Pass filters to API!
+    sortOrder: sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
     categories: selectedCategories.length > 0 ? selectedCategories : undefined,
-    inStock: undefined, // Can be added if you want to filter by stock
-    sortOrder: sortOrder === 'price-high' ? 'desc' : 'asc',
     useOptimized: true,
     useMaterializedView: false,
     enabled: true
@@ -383,7 +413,8 @@ export default function Component() {
     setSelectedCategories([])
     setActiveCategory(null)
     setActiveBrand(null)
-    setSortOrder('featured')
+    setSearchTerm("")
+    setSortOrder('price-low')
     // Reset infinite scroll
     infiniteReset()
   }, [infiniteReset])
@@ -411,10 +442,8 @@ export default function Component() {
         const cacheAge = cacheTimestamp ? now - parseInt(cacheTimestamp) : Infinity
         
         
-        
         // Use cache if it's less than 2 minutes old
         if (cachedAds && cachedRotation && cacheAge < 2 * 60 * 1000) {
-          console.log('✅ [Advertisements] Using cached ads data')
           setAdvertisements(JSON.parse(cachedAds))
           setAdRotationTime(parseInt(cachedRotation))
           setAdsLoading(false)
@@ -436,12 +465,10 @@ export default function Component() {
           setAdvertisements(data || [])
           localStorage.setItem('ads_cache', JSON.stringify(data || []))
         } else if (adsResponse.status === 429) {
-          console.warn('⚠️ [Advertisements] Rate limited when fetching ads, using cached data if available')
           if (cachedAds) {
             setAdvertisements(JSON.parse(cachedAds))
           }
         } else {
-          console.warn('⚠️ [Advertisements] Failed to fetch advertisements:', adsResponse.status)
         }
         
         if (rotationResponse.ok) {
@@ -449,19 +476,16 @@ export default function Component() {
           setAdRotationTime(rotationData.rotationTime || 10)
           localStorage.setItem('ads_rotation_cache', (rotationData.rotationTime || 10).toString())
         } else if (rotationResponse.status === 429) {
-          console.warn('⚠️ [Advertisements] Rate limited when fetching rotation time, using cached data if available')
           if (cachedRotation) {
             setAdRotationTime(parseInt(cachedRotation))
           }
         } else {
-          console.warn('⚠️ [Advertisements] Failed to fetch rotation time:', rotationResponse.status)
         }
         
         // Update cache timestamp
         localStorage.setItem('ads_cache_timestamp', now.toString())
         
       } catch (error) {
-        console.error('❌ [Advertisements] Error fetching advertisements:', error)
       } finally {
         setAdsLoading(false)
       }
@@ -569,52 +593,148 @@ export default function Component() {
     variantConfig: (product as any).variant_config
   }))
 
-  // Use image search results if available, otherwise use infinite products
+  // Use server-side filtering with PostgreSQL full-text search
   const products = imageSearchResults.length > 0 ? imageSearchResults : adaptedInfiniteProducts as any
 
-  // Shuffle products every 20 minutes deterministically using a time-based seed
-  const shuffledProducts = useMemo(() => {
-    if (!products || products.length === 0) return []
-    
-    // 20-minute window seed
-    const windowMs = 20 * 60 * 1000
-    const seed = Math.floor(Date.now() / windowMs)
-    // Simple seeded shuffle (Fisher-Yates variant)
-    const seededRandom = (() => {
-      let s = seed ^ 0x9e3779b9
-      return () => {
-        // xorshift32
-        s ^= s << 13; s ^= s >>> 17; s ^= s << 5
-        // Convert to [0,1)
-        return ((s >>> 0) / 4294967296)
-      }
-    })()
-    const copy = products.slice()
-    for (let i = copy.length - 1; i > 0; i--) {
-      const j = Math.floor(seededRandom() * (i + 1))
-      ;[copy[i], copy[j]] = [copy[j], copy[i]]
-    }
-    return copy
-  }, [products])
-  const isLoading = infiniteLoading || (activeCategory !== debouncedCategory) || (searchTerm !== debouncedSearchTerm) || (debouncedSearchTerm.trim().length === 1) // Show loading while debouncing or typing single character
+  // Old shuffling system removed - now using smart shuffling system above
+  const isLoading = infiniteLoading // Only show loading for infinite scroll
   const error = infiniteError
 
+  // Smart Product Shuffling System
+  const [shuffledProducts, setShuffledProducts] = useState<any[]>([])
+  const [isShufflingPaused, setIsShufflingPaused] = useState(false)
+  // Use ref to avoid re-renders on every user activity
+  const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const shuffleIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isUserActiveRef = useRef(false)
+  
+  // Shuffling configuration
+  const SHUFFLE_INTERVAL = 30000 // 30 seconds
+  const IDLE_TIMEOUT = 5000 // 5 seconds of inactivity before resuming
+  
+  // Shuffle products function
+  const shuffleProducts = useCallback((products: any[]) => {
+    if (products.length === 0) return products
+    
+    const shuffled = [...products]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    return shuffled
+  }, [])
+  
+  // Keep shuffled list in sync when new products arrive (append-only to preserve current order)
+  useEffect(() => {
+    if (products.length === 0) return
+    if (shuffledProducts.length === 0) {
+      setShuffledProducts(products)
+      return
+    }
+    if (products.length > shuffledProducts.length) {
+      const existingIds = new Set(shuffledProducts.map((p: any) => p.id))
+      const newOnes = products.filter((p: any) => !existingIds.has(p.id))
+      if (newOnes.length > 0) {
+        setShuffledProducts(prev => [...prev, ...newOnes])
+      }
+    }
+  }, [products, shuffledProducts])
+
+  // When filters/search change, reset the shuffle buffer so we only show the new filtered list
+  useEffect(() => {
+    setShuffledProducts([])
+  }, [activeCategory, activeBrand, searchTerm])
+  
   // Server-side filtering is now handled by the API!
-  // This component just displays what the server sends
+  // Build the list to display (uses shuffled order when active)
   const displayedProducts = useMemo(() => {
-    // Remove duplicates only (API handles filtering & sorting)
+    const baseList = (shuffledProducts.length > 0) ? shuffledProducts : products
     const seen = new Set<number>()
-    const sourceList = shuffledProducts.length > 0 ? shuffledProducts : products
-    const uniqueProducts = sourceList.filter((product: any) => {
+    const uniqueProducts = baseList.filter((product: any) => {
       if (seen.has(product.id)) return false
       seen.add(product.id)
       return true
     })
+    return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
+  }, [products, shuffledProducts, PRODUCTS_PER_PAGE])
 
-    // Limit to PRODUCTS_PER_PAGE (120) for current page
-    const limitedProducts = uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
-    return limitedProducts
-  }, [shuffledProducts, products, PRODUCTS_PER_PAGE])
+  // Handle user activity detection
+  const handleUserActivity = useCallback(() => {
+    isUserActiveRef.current = true
+    setIsShufflingPaused(true)
+    
+    // Clear existing timeout
+    if (userActivityTimeoutRef.current) {
+      clearTimeout(userActivityTimeoutRef.current)
+    }
+    
+    // Set new timeout to resume shuffling
+    const timeout = setTimeout(() => {
+      isUserActiveRef.current = false
+      setIsShufflingPaused(false)
+    }, IDLE_TIMEOUT)
+    
+    userActivityTimeoutRef.current = timeout
+  }, [IDLE_TIMEOUT])
+  
+  // Set up shuffling interval
+  useEffect(() => {
+    if (shuffledProducts.length > 0 && !isShufflingPaused) {
+      shuffleIntervalRef.current = setInterval(() => {
+        if (!isUserActiveRef.current) {
+          setShuffledProducts(prev => shuffleProducts(prev))
+        }
+      }, SHUFFLE_INTERVAL)
+    }
+    
+    return () => {
+      if (shuffleIntervalRef.current) {
+        clearInterval(shuffleIntervalRef.current)
+      }
+    }
+  }, [shuffledProducts.length, isShufflingPaused, SHUFFLE_INTERVAL])
+  
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (userActivityTimeoutRef.current) {
+        clearTimeout(userActivityTimeoutRef.current)
+      }
+      if (shuffleIntervalRef.current) {
+        clearInterval(shuffleIntervalRef.current)
+      }
+    }
+  }, [])
+  
+  // Event listeners for user activity
+  useEffect(() => {
+    const events = ['scroll', 'mousemove', 'keydown', 'touchstart', 'click']
+    
+    events.forEach(event => {
+      document.addEventListener(event, handleUserActivity, { passive: true })
+    })
+    
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, handleUserActivity)
+      })
+    }
+  }, [handleUserActivity])
+  
+  // Specific pause triggers for search and filters
+  const handleSearchActivity = useCallback(() => {
+    handleUserActivity()
+  }, [handleUserActivity])
+  
+  const handleFilterActivity = useCallback(() => {
+    handleUserActivity()
+  }, [handleUserActivity])
+  
+  const handleProductHover = useCallback(() => {
+    handleUserActivity()
+  }, [handleUserActivity])
+  
+  // Removed UI badge for shuffle/pause status
   
   // Note: Price filtering, category filtering, and sorting are now done server-side
   // The API endpoint handles these parameters automatically
@@ -815,7 +935,7 @@ export default function Component() {
   const handleClearAllFilters = () => {
     setPriceRange([0, 100000])
     setSelectedCategories([])
-    setSortOrder('featured')
+    setSortOrder('price-low')
     setActiveCategory(null)
     clearFilters()
   }
@@ -843,7 +963,6 @@ export default function Component() {
           hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
         }
       } catch (error) {
-        console.error('❌ Error fetching full product:', error)
       }
     }
     
@@ -918,7 +1037,10 @@ export default function Component() {
         const variantPrice = calculatePriceForCombination(combination, productVariants, variantConfig, productPrice)
         
         
-        addItem(productId, 1, variantId, combination, variantPrice)
+        // Auto-set quantity to 5 for products under 500 TZS
+        const quantity = variantPrice < 500 ? 5 : 1
+        
+        addItem(productId, quantity, variantId, combination, variantPrice)
         
         return
       }
@@ -927,7 +1049,10 @@ export default function Component() {
     // Fallback: simple product without variants - use minimum price
     const minPrice = getMinimumPrice(productPrice, productVariants)
     
-    addItem(productId, 1, undefined, {}, minPrice)
+    // Auto-set quantity to 5 for products under 500 TZS
+    const quantity = minPrice < 500 ? 5 : 1
+    
+    addItem(productId, quantity, undefined, {}, minPrice)
   }
 
 
@@ -980,7 +1105,7 @@ export default function Component() {
               suppressHydrationWarning
           >
             <Image
-              src={companyLogo}
+              src={displayLogo}
               alt={`${companyName} Logo`}
               width={32}
               height={32}
@@ -996,7 +1121,7 @@ export default function Component() {
           >
                               <span className="sr-only" suppressHydrationWarning>{companyName}</span>
             <Image
-              src={companyLogo}
+              src={displayLogo}
               alt={`${companyName} Logo`}
               width={48}
               height={48}
@@ -1058,16 +1183,35 @@ export default function Component() {
                 )}
                 value={searchTerm}
                 onChange={(e) => {
-                  setSearchTerm(e.target.value)
+                  const value = e.target.value
+                  setSearchTerm(value)
                   setShowSuggestions(true)
+                  handleSearchActivity()
+                  // If user manually cleared, remove search from URL immediately
+                  if (value.trim() === '') {
+                    const params = new URLSearchParams(urlSearchParams?.toString() || '')
+                    params.delete('search')
+                    params.delete('returnTo')
+                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                    router.push(nextUrl)
+                  }
                   // Debouncing is now handled by useEffect
                 }}
-                onFocus={() => {
+                onKeyDown={(e) => {
+                  handleSearchActivity()
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    submitSearch()
+                  }
+                }}
+                onFocus={(e) => {
+                  handleSearchActivity()
                   setIsSearchFocused(true)
                   if (searchTerm.length >= 2) {
                     setShowSuggestions(true)
                   }
                 }}
+                
                 onBlur={() => {
                   // Delay hiding suggestions to allow clicks
                   setTimeout(() => {
@@ -1085,12 +1229,8 @@ export default function Component() {
                 isVisible={showSuggestions && isSearchFocused}
                 className="mt-1"
               />
-              {/* Search Loading Indicator */}
-              {searchTerm && searchTerm !== debouncedSearchTerm && (
-                <div className="absolute right-20 sm:right-24 top-1/2 -translate-y-1/2">
-                  <div className="animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full"></div>
-                </div>
-              )}
+              
+              {/* Search Loading Indicator - removed since we're using client-side filtering */}
               {/* Search Button */}
               <button
                 type="submit"
@@ -1133,7 +1273,12 @@ export default function Component() {
                 <button
                   onClick={() => {
                     setSearchTerm("")
-                    setDebouncedSearchTerm("") // Clear debounced term immediately
+                    // Also clear URL immediately
+                    const params = new URLSearchParams(urlSearchParams?.toString() || '')
+                    params.delete('search')
+                    params.delete('returnTo')
+                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                    router.push(nextUrl)
                   }}
                   className={cn(
                     "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center",
@@ -1204,9 +1349,9 @@ export default function Component() {
               <DropdownMenuContent
                 align="end"
                 className={cn(
-                  darkHeaderFooterClasses.dialogSheetBg,
-                  darkHeaderFooterClasses.textNeutralPrimary,
-                  darkHeaderFooterClasses.dialogSheetBorder,
+                  themeClasses.cardBg,
+                  themeClasses.mainText,
+                  themeClasses.cardBorder,
                 )}
               >
                 <DropdownMenuItem
@@ -1253,9 +1398,9 @@ export default function Component() {
               <DropdownMenuContent
                 align="end"
                 className={cn(
-                  darkHeaderFooterClasses.dialogSheetBg,
-                  darkHeaderFooterClasses.textNeutralPrimary,
-                  darkHeaderFooterClasses.dialogSheetBorder,
+                  themeClasses.cardBg,
+                  themeClasses.mainText,
+                  themeClasses.cardBorder,
                 )}
               >
                 <DropdownMenuItem
@@ -1318,9 +1463,9 @@ export default function Component() {
                     align="end"
                     className={cn(
                       "w-48 sm:w-56",
-                      darkHeaderFooterClasses.dialogSheetBg,
-                      darkHeaderFooterClasses.textNeutralPrimary,
-                      darkHeaderFooterClasses.dialogSheetBorder,
+                      themeClasses.cardBg,
+                      themeClasses.mainText,
+                      themeClasses.cardBorder,
                     )}
                   >
                     <div className="p-2 flex flex-col gap-2">
@@ -1417,32 +1562,32 @@ export default function Component() {
               )}>
         <div className="flex items-center justify-center h-auto sm:h-8 px-1 sm:px-2 lg:px-4 xl:px-6 2xl:px-8 py-1 sm:py-0">
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-2 lg:gap-3 xl:gap-4 overflow-visible sm:overflow-x-auto scrollbar-hide">
-            {/* All Categories Button - Always visible */}
-            <button
-              onClick={() => {
-                // Clear category filter to show all products
-                setSearchTerm("") // Clear search term
-                setDebouncedSearchTerm("") // Clear debounced search term
-                setActiveCategory(null) // Clear active category
-                clearFilters()
-              }}
-              className={cn(
-                "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
-                activeCategory === null
-                  ? themeClasses.mainBg === "bg-white min-h-screen"
-                    ? "text-black bg-amber-200/60"
-                    : "text-black bg-stone-300/60"
-                  : themeClasses.mainBg === "bg-white min-h-screen"
-                    ? "text-black hover:text-black hover:bg-amber-200/40"
-                    : "text-black hover:text-black hover:bg-stone-300/40"
-              )}
-            >
-              <Home className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-              <span>All</span>
-            </button>
+            {/* Removed legacy always-visible All button to avoid duplicates */}
 
             {/* Mobile Categories - Only show 5 with rotation */}
-            {!categoriesLoading && categoriesList.slice(mobileCategoryStartIndex, mobileCategoryStartIndex + MOBILE_CATEGORIES_PER_ROW).map((category) => {
+            {/* "All" button to clear category filter (mobile) */}
+            <button
+              key="mobile-all-categories"
+              onClick={() => {
+                setSearchTerm("")
+                setActiveCategory(null)
+                const params = new URLSearchParams(urlSearchParams?.toString())
+                params.delete('category')
+                const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                router.push(nextUrl)
+                handleFilterActivity()
+              }}
+              className={cn(
+                "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden",
+                !activeCategory
+                  ? (themeClasses.mainBg === "bg-white min-h-screen" ? "text-black bg-amber-200/60" : "text-yellow-300 bg-yellow-700/30")
+                  : (themeClasses.mainBg === "bg-white min-h-screen" ? "text-neutral-700 hover:bg-neutral-100" : "text-white/80 hover:bg-white/10")
+              )}
+            >
+              All
+            </button>
+
+            {categoriesList.slice(mobileCategoryStartIndex, mobileCategoryStartIndex + MOBILE_CATEGORIES_PER_ROW).map((category) => {
               const IconComponent = categoryIcons[category.name] || categoryIcons.default
               return (
                 <button
@@ -1450,29 +1595,55 @@ export default function Component() {
                   onClick={() => {
                     // Filter by specific category
                     setSearchTerm("") // Clear search term when filtering by category
-                    setDebouncedSearchTerm("") // Clear debounced search term
                     setActiveCategory(category.name) // Set active category
+                    const params = new URLSearchParams(urlSearchParams?.toString())
+                    params.set('category', category.name)
+                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                    router.push(nextUrl)
+                    handleFilterActivity()
                     // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
-                  }}
-                  className={cn(
-                    "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
+                }}
+                className={cn(
+                  "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden",
                     activeCategory === category.name
-                      ? themeClasses.mainBg === "bg-white min-h-screen"
-                        ? "text-black bg-amber-200/60"
-                        : "text-black bg-stone-300/60"
-                      : themeClasses.mainBg === "bg-white min-h-screen"
-                        ? "text-black hover:text-black hover:bg-amber-200/40"
-                        : "text-black hover:text-black hover:bg-stone-300/40"
-                  )}
-                >
+                    ? themeClasses.mainBg === "bg-white min-h-screen"
+                      ? "text-black bg-amber-200/60"
+                      : "text-black bg-stone-300/60"
+                    : themeClasses.mainBg === "bg-white min-h-screen"
+                      ? "text-black hover:text-black hover:bg-amber-200/40"
+                      : "text-black hover:text-black hover:bg-stone-300/40"
+                )}
+              >
                   <IconComponent className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                  <span>{category.name}</span>
-                </button>
+                <span>{category.name}</span>
+              </button>
               )
             })}
 
             {/* Desktop Categories - Show all (hidden on mobile) */}
-            {!categoriesLoading && categoriesList.slice(0, 10).map((category) => {
+            {/* Desktop "All" button placed first */}
+            <button
+              key="desktop-all-categories"
+              onClick={() => {
+                setSearchTerm("")
+                setActiveCategory(null)
+                const params = new URLSearchParams(urlSearchParams?.toString())
+                params.delete('category')
+                const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                router.push(nextUrl)
+                handleFilterActivity()
+              }}
+              className={cn(
+                "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
+                !activeCategory
+                  ? (themeClasses.mainBg === "bg-white min-h-screen" ? "text-black bg-amber-200/60" : "text-yellow-300 bg-yellow-700/30")
+                  : (themeClasses.mainBg === "bg-white min-h-screen" ? "text-neutral-700 hover:bg-neutral-100" : "text-white/80 hover:bg-white/10")
+              )}
+            >
+              All
+            </button>
+
+            {categoriesList.slice(0, 10).map((category) => {
               const IconComponent = categoryIcons[category.name] || categoryIcons.default
               return (
                 <button
@@ -1480,8 +1651,12 @@ export default function Component() {
                   onClick={() => {
                     // Filter by specific category
                     setSearchTerm("") // Clear search term when filtering by category
-                    setDebouncedSearchTerm("") // Clear debounced search term
                     setActiveCategory(category.name) // Set active category
+                    const params = new URLSearchParams(urlSearchParams?.toString())
+                    params.set('category', category.name)
+                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                    router.push(nextUrl)
+                    handleFilterActivity()
                     // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
                   }}
                   className={cn(
@@ -1504,11 +1679,11 @@ export default function Component() {
         </div>
       </nav>
 
-      <main className={cn("flex-1 pt-32 xs:pt-28 sm:pt-32", themeClasses.mainBg)} suppressHydrationWarning>
+      <main className={cn("flex-1 pt-28 xs:pt-20 sm:pt-28", themeClasses.mainBg)} suppressHydrationWarning>
 
         {/* Ads Container - Above filter buttons */}
         {!adsLoading && advertisements.length > 0 && (
-          <div className="px-1 sm:px-2 lg:px-3 mb-6">
+          <div className="px-1 sm:px-2 lg:px-3 mb-1">
             <div 
               className="w-full relative"
               onTouchStart={handleTouchStart}
@@ -1608,7 +1783,7 @@ export default function Component() {
         )}
 
         {/* Filter and Sort Section */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3 mt-1" suppressHydrationWarning>
           {/* Left Side - Filter Buttons and Product Count */}
           <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto" suppressHydrationWarning>
             {/* Filter Buttons */}
@@ -1756,7 +1931,7 @@ export default function Component() {
           </div>
 
           {/* Right Side - Sort Dropdown */}
-          <div className="flex items-center gap-2 w-full sm:w-auto" suppressHydrationWarning>
+          <div className="hidden sm:flex items-center gap-2 w-full sm:w-auto" suppressHydrationWarning>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -1773,7 +1948,7 @@ export default function Component() {
                               sortOrder === 'price-low' ? 'Price: Low to High' :
                               sortOrder === 'price-high' ? 'Price: High to Low' :
                               sortOrder === 'newest' ? 'Newest Arrivals' :
-                              sortOrder === 'best-selling' ? 'Best Selling' : 'Featured'}
+                              sortOrder === 'best-selling' ? 'Best Selling' : 'Price: Low to High'}
                 </span>
                 <ChevronDown className="w-3 h-3 sm:w-4 sm:h-4 group-hover:text-yellow-500 transition-colors" />
               </Button>
@@ -1821,17 +1996,12 @@ export default function Component() {
         {/* Promotional Text Below Advertisement */}
         <div className="px-1 sm:px-2 lg:px-3 mb-6">
           <div className="text-center">
-            {/* Decorative Line Above */}
-            <div className="mb-2">
-              <div className="w-4/5 h-0.5 bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 rounded-full mx-auto"></div>
-            </div>
-            
-            <h2 className="text-sm sm:text-lg md:text-xl lg:text-2xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent mb-1 font-serif whitespace-nowrap overflow-hidden text-ellipsis">
+            <h2 className="text-sm sm:text-lg md:text-xl lg:text-2xl font-bold text-black dark:text-white mb-1 font-serif whitespace-nowrap overflow-hidden text-ellipsis">
               Quality-Trusted Component Store
             </h2>
             {/* Removed promotional subheading per request */}
-          </div>
-        </div>
+            </div>
+                  </div>
 
         {/* Loading State - Removed for faster UX */}
 
@@ -1933,7 +2103,7 @@ export default function Component() {
               <>
                 
                 {/* All Product Cards */}
-            {displayedProducts.map((product: any, index: number) => {
+            {(shuffledProducts.length > 0 ? shuffledProducts : displayedProducts).map((product: any, index: number) => {
             
             // If product has variants and variantConfig, compute first-combination price for display
             let effectivePrice = product.price
@@ -1950,10 +2120,16 @@ export default function Component() {
                 effectivePrice = calculatePriceForCombination(autoAttributes, product.variants, product.variantConfig, product.price)
               }
             }
-            // TEMPORARY: Create test discounts for first few products to verify display works
+            // Calculate pricing display for all products (deterministic)
             let testOriginalPrice = product.originalPrice
-            if (index < 3 && product.originalPrice <= product.price) {
-              testOriginalPrice = Math.round(product.price * 1.2) // 20% higher than current price
+            // If no original price or original price is same as current price, synthesize a stable discount (10-30%) based on product id
+            if (testOriginalPrice <= effectivePrice) {
+              // Simple deterministic pseudo-random based on product id
+              const idNumber = Number(product.id) || 0
+              const hash = (idNumber * 9301 + 49297) % 233280
+              const fraction = hash / 233280 // [0,1)
+              const discountRate = 0.10 + (fraction * 0.20) // 10%..30%
+              testOriginalPrice = Math.round(effectivePrice / (1 - discountRate))
             }
             
             const discountPercentage = ((testOriginalPrice - effectivePrice) / testOriginalPrice) * 100
@@ -1964,6 +2140,8 @@ export default function Component() {
               <Card
                 key={`${product.id}-${index}`}
                 data-product-id={product.id}
+                onMouseEnter={handleProductHover}
+                onFocus={handleProductHover}
                 className={cn(
                   "flex flex-col overflow-hidden rounded-sm",
                   themeClasses.cardBg,
@@ -1974,7 +2152,7 @@ export default function Component() {
                     suppressHydrationWarning
               >
                     <OptimizedLink 
-                      href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.get('search') || searchTerm)?.trim() ? `?search=${encodeURIComponent((urlSearchParams?.get('search') || searchTerm).trim())}` : (urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}`)}`} 
+                      href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}` || window.location.href)}`} 
                       className="block relative aspect-square overflow-hidden" 
                       prefetch={false}
                       priority="low"
@@ -2028,7 +2206,7 @@ export default function Component() {
                     </OptimizedLink>
                     <CardContent className="p-1 flex-1 flex flex-col justify-between" suppressHydrationWarning>
                       <OptimizedLink 
-                        href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.get('search') || searchTerm)?.trim() ? `?search=${encodeURIComponent((urlSearchParams?.get('search') || searchTerm).trim())}` : (urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}`)}`}
+                        href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}` || window.location.href)}`}
                         className="block"
                         prefetch={false}
                         priority="low"
@@ -2056,11 +2234,16 @@ export default function Component() {
                         <span suppressHydrationWarning>({product.reviews})</span>
                   </div>
                       <div className="flex flex-wrap items-baseline gap-x-2 mt-0.5" suppressHydrationWarning>
-                        <div className="text-sm font-bold sm:text-base lg:text-lg" suppressHydrationWarning>{formatPrice(effectivePrice)}</div>
-                    {testOriginalPrice > effectivePrice && (
+                        {/* Main Price */}
+                        <div className="text-sm font-bold sm:text-base lg:text-lg" suppressHydrationWarning>
+                          {formatPrice(effectivePrice)}
+                        </div>
+                        
+                        {/* Original Price and Discount - Always show for all products */}
+                        {testOriginalPrice > effectivePrice && (
                       <>
                             <div className={cn("text-[10px] line-through sm:text-xs", themeClasses.textNeutralSecondary)} suppressHydrationWarning>
-                          {formatPrice(testOriginalPrice)}
+                              {formatPrice(testOriginalPrice)}
                         </div>
                             <div className="text-[10px] font-medium text-green-600" suppressHydrationWarning>
                           {discountPercentage.toFixed(0)}% OFF
@@ -2139,8 +2322,18 @@ export default function Component() {
             <SheetTitle className="flex items-center gap-2">
               <Package className="w-5 h-5" />
               All Categories
+              {isUsingFallbackCategories && (
+                <span className="text-xs bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 px-2 py-1 rounded-full">
+                  Offline
+                </span>
+              )}
             </SheetTitle>
-            <p className="text-sm text-muted-foreground">Browse products by category</p>
+            <p className="text-sm text-muted-foreground">
+              {isUsingFallbackCategories 
+                ? "Showing cached categories (API unavailable)" 
+                : "Browse products by category"
+              }
+            </p>
           </SheetHeader>
           
           <div className="mt-6 space-y-2">
@@ -2165,12 +2358,6 @@ export default function Component() {
             </Button>
 
             {/* Category List */}
-            {categoriesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-500"></div>
-                <span className="ml-2 text-sm text-muted-foreground">Loading categories...</span>
-              </div>
-            ) : (
               <div className="space-y-1">
                 {categoriesList.map((category) => {
                   const IconComponent = categoryIcons[category.name] || categoryIcons.default
@@ -2180,6 +2367,11 @@ export default function Component() {
                       onClick={() => {
                         setActiveCategory(category.name)
                         setIsCategoriesNavOpen(false)
+                        const params = new URLSearchParams(urlSearchParams?.toString())
+                        params.set('category', category.name)
+                        const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                        router.push(nextUrl)
+                        handleFilterActivity()
                       }}
                       variant="ghost"
                       className={cn(
@@ -2196,7 +2388,6 @@ export default function Component() {
                   )
                 })}
               </div>
-            )}
           </div>
 
           {/* Footer Actions */}
@@ -2219,119 +2410,298 @@ export default function Component() {
 
       <Footer />
 
-      {/* Mobile Hamburger Menu */}
+      {/* Mobile Hamburger Menu - Modern E-commerce Style */}
       <div className={`hamburger-overlay ${isHamburgerMenuOpen ? 'open' : ''}`} onClick={() => setIsHamburgerMenuOpen(false)} />
       <div className={`hamburger-menu ${isHamburgerMenuOpen ? 'open' : ''}`}>
-        <div className="flex items-center justify-between p-4 border-b border-neutral-700">
-          <h2 className="text-lg font-semibold text-white">Menu</h2>
+        {/* Header with Logo and Close */}
+        <div className="flex items-center justify-between p-6 border-b border-white/10 bg-gradient-to-r from-yellow-500/10 to-orange-500/10">
+          <div className="flex items-center gap-3">
+            <Image
+              src={displayLogo}
+              alt={`${companyName} Logo`}
+              width={32}
+              height={32}
+              className="w-8 h-8 rounded-lg"
+            />
+            <div>
+              <h2 className="text-lg font-bold text-white">{companyName}</h2>
+              <p className="text-xs text-white/70">Menu</p>
+            </div>
+          </div>
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setIsHamburgerMenuOpen(false)}
-            className="text-white hover:bg-white/10"
+            className="text-white hover:bg-white/20 rounded-full"
           >
-            <X className="w-5 h-5" />
+            <X className="w-6 h-6" />
           </Button>
         </div>
         
-        <div className="p-4 space-y-4">
-          {/* Search in Hamburger Menu */}
+        <div className="flex flex-col h-full">
+          {/* Search Section */}
+          <div className="p-6 border-b border-white/10">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-white/60" />
             <Input
               type="search"
-              placeholder="Search for products..."
-              className="w-full pl-10 pr-4 bg-neutral-800 border-neutral-700 text-white placeholder:text-neutral-400"
+                placeholder="Search products..."
+                className="w-full pl-12 pr-4 py-3 bg-white/10 border-white/20 text-white placeholder:text-white/60 rounded-xl focus:ring-2 focus:ring-yellow-500/50"
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value)
-                // Debouncing is now handled by useEffect
+                  handleSearchActivity()
               }}
+                onFocus={handleSearchActivity}
+                onKeyDown={(e) => {
+                  handleSearchActivity()
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    submitSearch()
+                  }
+                }}
             />
+            </div>
           </div>
 
-          {/* Navigation Links */}
-          <div className="space-y-2">
+          {/* Main Navigation */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-6 space-y-6">
+              {/* Quick Actions */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Quick Actions</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <Link 
+                    href="/cart" 
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <div className="relative">
+                      <ShoppingCart className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                      {cartTotalItems > 0 && (
+                        <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-black">
+                          {cartTotalItems}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-white">Cart</span>
+                  </Link>
+                  
+                  <button 
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => {
+                      setIsHamburgerMenuOpen(false)
+                      setIsSearchModalOpen(true)
+                    }}
+                  >
+                    <Search className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-xs font-medium text-white">Search</span>
+                  </button>
+                </div>
+              </div>
 
-            <Link href="/cart" className="flex items-center gap-3 p-3 rounded-lg hover:bg-white/10 text-white">
-              <ShoppingCart className="w-5 h-5" />
-              Shopping Cart ({cartTotalItems})
+              {/* Categories */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Categories</h3>
+                <button
+                  onClick={() => {
+                    setIsHamburgerMenuOpen(false)
+                    setIsCategoriesNavOpen(true)
+                  }}
+                  className="w-full flex items-center justify-between p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                >
+                  <div className="flex items-center gap-3">
+                    <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">All Categories</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors" />
+                </button>
+              </div>
+
+              {/* Account Section */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Account</h3>
+                <div className="space-y-2">
+                  {isAuthenticated ? (
+                    <>
+                      <Link 
+                        href="/account"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <User className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Account</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
             </Link>
+                      <Link 
+                        href="/account/orders"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Orders</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/wishlist"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Heart className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Wishlist</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/messages"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <MessageSquare className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Messages</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/payment"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <CreditCard className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Payment</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/coins"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Coins</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/coupons"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Ticket className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Coupons</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/settings"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Settings className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Settings</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-center text-white/60 text-sm mb-2">
+                        Sign in to access your account
+                      </div>
+                      <Button 
+                        className="w-full bg-yellow-500 text-black hover:bg-yellow-400 font-medium py-3 rounded-xl"
+                        onClick={() => {
+                          setIsHamburgerMenuOpen(false)
+                          openAuthModal('login')
+                        }}
+                      >
+                        Sign In
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        className="w-full border-white/30 text-white hover:bg-white/10 py-3 rounded-xl"
+                        onClick={() => {
+                          setIsHamburgerMenuOpen(false)
+                          openAuthModal('register')
+                        }}
+                      >
+                        Create Account
+                      </Button>
+                    </div>
+                  )}
+                </div>
           </div>
 
-          {/* Theme Switcher */}
-          <div className="border-t border-neutral-700 pt-4">
-            <h3 className="text-sm font-semibold text-white mb-2">Theme</h3>
+              {/* Settings */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Settings</h3>
+                
+                {/* Theme Selection */}
             <div className="space-y-2">
+                  <p className="text-xs text-white/70">Theme</p>
+                  <div className="grid grid-cols-3 gap-2">
               <Button
                 variant="ghost"
-                className={`w-full justify-start ${backgroundColor === 'dark' ? 'bg-yellow-500 text-black' : 'text-white hover:bg-white/10'}`}
+                      size="sm"
+                      className={`h-10 text-xs ${backgroundColor === 'dark' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
                 onClick={() => setBackgroundColor('dark')}
               >
-                Dark Mode
+                      Dark
               </Button>
               <Button
                 variant="ghost"
-                className={`w-full justify-start ${backgroundColor === 'gray' ? 'bg-yellow-500 text-black' : 'text-white hover:bg-white/10'}`}
+                      size="sm"
+                      className={`h-10 text-xs ${backgroundColor === 'gray' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
                 onClick={() => setBackgroundColor('gray')}
               >
-                Gray Mode
+                      Gray
               </Button>
               <Button
                 variant="ghost"
-                className={`w-full justify-start ${backgroundColor === 'white' ? 'bg-yellow-500 text-black' : 'text-white hover:bg-white/10'}`}
+                      size="sm"
+                      className={`h-10 text-xs ${backgroundColor === 'white' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
                 onClick={() => setBackgroundColor('white')}
               >
-                Light Mode
+                      Light
               </Button>
             </div>
           </div>
 
-          {/* Currency Switcher */}
-          <div className="border-t border-neutral-700 pt-4">
-            <h3 className="text-sm font-semibold text-white mb-2">Currency</h3>
+                {/* Currency Selection */}
             <div className="space-y-2">
+                  <p className="text-xs text-white/70">Currency</p>
+                  <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="ghost"
-                className={`w-full justify-start ${currency === 'USD' ? 'bg-yellow-500 text-black' : 'text-white hover:bg-white/10'}`}
+                      size="sm"
+                      className={`h-10 text-xs ${currency === 'USD' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
                 onClick={() => setCurrency('USD')}
               >
-                <DollarSign className="w-4 h-4 mr-2" /> USD
+                      <DollarSign className="w-3 h-3 mr-1" /> USD
               </Button>
               <Button
                 variant="ghost"
-                className={`w-full justify-start ${currency === 'TZS' ? 'bg-yellow-500 text-black' : 'text-white hover:bg-white/10'}`}
+                      size="sm"
+                      className={`h-10 text-xs ${currency === 'TZS' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
                 onClick={() => setCurrency('TZS')}
               >
-                <Landmark className="w-4 h-4 mr-2" /> TZS
+                      <Landmark className="w-3 h-3 mr-1" /> TZS
               </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* User Account */}
-          <div className="border-t border-neutral-700 pt-4">
-            <h3 className="text-sm font-semibold text-white mb-2">Account</h3>
-            <div className="space-y-2">
-              <Button 
-                className="w-full bg-yellow-500 text-black hover:bg-yellow-600"
-                onClick={() => {
-                  setIsHamburgerMenuOpen(false)
-                  openAuthModal('login')
-                }}
-              >
-                Sign In
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full border-white/20 text-white hover:bg-white/10"
-                onClick={() => {
-                  setIsHamburgerMenuOpen(false)
-                  openAuthModal('register')
-                }}
-              >
-                Register
-              </Button>
+          {/* Footer with User Info */}
+          <div className="p-6 border-t border-white/10 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
+            {isAuthenticated && (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/10">
+                <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center">
+                  <span className="text-black font-bold text-sm">
+                    {user?.email?.charAt(0).toUpperCase() || 'U'}
+                  </span>
             </div>
+                <div className="flex-1">
+                  <p className="text-white font-medium text-sm">{user?.email}</p>
+                  <p className="text-white/60 text-xs">Welcome back!</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

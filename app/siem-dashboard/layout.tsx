@@ -28,6 +28,7 @@ import { useTheme } from "@/hooks/use-theme"
 import { useAuth } from "@/contexts/auth-context"
 import { useToast } from "@/hooks/use-toast"
 import { useCurrency } from "@/contexts/currency-context"
+import { useCompanyContext } from "@/components/company-provider"
 import { supabaseClient } from "@/lib/supabase-client"
 import { AdminRoleGuard } from "@/components/admin-role-guard"
 import { Admin2FAGuard } from "@/components/admin-2fa-guard"
@@ -52,6 +53,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { currency, setCurrency } = useCurrency() // Use global currency context
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const { companyName, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  
+  // Fallback logo system - use local logo if API is not loaded or logo is not available
+  const fallbackLogo = "/android-chrome-512x512.png"
+  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const [orderCounts, setOrderCounts] = useState({
     pendingOrders: 0,
     confirmedOrders: 0,
@@ -215,8 +221,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <div className="flex items-center gap-2" suppressHydrationWarning>
               <Link href="/siem-dashboard" className={cn("flex items-center gap-2", themeClasses.mainText)}>
                 <Image
-                  src="/placeholder.svg?height=48&width=48&text=Logo"
-                  alt="Admin Logo"
+                  src={displayLogo}
+                  alt={`${companyName} Logo`}
                   width={48}
                   height={48}
                   className="rounded-md"

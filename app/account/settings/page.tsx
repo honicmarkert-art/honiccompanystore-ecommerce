@@ -91,9 +91,9 @@ export default function AccountSettingsPage() {
       {/* Top nav like products list + back button */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => router.back()} className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => router.push('/products')} className="flex items-center gap-2">
             <ArrowLeft className="w-4 h-4" />
-            Back
+            Back to Products
           </Button>
           <div className="flex items-center gap-2">
             <SettingsIcon className="w-5 h-5 text-orange-500" />
@@ -155,5 +155,6 @@ export default function AccountSettingsPage() {
     </UserRoute>
   )
 }
+
 
 

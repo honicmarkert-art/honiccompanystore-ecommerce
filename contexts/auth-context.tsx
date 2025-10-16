@@ -6,7 +6,6 @@ import { useToast } from '@/hooks/use-toast'
 
 // Simple security logging function
 const logSecurityEvent = (action: string, userId?: string, details?: any) => {
-  console.log(`Security Event: ${action} by user ${userId || 'unknown'}`, details)
 }
 
 const SECURITY_CONFIG = {
@@ -67,6 +66,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true)
       
+      // Check for session indicator cookie first to avoid unnecessary API calls
+      const sessionActive = document.cookie.includes('sb-session-active=true')
+      if (!sessionActive) {
+        setUser(null)
+        setIsAuthenticated(false)
+        setIsAdmin(false)
+        setLoading(false)
+              return
+            }
+            
       // Use the official session API to check authentication with timeout
       const controller = new AbortController()
       const timeoutId = setTimeout(() => {
@@ -114,7 +123,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (fetchError) {
         clearTimeout(timeoutId)
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-          console.log('Auth check timed out, treating as no session')
           setUser(null)
           setIsAuthenticated(false)
           setIsAdmin(false)
@@ -123,7 +131,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (error) {
-      console.error('Auth check error:', error)
       setUser(null)
       setIsAuthenticated(false)
       setIsAdmin(false)
@@ -200,7 +207,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (fetchError) {
         clearTimeout(timeoutId)
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-          console.log('Login request timed out')
           return { 
             success: false, 
             error: "Login request timed out. Please try again.",
@@ -309,7 +315,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (error) {
-      console.error('Login error:', error)
       
       toast({
         title: "Login Error",
@@ -365,7 +370,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       toast({ title: 'Registration Failed', description: result?.error || 'Please try again.', variant: 'destructive' })
       return { success: false, error: result?.error, type: result?.type }
     } catch (error) {
-      console.error('Registration error:', error)
       toast({ title: 'Registration Error', description: 'Network error. Please try again.', variant: 'destructive' })
       return { success: false, error: 'NETWORK_ERROR', type: 'NETWORK_ERROR' }
     }
@@ -408,7 +412,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           router.replace('/')
         })
       } else {
-        console.error('Logout error:', result.error)
         toast({
           title: "Sign Out Error",
           description: result.error || "An error occurred while signing out",
@@ -416,7 +419,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
       }
     } catch (error) {
-      console.error('Sign out error:', error)
       
       // Even if there's an error, clear the local state
       setUser(null)
@@ -446,7 +448,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
       return { success: false, error: "Password reset not implemented yet" }
     } catch (error) {
-      console.error('Reset password error:', error)
       toast({
         title: "Reset Error",
         description: "An error occurred while sending reset email",

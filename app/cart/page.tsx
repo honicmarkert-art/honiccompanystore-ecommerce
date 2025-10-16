@@ -12,6 +12,8 @@ import {
   Minus,
   Trash2,
   ChevronLeft,
+  Menu,
+  X,
   DollarSign,
   Landmark,
   MessageSquareText,
@@ -29,12 +31,14 @@ import {
   Coins,
   User,
   Palette,
-  MessageSquare,
   Heart,
-  Ticket,
-  Settings,
+  Package,
+  ChevronRight,
   LogOut,
   Shield,
+  MessageSquare,
+  Ticket,
+  Settings,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -70,7 +74,11 @@ function CartPageContent() {
   const { currency, setCurrency, formatPrice } = useCurrency() // Use global currency context
   
   // Debug logging
-  const { companyName, companyColor, companyLogo } = useCompanyContext()
+  const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  
+  // Fallback logo system - use local logo if API is not loaded or logo is not available
+  const fallbackLogo = "/android-chrome-512x512.png"
+  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { toast } = useToast()
   const router = useRouter()
   const pathname = usePathname()
@@ -82,6 +90,9 @@ function CartPageContent() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [selected, setSelected] = useState<Record<number, boolean>>({})
+  const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
+  const [isQuantityWarningModalOpen, setIsQuantityWarningModalOpen] = useState(false)
+  const [quantityWarningItem, setQuantityWarningItem] = useState<{productId: number, variantId?: string, productName: string} | null>(null)
   const { showCheckoutValidation, hideModal, isOpen: isModalOpen, modalProps} = useValidationModal()
   
   // Fetch stock data for all cart items (debounced + only when product set changes)
@@ -120,12 +131,24 @@ function CartPageContent() {
         const newQuantity = variant.quantity + delta
         const product = products.find(p => p.id === productId)
         
+        // Restrict quantity reduction below 5 for products under 500 TZS
+        if (delta < 0 && product && product.price < 500 && newQuantity < 5) {
+          setQuantityWarningItem({
+            productId,
+            variantId,
+            productName: product.name
+          })
+          setIsQuantityWarningModalOpen(true)
+          return
+        }
+        
         // Check stock limits
-        if (delta > 0 && product && product.stock_quantity !== null) {
-          if (newQuantity > product.stock_quantity) {
+        const stockQtyInc = getStock(productId)?.stockQuantity ?? (product as any)?.stockQuantity ?? null
+        if (delta > 0 && stockQtyInc !== null) {
+          if (newQuantity > stockQtyInc) {
             toast({
               title: "Insufficient Stock",
-              description: `Only ${product.stock_quantity} items available in stock.`,
+              description: `Only ${stockQtyInc} items available in stock.`,
               variant: "destructive"
             })
             return
@@ -144,6 +167,70 @@ function CartPageContent() {
     }
   }, [cart, products, updateItemQuantity, toast])
 
+  const handleQuantityInput = useCallback((productId: number, variantId: string | undefined, newQuantity: number) => {
+    const currentItem = cart.find((item) => item.productId === productId)
+    if (currentItem) {
+      const variant = currentItem.variants.find(v => v.variantId === variantId)
+      if (variant) {
+        const product = products.find(p => p.id === productId)
+        
+        // Validate quantity
+        if (newQuantity < 1) {
+          newQuantity = 1
+        }
+        
+        // Restrict quantity below 5 for products under 500 TZS
+        if (product && product.price < 500 && newQuantity < 5) {
+          setQuantityWarningItem({
+            productId,
+            variantId,
+            productName: product.name
+          })
+          setIsQuantityWarningModalOpen(true)
+          return
+        }
+        
+        // Check stock limits
+        const stockQtyTyped = getStock(productId)?.stockQuantity ?? (product as any)?.stockQuantity ?? null
+        if (stockQtyTyped !== null && newQuantity > stockQtyTyped) {
+          toast({
+            title: "Insufficient Stock",
+            description: `Only ${stockQtyTyped} items available in stock.`,
+            variant: "destructive"
+          })
+          return
+        }
+        
+        startTransition(() => {
+          updateItemQuantity(productId, newQuantity, variantId)
+        })
+      }
+    }
+  }, [cart, products, updateItemQuantity, toast])
+
+  const handleQuantityInputChange = useCallback((productId: number, variantId: string | undefined, value: string) => {
+    const product = products.find(p => p.id === productId)
+    
+    // If product is under 500 TZS, prevent typing below 5
+    if (product && product.price < 500) {
+      const numericValue = parseInt(value) || 0
+      if (numericValue > 0 && numericValue < 5) {
+        // Show warning and reset to 5
+        setQuantityWarningItem({
+          productId,
+          variantId,
+          productName: product.name
+        })
+        setIsQuantityWarningModalOpen(true)
+        return
+      }
+    }
+    
+    // Allow normal input for other products
+    const newQuantity = parseInt(value) || 1
+    handleQuantityInput(productId, variantId, newQuantity)
+  }, [products, handleQuantityInput])
+
   const handleRemoveItem = useCallback((productId: number) => {
     startTransition(() => removeItem(productId, undefined)) // Always remove entire product
   }, [removeItem])
@@ -156,7 +243,29 @@ function CartPageContent() {
     })
   }
 
-  const handleSaveForLater = useCallback(async () => {
+  // Calculate dynamic width for quantity input based on number length
+  const getQuantityInputWidth = (qty: number) => {
+    const numDigits = qty.toString().length
+    const baseWidth = 1.5 // Base width in rem for mobile
+    const digitWidth = 0.6 // Width per digit in rem
+    const maxWidth = 4 // Maximum width in rem
+    
+    const calculatedWidth = baseWidth + (numDigits - 1) * digitWidth
+    return Math.min(calculatedWidth, maxWidth)
+  }
+
+  // Calculate dynamic width for desktop quantity input
+  const getDesktopQuantityInputWidth = (qty: number) => {
+    const numDigits = qty.toString().length
+    const baseWidth = 2.5 // Base width in rem for desktop
+    const digitWidth = 0.8 // Width per digit in rem
+    const maxWidth = 6 // Maximum width in rem
+    
+    const calculatedWidth = baseWidth + (numDigits - 1) * digitWidth
+    return Math.min(calculatedWidth, maxWidth)
+  }
+
+  const handleSaveForLater = useCallback(() => {
     if (cart.length === 0) {
       toast({
         title: "No items to save",
@@ -165,36 +274,16 @@ function CartPageContent() {
       })
       return
     }
-    if (!isAuthenticated) {
-      openAuthModal('login')
-      return
-    }
-
-    try {
-      const items = cart.map((i) => ({
-        productId: i.productId,
-        name: i.product?.name,
-        price: i.totalPrice || i.product?.price,
-        image: i.product?.image
-      }))
-      const res = await fetch('/api/user/saved-later', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ items })
-      })
-      if (!res.ok) throw new Error('Failed')
-      startTransition(() => {
-        clearCart()
-      })
-      toast({
-        title: "Items saved for later",
-        description: `${cart.length} items have been moved to your saved items.`,
-      })
-    } catch {
-      toast({ title: 'Failed to save for later', variant: 'destructive' })
-    }
-  }, [cart, clearCart, toast, isAuthenticated, openAuthModal])
+    
+    startTransition(() => {
+      setSavedForLater(prev => ([...prev, ...cart]))
+      clearCart()
+    })
+    toast({
+      title: "Items saved for later",
+      description: `${cart.length} items have been moved to your saved items.`,
+    })
+  }, [cart, clearCart, toast])
 
   const handleAddToWishlist = (productId: number) => {
     const isAlreadyInWishlist = wishlist.some(wishlistItem => 
@@ -301,10 +390,35 @@ function CartPageContent() {
         suppressHydrationWarning
       >
         <div className="flex items-center h-10 sm:h-16 px-0 pr-[10px] sm:px-6 lg:px-8 w-full" suppressHydrationWarning>
-          {/* Back Button */}
+          {/* Mobile Hamburger Menu Button */}
           <Button
             variant="ghost"
-            onClick={() => router.back()}
+            size="icon"
+            className="mobile-menu-toggle desktop-nav:hidden flex items-center justify-center w-8 h-8 mr-2"
+            onClick={() => setIsHamburgerMenuOpen(true)}
+            suppressHydrationWarning
+          >
+            <Menu className="w-6 h-6" />
+            <span className="sr-only">Open menu</span>
+          </Button>
+
+          {/* Back Button - Use referrer when not from checkout; otherwise go to products */}
+          <Button
+            variant="ghost"
+            onClick={() => {
+              try {
+                const ref = document.referrer || ''
+                const sameOrigin = ref && new URL(ref, window.location.origin).origin === window.location.origin
+                const fromCheckout = /\/checkout(\b|\/?)/.test(ref)
+                if (sameOrigin && !fromCheckout) {
+                  router.back()
+                } else {
+                  router.push('/products')
+                }
+              } catch {
+                router.push('/products')
+              }
+            }}
             className="flex items-center gap-1 text-xs font-semibold flex-shrink-0 text-gray-900 dark:text-white p-1"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -318,7 +432,7 @@ function CartPageContent() {
             className="flex items-center gap-2 text-lg font-semibold md:text-base ml-2 lg:ml-8 flex-shrink-0 text-gray-900 dark:text-white"
           >
             <Image
-              src={companyLogo}
+              src={displayLogo}
               alt={`${companyName} Logo`}
               width={48}
               height={48}
@@ -337,16 +451,16 @@ function CartPageContent() {
           {/* Right Side Actions */}
           <div className="flex items-center gap-2 lg:gap-4 ml-auto flex-shrink-0">
             {/* Theme Switcher Dropdown */}
-            <DropdownMenu suppressHydrationWarning>
+            <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn(
-                    "flex items-center gap-1",
-                    darkHeaderFooterClasses.buttonGhostText,
-                    darkHeaderFooterClasses.buttonGhostHoverBg,
-                  )}
+                          className={cn(
+                            "flex items-center gap-1",
+                            darkHeaderFooterClasses.buttonGhostText,
+                            darkHeaderFooterClasses.buttonGhostHoverBg,
+                          )}
                 >
                   <Palette className="w-5 h-5" />
                   <span className="sr-only">Change Theme</span>
@@ -355,9 +469,8 @@ function CartPageContent() {
               <DropdownMenuContent
                 align="end"
                 className={cn(
-                  darkHeaderFooterClasses.dialogSheetBg,
-                  darkHeaderFooterClasses.textNeutralPrimary,
-                  darkHeaderFooterClasses.dialogSheetBorder,
+                  // Force solid backgrounds in both themes
+                  "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
                 )}
               >
                 <DropdownMenuItem
@@ -381,15 +494,15 @@ function CartPageContent() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <DropdownMenu suppressHydrationWarning>
+            <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="outline"
-                  className={cn(
-                    "flex items-center gap-1 border-yellow-500 bg-transparent text-xs sm:text-sm w-[20px] h-[10px] sm:w-auto sm:h-auto",
-                    darkHeaderFooterClasses.buttonGhostText,
-                    darkHeaderFooterClasses.buttonGhostHoverBg,
-                  )}
+                          className={cn(
+                            "flex items-center gap-1 border-yellow-500 bg-transparent text-xs sm:text-sm w-[20px] h-[10px] sm:w-auto sm:h-auto",
+                            darkHeaderFooterClasses.buttonGhostText,
+                            darkHeaderFooterClasses.buttonGhostHoverBg,
+                          )}
                 >
                   {currency === "USD" ? <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" /> : <Landmark className="w-3 h-3 sm:w-4 sm:h-4" />}
                   <span className="hidden sm:inline">{currency}</span>
@@ -398,9 +511,8 @@ function CartPageContent() {
               <DropdownMenuContent
                 align="end"
                 className={cn(
-                  darkHeaderFooterClasses.dialogSheetBg,
-                  darkHeaderFooterClasses.textNeutralPrimary,
-                  darkHeaderFooterClasses.dialogSheetBorder,
+                  // Force solid backgrounds in both themes
+                  "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
                 )}
               >
                 <DropdownMenuItem
@@ -458,9 +570,8 @@ function CartPageContent() {
                   align="end"
                   className={cn(
                       "w-48 sm:w-56",
-                    darkHeaderFooterClasses.dialogSheetBg,
-                    darkHeaderFooterClasses.textNeutralPrimary,
-                    darkHeaderFooterClasses.dialogSheetBorder,
+                      // Force solid backgrounds in both themes
+                      "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
                   )}
                 >
                   <div className="p-2 flex flex-col gap-2">
@@ -635,7 +746,7 @@ function CartPageContent() {
                   {cart.slice().reverse().map((item, index) => {
                     const product = products.find(p => p.id === item.productId) || item.product
                     const stockData = getStock(item.productId)
-                    const stockQty = stockData?.stockQuantity ?? product?.stock_quantity ?? product?.stockQuantity ?? null
+                    const stockQty = stockData?.stockQuantity ?? (product as any)?.stockQuantity ?? null
                     
                     // Debug logging removed
                     
@@ -673,7 +784,7 @@ function CartPageContent() {
                                       alt={product.name}
                                       width={50}
                                       height={50}
-                                      className="w-12 h-12 sm:w-15 sm:h-15 rounded object-cover border border-neutral-200 hover:border-yellow-500 transition-colors"
+                                      className="w-12 h-12 sm:w-15 sm:h-15 rounded object-cover border border-neutral-200 hover:border-yellow-500 transition-colors bg-gray-50"
                                       priority={false} // Not priority since it's in a list
                                       quality={80}
                                     />
@@ -777,8 +888,8 @@ function CartPageContent() {
                     // Single variant or legacy item display
                     
                     const unitPrice = item.totalPrice / item.totalQuantity
-                    const discountPercentage = product?.original_price && product.original_price > unitPrice
-                      ? ((product.original_price - unitPrice) / product.original_price) * 100
+                    const discountPercentage = product?.originalPrice && product.originalPrice > unitPrice
+                      ? ((product.originalPrice - unitPrice) / product.originalPrice) * 100
                       : 0
 
                     return (
@@ -809,7 +920,7 @@ function CartPageContent() {
                                     alt={product.name}
                                     width={50}
                                     height={50}
-                                    className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 hover:border-yellow-500 transition-colors"
+                                    className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 hover:border-yellow-500 transition-colors bg-gray-50"
                                     priority={false} // Not priority since it's in a list
                                     quality={80}
                                   />
@@ -842,13 +953,13 @@ function CartPageContent() {
                                     <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
                                       {formatPrice(item.totalPrice / item.totalQuantity)}
                                     </span>
-                                    {product?.original_price && product.original_price > (item.totalPrice / item.totalQuantity) && (
+                                    {product?.originalPrice && product.originalPrice > (item.totalPrice / item.totalQuantity) && (
                                       <>
                                         <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
-                                          {formatPrice(product.original_price)}
+                                          {formatPrice(product.originalPrice)}
                                         </span>
                                         <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
-                                          Save {formatPrice(product.original_price - unitPrice)}
+                                          Save {formatPrice(product.originalPrice - unitPrice)}
                                         </span>
                                       </>
                                     )}
@@ -861,25 +972,62 @@ function CartPageContent() {
                                 </div>
 
                                   {/* Mobile: Quantity Controls and Actions below product details */}
-                                  <div className="flex items-center justify-between mt-1 sm:hidden">
+                                  <div className="flex flex-col gap-1 mt-1 sm:hidden">
+                                    {/* Minimum quantity indicator for products under 500 TZS */}
+                                    {product && product.price < 500 && (
+                                      <div className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1">
+                                        Min. Qty: 5
+                                      </div>
+                                    )}
+                                    <div className="flex items-center justify-between">
                                     <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, -1)}
-                                disabled={item.totalQuantity <= 1}
+                                disabled={item.totalQuantity <= 1 || (product && product.price < 500 && item.totalQuantity <= 5)}
                                         className="rounded-none h-5 w-5 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700"
                               >
                                 <Minus className="w-2.5 h-2.5" />
                               </Button>
-                                      <span className="px-1 py-0.5 text-[10px] font-medium text-neutral-950 dark:text-gray-100 min-w-[1.5rem] text-center">
-                                {item.totalQuantity}
-                              </span>
+                                      <Input
+                                        type="number"
+                                        min={product && product.price < 500 ? "5" : "1"}
+                                        value={item.totalQuantity}
+                                        onChange={(e) => {
+                                          handleQuantityInputChange(item.productId, item.variants[0]?.variantId, e.target.value)
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (product && product.price < 500) {
+                                            const key = e.key
+                                            const currentValue = (e.target as HTMLInputElement).value
+                                            const newValue = currentValue + key
+                                            const numericValue = parseInt(newValue) || 0
+                                            
+                                            // Prevent typing if it would result in a value below 5
+                                            if (numericValue > 0 && numericValue < 5) {
+                                              e.preventDefault()
+                                              setQuantityWarningItem({
+                                                productId: item.productId,
+                                                variantId: item.variants[0]?.variantId,
+                                                productName: product.name
+                                              })
+                                              setIsQuantityWarningModalOpen(true)
+                                            }
+                                          }
+                                        }}
+                                        style={{
+                                          width: `${getQuantityInputWidth(item.totalQuantity)}rem`,
+                                          minWidth: '1.5rem',
+                                          maxWidth: '4rem'
+                                        }}
+                                        className="px-1 py-0.5 text-[10px] font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-5 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out"
+                                      />
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, 1)}
-                                disabled={product && product.stock_quantity !== null && item.totalQuantity >= product.stock_quantity}
+                                disabled={stockQty !== null && item.totalQuantity >= stockQty}
                                 className="rounded-none h-5 w-5 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
                               >
                                 <Plus className="w-2.5 h-2.5" />
@@ -927,33 +1075,70 @@ function CartPageContent() {
                                           "h-5 w-5 text-red-500 hover:bg-red-50 hover:text-red-600",
                               themeClasses.buttonGhostHoverBg,
                             )}
-                          >
-                            <Trash2 className="w-2.5 h-2.5" />
+                                          >
+                                            <Trash2 className="w-2.5 h-2.5" />
                                       </Button>
                                     </div>
                                   </div>
-                                </div>
+                                    </div>
+                                  </div>
 
                                 {/* Desktop: Quantity Controls and Actions - Right side */}
                                 <div className="hidden sm:flex flex-col items-center gap-1">
+                                  {/* Minimum quantity indicator for products under 500 TZS */}
+                                  {product && product.price < 500 && (
+                                    <div className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                                      Min. Qty: 5
+                                    </div>
+                                  )}
                                   <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
                                     <Button
                                       variant="ghost"
                                       size="icon"
                                       onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, -1)}
-                                      disabled={item.totalQuantity <= 1}
+                                      disabled={item.totalQuantity <= 1 || (product && product.price < 500 && item.totalQuantity <= 5)}
                                       className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700"
                                     >
                                       <Minus className="w-3.5 h-3.5" />
                                     </Button>
-                                    <span className="px-3 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 min-w-[2.5rem] text-center">
-                                      {item.totalQuantity}
-                                    </span>
+                                    <Input
+                                      type="number"
+                                      min={product && product.price < 500 ? "5" : "1"}
+                                      value={item.totalQuantity}
+                                      onChange={(e) => {
+                                        handleQuantityInputChange(item.productId, item.variants[0]?.variantId, e.target.value)
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (product && product.price < 500) {
+                                          const key = e.key
+                                          const currentValue = (e.target as HTMLInputElement).value
+                                          const newValue = currentValue + key
+                                          const numericValue = parseInt(newValue) || 0
+                                          
+                                          // Prevent typing if it would result in a value below 5
+                                          if (numericValue > 0 && numericValue < 5) {
+                                            e.preventDefault()
+                                            setQuantityWarningItem({
+                                              productId: item.productId,
+                                              variantId: item.variants[0]?.variantId,
+                                              productName: product.name
+                                            })
+                                            setIsQuantityWarningModalOpen(true)
+                                          }
+                                        }
+                                      }}
+                                      style={{
+                                        width: `${getDesktopQuantityInputWidth(item.totalQuantity)}rem`,
+                                        minWidth: '2.5rem',
+                                        maxWidth: '6rem'
+                                      }}
+                                      className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out"
+                                    />
                                     <Button
                                       variant="ghost"
                                       size="icon"
                                       onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, 1)}
-                                      disabled={product && product.stock_quantity !== null && item.totalQuantity >= product.stock_quantity}
+                                      disabled={stockQty !== null && item.totalQuantity >= stockQty}
                                       className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
                                     >
                                       <Plus className="w-3.5 h-3.5" />
@@ -1067,10 +1252,8 @@ function CartPageContent() {
                           placeholder="Enter promo code"
                           className={cn(
                             "flex-1 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border rounded-md",
-                            themeClasses.inputBg,
-                            themeClasses.inputBorder,
-                            themeClasses.textNeutralPrimary,
-                            themeClasses.inputPlaceholder,
+                            // Use explicit classes for consistent dark/light appearance
+                            "bg-white text-neutral-900 placeholder:text-neutral-400 border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400 dark:border-neutral-800",
                           )}
                         />
                         <Button size="sm" className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600 text-xs sm:text-sm px-2 sm:px-3">
@@ -1185,7 +1368,7 @@ function CartPageContent() {
                             alt={product.name}
                             fill
                             sizes="(max-width: 640px) 33vw, (max-width: 1024px) 25vw, 12vw"
-                            className="object-cover transition-transform duration-200 group-hover:scale-105"
+                            className="object-cover transition-transform duration-200 group-hover:scale-105 bg-gray-50"
                             priority={false} // Not priority since it's in a list
                             quality={80}
                           />
@@ -1255,6 +1438,223 @@ function CartPageContent() {
         isOpen={isModalOpen}
         onClose={hideModal}
         {...modalProps}
+      />
+
+      {/* Mobile Hamburger Menu */}
+      <div className={`hamburger-overlay ${isHamburgerMenuOpen ? 'open' : ''}`} onClick={() => setIsHamburgerMenuOpen(false)} />
+      <div className={`hamburger-menu ${isHamburgerMenuOpen ? 'open' : ''}`}>
+        {/* Header with Logo and Close */}
+        <div className="flex items-center justify-between p-6 border-b border-white/10 bg-gradient-to-r from-yellow-500/10 to-orange-500/10">
+          <div className="flex items-center gap-3">
+            <Image
+              src={displayLogo}
+              alt={`${companyName} Logo`}
+              width={32}
+              height={32}
+              className="w-8 h-8 rounded-lg"
+            />
+            <div>
+              <h2 className="text-lg font-bold text-white">{companyName}</h2>
+              <p className="text-xs text-white/70">Menu</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsHamburgerMenuOpen(false)}
+            className="text-white hover:bg-white/20 rounded-full"
+          >
+            <X className="w-6 h-6" />
+          </Button>
+        </div>
+        
+        <div className="flex flex-col h-full">
+          {/* Main Navigation */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-6 space-y-6">
+              {/* Quick Actions */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Quick Actions</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <Link 
+                    href="/products"
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Package className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-xs font-medium text-white">Products</span>
+                  </Link>
+                  
+                  <Link 
+                    href="/cart"
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <div className="relative">
+                      <ShoppingCart className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                      {cartTotalItems > 0 && (
+                        <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-black">
+                          {cartTotalItems}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-white">Cart</span>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Account Section */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Account</h3>
+                <div className="space-y-2">
+                  {isAuthenticated ? (
+                    <>
+                      <Link 
+                        href="/account"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <User className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Account</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/orders"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Orders</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/wishlist"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Heart className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Wishlist</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/messages"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <MessageSquare className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Messages</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/payment"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <CreditCard className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Payment</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/coins"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Coins</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/coupons"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Ticket className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Coupons</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/settings"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Settings className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Settings</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-center text-white/60 text-sm mb-2">
+                        Sign in to access your account
+                      </div>
+                      <Button 
+                        className="w-full bg-yellow-500 text-black hover:bg-yellow-400 font-medium py-3 rounded-xl"
+                        onClick={() => {
+                          setIsHamburgerMenuOpen(false)
+                          openAuthModal('login')
+                        }}
+                      >
+                        Sign In
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        className="w-full border-white/30 text-white hover:bg-white/10 py-3 rounded-xl"
+                        onClick={() => {
+                          setIsHamburgerMenuOpen(false)
+                          openAuthModal('register')
+                        }}
+                      >
+                        Create Account
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer with User Info */}
+          <div className="p-6 border-t border-white/10 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
+            {isAuthenticated && (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/10">
+                <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center">
+                  <span className="text-black font-bold text-sm">
+                    {user?.email?.charAt(0).toUpperCase() || 'U'}
+                  </span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-white font-medium text-sm">{user?.email}</p>
+                  <p className="text-white/60 text-xs">Welcome back!</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Quantity Warning Modal */}
+      <ValidationModal
+        isOpen={isQuantityWarningModalOpen}
+        onClose={() => setIsQuantityWarningModalOpen(false)}
+        title="Minimum Quantity Required"
+        message={`For products under 500 TZS, the minimum quantity is 5. You cannot reduce the quantity of "${quantityWarningItem?.productName}" below 5. We recommend visiting our physical shop for smaller quantities or contact our support team for assistance.`}
+        type="warning"
+        buttonText="Visit Our Shop"
+        cancelText="Contact Support"
+        showCancelButton
+        onConfirm={() => {
+          // Redirect to shop location or contact page
+          window.open('/help', '_blank')
+          setIsQuantityWarningModalOpen(false)
+          setQuantityWarningItem(null)
+        }}
+        onCancel={() => {
+          // Open contact support
+          window.open('mailto:support@honic.co?subject=Quantity Inquiry&body=I need assistance with ordering smaller quantities of products under 500 TZS', '_blank')
+          setIsQuantityWarningModalOpen(false)
+          setQuantityWarningItem(null)
+        }}
+        showCloseButton
       />
     </div>
   )

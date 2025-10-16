@@ -37,12 +37,11 @@ export async function GET(request: NextRequest) {
     .order('created_at', { ascending: false })
 
   if (cartErr) {
-    console.error('Cart fetch error:', cartErr)
     return NextResponse.json({ error: 'Failed to fetch cart' }, { status: 500 })
   }
 
   // Transform and group data for frontend consumption
-  const rawCartItems = (data || []).map(item => ({
+  const rawCartItems = (data || []).map((item: any) => ({
     id: item.id,
     productId: item.product_id,
     variantId: item.variant_id,
@@ -58,7 +57,7 @@ export async function GET(request: NextRequest) {
   // Group cart items by product ID
   const groupedCartItems: { [key: number]: any } = {}
   
-  rawCartItems.forEach(item => {
+  rawCartItems.forEach((item: any) => {
     const productId = item.productId
     
     if (!groupedCartItems[productId]) {
@@ -187,7 +186,6 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (pErr || !product) {
-    console.error('Product fetch error:', pErr)
     return NextResponse.json({ error: 'Product not found' }, { status: 404 })
   }
 
@@ -282,7 +280,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (upsertErr) {
-      console.warn('RPC upsert_cart_item failed, falling back to Supabase upsert:', upsertErr.message || upsertErr)
       
       const finalPrice = variantPrice || product.price
       logger.log('🛒 DEBUG: Using price for database:', finalPrice, 'variantPrice:', variantPrice, 'product.price:', product.price)
@@ -301,7 +298,6 @@ export async function POST(request: NextRequest) {
         })
 
       if (upsertFallbackErr) {
-        console.error('Cart upsert fallback error:', upsertFallbackErr)
         return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
       }
     }
@@ -368,17 +364,14 @@ export async function POST(request: NextRequest) {
     upsertResult = data
     
     if (error) {
-      console.error('❌ RPC upsert error:', error)
     } else {
       logger.log('✅ RPC upsert successful:', data)
     }
   } catch (e) {
     upsertErr = e
-    console.error('❌ RPC upsert exception:', e)
   }
 
   if (upsertErr) {
-    console.warn('RPC upsert_cart_item failed, falling back to Supabase upsert:', upsertErr.message || upsertErr)
 
     // ⚡ Use Supabase upsert instead of manual SELECT → INSERT
     // This is atomic and safe under concurrency
@@ -399,7 +392,6 @@ export async function POST(request: NextRequest) {
       })
 
     if (upsertFallbackErr) {
-      console.error('Cart upsert fallback error:', upsertFallbackErr)
       return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
     }
   }
@@ -435,7 +427,6 @@ export async function PATCH(request: NextRequest) {
       .eq('user_id', user.id)
 
     if (delErr) {
-      console.error('Cart delete error:', delErr)
       return NextResponse.json({ error: 'Failed to remove item' }, { status: 500 })
     }
   } else {
@@ -447,7 +438,6 @@ export async function PATCH(request: NextRequest) {
       .eq('user_id', user.id)
 
     if (updErr) {
-      console.error('Cart update error:', updErr)
       return NextResponse.json({ error: 'Failed to update item' }, { status: 500 })
     }
   }
@@ -475,7 +465,6 @@ export async function DELETE(request: NextRequest) {
     .eq('user_id', user.id)
 
   if (error) {
-    console.error('Cart clear error:', error)
     return NextResponse.json({ error: 'Failed to clear cart' }, { status: 500 })
   }
 

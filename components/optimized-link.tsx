@@ -41,7 +41,8 @@ export function OptimizedLink({
   const router = useRouter()
   const { prefetchRoute } = useRoutePrefetch()
   const [isPrefetched, setIsPrefetched] = useState(false)
-  const [isHovered, setIsHovered] = useState(false)
+  // Avoid state updates on rapid hover/leave which can cascade during list reorders
+  const isHoveredRef = useRef(false)
   const linkRef = useRef<HTMLAnchorElement>(null)
   const prefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -52,14 +53,12 @@ export function OptimizedLink({
     try {
       await prefetchRoute(href, priority)
       setIsPrefetched(true)
-    } catch (error) {
-      console.warn(`Failed to prefetch ${href}:`, error)
-    }
+    } catch (error) {}
   }, [href, priority, prefetchRoute, isPrefetched])
 
   // Handle mouse enter (hover prefetch)
   const handleMouseEnter = useCallback(() => {
-    setIsHovered(true)
+    isHoveredRef.current = true
     onHover?.()
 
     if (prefetch === 'hover' || prefetch === 'always') {
@@ -72,7 +71,7 @@ export function OptimizedLink({
 
   // Handle mouse leave
   const handleMouseLeave = useCallback(() => {
-    setIsHovered(false)
+    isHoveredRef.current = false
     
     if (prefetchTimeoutRef.current) {
       clearTimeout(prefetchTimeoutRef.current)
@@ -152,7 +151,7 @@ export function OptimizedLink({
       onClick={handleClick}
       data-prefetched={isPrefetched}
       data-priority={priority}
-      data-hovered={isHovered}
+      data-hovered={isHoveredRef.current}
       {...props}
     >
       {children}
@@ -181,9 +180,7 @@ export function useOptimizedNavigation() {
     if (prefetch) {
       try {
         await prefetchRoute(href, priority)
-      } catch (error) {
-        console.warn(`Failed to prefetch ${href}:`, error)
-      }
+      } catch (error) {}
     }
 
     if (replace) {
@@ -207,9 +204,7 @@ export function useOptimizedNavigation() {
     // Prefetch first
     try {
       await prefetchRoute(href, priority)
-    } catch (error) {
-      console.warn(`Failed to prefetch ${href}:`, error)
-    }
+    } catch (error) {}
 
     // Navigate after delay
     setTimeout(() => {

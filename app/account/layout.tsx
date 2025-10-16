@@ -3,11 +3,9 @@
 import { UserRoute } from '@/components/protected-route'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ShoppingBag, MessageCircle, CreditCard, Heart, Settings, User, ChevronRight, Bookmark } from 'lucide-react'
+import { ShoppingBag, MessageCircle, CreditCard, Heart, Settings, User, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
-import { useRouter } from 'next/navigation'
 
 export default function AccountLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -17,13 +15,11 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
     { href: '/account/messages', label: 'Messages', icon: MessageCircle },
     { href: '/account/payment', label: 'Payment', icon: CreditCard },
     { href: '/account/wishlist', label: 'Wishlist', icon: Heart },
-    { href: '/account/saved-later', label: 'Saved Later', icon: Bookmark },
     { href: '/account/settings', label: 'Settings', icon: Settings },
   ]
 
   const current = nav.find(n => n.href === pathname) || nav[0]
-  const { user, signOut } = useAuth()
-  const router = useRouter()
+  const { user } = useAuth()
   const userName = (user?.user_metadata?.full_name as string) || (user?.email?.split('@')[0] ?? 'User')
   const initials = userName.split(' ').map(s => s[0]).join('').toUpperCase()
   const segments = pathname
@@ -42,9 +38,6 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
           {/* Sidebar */}
           <aside className="lg:col-span-3">
             <div className="sticky top-20 rounded-xl border bg-white/70 dark:bg-gray-900/70 backdrop-blur p-3">
-              <div className="mb-3 flex items-center justify-between">
-                <Button variant="ghost" size="sm" onClick={() => router.push('/products')}>← Back to Products</Button>
-              </div>
               <nav className="space-y-1">
                 {nav.map(({ href, label, icon: Icon }) => {
                   const active = pathname === href
@@ -83,7 +76,6 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
                   <AvatarImage src={user?.user_metadata?.avatar_url as string | undefined} />
                   <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
-                <Button variant="outline" size="sm" onClick={async () => { await signOut(); router.replace('/') }}>Log out</Button>
               </div>
             </div>
             <nav aria-label="Breadcrumb" className="mb-6 text-sm text-gray-500 dark:text-gray-400">
@@ -111,7 +103,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
             {/* Top navigation tabs (consistent across account pages) */}
             <div className="mb-6 border-b">
               <div className="flex flex-wrap gap-2">
-                {[ '/account', '/account/orders', '/account/messages', '/account/payment', '/account/wishlist', '/account/saved-later' ].map((href) => {
+                {[ '/account', '/account/orders', '/account/messages', '/account/payment', '/account/wishlist' ].map((href) => {
                   const cfg = nav.find(n => n.href === href)!
                   const active = pathname === href
                   return (

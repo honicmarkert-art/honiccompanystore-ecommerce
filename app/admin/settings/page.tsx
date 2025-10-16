@@ -635,7 +635,7 @@ export default function SettingsPage() {
 
   const handleResetCompanyLogo = async () => {
     await resetCompanyLogo()
-    setSettings(prev => ({ ...prev, companyLogo: "/placeholder-logo.png" }))
+    setSettings(prev => ({ ...prev, companyLogo: "/android-chrome-512x512.png" }))
     toast({
       title: "Reset",
       description: "Company logo reset to default",

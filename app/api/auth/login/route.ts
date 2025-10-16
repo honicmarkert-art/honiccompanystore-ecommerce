@@ -5,9 +5,12 @@ import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { logAuthFailure } from '@/lib/security-monitor'
 import { logger } from '@/lib/logger'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -129,6 +132,9 @@ export async function POST(request: NextRequest) {
     logger.log('Access token length:', data.session.access_token.length)
     logger.log('Refresh token length:', data.session.refresh_token.length)
     
+    // Generate CSRF token for additional security
+    const csrfToken = crypto.randomUUID()
+    
     response.cookies.set('sb-access-token', data.session.access_token, {
       httpOnly: true,
       secure: isProd,
@@ -152,6 +158,15 @@ export async function POST(request: NextRequest) {
       sameSite: 'lax',
       path: '/',
       maxAge: userRememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7 // Same as refresh token
+    })
+    
+    // Set CSRF token for additional security
+    response.cookies.set('csrf-token', csrfToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'strict', // Stricter for CSRF token
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7 // 7 days
     })
     
     logger.log('Auth cookies set successfully')

@@ -168,7 +168,10 @@ export function useCart() {
     setIsLoading(true)
     try {
       const response = await fetch('/api/cart', {
-        credentials: 'include'
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        }
       })
       
       if (response.ok) {
@@ -328,7 +331,6 @@ export function useCart() {
     variantSku?: string,
     variantImage?: string
   ) => {
-    // Guests are allowed: we update local cart and skip server calls below.
     
     // Normalize variant id so simple products always use a single key
     const normalizedVariantId: string = buildCanonicalVariantId(variantId, variantAttributes)
@@ -513,7 +515,9 @@ export function useCart() {
 
           const response = await fetch('/api/cart', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json'
+            },
             credentials: 'include',
             body: JSON.stringify(requestBody)
           })
@@ -541,62 +545,8 @@ export function useCart() {
             })
           }
         } else {
-          // Handle auth/session edge cases gracefully
-          if (response.status === 401) {
-            try {
-              // Attempt a silent session refresh, then retry once
-              await fetch('/api/auth/session', { credentials: 'include' })
-              const retry = await fetch('/api/cart', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify(requestBody)
-              })
-              if (retry.ok) {
-                const retryData = await retry.json()
-                await loadServerCart()
-                if (retryData.partialStock) {
-                  const { partialStock } = retryData
-                  toast({
-                    title: "Partial Stock Added",
-                    description: `${retryData.message}\n\n${partialStock.restockMessage}\n\n${partialStock.customerCare.message}\n\nContact: ${partialStock.customerCare.contactInfo.email} | ${partialStock.customerCare.contactInfo.phone}`,
-                    variant: "default",
-                    duration: 8000,
-                  })
-                } else {
-                  toast({ title: "Added to cart", description: "Item has been added to your cart successfully.", duration: 500 })
-                }
-                return
-              }
-            } catch {}
-
-            // Still unauthorized after retry
-            if (!isAuthenticated) {
-              // Guest: keep optimistic local cart and inform user
-              toast({
-                title: "You're signed out",
-                description: "We kept the item in your temporary cart. Please sign in to sync.",
-                variant: "destructive",
-                duration: 6000,
-              })
-              // Do not rollback; leave optimistic state as-is
-              return
-            } else {
-              // Auth state says logged-in but server refused: treat as transient server issue
-              toast({
-                title: "Error",
-                description: "Failed to sync cart. We'll keep your item locally and try again.",
-                variant: "destructive",
-                duration: 6000,
-              })
-              // Keep optimistic state; schedule a background reload attempt
-              setTimeout(() => { loadServerCart().catch(() => {}) }, 1500)
-              return
-            }
-          }
-
           const errorData = await response.json()
-
+          
           if (errorData.error === 'Product out of stock') {
             toast({
               title: "Out of Stock",
@@ -613,7 +563,7 @@ export function useCart() {
             })
           }
 
-          // For other errors, rollback optimistic update
+          // Rollback optimistic update
           await loadServerCart()
         }
       } catch (error) {
@@ -701,7 +651,9 @@ export function useCart() {
       try {
         const response = await fetch('/api/cart', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json'
+          },
           credentials: 'include',
           body: JSON.stringify({
             itemId: item.id,
@@ -785,7 +737,9 @@ export function useCart() {
       try {
         const response = await fetch('/api/cart', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json'
+          },
           credentials: 'include',
           body: JSON.stringify({
             itemId: item.id,
@@ -841,7 +795,10 @@ export function useCart() {
       try {
         const response = await fetch('/api/cart', {
           method: 'DELETE',
-          credentials: 'include'
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json'
+          }
         })
 
         if (!response.ok) {

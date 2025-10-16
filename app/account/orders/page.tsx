@@ -49,45 +49,171 @@ function OrdersPageContent() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        let res = await fetch('/api/orders/my', { credentials: 'include' })
-        if (res.status === 401) {
-          // Try to refresh session and retry once
-          console.warn('[Orders] 401 – attempting session refresh')
-          await fetch('/api/auth/session', { credentials: 'include' })
-          res = await fetch('/api/orders/my', { credentials: 'include' })
-        }
-        if (!res.ok) throw new Error('Failed')
-        const json = await res.json()
-        const mapped: Order[] = (json.orders || []).map((o: any) => ({
-          id: String(o.id),
-          orderNumber: o.order_number || o.reference_id || `ORD-${o.id}`,
-          date: new Date(o.created_at),
-          status: (o.status || 'pending') as any,
-          total: Number(o.total_amount || o.total || 0),
-          items: (o.items || []).length || Number(o.items_count || 0),
-          shippingAddress: typeof o.shipping_address === 'string' ? o.shipping_address : JSON.stringify(o.shipping_address || {}),
-          paymentMethod: o.payment_method || '-',
-          items: (o.items || []).map((it: any, idx: number) => ({
-            id: String(it.id || idx),
-            name: it.name || 'Item',
-            price: Number(it.price || 0),
-            quantity: Number(it.quantity || 1),
-            image: it.image || '/placeholder.svg'
-          }))
-        }))
-        setOrders(mapped)
-        setFilteredOrders(mapped)
-      } catch (e) {
-        console.warn('[Orders] Failed to load:', e)
-        setOrders([])
-        setFilteredOrders([])
-      } finally {
-        setIsLoading(false)
+    // Mock orders data
+    const mockOrders: Order[] = [
+      {
+        id: '1',
+        orderNumber: 'ORD-2024-001',
+        date: new Date('2024-01-15'),
+        status: 'delivered',
+        total: 156.99,
+        items: 3,
+        shippingAddress: '123 Main St, Dar es Salaam, Tanzania',
+        paymentMethod: 'Credit Card',
+        items: [
+          {
+            id: '1',
+            name: 'Arduino Uno R3',
+            price: 89.99,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '2',
+            name: 'DHT22 Sensor',
+            price: 34.50,
+            quantity: 2,
+            image: '/placeholder.jpg'
+          }
+        ]
+      },
+      {
+        id: '2',
+        orderNumber: 'ORD-2024-002',
+        date: new Date('2024-01-10'),
+        status: 'shipped',
+        total: 89.50,
+        items: 2,
+        shippingAddress: '456 Oak Ave, Mwanza, Tanzania',
+        paymentMethod: 'Mobile Money',
+        items: [
+          {
+            id: '3',
+            name: 'SG90 Servo Motor',
+            price: 45.25,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '4',
+            name: 'LED Strip',
+            price: 44.25,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          }
+        ]
+      },
+      {
+        id: '3',
+        orderNumber: 'ORD-2024-003',
+        date: new Date('2024-01-05'),
+        status: 'processing',
+        total: 234.75,
+        items: 5,
+        shippingAddress: '789 Pine Rd, Arusha, Tanzania',
+        paymentMethod: 'Bank Transfer',
+        items: [
+          {
+            id: '5',
+            name: 'Raspberry Pi 4',
+            price: 89.99,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '6',
+            name: 'Camera Module',
+            price: 29.99,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '7',
+            name: 'MicroSD Card',
+            price: 19.99,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '8',
+            name: 'GPIO Extension',
+            price: 14.99,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '9',
+            name: 'Case Enclosure',
+            price: 24.99,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          }
+        ]
+      },
+      {
+        id: '4',
+        orderNumber: 'ORD-2024-004',
+        date: new Date('2024-01-01'),
+        status: 'pending',
+        total: 67.25,
+        items: 2,
+        shippingAddress: '321 Elm St, Dodoma, Tanzania',
+        paymentMethod: 'Credit Card',
+        items: [
+          {
+            id: '10',
+            name: 'Breadboard Kit',
+            price: 22.50,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '11',
+            name: 'Jumper Wires',
+            price: 44.75,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          }
+        ]
+      },
+      {
+        id: '5',
+        orderNumber: 'ORD-2023-015',
+        date: new Date('2023-12-20'),
+        status: 'cancelled',
+        total: 123.45,
+        items: 3,
+        shippingAddress: '654 Maple Dr, Zanzibar, Tanzania',
+        paymentMethod: 'Mobile Money',
+        items: [
+          {
+            id: '12',
+            name: 'LCD Display',
+            price: 45.00,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '13',
+            name: 'Keypad Module',
+            price: 38.45,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          },
+          {
+            id: '14',
+            name: 'Battery Pack',
+            price: 40.00,
+            quantity: 1,
+            image: '/placeholder.jpg'
+          }
+        ]
       }
-    }
-    load()
+    ]
+
+    setOrders(mockOrders)
+    setFilteredOrders(mockOrders)
+    setIsLoading(false)
   }, [])
 
   // Filter orders based on search and status

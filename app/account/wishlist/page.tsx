@@ -285,7 +285,7 @@ function WishlistPageContent() {
               <img
                 src={item.image}
                 alt={item.name}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
               />
               {item.originalPrice && item.originalPrice > item.price && (
                 <Badge className="absolute top-2 left-2 bg-red-500">

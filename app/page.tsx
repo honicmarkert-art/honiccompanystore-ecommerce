@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +18,7 @@ import {
   ShoppingCart, 
   User, 
   Menu,
+  X,
   Play,
   Shield,
   FileText,
@@ -28,11 +31,19 @@ import {
   Zap,
   Cpu,
   CircuitBoard,
+  Package,
+  ChevronRight,
   Bot,
   Lightbulb,
   Mail,
   Phone,
   MapPin,
+  MessageSquare,
+  CreditCard,
+  Coins,
+  Ticket,
+  Settings,
+  Heart,
   Facebook,
   Twitter,
   Instagram,
@@ -43,7 +54,6 @@ import {
   CheckCircle,
   Building2
 } from 'lucide-react'
-import Image from 'next/image';
 import { useRouter } from 'next/navigation'
 import { useCompanyContext } from '@/components/company-provider'
 import { UserProfile } from '@/components/user-profile'
@@ -73,8 +83,13 @@ export default function LandingPage() {
     serviceStemImages,
     serviceHomeImages,
     serviceImageRotationTime,
-    settings: adminSettings
+    settings: adminSettings,
+    isLoaded: companyLoaded
   } = useCompanyContext()
+  
+  // Fallback logo system - use local logo if API is not loaded or logo is not available
+  const fallbackLogo = "/android-chrome-512x512.png"
+  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
   const { cartTotalItems } = useCart()
@@ -85,6 +100,7 @@ export default function LandingPage() {
   const [adRotation, setAdRotation] = useState<number>(5000)
   const [isPromotionalCartOpen, setIsPromotionalCartOpen] = useState(false)
   const [promotionalProducts, setPromotionalProducts] = useState<any[]>([])
+  const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
 
   // Debug logging for service images and hero background
   useEffect(() => {
@@ -117,18 +133,15 @@ export default function LandingPage() {
             const adsData = await adsRes.json()
             setAds(adsData)
           } else {
-            console.warn('⚠️ [Advertisements] Failed to fetch home ads:', adsRes.status)
           }
           
           if (rotRes.ok) {
             const rotationData = await rotRes.json()
             setAdRotation(rotationData)
           } else {
-            console.warn('⚠️ [Advertisements] Failed to fetch rotation time:', rotRes.status)
           }
         }
       } catch (error) {
-        console.error('❌ [Advertisements] Error fetching home ads:', error)
       }
     }
     loadAds()
@@ -155,7 +168,6 @@ export default function LandingPage() {
           setPromotionalProducts(selectedProducts)
         }
       } catch (error) {
-        console.error('Error fetching promotional products:', error)
       }
     }
 
@@ -192,7 +204,6 @@ export default function LandingPage() {
           setPromotionalProducts(selectedProducts)
         }
       } catch (error) {
-        console.error('Error rotating promotional products:', error)
       }
     }, 10000) // 10 seconds
 
@@ -375,7 +386,7 @@ export default function LandingPage() {
               {/* Mobile Logo and Company Name */}
               <div className="flex items-center cursor-pointer" onClick={() => router.push('/')}>
                 <Image 
-                  src={companyLogo} 
+                  src={displayLogo} 
                   alt={`${companyName} Logo`} 
                   width={32} 
                   height={32} 
@@ -399,6 +410,14 @@ export default function LandingPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Hamburger Menu Button */}
+                <button
+                  onClick={() => setIsHamburgerMenuOpen(true)}
+                  className="p-1 text-white hover:text-yellow-400 transition-colors"
+                >
+                  <Menu className="w-6 h-6" />
+                </button>
 
                 {/* Account */}
                 {user ? (
@@ -454,7 +473,7 @@ export default function LandingPage() {
               <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push('/')}>
                 <div className="flex items-center gap-1 sm:gap-2">
                   <Image 
-                    src={companyLogo} 
+                    src={displayLogo} 
                     alt={`${companyName} Logo`} 
                     width={48} 
                     height={48}
@@ -832,7 +851,7 @@ export default function LandingPage() {
             <div className="lg:col-span-2">
               <div className="flex items-center gap-1 sm:gap-2 mb-4">
                   <Image 
-                  src={companyLogo} 
+                  src={displayLogo} 
                   alt={`${companyName} Logo`} 
                   width={48} 
                   height={48}
@@ -1028,6 +1047,197 @@ export default function LandingPage() {
         products={promotionalProducts}
       />
 
+      {/* Mobile Hamburger Menu */}
+      <div className={`hamburger-overlay ${isHamburgerMenuOpen ? 'open' : ''}`} onClick={() => setIsHamburgerMenuOpen(false)} />
+      <div className={`hamburger-menu ${isHamburgerMenuOpen ? 'open' : ''}`}>
+        {/* Header with Logo and Close */}
+        <div className="flex items-center justify-between p-6 border-b border-white/10 bg-gradient-to-r from-yellow-500/10 to-orange-500/10">
+          <div className="flex items-center gap-3">
+            <Image
+              src={displayLogo}
+              alt={`${companyName} Logo`}
+              width={32}
+              height={32}
+              className="w-8 h-8 rounded-lg"
+            />
+            <div>
+              <h2 className="text-lg font-bold text-white">{companyName}</h2>
+              <p className="text-xs text-white/70">Menu</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsHamburgerMenuOpen(false)}
+            className="text-white hover:bg-white/20 rounded-full"
+          >
+            <X className="w-6 h-6" />
+          </Button>
+        </div>
+        
+        <div className="flex flex-col h-full">
+          {/* Main Navigation */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-6 space-y-6">
+              {/* Quick Actions */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Quick Actions</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <Link 
+                    href="/products"
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Package className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-xs font-medium text-white">Products</span>
+                  </Link>
+                  
+                  <Link 
+                    href="/cart"
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <div className="relative">
+                      <ShoppingCart className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                      {cartTotalItems > 0 && (
+                        <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-black">
+                          {cartTotalItems}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-white">Cart</span>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Account Section */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Account</h3>
+                <div className="space-y-2">
+                  {user ? (
+                    <>
+                      <Link 
+                        href="/account"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <User className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Account</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/orders"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Orders</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/wishlist"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Heart className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Wishlist</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/messages"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <MessageSquare className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Messages</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/payment"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <CreditCard className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Payment</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/coins"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Coins</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/coupons"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Ticket className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">My Coupons</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/account/settings"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Settings className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Settings</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-center text-white/60 text-sm mb-2">
+                        Sign in to access your account
+                      </div>
+                      <Button 
+                        className="w-full bg-yellow-500 text-black hover:bg-yellow-400 font-medium py-3 rounded-xl"
+                        onClick={() => {
+                          setIsHamburgerMenuOpen(false)
+                          openAuthModal('login')
+                        }}
+                      >
+                        Sign In
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        className="w-full border-white/30 text-white hover:bg-white/10 py-3 rounded-xl"
+                        onClick={() => {
+                          setIsHamburgerMenuOpen(false)
+                          openAuthModal('register')
+                        }}
+                      >
+                        Create Account
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer with User Info */}
+          <div className="p-6 border-t border-white/10 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
+            {user && (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/10">
+                <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center">
+                  <span className="text-black font-bold text-sm">
+                    {user?.email?.charAt(0).toUpperCase() || 'U'}
+                  </span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-white font-medium text-sm">{user?.email}</p>
+                  <p className="text-white/60 text-xs">Welcome back!</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
     </div>
   )

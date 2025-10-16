@@ -34,15 +34,8 @@ export function copyCookies(source: NextResponse, target: NextResponse) {
 
 // Helper to validate authentication in API routes
 export async function validateAuth(request: NextRequest) {
-  // Check for explicit logout flag first - if set, user should remain logged out
-  const explicitLogout = request.cookies.get('explicit-logout')?.value
-  if (explicitLogout === 'true') {
-    logger.log('Explicit logout flag found in validateAuth, returning unauthenticated')
-    const { supabase, response } = getSupabase(request)
-    return { user: null, error: 'User has explicitly logged out', response, supabase }
-  }
-  
   const { supabase, response } = getSupabase(request)
+  const explicitLogout = request.cookies.get('explicit-logout')?.value === 'true'
   
   // First try to get the current session
   let { data: { session }, error: sessionError } = await supabase.auth.getSession()
@@ -54,6 +47,12 @@ export async function validateAuth(request: NextRequest) {
 
   // If no session, try to refresh
   if (!session) {
+    // Respect explicit logout only when there is truly no active session
+    if (explicitLogout) {
+      logger.log('Explicit logout cookie honored - no active session')
+      return { user: null, error: 'User has explicitly logged out', response, supabase }
+    }
+
     const refreshToken = request.cookies.get('sb-refresh-token')?.value
     if (refreshToken) {
       const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession({
@@ -62,11 +61,60 @@ export async function validateAuth(request: NextRequest) {
       
       if (refreshError || !refreshedSession) {
         console.error('Refresh error:', refreshError)
+        // Fallback: try Authorization Bearer header
+        const authHeader = request.headers.get('authorization') || request.headers.get('Authorization')
+        const bearer = authHeader?.startsWith('Bearer ')
+          ? authHeader.substring('Bearer '.length)
+          : null
+        if (bearer) {
+          try {
+            const headerClient = createServerClient(
+              process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+              {
+                global: { headers: { Authorization: `Bearer ${bearer}` } },
+              }
+            )
+            const { data: userData, error: userErr } = await headerClient.auth.getUser()
+            if (!userErr && userData.user) {
+              // Clear stale explicit-logout if present
+              if (explicitLogout) {
+                try { response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 }) } catch {}
+              }
+              return { user: userData.user, error: null, response, supabase: headerClient as any }
+            }
+          } catch (e) {
+            console.error('Authorization header validation failed:', e)
+          }
+        }
         return { user: null, error: 'Authentication failed', response, supabase }
       }
       
       session = refreshedSession
     } else {
+      // Final fallback: Authorization header
+      const authHeader = request.headers.get('authorization') || request.headers.get('Authorization')
+      const bearer = authHeader?.startsWith('Bearer ')
+        ? authHeader.substring('Bearer '.length)
+        : null
+      if (bearer) {
+        try {
+          const headerClient = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+            { global: { headers: { Authorization: `Bearer ${bearer}` } } }
+          )
+          const { data: userData, error: userErr } = await headerClient.auth.getUser()
+          if (!userErr && userData.user) {
+            if (explicitLogout) {
+              try { response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 }) } catch {}
+            }
+            return { user: userData.user, error: null, response, supabase: headerClient as any }
+          }
+        } catch (e) {
+          console.error('Authorization header validation failed:', e)
+        }
+      }
       return { user: null, error: 'No valid session', response, supabase }
     }
   }
@@ -74,6 +122,13 @@ export async function validateAuth(request: NextRequest) {
   const user = session.user
   if (!user) {
     return { user: null, error: 'User not found', response, supabase }
+  }
+
+  // If we successfully have a session, clear any stale explicit-logout flag
+  if (explicitLogout) {
+    try {
+      response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 })
+    } catch {}
   }
 
   return { user, error: null, response, supabase }

@@ -86,22 +86,24 @@
     display: block;
   }
   
-  /* Mobile hamburger menu styles */
+  /* Mobile hamburger menu styles - Modern E-commerce Design */
   .hamburger-menu {
     position: fixed;
     top: 0;
     left: -100%;
-    width: 280px;
+    width: 320px;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.95);
-    backdrop-filter: blur(10px);
-    transition: left 0.3s ease;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.98) 100%);
+    backdrop-filter: blur(20px);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 1000;
-    overflow-y: auto;
+    overflow: hidden;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.3);
   }
   
   .hamburger-menu.open {
     left: 0;
+    transform: translateX(0);
   }
   
   .hamburger-overlay {
@@ -110,11 +112,12 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
     z-index: 999;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.3s ease, visibility 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
   .hamburger-overlay.open {

@@ -101,7 +101,11 @@ export default function ProductDetailPage() {
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { products, isLoading, preloadProducts, fetchFullProductDetails } = useProducts()
   const { addItem, isInCart, cartTotalItems } = useCart() // Use useCart hook
-  const { companyName, companyLogo, companyColor } = useCompanyContext()
+  const { companyName, companyLogo, companyColor, isLoaded: companyLoaded } = useCompanyContext()
+  
+  // Fallback logo system - use local logo if API is not loaded or logo is not available
+  const fallbackLogo = "/android-chrome-512x512.png"
+  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { user, isAuthenticated } = useAuth() // Add auth context
   const { openAuthModal } = useGlobalAuthModal()
   const { formatPrice, currency, setCurrency } = useCurrency()
@@ -113,12 +117,10 @@ export default function ProductDetailPage() {
   const productId = leadingDigits
   
   // Get return URL from search params to preserve search state
-  const returnTo = searchParams?.get('returnTo') || '/products'
+  const returnTo = searchParams?.get('returnTo') || (typeof window !== 'undefined' ? document.referrer || '/products' : '/products')
   
   // Debug: Log the return URL to see what we're getting
-  useEffect(() => {
-    // debug removed
-  }, [returnTo, searchParams])
+  useEffect(() => {}, [returnTo, searchParams])
   
   // Validate product ID (but don't return early - violates Rules of Hooks!)
   const isValidProductId = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
@@ -1834,6 +1836,17 @@ export default function ProductDetailPage() {
     setIsBulkOrderDialogOpen(true)
   }
 
+  // Calculate dynamic width for quantity input based on number length
+  const getQuantityInputWidth = (qty: number) => {
+    const numDigits = qty.toString().length
+    const baseWidth = 2.5 // Base width in rem
+    const digitWidth = 0.8 // Width per digit in rem
+    const maxWidth = 6 // Maximum width in rem
+    
+    const calculatedWidth = baseWidth + (numDigits - 1) * digitWidth
+    return Math.min(calculatedWidth, maxWidth)
+  }
+
   const handlePriceAlertClick = () => {
     if (!isAuthenticated) {
       toast({
@@ -2025,7 +2038,7 @@ export default function ProductDetailPage() {
             )}
           >
             <Image
-              src={companyLogo}
+              src={displayLogo}
               alt={`${companyName} Logo`}
               width={48}
               height={48}
@@ -2152,7 +2165,9 @@ export default function ProductDetailPage() {
                 variant="outline"
                 size="icon"
                 className={cn(
-                  "relative border-yellow-500 hover:bg-yellow-500 hover:text-white hover:border-yellow-500 rounded-full transition-colors",
+                  "relative rounded-full transition-colors border-yellow-500 hover:bg-yellow-500 hover:text-white hover:border-yellow-500",
+                  // Smaller on mobile
+                  "w-7 h-7 p-0 sm:w-10 sm:h-10",
                   backgroundColor === "white" ? "bg-white text-neutral-950" : "bg-gray-800 text-white"
                 )}
                 suppressHydrationWarning
@@ -2160,7 +2175,7 @@ export default function ProductDetailPage() {
                 <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" />
                 <span className="sr-only">Shopping Cart</span>
                 {cartTotalItems > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-orange-500 text-white text-xs font-bold" suppressHydrationWarning>
+                  <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-orange-500 text-white text-[10px] sm:text-xs font-bold" suppressHydrationWarning>
                     {cartTotalItems > 99 ? '99+' : cartTotalItems}
                 </span>
                 )}
@@ -2169,7 +2184,15 @@ export default function ProductDetailPage() {
 
             {/* User Profile - Added to product detail page */}
             {isAuthenticated ? (
-              <UserProfile />
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:flex flex-col leading-tight">
+                  <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Hi</span>
+                  <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[120px]">
+                    {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                  </span>
+                </div>
+                <UserProfile />
+              </div>
             ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -2193,9 +2216,8 @@ export default function ProductDetailPage() {
                   align="end"
                   className={cn(
                     "w-56",
-                    darkHeaderFooterClasses.dialogSheetBg,
-                    darkHeaderFooterClasses.textNeutralPrimary,
-                    darkHeaderFooterClasses.dialogSheetBorder,
+                    // Force solid backgrounds in both themes
+                    "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
                   )}
                 >
                   <div className="p-2 flex flex-col gap-2">
@@ -3315,10 +3337,22 @@ export default function ProductDetailPage() {
 
             {/* Quantity Selector and Add to Cart/Buy Now */}
             <div className="space-y-2 mt-4 sm:mt-6">
+              {/* Minimum quantity indicator for products under 500 TZS - Mobile: above, Desktop: inline */}
+              {product && product.price < 500 && (
+                <div className="text-sm text-amber-600 dark:text-amber-400 font-medium sm:hidden">
+                  Min. Qty: 5
+                </div>
+              )}
               <div className="flex items-center gap-2 sm:gap-4">
                 <Label htmlFor="quantity" className={cn("text-sm sm:text-base font-semibold", themeClasses.mainText)}>
                 Quantity:
               </Label>
+              {/* Minimum quantity indicator for products under 500 TZS - Desktop only */}
+              {product && product.price < 500 && (
+                <div className="hidden sm:block text-sm text-amber-600 dark:text-amber-400 font-medium">
+                  Min. Qty: 5
+                </div>
+              )}
               <div
                 className={cn(
                   "flex items-center border rounded-md overflow-hidden max-h-8 sm:max-h-9",
@@ -3355,12 +3389,17 @@ export default function ProductDetailPage() {
                     
                     setQuantity(Math.max(minQuantity, newQuantity))
                   }}
+                  style={{
+                    width: `${getQuantityInputWidth(quantity)}rem`,
+                    minWidth: '2.5rem',
+                    maxWidth: '6rem'
+                  }}
                   className={cn(
-                    "w-12 sm:w-16 text-center border-x rounded-none h-8 sm:h-9 focus:ring-0 focus:border-blue-500 bg-white",
+                    "text-center border-x rounded-none h-8 sm:h-9 focus:ring-0 focus:border-blue-500 bg-white",
                     "border-neutral-200",
                     "text-neutral-950",
                     "text-xs sm:text-sm",
-                    "min-w-0",
+                    "transition-all duration-200 ease-in-out",
                     "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
                   )}
                 />
@@ -3993,7 +4032,7 @@ export default function ProductDetailPage() {
 
       {/* Price Alert Dialog */}
       <Dialog open={isPriceAlertDialogOpen} onOpenChange={setIsPriceAlertDialogOpen}>
-        <DialogContent className={cn("sm:max-w-md", darkHeaderFooterClasses.dialogSheetBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.dialogSheetBorder)}>
+        <DialogContent className={cn("sm:max-w-md", themeClasses.cardBg, themeClasses.mainText, themeClasses.cardBorder)}>
           <DialogHeader>
             <DialogTitle className={cn("text-lg font-bold", darkHeaderFooterClasses.textNeutralPrimary)}>
               🔔 Set Price Alert

@@ -61,7 +61,7 @@ interface InfiniteProductsReturn {
 
 export function useInfiniteProducts(options: InfiniteProductsOptions = {}): InfiniteProductsReturn {
   const {
-    limit = 20,
+    limit = 24,
     initialOffset = 0,
     category,
     brand,
@@ -116,10 +116,8 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     setError(null)
 
     try {
-      // Add small delay to prevent rapid-fire requests
-      if (currentOffset > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-      }
+      // Debug removed
+      // Remove artificial delay to speed up load-more requests
 
       let url = '/api/products'
       if (useMaterializedView) {
@@ -156,6 +154,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       }
 
       const fullUrl = `${url}?${params.toString()}`
+      
       // For search queries, reduce cache to avoid stale results
       const isSearching = !!search && String(search).trim().length > 0
       const data = await fetchWithCache(fullUrl, { ttlMs: isSearching ? 1000 : 30_000, swrMs: isSearching ? 0 : 180_000 })
@@ -164,6 +163,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       const newProducts = Array.isArray(data) ? data : (data.products || [])
       const pagination = !Array.isArray(data) ? data.pagination : null
       
+      
       // Update total count if available
       if (pagination?.total !== undefined) {
         setTotalCount(pagination.total)
@@ -171,6 +171,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
 
       // Check if we have more data - use API's hasMore flag if available
       const hasMoreData = pagination?.hasMore ?? (newProducts.length === limit)
+      
       
       hasMoreRef.current = hasMoreData
       setHasMore(hasMoreData)
@@ -188,7 +189,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch products'
       setError(errorMessage)
-      console.error('Infinite products fetch error:', err)
+      // Keep console clean in production; surface error state only
     } finally {
       setLoading(false)
       setLoadingMore(false)
@@ -240,7 +241,8 @@ export function useInfiniteScroll(
     enabled?: boolean
   } = {}
 ) {
-  const { rootMargin = '100px', threshold = 0.1, enabled = true } = options
+  // Start loading well before user reaches the end for smoother UX
+  const { rootMargin = '1200px', threshold = 0.01, enabled = true } = options
   const observerRef = useRef<IntersectionObserver | null>(null)
   const elementRef = useRef<HTMLDivElement | null>(null)
 

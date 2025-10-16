@@ -90,7 +90,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
 
   const resetCompanyLogo = async () => {
-    await adminSettings.updateSetting('companyLogo', '/placeholder-logo.png')
+    await adminSettings.updateSetting('companyLogo', '/android-chrome-512x512.png')
   }
 
   const resetMainHeadline = async () => {

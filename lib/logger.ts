@@ -21,7 +21,7 @@ class Logger {
    */
   log(...args: any[]) {
     if (this.isDevelopment) {
-      console.log(...args)
+      // console.log removed for production cleanliness
     }
   }
 
@@ -31,7 +31,7 @@ class Logger {
   debug(message: string, data?: any, options?: LogOptions) {
     if (this.isDevelopment || this.isDebugEnabled) {
       const prefix = this.formatPrefix('DEBUG', options)
-      console.log(prefix, message, data || '')
+      // console.log removed for production cleanliness
     }
   }
 
@@ -48,7 +48,7 @@ class Logger {
    */
   warn(message: string, data?: any, options?: LogOptions) {
     const prefix = this.formatPrefix('WARN', options)
-    console.warn(prefix, message, data || '')
+    // console.warn removed for production cleanliness
   }
 
   /**
@@ -56,7 +56,7 @@ class Logger {
    */
   error(message: string, error?: any, options?: LogOptions) {
     const prefix = this.formatPrefix('ERROR', options)
-    console.error(prefix, message, error || '')
+    // console.error removed for production cleanliness
     
     // In production, you could send to error tracking service
     if (!this.isDevelopment && typeof window !== 'undefined') {
@@ -70,7 +70,7 @@ class Logger {
   perf(label: string, duration: number, options?: LogOptions) {
     if (this.isDevelopment || this.isDebugEnabled) {
       const prefix = this.formatPrefix('PERF', options)
-      console.log(`${prefix} ${label}: ${duration.toFixed(2)}ms`)
+      // console.log removed
     }
   }
 
@@ -80,7 +80,7 @@ class Logger {
   api(method: string, url: string, status: number, duration: number) {
     if (this.isDevelopment || this.isDebugEnabled) {
       const statusColor = status >= 500 ? '🔴' : status >= 400 ? '🟡' : '🟢'
-      console.log(`${statusColor} [API] ${method} ${url} - ${status} (${duration.toFixed(0)}ms)`)
+      // console.log removed
     }
   }
 
@@ -89,7 +89,7 @@ class Logger {
    */
   query(table: string, operation: string, duration: number, rows?: number) {
     if (this.isDevelopment || this.isDebugEnabled) {
-      console.log(`🗄️  [DB] ${operation} on ${table} - ${duration.toFixed(2)}ms${rows !== undefined ? ` (${rows} rows)` : ''}`)
+      // console.log removed
     }
   }
 

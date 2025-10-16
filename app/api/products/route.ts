@@ -244,124 +244,184 @@ export async function GET(request: NextRequest) {
       })
     }
     
-    // Apply fuzzy search if search term provided
+    // Apply PostgreSQL full-text search if search term provided
     let filteredProducts = products
     if (performSearch && search) {
-      const { fuzzySearchProducts } = await import('@/lib/fuzzy-search')
       const sanitized = securityUtils.sanitizeInput(search)
       
-      // Convert products to searchable format - include variant data
-      const searchableProducts = products.map((p: any) => {
-        // Use product_variants (raw from database) instead of variants (transformed)
-        const rawVariants = p.product_variants || []
-        
-        // Collect all variant data for comprehensive search
-        const variantSkus = rawVariants.map((v: any) => v.sku).filter(Boolean)
-        const variantNames = rawVariants.map((v: any) => v.name).filter(Boolean)
-        
-        // Collect variant attributes (regular attributes object)
-        const variantAttributes = rawVariants.flatMap((v: any) => 
-          v.attributes ? Object.values(v.attributes) : []
-        ).filter(Boolean)
-        
-        // Collect variant primaryValues (for primary-dependent variants)
-        const variantPrimaryValues = rawVariants.flatMap((v: any) => 
-          v.primary_values?.map((pv: any) => pv.value) || []
-        ).filter(Boolean)
-        
-        // Collect variant multiValues (for multi-select attributes)
-        const variantMultiValues = rawVariants.flatMap((v: any) => 
-          v.multi_values ? Object.values(v.multi_values).flat() : []
-        ).filter(Boolean)
-        
-        // Combine all searchable text including all variant data
-        const combinedText = [
-          p.name || '',
-          p.description || '',
-          p.category || '',
-          p.brand || '',
-          p.sku || '',
-          p.model || '',
-          ...variantSkus,
-          ...variantNames,
-          ...variantAttributes,
-          ...variantPrimaryValues,
-          ...variantMultiValues
-        ].join(' ')
-        
-        return {
-        id: p.id,
-          name: combinedText, // Use combined text for comprehensive search
-        description: p.description || '',
-        category: p.category || '',
-        brand: p.brand || '',
-        price: p.price || 0,
-        sku: p.sku,
-        model: p.model,
-          tags: []
+      try {
+        // Use PostgreSQL full-text search with basic textSearch
+        const { data: searchResults, error: searchError } = await supabase
+          .from('products')
+          .select(`
+            id, name, description, category, brand, price, image,
+            product_variants (
+              sku, model, attributes, primary_values, multi_values
+            )
+          `)
+          .textSearch('search_vector', sanitized, { type: 'websearch' })
+          .limit(limit ? parseInt(limit) : 100)
+
+        if (searchError) {
+          logger.error('Full-text search error:', searchError)
+          // Fallback to simple ILIKE search
+          const { data: fallbackResults, error: fallbackError } = await supabase
+            .from('products')
+            .select('id')
+            .or(`name.ilike.%${sanitized}%,description.ilike.%${sanitized}%,category.ilike.%${sanitized}%,brand.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
+            .limit(limit ? parseInt(limit) : 100)
+
+          if (fallbackError) {
+            logger.error('Fallback search error:', fallbackError)
+            filteredProducts = []
+          } else {
+            const fallbackIds = new Set(fallbackResults?.map(r => r.id) || [])
+            filteredProducts = products.filter((p: any) => fallbackIds.has(p.id))
+          }
+        } else {
+          // No full-text search results, search within variant data
+          filteredProducts = []
         }
-      })
-      
-      // Perform fuzzy search with synonym expansion
-      const searchResults = fuzzySearchProducts(searchableProducts, sanitized, {
-        maxResults: limit ? parseInt(limit) : 100,
-        minScore: 0.3,  // More lenient for typos (0 = perfect, 1 = worst)
-        useSynonyms: true
-      })
-      
-      // Map search results back to full products
-      const searchResultIds = new Set(searchResults.map(r => r.id))
-      filteredProducts = products.filter((p: any) => searchResultIds.has(p.id))
-      
-      // Sort by boosted relevance score (prioritize exact and high-coverage matches)
-      const normalize = (value: string | null | undefined) => {
-        return (value || '')
-          .toLowerCase()
-          .trim()
-          .replace(/[\/_\-,:]+/g, ' ')
-          .replace(/[^a-z0-9\s]/g, '')
-          .replace(/\s+/g, ' ')
+        
+        // Always search within variant data for additional matches (regardless of full-text results)
+        const searchResultIds = new Set((searchResults || []).map((r: any) => r.id))
+        
+        // Search within variant data for additional matches
+        const variantMatches = products.filter((p: any) => {
+          if (searchResultIds.has(p.id)) return false // Already matched by full-text search
+          
+          // Check if any variant contains the search term
+          const variants = p.product_variants || []
+          return variants.some((variant: any) => {
+            // Extract all text from variant data
+            const variantTexts = [
+              variant.sku || '',
+              variant.model || '',
+              JSON.stringify(variant.attributes || {}),
+              JSON.stringify(variant.primary_values || []),
+              JSON.stringify(variant.multi_values || {})
+            ]
+            
+            // Also extract individual values from primary_values and multi_values
+            if (variant.primary_values && Array.isArray(variant.primary_values)) {
+              variant.primary_values.forEach((pv: any) => {
+                if (pv.value) variantTexts.push(pv.value)
+                if (pv.attribute) variantTexts.push(pv.attribute)
+              })
+            }
+            
+            if (variant.multi_values && typeof variant.multi_values === 'object') {
+              Object.values(variant.multi_values).forEach((values: any) => {
+                if (Array.isArray(values)) {
+                  values.forEach((value: any) => variantTexts.push(value))
+                } else if (typeof values === 'string') {
+                  variantTexts.push(values)
+                }
+              })
+            }
+            
+            // Join all text and search
+            const variantText = variantTexts.join(' ').toLowerCase()
+            const searchLower = sanitized.toLowerCase()
+            
+            // Check for exact match or partial match
+            return variantText.includes(searchLower) || 
+                   searchLower.split(' ').some(word => variantText.includes(word))
+          })
+        })
+        
+        // Simple substring search across product core fields (fallback for short queries like "sal")
+        const searchLowerSimple = sanitized.toLowerCase()
+        const simpleMatches = products.filter((p: any) => {
+          const text = `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.brand || ''}`.toLowerCase()
+          return text.includes(searchLowerSimple)
+        })
+
+        // Combine full-text results with variant and simple matches, de-duplicated
+        const fullTextMatches = searchResults ? products.filter((p: any) => searchResultIds.has(p.id)) : []
+        const combined = [...fullTextMatches, ...variantMatches, ...simpleMatches]
+        const seenIds = new Set<number>()
+        filteredProducts = combined.filter((p: any) => {
+          if (seenIds.has(p.id)) return false
+          seenIds.add(p.id)
+          return true
+        })
+        
+        logger.log(`Full-text search: "${search}" matched ${filteredProducts.length}/${products.length} products`)
+      } catch (error) {
+        logger.error('Search execution error:', error)
+        // Fallback to simple ILIKE search
+        const { data: fallbackResults, error: fallbackError } = await supabase
+          .from('products')
+          .select('id')
+          .or(`name.ilike.%${sanitized}%,description.ilike.%${sanitized}%,category.ilike.%${sanitized}%,brand.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
+          .limit(limit ? parseInt(limit) : 100)
+
+        if (fallbackError) {
+          logger.error('Fallback search error:', fallbackError)
+          filteredProducts = []
+        } else {
+          const fallbackIds = new Set(fallbackResults?.map(r => r.id) || [])
+          filteredProducts = products.filter((p: any) => fallbackIds.has(p.id))
+        }
+      }
+    }
+
+    // If searching, prioritize results that start with the first word and ILIKE-style matches
+    if (performSearch && search) {
+      const queryLower = search.toLowerCase()
+      const words = queryLower.split(/\s+/).filter(Boolean)
+      const firstWord = words[0] || queryLower
+
+      const wordBoundary = (text: string, word: string) => {
+        try {
+          const re = new RegExp(`(^|\\b)${word.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}(\\b|$)`, 'i')
+          return re.test(text)
+        } catch {
+          return text.includes(word)
+        }
       }
 
-      const normalizedQuery = normalize(sanitized)
-      const idToOriginalName = new Map<number, string>((products as any[]).map(p => [p.id, p.name || '']))
+      const scoreProduct = (p: any): number => {
+        const name = (p.name || '').toLowerCase()
+        const description = (p.description || '').toLowerCase()
+        const brand = (p.brand || '').toLowerCase()
+        const categoryText = (p.category || '').toLowerCase()
+        const sku = (p.sku || '').toLowerCase()
+        const model = (p.model || '').toLowerCase()
 
-      const DOMAIN_TERMS = ['lora', 'rf', 'transceiver', 'transceiver module', 'rf module', 'rf transceiver', 'rf transceiver module']
+        let score = 0
+        // Strong boost: name starts with first word
+        if (name.startsWith(firstWord)) score += 120
+        // Boost: name has first word as a whole word
+        if (wordBoundary(name, firstWord)) score += 80
+        // General contains boosts
+        if (name.includes(queryLower)) score += 60
+        if (sku.startsWith(firstWord) || model.startsWith(firstWord)) score += 40
+        if (brand.startsWith(firstWord) || categoryText.startsWith(firstWord)) score += 30
+        if (brand.includes(queryLower) || categoryText.includes(queryLower)) score += 20
+        if (description.includes(queryLower)) score += 10
 
-      const scoreMap = new Map<number, number>(
-        searchResults.map(r => {
-          const base = r.searchScore || 0
-          const originalName = idToOriginalName.get(r.id) || ''
-          const normalizedName = normalize(originalName)
+        // Check variants
+        const variants = Array.isArray(p.product_variants) ? p.product_variants : []
+        for (const v of variants) {
+          const vSku = (v.sku || '').toLowerCase()
+          const vModel = (v.model || '').toLowerCase()
+          const vText = `${vSku} ${vModel} ${JSON.stringify(v.attributes||{})} ${JSON.stringify(v.primary_values||[])} ${JSON.stringify(v.multi_values||{})}`.toLowerCase()
+          if (vSku.startsWith(firstWord) || vModel.startsWith(firstWord)) score += 25
+          if (vText.includes(queryLower)) { score += 10; break }
+        }
 
-          let boost = 0
-          if (normalizedName === normalizedQuery) boost += 1.0
-          else if (normalizedName.startsWith(normalizedQuery)) boost += 0.6
-          else if (normalizedName.includes(normalizedQuery)) boost += 0.4
+        // Slight popularity boost
+        const rating = Number(p.rating) || 0
+        const reviews = Number(p.reviews) || 0
+        score += Math.min(10, rating * 1.5)
+        score += Math.min(10, Math.log10(reviews + 1) * 3)
 
-          // Domain-specific small boosts when present in name and query intent
-          for (const term of DOMAIN_TERMS) {
-            if (normalizedName.includes(term) && normalizedQuery.includes(term.split(' ')[0])) {
-              boost += 0.15
-            }
-          }
+        return score
+      }
 
-          // Slight penalty for very long names to avoid noise dominating
-          if (originalName && originalName.length > 80) {
-            boost -= 0.05
-          }
-
-          return [r.id, base + boost] as [number, number]
-        })
-      )
-
-      filteredProducts.sort((a: any, b: any) => {
-        const scoreA = scoreMap.get(a.id) || 0
-        const scoreB = scoreMap.get(b.id) || 0
-        return scoreB - scoreA // Higher boosted score first
-      })
-      
-      logger.log(`Fuzzy search: "${search}" matched ${filteredProducts.length}/${products.length} products`)
+      filteredProducts = filteredProducts.sort((a: any, b: any) => scoreProduct(b) - scoreProduct(a))
     }
 
     // Transform data with optimized payload

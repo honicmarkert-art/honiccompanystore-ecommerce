@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import Image from 'next/image'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,9 +21,16 @@ import {
   Truck,
   CheckCircle,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Menu,
+  X,
+  ChevronRight,
+  ShoppingCart
 } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
+import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
+import { useCompanyContext } from '@/components/company-provider'
+import { useCart } from '@/hooks/use-cart'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/hooks/use-toast'
 import { ProtectedRoute } from '@/components/protected-route'
@@ -49,15 +58,23 @@ interface Coupon {
 
 function AccountPageContent() {
   const { user, signOut } = useAuth()
+  const { openAuthModal } = useGlobalAuthModal()
+  const { companyName, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  const { cartTotalItems } = useCart()
   const router = useRouter()
   const { toast } = useToast()
   const [recentOrders, setRecentOrders] = useState<Order[]>([])
   const [activeCoupons, setActiveCoupons] = useState<Coupon[]>([])
+  const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
   const [coins, setCoins] = useState(1250)
   const [unreadMessages, setUnreadMessages] = useState(3)
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const [fullName, setFullName] = useState('')
+
+  // Fallback logo system
+  const fallbackLogo = "/android-chrome-512x512.png"
+  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const [phone, setPhone] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
   const [password1, setPassword1] = useState('')
@@ -127,13 +144,13 @@ function AccountPageContent() {
         })
         const json = await res.json()
         if (res.ok && json?.profile) {
-          setFullName(json.profile.full_name || user.user_metadata?.full_name || '')
-          setPhone(json.profile.phone || user.user_metadata?.phone || '')
-          setAvatarUrl(user?.user_metadata?.avatar_url || '')
+          setFullName(json.profile.full_name || user?.name || '')
+          setPhone(json.profile.phone || user?.profile?.phone || '')
+          setAvatarUrl(user?.profile?.avatar || '')
         } else {
-          setFullName(user?.user_metadata?.full_name || '')
-          setPhone(user?.user_metadata?.phone || '')
-          setAvatarUrl(user?.user_metadata?.avatar_url || '')
+          setFullName(user?.name || '')
+          setPhone(user?.profile?.phone || '')
+          setAvatarUrl(user?.profile?.avatar || '')
         }
       } catch {}
       setProfileLoading(false)
@@ -248,7 +265,6 @@ function AccountPageContent() {
       })
       router.push('/')
     } catch (error) {
-      console.error('Logout failed:', error)
       toast({
         title: 'Error',
         description: 'Failed to logout',
@@ -258,8 +274,8 @@ function AccountPageContent() {
   }
 
   const getUserName = () => {
-    if (user?.user_metadata?.full_name) {
-      return user.user_metadata.full_name
+    if (user?.name) {
+      return user.name
     }
     return user?.email?.split('@')[0] || 'User'
   }
@@ -271,6 +287,19 @@ function AccountPageContent() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Mobile Hamburger Menu Button */}
+      <div className="block sm:hidden mb-4">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="flex items-center justify-center w-8 h-8"
+          onClick={() => setIsHamburgerMenuOpen(true)}
+        >
+          <Menu className="w-6 h-6" />
+          <span className="sr-only">Open menu</span>
+        </Button>
+      </div>
+
       {/* Header */}
       <div className="mb-8">
         {/* Remove avatar/email and welcome headline from Overview header */}
@@ -485,6 +514,167 @@ function AccountPageContent() {
           <LogOut className="w-6 h-6" />
           <span>Sign Out</span>
         </Button>
+      </div>
+
+      {/* Mobile Hamburger Menu */}
+      <div className={`hamburger-overlay ${isHamburgerMenuOpen ? 'open' : ''}`} onClick={() => setIsHamburgerMenuOpen(false)} />
+      <div className={`hamburger-menu ${isHamburgerMenuOpen ? 'open' : ''}`}>
+        {/* Header with Logo and Close */}
+        <div className="flex items-center justify-between p-6 border-b border-white/10 bg-gradient-to-r from-yellow-500/10 to-orange-500/10">
+          <div className="flex items-center gap-3">
+            <Image
+              src={displayLogo}
+              alt={`${companyName} Logo`}
+              width={32}
+              height={32}
+              className="w-8 h-8 rounded-lg"
+            />
+            <div>
+              <h2 className="text-lg font-bold text-white">{companyName}</h2>
+              <p className="text-xs text-white/70">Menu</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsHamburgerMenuOpen(false)}
+            className="text-white hover:bg-white/20 rounded-full"
+          >
+            <X className="w-6 h-6" />
+          </Button>
+        </div>
+        
+        <div className="flex flex-col h-full">
+          {/* Main Navigation */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-6 space-y-6">
+              {/* Quick Actions */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Quick Actions</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <Link 
+                    href="/products"
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Package className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-xs font-medium text-white">Products</span>
+                  </Link>
+                  
+                  <Link 
+                    href="/cart"
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <div className="relative">
+                      <ShoppingCart className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
+                      {cartTotalItems > 0 && (
+                        <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-black">
+                          {cartTotalItems}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-white">Cart</span>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Account Section */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Account</h3>
+                <div className="space-y-2">
+                  <Link 
+                    href="/account"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <User className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">My Account</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
+                    href="/account/orders"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <ShoppingBag className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">My Orders</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
+                    href="/account/wishlist"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Heart className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">Wishlist</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
+                    href="/account/messages"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <MessageCircle className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">Messages</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
+                    href="/account/payment"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <CreditCard className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">Payment</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
+                    href="/account/coins"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">My Coins</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
+                    href="/account/coupons"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Ticket className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">My Coupons</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
+                    href="/account/settings"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Settings className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">Settings</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer with User Info */}
+          <div className="p-6 border-t border-white/10 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-white/10">
+              <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center">
+                <span className="text-black font-bold text-sm">
+                  {user?.email?.charAt(0).toUpperCase() || 'U'}
+                </span>
+              </div>
+              <div className="flex-1">
+                <p className="text-white font-medium text-sm">{user?.email}</p>
+                <p className="text-white/60 text-xs">Welcome back!</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

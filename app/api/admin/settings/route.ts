@@ -165,6 +165,7 @@ export async function GET(request: NextRequest) {
     )
 
     // Get admin settings from admin_settings table
+    
     const { data: settings, error: settingsError } = await supabase
       .from('admin_settings')
       .select('*')
@@ -178,7 +179,7 @@ export async function GET(request: NextRequest) {
         companyName: 'honiccompanystore',
         companyColor: '#3B82F6',
         companyTagline: 'technology, innovation',
-        companyLogo: '/placeholder-logo.png',
+        companyLogo: '/android-chrome-512x512.png',
         mainHeadline: 'The leading B2B ecommerce platform for global trade',
         heroBackgroundImage: '',
         heroTaglineAlignment: 'left',
@@ -277,13 +278,13 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Map database fields to API response format
+    // Map database fields to API response format (see mappedSettings below)
     
     const mappedSettings = {
       companyName: settings.company_name || 'honiccompanystore',
       companyColor: settings.company_color || '#3B82F6',
       companyTagline: settings.company_tagline || 'technology, innovation',
-      companyLogo: settings.company_logo || '/placeholder-logo.png',
+      companyLogo: settings.company_logo || '/android-chrome-512x512.png',
       mainHeadline: settings.main_headline || 'The leading B2B ecommerce platform for global trade',
       heroBackgroundImage: settings.hero_background_image || '',
       heroTaglineAlignment: settings.hero_tagline_alignment || 'left',
@@ -388,13 +389,123 @@ export async function GET(request: NextRequest) {
         sunday: { open: '10:00', close: '14:00', closed: false }
       }
     }
-
-    
+    // debug removed
     
     return NextResponse.json(mappedSettings)
 
   } catch (error) {
     console.error('Error in admin settings GET:', error)
+    const message = String((error as any)?.message || '')
+    const isNetworkFailure =
+      message.includes('ENOTFOUND') ||
+      message.includes('fetch failed') ||
+      message.includes('getaddrinfo')
+
+    if (isNetworkFailure) {
+      // Serve the same safe defaults as above when Supabase is unreachable
+      return NextResponse.json({
+        companyName: 'honiccompanystore',
+        companyColor: '#3B82F6',
+        companyTagline: 'technology, innovation',
+        companyLogo: '/android-chrome-512x512.png',
+        mainHeadline: 'The leading B2B ecommerce platform for global trade',
+        heroBackgroundImage: '',
+        heroTaglineAlignment: 'left',
+        serviceRetailImage: '',
+        servicePrototypingImage: '',
+        servicePcbImage: '',
+        serviceAiImage: '',
+        serviceStemImage: '',
+        websiteUrl: 'https://honic-co.com',
+        contactEmail: 'contact@honic-co.com',
+        contactPhone: '+255 123 456 789',
+        address: 'Dar es Salaam, Tanzania',
+        currency: 'TZS',
+        timezone: 'Africa/Dar_es_Salaam',
+        language: 'en',
+        theme: 'system',
+        primaryColor: '#3B82F6',
+        secondaryColor: '#6B7280',
+        accentColor: '#F59E0B',
+        navTranslucent: true,
+        navOpacity: 0.95,
+        navTheme: 'auto',
+        footerTheme: 'dark',
+        footerColumns: 5,
+        productsPerRowMobile: 3,
+        productsPerRowTablet: 4,
+        productsPerRowDesktop: 5,
+        productCardSpacing: 4,
+        productCardRadius: 0.5,
+        cartCompactMode: true,
+        cartItemSpacing: 0,
+        showClearCartButton: false,
+        showSaveForLater: true,
+        mobileNavHeight: 'h-4',
+        mobileFontSize: 'text-xs',
+        mobileCategoryIconsSmall: true,
+        mobileFooterColumns: 3,
+        notifications: {
+          email: true,
+          sms: false,
+          push: true,
+          orderUpdates: true,
+          promotional: false,
+          securityAlerts: true
+        },
+        apiKeys: {
+          googleMaps: 'KNsu7C7EvTn1CgWdh03Af_3NGjs',
+          dpoPayment: 'your-dpo-api-key',
+          stripe: 'your-stripe-api-key',
+          emailService: '',
+          smsService: ''
+        },
+        security: {
+          twoFactorAuth: false,
+          sessionTimeout: 30,
+          passwordPolicy: 'strong',
+          loginAttempts: 5,
+          lockoutDuration: 15
+        },
+        performance: {
+          cacheEnabled: true,
+          imageOptimization: true,
+          cdnEnabled: false,
+          lazyLoading: true,
+          preloadCritical: true
+        },
+        seo: {
+          metaTitle: 'honiccompanystore - Shopping',
+          metaDescription: 'Your trusted source for technology and innovation',
+          metaKeywords: 'technology, innovation, electronics, arduino',
+          ogImage: '/og-image.png',
+          favicon: '/favicon.ico'
+        },
+        socialLinks: {
+          facebook: '',
+          twitter: '',
+          instagram: '',
+          linkedin: '',
+          youtube: ''
+        },
+        paymentSettings: {
+          defaultCurrency: 'TZS',
+          supportedCurrencies: ['TZS', 'USD', 'EUR'],
+          paymentMethods: ['card', 'mobile_money', 'bank_transfer'],
+          shippingCost: 5000
+        },
+        businessHours: {
+          monday: { open: '09:00', close: '18:00', closed: false },
+          tuesday: { open: '09:00', close: '18:00', closed: false },
+          wednesday: { open: '09:00', close: '18:00', closed: false },
+          thursday: { open: '09:00', close: '18:00', closed: false },
+          friday: { open: '09:00', close: '18:00', closed: false },
+          saturday: { open: '09:00', close: '16:00', closed: false },
+          sunday: { open: '10:00', close: '14:00', closed: false }
+        }
+      })
+    }
+
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -423,6 +534,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Create Supabase client with service role for admin operations
+    
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -462,6 +574,7 @@ export async function POST(request: NextRequest) {
     }
     if (validatedData.heroBackgroundImage !== undefined) {
       try {
+        
         dbData.hero_background_image = validatedData.heroBackgroundImage
       } catch (error) {
         logger.log('⚠️ hero_background_image column not available, skipping update')

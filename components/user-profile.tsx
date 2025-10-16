@@ -134,16 +134,15 @@ export function UserProfile() {
   }
 
   return (
-    <div className="flex flex-col items-center">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-8 w-8 rounded-full bg-gradient-to-br from-green-400 via-blue-500 to-indigo-600 hover:from-green-500 hover:via-blue-600 hover:to-indigo-700 transition-all duration-300 shadow-lg">
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={user.user_metadata?.avatar_url} alt={getUserName()} />
-              <AvatarFallback className="bg-transparent text-white font-semibold">{getUserInitials(user.email || '')}</AvatarFallback>
-            </Avatar>
-          </Button>
-        </DropdownMenuTrigger>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" className="relative h-6 w-6 rounded-full bg-gradient-to-br from-green-400 via-blue-500 to-indigo-600 hover:from-green-500 hover:via-blue-600 hover:to-indigo-700 transition-all duration-300 shadow-lg">
+          <Avatar className="h-6 w-6">
+            <AvatarImage src={user.user_metadata?.avatar_url} alt={getUserName()} />
+            <AvatarFallback className="bg-transparent text-white font-semibold text-xs">{getUserInitials(user.email || '')}</AvatarFallback>
+          </Avatar>
+        </Button>
+      </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
@@ -181,9 +180,5 @@ export function UserProfile() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-      <span className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-        Hi! {getUserName()}
-      </span>
-    </div>
   )
 } 

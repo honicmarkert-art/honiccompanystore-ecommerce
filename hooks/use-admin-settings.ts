@@ -9,7 +9,7 @@ const DEFAULT_ADMIN_SETTINGS = {
   companyName: "Honic Co.",
   companyColor: "#3B82F6",
   companyTagline: "technology, innovation",
-  companyLogo: "/placeholder-logo.png",
+  companyLogo: "/android-chrome-512x512.png",
   mainHeadline: "The leading B2B ecommerce platform for global trade",
   heroBackgroundImage: "",
   heroTaglineAlignment: "left",

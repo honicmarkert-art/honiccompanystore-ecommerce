@@ -76,7 +76,11 @@ function CheckoutPageContent() {
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem } = useCart()
   const { user } = useAuth()
-  const { companyName, companyColor, companyLogo } = useCompanyContext()
+  const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  
+  // Fallback logo system - use local logo if API is not loaded or logo is not available
+  const fallbackLogo = "/android-chrome-512x512.png"
+  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { currency, setCurrency, formatPrice } = useCurrency()
   const { showComingSoon, ComingSoonModal } = useComingSoonModal()
 
@@ -1478,7 +1482,7 @@ function CheckoutPageContent() {
                               alt={item.product.name || "Product image"}
                               width={64}
                               height={64}
-                          className="rounded-md object-cover w-16 h-16 sm:w-20 sm:h-20"
+                          className="rounded-md object-contain w-16 h-16 sm:w-20 sm:h-20 bg-gray-50"
                               priority={false} // Not priority since it's in a list
                               quality={80}
                         />
@@ -1739,7 +1743,14 @@ function CheckoutPageContent() {
   const maxSteps = deliveryOption === 'pickup' ? 4 : 5
 
   if (!isClient) {
-    return <div>Loading...</div>
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-yellow-500 border-t-transparent mb-3"></div>
+          <span className="text-sm text-neutral-500">Loading checkout…</span>
+        </div>
+      </div>
+    )
   }
 
     return (

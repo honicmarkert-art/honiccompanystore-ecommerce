@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 // Cookie duration constants
 const ONE_HOUR = 60 * 60
@@ -19,15 +22,8 @@ function copyCookies(source: NextResponse, target: NextResponse) {
 export async function GET(request: NextRequest) {
   try {
     
-    // Check for explicit logout flag first - if set, user should remain logged out
-    const explicitLogout = request.cookies.get('explicit-logout')?.value
-    if (explicitLogout === 'true') {
-      return NextResponse.json({
-        success: false,
-        authenticated: false,
-        message: 'User has explicitly logged out'
-      }, { status: 401 })
-    }
+    // Read explicit logout but only honor it if no active session is found
+    const explicitLogout = request.cookies.get('explicit-logout')?.value === 'true'
     
     // Log incoming cookies for debugging
     const accessToken = request.cookies.get('sb-access-token')?.value
@@ -78,21 +74,44 @@ export async function GET(request: NextRequest) {
       const refreshToken = request.cookies.get('sb-refresh-token')?.value
       
       if (!refreshToken) {
-        const errorResponse = NextResponse.json({
-          success: false,
-          authenticated: false,
-          message: 'No valid session found'
-        }, { status: 401 })
-        
-        // Clear session indicator cookie
-        errorResponse.cookies.set('sb-session-active', '', {
-          httpOnly: false,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-          path: '/',
-          maxAge: 0
-        })
-        
+        // Fallback to Authorization Bearer header
+        const authHeader = request.headers.get('authorization') || request.headers.get('Authorization')
+        const bearer = authHeader?.startsWith('Bearer ')
+          ? authHeader.substring('Bearer '.length)
+          : null
+        if (bearer) {
+          const headerClient = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+            {
+              cookies: {
+                get() { return undefined },
+                set() {},
+                remove() {}
+              },
+              global: { headers: { Authorization: `Bearer ${bearer}` } }
+            }
+          )
+          const { data: userData, error: userErr } = await headerClient.auth.getUser()
+          if (!userErr && userData.user) {
+            const successResponse = NextResponse.json({
+              success: true,
+              authenticated: true,
+              isProfileLoaded: false,
+              user: {
+                id: userData.user.id,
+                email: userData.user.email,
+                name: userData.user.user_metadata?.name || userData.user.email,
+                role: 'user',
+                isVerified: userData.user.email_confirmed_at !== null
+              }
+            }, { status: 200 })
+            if (explicitLogout) successResponse.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 })
+            copyCookies(response, successResponse)
+            return successResponse
+          }
+        }
+        const errorResponse = NextResponse.json({ success: false, authenticated: false, message: 'No valid session found' }, { status: 401 })
         copyCookies(response, errorResponse)
         return errorResponse
       }
@@ -202,6 +221,7 @@ export async function GET(request: NextRequest) {
       }
     }, { status: 200 })
     
+    if (explicitLogout) successResponse.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 })
     copyCookies(response, successResponse)
     return successResponse
 
