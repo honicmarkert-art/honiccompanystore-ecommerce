@@ -140,11 +140,34 @@ export default function AccountSettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="pwd1">New Password</Label>
-              <Input id="pwd1" type="password" placeholder="At least 8 characters" value={pwd1} onChange={(e)=>setPwd1(e.target.value)} />
+              <Input 
+                id="pwd1" 
+                type="password" 
+                placeholder="At least 8 characters" 
+                value={pwd1} 
+                onChange={(e)=>setPwd1(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    changePassword()
+                  }
+                }}
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="pwd2">Confirm Password</Label>
-              <Input id="pwd2" type="password" value={pwd2} onChange={(e)=>setPwd2(e.target.value)} />
+              <Input 
+                id="pwd2" 
+                type="password" 
+                value={pwd2} 
+                onChange={(e)=>setPwd2(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    changePassword()
+                  }
+                }}
+              />
             </div>
           </div>
           <div className="mt-4">

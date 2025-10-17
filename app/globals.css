@@ -25,9 +25,22 @@
   
   .scrollbar-hide {
     scrollbar-width: none;
+    -ms-overflow-style: none;
   }
   
   .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Smooth scrolling for category bars */
+  .category-scroll {
+    scroll-behavior: smooth;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  
+  .category-scroll::-webkit-scrollbar {
     display: none;
   }
   

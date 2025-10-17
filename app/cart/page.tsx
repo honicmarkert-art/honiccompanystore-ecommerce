@@ -161,7 +161,7 @@ function CartPageContent() {
         }
         
         startTransition(() => {
-          updateItemQuantity(productId, newQuantity, variantId)
+        updateItemQuantity(productId, newQuantity, variantId)
         })
       }
     }
@@ -277,7 +277,7 @@ function CartPageContent() {
     
     startTransition(() => {
       setSavedForLater(prev => ([...prev, ...cart]))
-      clearCart()
+    clearCart()
     })
     toast({
       title: "Items saved for later",
@@ -456,11 +456,11 @@ function CartPageContent() {
                 <Button
                   variant="ghost"
                   size="icon"
-                          className={cn(
-                            "flex items-center gap-1",
-                            darkHeaderFooterClasses.buttonGhostText,
-                            darkHeaderFooterClasses.buttonGhostHoverBg,
-                          )}
+                  className={cn(
+                    "flex items-center gap-1",
+                    darkHeaderFooterClasses.buttonGhostText,
+                    darkHeaderFooterClasses.buttonGhostHoverBg,
+                  )}
                 >
                   <Palette className="w-5 h-5" />
                   <span className="sr-only">Change Theme</span>
@@ -498,11 +498,11 @@ function CartPageContent() {
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="outline"
-                          className={cn(
-                            "flex items-center gap-1 border-yellow-500 bg-transparent text-xs sm:text-sm w-[20px] h-[10px] sm:w-auto sm:h-auto",
-                            darkHeaderFooterClasses.buttonGhostText,
-                            darkHeaderFooterClasses.buttonGhostHoverBg,
-                          )}
+                  className={cn(
+                    "flex items-center gap-1 border-yellow-500 bg-transparent text-xs sm:text-sm w-[20px] h-[10px] sm:w-auto sm:h-auto",
+                    darkHeaderFooterClasses.buttonGhostText,
+                    darkHeaderFooterClasses.buttonGhostHoverBg,
+                  )}
                 >
                   {currency === "USD" ? <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" /> : <Landmark className="w-3 h-3 sm:w-4 sm:h-4" />}
                   <span className="hidden sm:inline">{currency}</span>
@@ -1075,13 +1075,13 @@ function CartPageContent() {
                                           "h-5 w-5 text-red-500 hover:bg-red-50 hover:text-red-600",
                               themeClasses.buttonGhostHoverBg,
                             )}
-                                          >
-                                            <Trash2 className="w-2.5 h-2.5" />
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
                                       </Button>
                                     </div>
-                                  </div>
                                     </div>
                                   </div>
+                                </div>
 
                                 {/* Desktop: Quantity Controls and Actions - Right side */}
                                 <div className="hidden sm:flex flex-col items-center gap-1">
@@ -1505,13 +1505,13 @@ function CartPageContent() {
 
               {/* Account Section */}
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Account</h3>
+                <h3 className="text-xs font-semibold text-white/90 uppercase tracking-wider">Account</h3>
                 <div className="space-y-2">
                   {isAuthenticated ? (
                     <>
                       <Link 
                         href="/account"
-                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        className="w-full flex items-center gap-2 p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group text-sm"
                         onClick={() => setIsHamburgerMenuOpen(false)}
                       >
                         <User className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
@@ -1520,7 +1520,7 @@ function CartPageContent() {
                       </Link>
                       <Link 
                         href="/account/orders"
-                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        className="w-full flex items-center gap-2 p-3 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group text-sm"
                         onClick={() => setIsHamburgerMenuOpen(false)}
                       >
                         <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
@@ -1644,7 +1644,7 @@ function CartPageContent() {
         showCancelButton
         onConfirm={() => {
           // Redirect to shop location or contact page
-          window.open('/help', '_blank')
+          window.open('/support', '_blank')
           setIsQuantityWarningModalOpen(false)
           setQuantityWarningItem(null)
         }}

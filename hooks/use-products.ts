@@ -71,6 +71,8 @@ interface UseProductsReturn {
   updateProduct: (id: number, productData: Partial<Product>) => Promise<void>
   deleteProduct: (id: number) => Promise<void>
   resetToDefault: () => Promise<void>
+  isRateLimited: boolean
+  isRetrying: boolean
 }
 
 // Enhanced cache for products data
@@ -85,6 +87,7 @@ export function useProducts(): UseProductsReturn {
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isRetrying, setIsRetrying] = useState(false)
   
   // Rate limiting state
   const [lastFetchTime, setLastFetchTime] = useState(0)
@@ -206,10 +209,11 @@ export function useProducts(): UseProductsReturn {
           headers: {
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache'
-          }
+          },
+          signal: AbortSignal.timeout(30000) // 30 second timeout
         }),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Request timeout')), 10000)
+          setTimeout(() => reject(new Error('Request timeout after 30 seconds')), 30000)
         )
       ])
         .then((response: any) => {
@@ -261,17 +265,32 @@ export function useProducts(): UseProductsReturn {
       }
     } catch (err) {
       console.error('Error fetching products:', err)
-      setError(err instanceof Error ? err.message : 'Failed to fetch products')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch products'
+      setError(errorMessage)
       preloadPromise = null
       
-      // Fallback data removed - relying on API only
+      // If it's a timeout error, try to use cached data if available
+      if (errorMessage.includes('timeout') && productsCache) {
+        console.log('Using cached data due to timeout')
+        setProducts(productsCache)
+        setError(null)
+      }
     } finally {
       setIsLoading(false)
     }
   }, [lastFetchTime, isRateLimited])
 
   const retry = useCallback(() => {
-    fetchProducts()
+    setIsRetrying(true)
+    // Clear any existing rate limiting
+    setIsRateLimited(false)
+    setError(null)
+    // Clear cache to force fresh fetch
+    productsCache = null
+    cacheTimestamp = 0
+    fetchProducts().finally(() => {
+      setIsRetrying(false)
+    })
   }, [fetchProducts])
 
   const preloadProducts = useCallback(async () => {
@@ -279,12 +298,18 @@ export function useProducts(): UseProductsReturn {
     const now = Date.now()
     if (!productsCache || (now - cacheTimestamp) >= CACHE_DURATION) {
       if (!preloadPromise) {
-        preloadPromise = fetch('/api/products?minimal=true', {
-          headers: {
-            'Cache-Control': 'max-age=1800' // 30 minutes
-          }
-        })
-          .then(response => {
+        preloadPromise = Promise.race([
+          fetch('/api/products?minimal=true', {
+            headers: {
+              'Cache-Control': 'max-age=1800' // 30 minutes
+            },
+            signal: AbortSignal.timeout(30000) // 30 second timeout
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Preload timeout')), 30000)
+          )
+        ])
+          .then((response: any) => {
             if (!response.ok) {
               throw new Error(`HTTP error! status: ${response.status}`)
             }
@@ -302,7 +327,8 @@ export function useProducts(): UseProductsReturn {
           .catch(err => {
             console.error('Error preloading products:', err)
             preloadPromise = null
-            throw err
+            // Don't throw error for preload failures - just log them
+            return null
           })
       }
     }
@@ -575,5 +601,7 @@ export function useProducts(): UseProductsReturn {
     updateProduct,
     deleteProduct,
     resetToDefault,
+    isRateLimited,
+    isRetrying,
   }
 } 

@@ -85,6 +85,8 @@ import { useParams, useRouter, usePathname, useSearchParams } from "next/navigat
 import { useCompanyContext } from "@/components/company-provider"
 // import { getPreviousPageName } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth-context"
+import { useWishlist } from "@/hooks/use-wishlist"
+import { useSavedLater } from "@/hooks/use-saved-later"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { useCurrency } from "@/contexts/currency-context"
 import { UserProfile } from "@/components/user-profile"
@@ -563,7 +565,7 @@ export default function ProductDetailPage() {
   }, [product, products])
 
   const [quantity, setQuantity] = useState(1)
-  const [mainImage, setMainImage] = useState(product?.image || null)
+  const [mainImage, setMainImage] = useState<string | null>(null)
   const [isManualImageSelection, setIsManualImageSelection] = useState(false)
   const [isQuantityLimitModalOpen, setIsQuantityLimitModalOpen] = useState(false)
   
@@ -575,8 +577,15 @@ export default function ProductDetailPage() {
   }, [product])
 
   // New states for functionality
-  const [wishlistCount, setWishlist] = useState(0) // For demonstration, a simple count
   const [isGiftWrapDialogOpen, setIsGiftWrapDialogOpen] = useState(false)
+  
+  // Wishlist functionality
+  const { add: addToWishlist, remove: removeFromWishlist, has: isInWishlist, items: wishlistItems } = useWishlist()
+  const isProductInWishlist = isInWishlist(product?.id || 0)
+  
+  // Save for Later functionality
+  const { add: addToSavedLater, remove: removeFromSavedLater, has: isInSavedLater, items: savedLaterItems } = useSavedLater()
+  const isProductInSavedLater = isInSavedLater(product?.id || 0)
 
   // Prefetch related routes for better performance
   useEffect(() => {
@@ -1341,7 +1350,25 @@ export default function ProductDetailPage() {
   // Find matching variant image for the selected attributes
   const matchingVariantImage = findMatchingVariantImage(selectedAttributes)
   
-  // Main image shows clicked thumbnail, or product image when no variant selected, or matching variant image when variant is selected
+  // Get only variant images for thumbnail gallery (no main product image)
+  const getAllThumbnailImages = useCallback(() => {
+    const images: string[] = []
+    // Add only variant images (no main product image in thumbnails)
+    variantImages.forEach((variantImg) => {
+      if (variantImg.imageUrl && variantImg.imageUrl.trim() !== '') {
+        images.push(variantImg.imageUrl)
+      }
+    })
+    // Remove duplicates
+    const uniqueImages = [...new Set(images)]
+    return uniqueImages
+  }, [variantImages])
+
+  const thumbnailImages = useMemo(() => getAllThumbnailImages(), [getAllThumbnailImages])
+  
+  // Compute thumbnails before deriving currentImage (declare helper first)
+
+  // Main image shows clicked thumbnail, or first thumbnail when available, or matching variant image when variant is selected; falls back to main product image
   const currentImage = (() => {
     // If user clicked a thumbnail, show that image
     if (mainImage) {
@@ -1353,7 +1380,12 @@ export default function ProductDetailPage() {
       return matchingVariantImage
     }
     
-    // When no variant is selected, show main product image
+    // Prefer the first thumbnail if available
+    if (thumbnailImages.length > 0) {
+      return thumbnailImages[0]
+    }
+    
+    // When no thumbnails exist, show main product image
     if (product?.image && product.image.trim() !== '') {
       return product.image
     }
@@ -1361,31 +1393,14 @@ export default function ProductDetailPage() {
     return null
   })()
   
-  // Get only variant images for thumbnail gallery (no main product image)
-  const getAllThumbnailImages = useCallback(() => {
-    const images: string[] = []
-    
-    // Add only variant images (no main product image in thumbnails)
-    variantImages.forEach((variantImg) => {
-      if (variantImg.imageUrl && variantImg.imageUrl.trim() !== '') {
-        images.push(variantImg.imageUrl)
-      }
-    })
-    
-    // Remove duplicates
-    const uniqueImages = [...new Set(images)]
-    
-    return uniqueImages
-  }, [variantImages])
-  
-  const thumbnailImages = getAllThumbnailImages()
+  // (helper declared once above)
   
   // Reset manual selection when attributes change (allow auto-update again)
   useEffect(() => {
     setIsManualImageSelection(false)
   }, [selectedAttributes])
 
-  // Auto-update main image when attributes change (but not when user manually selects a thumbnail)
+  // Auto-update main image when attributes or thumbnails change (but not when user manually selects a thumbnail)
   useEffect(() => {
     // Don't auto-update if user has manually selected an image
     if (isManualImageSelection) {
@@ -1399,11 +1414,17 @@ export default function ProductDetailPage() {
         setMainImage(matchingVariantImage)
       }
       // If no matching variant image found, keep current image (don't reset to main)
+    } else {
+      // No attributes selected: prefer first thumbnail, else main product image
+      if (thumbnailImages.length > 0) {
+        setMainImage(thumbnailImages[0])
     } else if (product?.image) {
-      // Reset to main product image when no attributes are selected
       setMainImage(product.image)
+      } else {
+        setMainImage(null)
     }
-  }, [selectedAttributes, matchingVariantImage, product?.image, isManualImageSelection])
+    }
+  }, [selectedAttributes, matchingVariantImage, product?.image, thumbnailImages, isManualImageSelection])
   
   const currentSKU = selectedVariant?.sku || product?.sku || ""
   const currentModel = selectedVariant?.model || product?.model || ""
@@ -1807,12 +1828,40 @@ export default function ProductDetailPage() {
     }
   }
 
-  const handleAddToWishlist = () => {
-    setWishlist((prev) => prev + 1)
+  const handleAddToWishlist = async () => {
+    if (!product?.id) return
+    
+    if (isProductInWishlist) {
+      await removeFromWishlist(product.id)
+      toast({
+        title: "Removed from Wishlist",
+        description: `${product.name} removed from your wishlist.`,
+      })
+    } else {
+      await addToWishlist(product.id)
     toast({
       title: "Added to Wishlist!",
-      description: `${selectedVariant?.id || product.name} added to your wishlist.`,
-    })
+        description: `${product.name} added to your wishlist.`,
+      })
+    }
+  }
+
+  const handleSaveForLater = async () => {
+    if (!product?.id) return
+    
+    if (isProductInSavedLater) {
+      await removeFromSavedLater(product.id)
+      toast({
+        title: "Removed from Saved for Later",
+        description: `${product.name} removed from your saved items.`,
+      })
+    } else {
+      await addToSavedLater(product.id)
+      toast({
+        title: "Saved for Later!",
+        description: `${product.name} saved for later.`,
+      })
+    }
   }
 
   const handleApplyGiftWrap = () => {
@@ -2200,14 +2249,19 @@ export default function ProductDetailPage() {
                     variant="ghost"
                     className={cn(
                       "flex items-center gap-1 sm:gap-2 h-auto py-2 px-1 sm:px-2 ml-1 sm:ml-2 cursor-pointer",
+                      "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
                       darkHeaderFooterClasses.buttonGhostText,
                       darkHeaderFooterClasses.buttonGhostHoverBg,
                     )}
                   >
-                    <User className="w-3 h-3 sm:w-4 sm:h-4" />
+                    <User className="w-4 h-4 sm:w-4 sm:h-4" />
                     <div className="hidden sm:flex flex-col items-start text-xs">
                       <span>Welcome</span>
                       <span className="font-semibold hover:text-yellow-500 transition-colors">Sign in / Register</span>
+                    </div>
+                    <div className="sm:hidden flex flex-col items-center text-xs">
+                      <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Account</span>
+                      <span className="font-semibold text-neutral-900 dark:text-white">Sign in</span>
                     </div>
                     <span className="sr-only">User Menu</span>
                   </Button>
@@ -2238,22 +2292,40 @@ export default function ProductDetailPage() {
                     </button>
                   </div>
                   <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
-                  <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                  <DropdownMenuItem 
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
                     <ClipboardList className="w-4 h-4 mr-2" /> My Orders
                   </DropdownMenuItem>
-                  <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                  <DropdownMenuItem 
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
                     <Coins className="w-4 h-4 mr-2" /> My Coins
                   </DropdownMenuItem>
-                  <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                  <DropdownMenuItem 
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
                     <MessageSquare className="w-4 h-4 mr-2" /> Message Center
                   </DropdownMenuItem>
-                  <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                  <DropdownMenuItem 
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
                     <CreditCard className="w-4 h-4 mr-2" /> Payment
                   </DropdownMenuItem>
-                  <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                  <DropdownMenuItem 
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
                     <Heart className="w-4 h-4 mr-2" /> Wish List
                   </DropdownMenuItem>
-                  <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
+                  <DropdownMenuItem 
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
                     <Ticket className="w-4 h-4 mr-2" /> My Coupons
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -3489,26 +3561,51 @@ export default function ProductDetailPage() {
               </Button>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 mt-4">
               <Button
                 variant="outline"
                 className={cn(
                   "flex items-center gap-2 group border hover:border-white/20 hover:bg-transparent",
                   backgroundColor === "dark" 
                     ? "text-neutral-400 hover:text-yellow-500 border-neutral-600" 
-                    : "hover:bg-neutral-100 bg-transparent text-neutral-600 border-neutral-300"
+                    : "hover:bg-neutral-100 bg-transparent text-neutral-600 border-neutral-300",
+                  isProductInWishlist && "bg-red-50 border-red-200 text-red-600 hover:bg-red-100"
                 )}
                 onClick={handleAddToWishlist}
               >
                 <Heart className={cn(
                   "w-4 h-4 group-hover:text-yellow-500 transition-colors",
-                  backgroundColor === "dark" && "group-hover:text-yellow-500"
+                  backgroundColor === "dark" && "group-hover:text-yellow-500",
+                  isProductInWishlist && "fill-red-500 text-red-500"
                 )} /> 
                 <span className={cn(
                   "group-hover:text-yellow-500 transition-colors",
                   backgroundColor === "dark" && "group-hover:text-yellow-500"
                 )}>
-                  Wishlist ({wishlistCount})
+                  {isProductInWishlist ? "Remove from Wishlist" : "Add to Wishlist"} ({wishlistItems.length})
+                </span>
+              </Button>
+              <Button
+                variant="outline"
+                className={cn(
+                  "flex items-center gap-2 group border hover:border-white/20 hover:bg-transparent",
+                  backgroundColor === "dark" 
+                    ? "text-neutral-400 hover:text-yellow-500 border-neutral-600" 
+                    : "hover:bg-neutral-100 bg-transparent text-neutral-600 border-neutral-300",
+                  isProductInSavedLater && "bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100"
+                )}
+                onClick={handleSaveForLater}
+              >
+                <Clock className={cn(
+                  "w-4 h-4 group-hover:text-yellow-500 transition-colors",
+                  backgroundColor === "dark" && "group-hover:text-yellow-500",
+                  isProductInSavedLater && "fill-blue-500 text-blue-500"
+                )} /> 
+                <span className={cn(
+                  "group-hover:text-yellow-500 transition-colors",
+                  backgroundColor === "dark" && "group-hover:text-yellow-500"
+                )}>
+                  {isProductInSavedLater ? "Remove from Saved" : "Save for Later"} ({savedLaterItems.length})
                 </span>
               </Button>
               <Dialog open={isGiftWrapDialogOpen} onOpenChange={setIsGiftWrapDialogOpen}>
@@ -3815,8 +3912,8 @@ export default function ProductDetailPage() {
       </main>
 
       {/* Related Products Section */}
-      <section className="py-8 border-t">
-        <div className="container px-1 sm:px-2 lg:px-3">
+      <section className="py-8 border-t w-full">
+        <div className="w-full px-1 sm:px-2 lg:px-3">
           <div className="flex items-center justify-between mb-6">
             <h2 className={cn("text-xl font-bold", themeClasses.mainText)}>You May Also Like</h2>
             <OptimizedLink 
@@ -3829,14 +3926,14 @@ export default function ProductDetailPage() {
             </OptimizedLink>
           </div>
           
-          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-1 sm:gap-3 md:gap-4">
+          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-1 sm:gap-3 md:gap-4 w-full">
             {rotatedRelatedProducts.map((relatedProduct: any) => {
                 const discountPercentage = ((relatedProduct.originalPrice - relatedProduct.price) / relatedProduct.originalPrice) * 100
                 return (
                   <Card
                     key={relatedProduct.id}
                     className={cn(
-                      "flex flex-col overflow-hidden rounded-sm",
+                      "flex flex-col overflow-hidden rounded-sm w-full",
                       themeClasses.cardBg,
                       themeClasses.mainText,
                       themeClasses.cardBorder,

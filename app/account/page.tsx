@@ -31,6 +31,9 @@ import { useAuth } from '@/contexts/auth-context'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
 import { useCompanyContext } from '@/components/company-provider'
 import { useCart } from '@/hooks/use-cart'
+import { useOrders } from '@/hooks/use-orders'
+import { useWishlist } from '@/hooks/use-wishlist'
+import { useSavedLater } from '@/hooks/use-saved-later'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/hooks/use-toast'
 import { ProtectedRoute } from '@/components/protected-route'
@@ -38,14 +41,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase-auth'
 
-interface Order {
-  id: string
-  orderNumber: string
-  date: Date
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled'
-  total: number
-  items: number
-}
+// Remove local Order mock interface; we use real orders from useOrders
 
 interface Coupon {
   id: string
@@ -63,11 +59,13 @@ function AccountPageContent() {
   const { cartTotalItems } = useCart()
   const router = useRouter()
   const { toast } = useToast()
-  const [recentOrders, setRecentOrders] = useState<Order[]>([])
+  const { orders } = useOrders()
+  const { items: wishlistItems } = useWishlist()
+  const { items: savedLaterItems } = useSavedLater()
   const [activeCoupons, setActiveCoupons] = useState<Coupon[]>([])
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
-  const [coins, setCoins] = useState(1250)
-  const [unreadMessages, setUnreadMessages] = useState(3)
+  const [coins] = useState<number | null>(null)
+  const [unreadMessages] = useState(0)
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const [fullName, setFullName] = useState('')
@@ -81,54 +79,7 @@ function AccountPageContent() {
   const [password2, setPassword2] = useState('')
   const [isChangingPassword, setIsChangingPassword] = useState(false)
 
-  useEffect(() => {
-    // Mock data
-    setRecentOrders([
-      {
-        id: '1',
-        orderNumber: 'ORD-2024-001',
-        date: new Date('2024-01-15'),
-        status: 'delivered',
-        total: 156.99,
-        items: 3
-      },
-      {
-        id: '2',
-        orderNumber: 'ORD-2024-002',
-        date: new Date('2024-01-10'),
-        status: 'shipped',
-        total: 89.50,
-        items: 2
-      },
-      {
-        id: '3',
-        orderNumber: 'ORD-2024-003',
-        date: new Date('2024-01-05'),
-        status: 'processing',
-        total: 234.75,
-        items: 5
-      }
-    ])
-
-    setActiveCoupons([
-      {
-        id: '1',
-        code: 'SAVE20',
-        discount: 20,
-        type: 'percentage',
-        validUntil: new Date('2024-02-15'),
-        isUsed: false
-      },
-      {
-        id: '2',
-        code: 'FREESHIP',
-        discount: 10,
-        type: 'fixed',
-        validUntil: new Date('2024-01-30'),
-        isUsed: false
-      }
-    ])
-  }, [])
+  useEffect(() => { setActiveCoupons([]) }, [])
 
   // Load profile from API (requires supabase access token)
   useEffect(() => {
@@ -287,18 +238,7 @@ function AccountPageContent() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      {/* Mobile Hamburger Menu Button */}
-      <div className="block sm:hidden mb-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="flex items-center justify-center w-8 h-8"
-          onClick={() => setIsHamburgerMenuOpen(true)}
-        >
-          <Menu className="w-6 h-6" />
-          <span className="sr-only">Open menu</span>
-        </Button>
-      </div>
+      
 
       {/* Header */}
       <div className="mb-8">
@@ -310,23 +250,23 @@ function AccountPageContent() {
       {/* Security moved to Settings page */}
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4 mb-4 sm:mb-8">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center space-x-3">
               <div className="p-2 bg-blue-100 rounded-lg">
                 <ShoppingBag className="w-6 h-6 text-blue-600" />
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Orders</p>
-                <p className="text-2xl font-bold">{recentOrders.length}</p>
+                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Orders</p>
+                <p className="text-lg sm:text-2xl font-bold">{orders?.length || 0}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center space-x-3">
               <div className="p-2 bg-green-100 rounded-lg">
                 <Coins className="w-6 h-6 text-green-600" />
@@ -346,22 +286,36 @@ function AccountPageContent() {
                 <Heart className="w-6 h-6 text-red-600" />
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Wishlist</p>
-                <p className="text-2xl font-bold">12</p>
+                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Wishlist</p>
+                <p className="text-lg sm:text-2xl font-bold">{wishlistItems.length}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex items-center space-x-3">
               <div className="p-2 bg-purple-100 rounded-lg">
                 <MessageCircle className="w-6 h-6 text-purple-600" />
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Messages</p>
-                <p className="text-2xl font-bold">{unreadMessages}</p>
+                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Messages</p>
+                <p className="text-lg sm:text-2xl font-bold">{unreadMessages}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-orange-100 rounded-lg">
+                <Clock className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Saved for Later</p>
+                <p className="text-lg sm:text-2xl font-bold">{savedLaterItems.length}</p>
               </div>
             </div>
           </CardContent>
@@ -369,42 +323,45 @@ function AccountPageContent() {
       </div>
 
       {/* Recent Orders */}
-      <Card className="mb-8">
+      <Card className="mb-4 sm:mb-8">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-2">
+            <CardTitle className="flex items-center space-x-2 text-base sm:text-lg">
               <ShoppingBag className="w-5 h-5" />
               <span>Recent Orders</span>
             </CardTitle>
-            <Button variant="outline" onClick={() => router.push('/account/orders')}>
+            <Button size="sm" variant="outline" onClick={() => router.push('/account/orders')}>
               View All Orders
             </Button>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {recentOrders.map((order) => (
-              <div key={order.id} className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="flex items-center space-x-4">
+            {(orders || []).slice(0, 3).map((order: any) => (
+              <div key={order.id} className="flex items-center justify-between p-3 sm:p-4 border rounded-lg">
+                <div className="flex items-center space-x-3 sm:space-x-4">
                   {getStatusIcon(order.status)}
                   <div>
-                    <p className="font-medium">Order #{order.orderNumber}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {order.items} items • ${order.total.toFixed(2)}
+                    <p className="font-medium text-sm sm:text-base">Order #{order.orderNumber}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      {order.totalItems} items • TZS {Number(order.totalAmount || 0).toLocaleString()}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {order.date.toLocaleDateString()}
+                    <p className="text-[11px] sm:text-xs text-muted-foreground">
+                      {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : ''}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2 sm:space-x-4">
                   {getStatusBadge(order.status)}
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={() => router.push(`/account/orders/${order.id}`)}>
                     View Details
                   </Button>
                 </div>
               </div>
             ))}
+            {(!orders || orders.length === 0) && (
+              <div className="text-sm text-muted-foreground">No orders yet.</div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -442,7 +399,7 @@ function AccountPageContent() {
       </Card>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         <Button 
           variant="outline" 
           className="h-20 flex-col space-y-2"
@@ -452,14 +409,7 @@ function AccountPageContent() {
           <span>My Orders</span>
         </Button>
 
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/coins')}
-        >
-          <Coins className="w-6 h-6" />
-          <span>My Coins</span>
-        </Button>
+        
 
         <Button 
           variant="outline" 
@@ -486,6 +436,15 @@ function AccountPageContent() {
         >
           <Heart className="w-6 h-6" />
           <span>Wish List</span>
+        </Button>
+
+        <Button 
+          variant="outline" 
+          className="h-20 flex-col space-y-2"
+          onClick={() => router.push('/account/saved-later')}
+        >
+          <Clock className="w-6 h-6" />
+          <span>Saved for Later</span>
         </Button>
 
         <Button 
@@ -520,7 +479,7 @@ function AccountPageContent() {
       <div className={`hamburger-overlay ${isHamburgerMenuOpen ? 'open' : ''}`} onClick={() => setIsHamburgerMenuOpen(false)} />
       <div className={`hamburger-menu ${isHamburgerMenuOpen ? 'open' : ''}`}>
         {/* Header with Logo and Close */}
-        <div className="flex items-center justify-between p-6 border-b border-white/10 bg-gradient-to-r from-yellow-500/10 to-orange-500/10">
+        <div className="relative flex items-center justify-between p-6 border-b border-white/10 bg-gradient-to-r from-yellow-500/10 to-orange-500/10">
           <div className="flex items-center gap-3">
             <Image
               src={displayLogo}
@@ -538,9 +497,10 @@ function AccountPageContent() {
             variant="ghost"
             size="icon"
             onClick={() => setIsHamburgerMenuOpen(false)}
-            className="text-white hover:bg-white/20 rounded-full"
+            className="text-white hover:bg-white/20 rounded-full absolute right-2 top-2 h-8 w-8"
+            aria-label="Close"
           >
-            <X className="w-6 h-6" />
+            <X className="w-4 h-4" />
           </Button>
         </div>
         
@@ -611,6 +571,15 @@ function AccountPageContent() {
                     <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
                   </Link>
                   <Link 
+                    href="/account/saved-later"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Clock className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">Saved for Later</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                  <Link 
                     href="/account/messages"
                     className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
                     onClick={() => setIsHamburgerMenuOpen(false)}
@@ -628,15 +597,7 @@ function AccountPageContent() {
                     <span className="text-white font-medium">Payment</span>
                     <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
                   </Link>
-                  <Link 
-                    href="/account/coins"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">My Coins</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
+                  
                   <Link 
                     href="/account/coupons"
                     className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"

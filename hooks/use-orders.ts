@@ -1,178 +1,221 @@
-"use client"
+import { useState, useEffect, useCallback } from 'react'
+import { useAuth } from '@/contexts/auth-context'
 
-import { useState, useEffect } from "react"
-
-export interface OrderItem {
-  id: number
-  productId: number
-  variantId?: number
-  quantity: number
-  price: number
-  totalPrice: number
-  productName: string
-  variantName?: string
-}
-
-export interface Order {
-  id: number
+interface Order {
+  id: string
   orderNumber: string
-  userId: string
-  status: string
+  referenceId: string
+  pickupId: string
+  status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled' | 'ready_for_pickup' | 'picked_up'
   totalAmount: number
-  shippingAddress: any
-  billingAddress: any
-  paymentMethod: string
-  paymentStatus: string
+  currency: string
+  itemCount: number
+  totalItems: number
   createdAt: string
   updatedAt: string
-  user?: {
-    id: string
-    full_name: string
-    email: string
+  paymentMethod: string
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'unpaid'
+  clickpesaTransactionId?: string
+  paymentTimestamp?: string
+  failureReason?: string
+  deliveryOption: 'shipping' | 'pickup'
+  trackingNumber?: string
+  estimatedDelivery?: string
+  shippingAddress: {
+    fullName: string
+    address: string
+    address2?: string
+    city: string
+    state: string
+    postalCode: string
+    country: string
     phone: string
   }
   items: OrderItem[]
+  notes?: string
+}
+
+interface OrderItem {
+  id: string
+  productId: string
+  productName: string
+  productImage: string
+  variantName?: string
+  variantAttributes?: any
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+}
+
+interface OrderStatus {
+  status: string
+  timestamp: string
+  description: string
+  location?: string
 }
 
 export function useOrders() {
+  const { isAuthenticated } = useAuth()
   const [orders, setOrders] = useState<Order[]>([])
-  const [isInitialized, setIsInitialized] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load orders from API on mount
-  useEffect(() => {
-    fetchOrders()
-  }, [])
+  const fetchOrders = useCallback(async () => {
+    if (!isAuthenticated) {
+      setOrders([])
+      return
+    }
 
-  const fetchOrders = async () => {
     try {
-      setIsLoading(true)
+      setLoading(true)
       setError(null)
       
-      const response = await fetch('/api/orders')
-      if (response.ok) {
-        const data = await response.json()
-        setOrders(data)
-      } else {
-        const errorData = await response.json()
-        const errorMessage = errorData.error || 'Failed to fetch orders'
-        setError(errorMessage)
-        console.error('Failed to fetch orders:', errorMessage)
+      const response = await fetch('/api/user/orders')
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch orders')
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Network error'
-      setError(errorMessage)
-      console.error('Error fetching orders:', error)
+      
+      const data = await response.json()
+      setOrders(data.orders || [])
+    } catch (err) {
+      console.error('Error fetching orders:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch orders')
     } finally {
-      setIsLoading(false)
-      setIsInitialized(true)
+      setLoading(false)
     }
-  }
+  }, [isAuthenticated])
 
-  const addOrder = async (order: Omit<Order, "id" | "createdAt" | "updatedAt">) => {
+  const fetchOrderById = useCallback(async (orderId: string): Promise<Order | null> => {
+    if (!isAuthenticated) {
+      return null
+    }
+
     try {
-      setError(null)
-      const response = await fetch('/api/orders', {
+      const response = await fetch(`/api/user/orders/${orderId}`)
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null
+        }
+        throw new Error('Failed to fetch order')
+      }
+      
+      const data = await response.json()
+      return data.order
+    } catch (err) {
+      console.error('Error fetching order:', err)
+      throw err
+    }
+  }, [isAuthenticated])
+
+  const createOrder = useCallback(async (orderData: Partial<Order>): Promise<Order | null> => {
+    if (!isAuthenticated) {
+      throw new Error('Must be authenticated to create order')
+    }
+
+    try {
+      const response = await fetch('/api/user/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(order),
+        body: JSON.stringify(orderData),
       })
-
-      if (response.ok) {
-        const newOrder = await response.json()
-        setOrders(prev => [newOrder, ...prev])
-        return newOrder
-      } else {
-        const errorData = await response.json()
-        const errorMessage = errorData.error || 'Failed to add order'
-        setError(errorMessage)
-        throw new Error(errorMessage)
+      
+      if (!response.ok) {
+        throw new Error('Failed to create order')
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to add order'
-      setError(errorMessage)
-      console.error('Error adding order:', error)
-      throw error
+      
+      const data = await response.json()
+      return data.order
+    } catch (err) {
+      console.error('Error creating order:', err)
+      throw err
     }
-  }
+  }, [isAuthenticated])
 
-  const updateOrder = async (id: number, updates: Partial<Order>) => {
+  const updateOrder = useCallback(async (orderId: string, updates: Partial<Order>): Promise<Order | null> => {
+    if (!isAuthenticated) {
+      throw new Error('Must be authenticated to update order')
+    }
+
     try {
-      setError(null)
-      const response = await fetch('/api/orders', {
+      const response = await fetch(`/api/user/orders/${orderId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ id, ...updates }),
+        body: JSON.stringify(updates),
       })
-
-      if (response.ok) {
-        const updatedOrder = await response.json()
-        setOrders(prev => 
-          prev.map(order => 
-            order.id === id ? updatedOrder : order
-          )
-        )
-        return updatedOrder
-      } else {
-        const errorData = await response.json()
-        const errorMessage = errorData.error || 'Failed to update order'
-        setError(errorMessage)
-        throw new Error(errorMessage)
+      
+      if (!response.ok) {
+        throw new Error('Failed to update order')
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to update order'
-      setError(errorMessage)
-      console.error('Error updating order:', error)
-      throw error
+      
+      const data = await response.json()
+      return data.order
+    } catch (err) {
+      console.error('Error updating order:', err)
+      throw err
     }
-  }
+  }, [isAuthenticated])
 
-  const deleteOrder = async (id: number) => {
+  const getOrderStatusHistory = useCallback(async (orderId: string): Promise<OrderStatus[]> => {
+    if (!isAuthenticated) {
+      return []
+    }
+
     try {
-      setError(null)
-      const response = await fetch(`/api/orders?id=${id}`, {
-        method: 'DELETE',
-      })
-
-      if (response.ok) {
-        setOrders(prev => prev.filter(order => order.id !== id))
-        return true
-      } else {
-        const errorData = await response.json()
-        const errorMessage = errorData.error || 'Failed to delete order'
-        setError(errorMessage)
-        throw new Error(errorMessage)
+      const response = await fetch(`/api/user/orders/${orderId}/status-history`)
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch status history')
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to delete order'
-      setError(errorMessage)
-      console.error('Error deleting order:', error)
-      throw error
+      
+      const data = await response.json()
+      const statusHistory = data.statusHistory || []
+      
+      // If no status history exists, create a basic one
+      if (statusHistory.length === 0) {
+        return [
+          {
+            status: 'pending',
+            timestamp: new Date().toISOString(),
+            description: 'Order placed and payment pending',
+            location: 'Online'
+          }
+        ]
+      }
+      
+      return statusHistory
+    } catch (err) {
+      console.error('Error fetching status history:', err)
+      // Return basic status history as fallback
+      return [
+        {
+          status: 'pending',
+          timestamp: new Date().toISOString(),
+          description: 'Order placed and payment pending',
+          location: 'Online'
+        }
+      ]
     }
-  }
+  }, [isAuthenticated])
 
-  const getOrder = (id: number) => {
-    return orders.find(order => order.id === id)
-  }
-
-  const retry = () => {
+  useEffect(() => {
     fetchOrders()
-  }
+  }, [fetchOrders])
 
   return {
     orders,
-    addOrder,
-    updateOrder,
-    deleteOrder,
-    getOrder,
-    retry,
-    isInitialized,
-    isLoading,
+    loading,
     error,
+    fetchOrders,
+    fetchOrderById,
+    createOrder,
+    updateOrder,
+    getOrderStatusHistory,
+    refetch: fetchOrders
   }
-} 
+}

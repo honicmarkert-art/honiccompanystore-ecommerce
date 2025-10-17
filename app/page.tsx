@@ -17,6 +17,7 @@ import {
   Globe, 
   ShoppingCart, 
   User, 
+  Users,
   Menu,
   X,
   Play,
@@ -332,7 +333,7 @@ export default function LandingPage() {
       { name: 'Logistics Solutions', href: '/services/logistics' }
     ],
     support: [
-      { name: 'Help Center', href: '/help' },
+      { name: 'Help Center', href: '/support' },
       { name: 'Order Tracking', href: '/tracking' },
       { name: 'Returns & Refunds', href: '/returns' },
       { name: 'Shipping Info', href: '/shipping' },
@@ -575,7 +576,7 @@ export default function LandingPage() {
                     <span>Become Supplier</span>
                   </span>
               </span>
-                <span className="text-gray-700 dark:text-gray-300 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/help')}>Help</span>
+                <span className="text-gray-700 dark:text-gray-300 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/support')}>Help</span>
                 <span className="text-gray-700 dark:text-gray-300 hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/buyer-central')}>Buyer Central</span>
                 <span className="text-gray-700 dark:text-gray-300 hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/app')}>App & extension</span>
             </div>
@@ -750,7 +751,7 @@ export default function LandingPage() {
           {ads && ads.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
               {ads.slice(0,3).map((ad: any, i: number) => (
-                <OptimizedLink key={i} href={ad.link || '/products'} className="block">
+                <OptimizedLink key={i} href={ad.link || '/products'} className="block" target="_blank" rel="noopener noreferrer">
                   <div className="relative overflow-hidden rounded-lg border border-gray-700 bg-gray-800 group">
                     {ad.image ? (
                       // simple img to avoid heavy next/image CLS on dynamic ads
@@ -1188,6 +1189,51 @@ export default function LandingPage() {
                         <span className="text-white font-medium">Settings</span>
                         <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
                       </Link>
+                      <Link 
+                        href="/contact"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <MessageSquare className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Contact Us</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/about"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Users className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">About Us</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/support"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <HelpCircle className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Support</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/support/order-tracking"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Order Tracking</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/categories"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Layers className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">All Categories</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
                     </>
                   ) : (
                     <div className="space-y-2">
@@ -1213,6 +1259,51 @@ export default function LandingPage() {
                       >
                         Create Account
                       </Button>
+                      <Link 
+                        href="/contact"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <MessageSquare className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Contact Us</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/about"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Users className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">About Us</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/support"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <HelpCircle className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Support</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/support/order-tracking"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">Order Tracking</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
+                      <Link 
+                        href="/categories"
+                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                        onClick={() => setIsHamburgerMenuOpen(false)}
+                      >
+                        <Layers className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                        <span className="text-white font-medium">All Categories</span>
+                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                      </Link>
                     </div>
                   )}
                 </div>

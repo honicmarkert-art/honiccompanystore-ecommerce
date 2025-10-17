@@ -42,10 +42,9 @@ export function Footer() {
   const footerLinks = {
     company: [
       { name: 'About Us', href: '/about' },
-      { name: 'Our Story', href: '/story' },
-      { name: 'Careers', href: '/careers' },
-      { name: 'Press & Media', href: '/press' },
-      { name: 'Contact Us', href: '/contact' }
+      { name: 'Contact Us', href: '/contact' },
+      { name: 'Support', href: '/support' },
+      { name: 'All Categories', href: '/categories' }
     ],
     services: [
       { name: 'Electronics Supply', href: '/services/electronics' },
@@ -55,7 +54,7 @@ export function Footer() {
       { name: 'Logistics Solutions', href: '/services/logistics' }
     ],
     support: [
-      { name: 'Help Center', href: '/help' },
+      { name: 'Help Center', href: '/support' },
       { name: 'Order Tracking', href: '/tracking' },
       { name: 'Returns & Refunds', href: '/returns' },
       { name: 'Shipping Info', href: '/shipping' },

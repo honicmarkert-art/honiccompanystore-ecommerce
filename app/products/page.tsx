@@ -1328,6 +1328,93 @@ export default function Component() {
               </Button>
             </Link>
 
+            {/* Mobile Profile Button */}
+            <div className="sm:hidden">
+              {isAuthenticated ? (
+                <UserProfile />
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "flex items-center gap-1 h-8 w-8 p-0 ml-1 cursor-pointer",
+                        "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
+                        darkHeaderFooterClasses.buttonGhostText,
+                        darkHeaderFooterClasses.buttonGhostHoverBg,
+                      )}
+                    >
+                      <User className="w-4 h-4" />
+                      <span className="sr-only">User Menu</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className={cn(
+                      "w-56",
+                      // Force solid backgrounds in both themes
+                      "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
+                    )}
+                  >
+                    <div className="p-2 flex flex-col gap-2">
+                      <Button 
+                        onClick={() => openAuthModal('login')}
+                        className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                      >
+                        Sign in
+                      </Button>
+                      <button
+                        onClick={() => openAuthModal('register')}
+                        className={cn(
+                          "text-center text-sm hover:underline",
+                          darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                        )}
+                      >
+                        Register
+                      </button>
+                    </div>
+                    <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Package className="w-4 h-4 mr-2" /> My Orders
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Coins className="w-4 h-4 mr-2" /> My Coins
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <MessageSquare className="w-4 h-4 mr-2" /> Message Center
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <CreditCard className="w-4 h-4 mr-2" /> Payment
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Heart className="w-4 h-4 mr-2" /> Wish List
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Ticket className="w-4 h-4 mr-2" /> My Coupons
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+
 
             {/* Theme Switcher Dropdown - Hidden on Mobile */}
             <div className="hidden sm:block">
@@ -1561,7 +1648,7 @@ export default function Component() {
                   : "bg-stone-200/80 border-b border-stone-300/50"
               )}>
         <div className="flex items-center justify-center h-auto sm:h-8 px-1 sm:px-2 lg:px-4 xl:px-6 2xl:px-8 py-1 sm:py-0">
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-2 lg:gap-3 xl:gap-4 overflow-visible sm:overflow-x-auto scrollbar-hide">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-2 lg:gap-3 xl:gap-4 category-scroll w-full sm:w-auto sm:justify-center min-w-0">
             {/* Removed legacy always-visible All button to avoid duplicates */}
 
             {/* Mobile Categories - Only show 5 with rotation */}
@@ -1578,7 +1665,7 @@ export default function Component() {
                 handleFilterActivity()
               }}
               className={cn(
-                "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden",
+                "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden flex-shrink-0",
                 !activeCategory
                   ? (themeClasses.mainBg === "bg-white min-h-screen" ? "text-black bg-amber-200/60" : "text-yellow-300 bg-yellow-700/30")
                   : (themeClasses.mainBg === "bg-white min-h-screen" ? "text-neutral-700 hover:bg-neutral-100" : "text-white/80 hover:bg-white/10")
@@ -1604,7 +1691,7 @@ export default function Component() {
                     // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
                 }}
                 className={cn(
-                  "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden",
+                  "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden flex-shrink-0",
                     activeCategory === category.name
                     ? themeClasses.mainBg === "bg-white min-h-screen"
                       ? "text-black bg-amber-200/60"
@@ -1634,7 +1721,7 @@ export default function Component() {
                 handleFilterActivity()
               }}
               className={cn(
-                "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
+                "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer flex-shrink-0",
                 !activeCategory
                   ? (themeClasses.mainBg === "bg-white min-h-screen" ? "text-black bg-amber-200/60" : "text-yellow-300 bg-yellow-700/30")
                   : (themeClasses.mainBg === "bg-white min-h-screen" ? "text-neutral-700 hover:bg-neutral-100" : "text-white/80 hover:bg-white/10")
@@ -1660,7 +1747,7 @@ export default function Component() {
                     // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
                   }}
                   className={cn(
-                    "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer",
+                    "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer flex-shrink-0",
                     activeCategory === category.name
                       ? themeClasses.mainBg === "bg-white min-h-screen"
                         ? "text-black bg-amber-200/60"
@@ -1722,6 +1809,8 @@ export default function Component() {
                 <Link 
                   href={advertisements[currentAdIndex].link_url || "/products"}
                   className="block cursor-pointer h-32 sm:h-48 relative z-10"
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   <div className="relative overflow-hidden hover:scale-105 transition-all duration-500 rounded-sm h-full bg-gray-100 dark:bg-gray-800">
                     {advertisements[currentAdIndex].media_type === 'image' ? (

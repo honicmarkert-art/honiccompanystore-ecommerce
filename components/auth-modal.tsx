@@ -228,6 +228,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       placeholder="Enter your email"
                       value={loginForm.email}
                       onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleLogin(e)
+                        }
+                      }}
                       className="pl-10 h-8 text-sm"
                       required
                     />
@@ -244,6 +250,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       placeholder="Enter your password"
                       value={loginForm.password}
                       onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleLogin(e)
+                        }
+                      }}
                       className="pl-10 pr-10 h-8 text-sm"
                       autoComplete="current-password"
                       required
@@ -336,6 +348,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       placeholder="Full name"
                       value={registerForm.fullName}
                       onChange={(e) => setRegisterForm({ ...registerForm, fullName: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleRegister(e)
+                        }
+                      }}
                       className="pl-10 h-8 text-sm"
                       required
                     />
@@ -352,6 +370,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       placeholder="Email"
                       value={registerForm.email}
                       onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleRegister(e)
+                        }
+                      }}
                       className="pl-10 h-8 text-sm"
                       required
                     />
@@ -368,6 +392,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       placeholder="Phone"
                       value={registerForm.phone}
                       onChange={(e) => setRegisterForm({ ...registerForm, phone: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleRegister(e)
+                        }
+                      }}
                       className="pl-10 h-8 text-sm"
                     />
                   </div>
@@ -384,6 +414,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                         placeholder="Password"
                         value={registerForm.password}
                         onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleRegister(e)
+                          }
+                        }}
                         className="pl-10 pr-10 h-8 text-sm"
                         autoComplete="new-password"
                         required
@@ -417,6 +453,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                         placeholder="Confirm"
                         value={registerForm.confirmPassword}
                         onChange={(e) => setRegisterForm({ ...registerForm, confirmPassword: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleRegister(e)
+                          }
+                        }}
                         className="pl-10 pr-10 h-8 text-sm"
                         autoComplete="new-password"
                         required

@@ -43,7 +43,7 @@ export function UserProfile() {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+          <Button variant="ghost" className="relative h-8 w-8 sm:h-8 sm:w-8 rounded-full hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors">
             <User className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -136,10 +136,10 @@ export function UserProfile() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-6 w-6 rounded-full bg-gradient-to-br from-green-400 via-blue-500 to-indigo-600 hover:from-green-500 hover:via-blue-600 hover:to-indigo-700 transition-all duration-300 shadow-lg">
-          <Avatar className="h-6 w-6">
+        <Button variant="ghost" className="relative h-8 w-8 sm:h-8 sm:w-8 rounded-full bg-gradient-to-br from-green-400 via-blue-500 to-indigo-600 hover:from-green-500 hover:via-blue-600 hover:to-indigo-700 transition-all duration-300 shadow-lg hover:shadow-xl">
+          <Avatar className="h-8 w-8">
             <AvatarImage src={user.user_metadata?.avatar_url} alt={getUserName()} />
-            <AvatarFallback className="bg-transparent text-white font-semibold text-xs">{getUserInitials(user.email || '')}</AvatarFallback>
+            <AvatarFallback className="bg-transparent text-white font-semibold text-sm">{getUserInitials(user.email || '')}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>

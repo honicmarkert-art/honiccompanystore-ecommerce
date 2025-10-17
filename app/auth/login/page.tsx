@@ -59,6 +59,12 @@ function LoginPageContent() {
                     placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleSubmit(e)
+                  }
+                }}
                 required
                      disabled={isLoggingIn}
                   />
@@ -73,6 +79,12 @@ function LoginPageContent() {
                     placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleSubmit(e)
+                    }
+                  }}
                   required
                      disabled={isLoggingIn}
                   />

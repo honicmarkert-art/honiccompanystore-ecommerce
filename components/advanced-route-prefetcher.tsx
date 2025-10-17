@@ -159,7 +159,7 @@ export function AdvancedRoutePrefetcher() {
       if (scrollPercent > 50 && !prefetchedRoutes.current.has('scroll-triggered')) {
         prefetchedRoutes.current.add('scroll-triggered')
         // Prefetch additional routes on scroll
-        const additionalRoutes = ['/help', '/about', '/contact']
+        const additionalRoutes = ['/support', '/about', '/contact']
         prefetchWithDelay(additionalRoutes, 500)
       }
     }
