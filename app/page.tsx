@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { ServiceCardWithRotation } from '@/components/service-card-with-rotation'
 import { OptimizedLink } from '@/components/optimized-link'
 import { PromotionalCartPopup } from '@/components/promotional-cart-popup'
 import { logger } from '@/lib/logger'
@@ -266,56 +265,6 @@ export default function LandingPage() {
     }
   ]
 
-  const services = [
-    {
-      icon: <ShoppingCart className="w-8 h-8" />,
-      title: "Retail & Online Sales",
-      description: "Buy electronics and components online",
-      images: serviceRetailImages && serviceRetailImages.length > 0 ? serviceRetailImages : [],
-      color: "blue",
-      onClick: () => router.push('/products')
-    },
-    {
-      icon: <Cpu className="w-8 h-8" />,
-      title: "Project Prototyping",
-      description: "Custom prototyping for your ideas",
-      images: servicePrototypingImages && servicePrototypingImages.length > 0 ? servicePrototypingImages : [],
-      color: "green",
-      onClick: () => router.push('/services/prototyping')
-    },
-    {
-      icon: <CircuitBoard className="w-8 h-8" />,
-      title: "PCB Printing",
-      description: "Professional PCB design and printing",
-      images: servicePcbImages && servicePcbImages.length > 0 ? servicePcbImages : [],
-      color: "purple",
-      onClick: () => router.push('/services/pcb')
-    },
-    {
-      icon: <Bot className="w-8 h-8" />,
-      title: "AI Consultancy",
-      description: "AI-powered project guidance and support",
-      images: serviceAiImages && serviceAiImages.length > 0 ? serviceAiImages : [],
-      color: "orange",
-      onClick: () => router.push('/services/ai')
-    },
-    {
-      icon: <Building2 className="w-8 h-8" />,
-      title: "STEM Training Kits",
-      description: "Educational kits for learning and teaching",
-      images: serviceStemImages && serviceStemImages.length > 0 ? serviceStemImages : [],
-      color: "red",
-      onClick: () => router.push('/services/stem-kits')
-    },
-    {
-      icon: <Lightbulb className="w-8 h-8" />,
-      title: "Home Devices",
-      description: "Smart home and automation solutions",
-      images: serviceHomeImages && serviceHomeImages.length > 0 ? serviceHomeImages : [],
-      color: "teal",
-      onClick: () => router.push('/products?category=home-innovations')
-    }
-  ]
 
   const footerLinks = {
     company: [
@@ -720,39 +669,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Services Section */}
-      <section className="bg-gray-800 py-3 sm:py-4 md:py-5 lg:py-6">
-        <div className="container mx-auto px-3 sm:px-4">
-          <div className="text-center mb-2 sm:mb-3 md:mb-4">
-            <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold mb-2 sm:mb-4">Our Services</h2>
-            <p className="text-gray-300 text-sm sm:text-base lg:text-lg max-w-3xl mx-auto px-2">
-              Empowering innovation through comprehensive electronics solutions, prototyping services, and AI-driven guidance
-            </p>
-          </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 lg:gap-4 px-4 sm:px-6 lg:px-8">
-            {services.map((service, index) => (
-              <ServiceCardWithRotation 
-                key={index} 
-                service={service} 
-                rotationTime={serviceImageRotationTime}
-              />
-            ))}
-          </div>
-
-          {/* Call to Action */}
-          <div className="text-center mt-2 sm:mt-3 md:mt-4">
-            <Button 
-              size="lg" 
-              className="bg-orange-500 hover:bg-orange-600 text-sm sm:text-base md:text-lg px-4 sm:px-6 md:px-8 py-2 sm:py-3 w-full sm:w-auto"
-              onClick={() => router.push('/products')}
-            >
-              <Zap className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-              Explore Our Services
-            </Button>
-          </div>
-        </div>
-      </section>
 
       {/* Features Section */}
       <section className="bg-gray-900 py-8 sm:py-12 lg:py-16">
