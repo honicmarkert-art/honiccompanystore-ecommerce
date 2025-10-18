@@ -1331,7 +1331,15 @@ export default function Component() {
             {/* Mobile Profile Button */}
             <div className="sm:hidden">
               {isAuthenticated ? (
-                <UserProfile />
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-col leading-tight">
+                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Hi</span>
+                    <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px]">
+                      {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                    </span>
+                  </div>
+                  <UserProfile />
+                </div>
               ) : (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   try {
@@ -58,6 +61,13 @@ export async function POST(request: NextRequest) {
     // Clear official Supabase auth cookies
     response.cookies.set('sb-access-token', '', cookieOptions)
     response.cookies.set('sb-refresh-token', '', cookieOptions)
+    response.cookies.set('sb-session-active', '', {
+      httpOnly: false,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0
+    })
 
     // Also clear any legacy custom cookies if they exist
     response.cookies.set('auth-token', '', cookieOptions)
@@ -94,6 +104,13 @@ export async function POST(request: NextRequest) {
 
     response.cookies.set('sb-access-token', '', cookieOptions)
     response.cookies.set('sb-refresh-token', '', cookieOptions)
+    response.cookies.set('sb-session-active', '', {
+      httpOnly: false,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0
+    })
     response.cookies.set('auth-token', '', cookieOptions)
     response.cookies.set('refresh-token', '', cookieOptions)
     response.cookies.set('session-id', '', cookieOptions)
