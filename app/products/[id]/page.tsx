@@ -2103,6 +2103,114 @@ export default function ProductDetailPage() {
             </div>
           </OptimizedLink>
 
+          {/* User Profile - Moved to left side */}
+          {isAuthenticated ? (
+            <div className="flex items-center gap-2 ml-2 sm:ml-4">
+              <div className="flex flex-col leading-tight">
+                <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Hi</span>
+                <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px] sm:max-w-[120px]">
+                  {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                </span>
+              </div>
+              <div className="flex flex-col items-center">
+                <UserProfile />
+                <span className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-1">
+                  ({(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'})
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="ml-2 sm:ml-4">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "flex items-center gap-1 sm:gap-2 h-auto py-2 px-1 sm:px-2 cursor-pointer",
+                      "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
+                      darkHeaderFooterClasses.buttonGhostText,
+                      darkHeaderFooterClasses.buttonGhostHoverBg,
+                    )}
+                  >
+                    <User className="w-4 h-4 sm:w-4 sm:h-4" />
+                    <div className="hidden sm:flex flex-col items-start text-xs">
+                      <span>Welcome</span>
+                      <span className="font-semibold hover:text-yellow-500 transition-colors">Sign in / Register</span>
+                    </div>
+                    <div className="sm:hidden flex flex-col items-center text-xs">
+                      <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Account</span>
+                      <span className="font-semibold text-neutral-900 dark:text-white">Sign in</span>
+                    </div>
+                    <span className="sr-only">User Menu</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className={cn(
+                    "w-56",
+                    // Force solid backgrounds in both themes
+                    "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
+                  )}
+                >
+                  <div className="p-2 flex flex-col gap-2">
+                    <Button 
+                      onClick={() => openAuthModal('login')}
+                      className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                    >
+                      Sign in
+                    </Button>
+                    <button
+                      onClick={() => openAuthModal('register')}
+                      className={cn(
+                        "text-center text-sm hover:underline",
+                        darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                      )}
+                    >
+                      Register
+                    </button>
+                  </div>
+                  <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Package className="w-4 h-4 mr-2" /> My Orders
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Coins className="w-4 h-4 mr-2" /> My Coins
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <MessageSquare className="w-4 h-4 mr-2" /> Message Center
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <CreditCard className="w-4 h-4 mr-2" /> Payment
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Heart className="w-4 h-4 mr-2" /> Wish List
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Ticket className="w-4 h-4 mr-2" /> My Coupons
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+
           {/* Search Bar Container */}
           <div className="flex-1 max-w-2xl mx-2 sm:mx-4 lg:mx-6 xl:mx-8 flex items-center relative">
             <form className="relative flex-1 flex items-center" onSubmit={handleSearch}>
@@ -2231,111 +2339,6 @@ export default function ProductDetailPage() {
               </Button>
             </OptimizedLink>
 
-            {/* User Profile - Added to product detail page */}
-            {isAuthenticated ? (
-              <div className="flex items-center gap-2">
-                <div className="flex flex-col leading-tight">
-                  <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Hi</span>
-                  <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px] sm:max-w-[120px]">
-                    {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
-                  </span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <UserProfile />
-                  <span className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-1">
-                    ({(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'})
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      "flex items-center gap-1 sm:gap-2 h-auto py-2 px-1 sm:px-2 ml-1 sm:ml-2 cursor-pointer",
-                      "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
-                      darkHeaderFooterClasses.buttonGhostText,
-                      darkHeaderFooterClasses.buttonGhostHoverBg,
-                    )}
-                  >
-                    <User className="w-4 h-4 sm:w-4 sm:h-4" />
-                    <div className="hidden sm:flex flex-col items-start text-xs">
-                      <span>Welcome</span>
-                      <span className="font-semibold hover:text-yellow-500 transition-colors">Sign in / Register</span>
-                    </div>
-                    <div className="sm:hidden flex flex-col items-center text-xs">
-                      <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Account</span>
-                      <span className="font-semibold text-neutral-900 dark:text-white">Sign in</span>
-                    </div>
-                    <span className="sr-only">User Menu</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className={cn(
-                    "w-56",
-                    // Force solid backgrounds in both themes
-                    "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
-                  )}
-                >
-                  <div className="p-2 flex flex-col gap-2">
-                    <Button 
-                      onClick={() => openAuthModal('login')}
-                      className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                    >
-                      Sign in
-                    </Button>
-                    <button
-                      onClick={() => openAuthModal('register')}
-                      className={cn(
-                        "text-center text-sm hover:underline",
-                        darkHeaderFooterClasses.textNeutralSecondaryFixed,
-                      )}
-                    >
-                      Register
-                    </button>
-                  </div>
-                  <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
-                  <DropdownMenuItem 
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <ClipboardList className="w-4 h-4 mr-2" /> My Orders
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Coins className="w-4 h-4 mr-2" /> My Coins
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <MessageSquare className="w-4 h-4 mr-2" /> Message Center
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <CreditCard className="w-4 h-4 mr-2" /> Payment
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Heart className="w-4 h-4 mr-2" /> Wish List
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Ticket className="w-4 h-4 mr-2" /> My Coupons
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
           </div>
         </div>
       </header>
