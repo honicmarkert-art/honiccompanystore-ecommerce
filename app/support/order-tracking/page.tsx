@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import { useTheme } from '@/hooks/use-theme'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/hooks/use-auth'
+import { useAuth } from '@/contexts/auth-context'
 import Link from 'next/link'
 
 interface OrderStatus {

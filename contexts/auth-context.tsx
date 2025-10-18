@@ -381,42 +381,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const result = await response.json()
       
+      // Always clear local state regardless of API response
+      setUser(null)
+      setIsAuthenticated(false)
+      setIsAdmin(false)
+      
+      // Clear all local storage and session storage
+      if (typeof window !== 'undefined') {
+        localStorage.clear()
+        sessionStorage.clear()
+        
+        // Clear specific auth-related items
+        sessionStorage.removeItem('admin-2fa-verified')
+        sessionStorage.removeItem('admin-2fa-time')
+        
+        // Clear any custom auth tokens that might exist
+        localStorage.removeItem('auth-token')
+        localStorage.removeItem('refresh-token')
+        localStorage.removeItem('user-role')
+        localStorage.removeItem('guest_cart') // Clear guest cart on logout
+      }
+      
       if (result.success) {
-        // Clear user state immediately
-        setUser(null)
-        setIsAuthenticated(false)
-        setIsAdmin(false)
-        
-        // Clear 2FA session
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('admin-2fa-verified')
-          sessionStorage.removeItem('admin-2fa-time')
-        }
-        
         // Show success message
         toast({
           title: "Signed Out",
           description: "You have been successfully signed out.",
           variant: "default"
         })
-        
-        // Redirect to home page
-        startTransition(() => {
-          router.replace('/')
-        })
       } else {
+        // Show warning but still proceed with logout
         toast({
-          title: "Sign Out Error",
-          description: result.error || "An error occurred while signing out",
-          variant: "destructive"
+          title: "Signed Out",
+          description: "You have been signed out locally.",
+          variant: "default"
         })
       }
-    } catch (error) {
       
+      // Force refresh and redirect to ensure clean state
+      startTransition(() => {
+        router.push('/')
+        router.refresh() // Force Next.js to clear client cache and refresh session context
+      })
+      
+    } catch (error) {
       // Even if there's an error, clear the local state
       setUser(null)
       setIsAuthenticated(false)
       setIsAdmin(false)
+      
+      // Clear all storage on error as well
+      if (typeof window !== 'undefined') {
+        localStorage.clear()
+        sessionStorage.clear()
+      }
       
       toast({
         title: "Signed Out",
@@ -424,8 +442,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         variant: "default"
       })
       
+      // Force refresh and redirect
       startTransition(() => {
-        router.replace('/')
+        router.push('/')
+        router.refresh()
       })
     }
   }

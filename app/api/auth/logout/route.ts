@@ -31,6 +31,11 @@ export async function POST(request: NextRequest) {
 
     // Sign out from Supabase (this invalidates the refresh token)
     const { error } = await supabase.auth.signOut()
+    
+    if (error) {
+      console.error('Supabase signOut error:', error)
+      // Continue with cookie cleanup even if Supabase signOut fails
+    }
 
     const isProd = process.env.NODE_ENV === 'production'
 
