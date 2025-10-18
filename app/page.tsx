@@ -422,7 +422,12 @@ export default function LandingPage() {
 
                 {/* Account */}
                 {user ? (
-                  <UserProfile />
+                  <div className="flex flex-col items-center">
+                    <UserProfile />
+                    <span className="text-xs text-white mt-1">
+                      ({(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'})
+                    </span>
+                  </div>
                 ) : (
                   <div className="flex items-center space-x-1">
                     <Button 
@@ -524,7 +529,12 @@ export default function LandingPage() {
 
                 {/* Account/Sign in */}
               {user ? (
-                <UserProfile />
+                <div className="flex flex-col items-center">
+                  <UserProfile />
+                  <span className="text-xs text-white mt-1">
+                    ({(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'})
+                  </span>
+                </div>
               ) : (
                   <div className="flex items-center space-x-2">
                     <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => openAuthModal('login')}>
