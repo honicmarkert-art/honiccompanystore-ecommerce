@@ -1537,7 +1537,7 @@ export default function Component() {
                 <div className="flex flex-col items-center">
                   <UserProfile />
                   <span className="text-xs text-white mt-1">
-                    ({(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'})
+                    {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                   </span>
                 </div>
               ) : (
