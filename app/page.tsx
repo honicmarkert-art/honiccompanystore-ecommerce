@@ -494,32 +494,32 @@ export default function LandingPage() {
               {/* Top Navigation Items */}
               <div className="flex items-center gap-2 lg:gap-3">
                 {/* Deliver to */}
-                <div className="flex items-center space-x-1 text-xs sm:text-sm cursor-pointer hover:text-orange-400 transition-colors">
-                <Flag className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">Deliver to: TZ</span>
-                <span className="sm:hidden">TZ</span>
-                <span className="text-gray-400">▼</span>
-              </div>
+                <div className="flex items-center space-x-1 text-xs sm:text-sm cursor-pointer hover:text-orange-400 transition-colors text-white">
+                <Flag className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                <span className="hidden sm:inline text-white">Deliver to: TZ</span>
+                <span className="sm:hidden text-white">TZ</span>
+                <span className="text-white">▼</span>
+                </div>
 
                 {/* Language/Currency */}
-                <div className="flex items-center space-x-1 text-xs sm:text-sm cursor-pointer hover:text-orange-400 transition-colors">
-                <Globe className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">English-TZS</span>
-                <span className="sm:hidden">EN</span>
-                <span className="text-gray-400">▼</span>
-              </div>
+                <div className="flex items-center space-x-1 text-xs sm:text-sm cursor-pointer hover:text-orange-400 transition-colors text-white">
+                <Globe className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                  <span className="hidden sm:inline text-white">English-TZS</span>
+                <span className="sm:hidden text-white">EN</span>
+                <span className="text-white">▼</span>
+                </div>
 
                 {/* Cart */}
-              <div className="flex items-center space-x-1 cursor-pointer relative" onClick={() => router.push('/cart')}>
+              <div className="flex items-center space-x-1 cursor-pointer relative text-white" onClick={() => router.push('/cart')}>
                 <div className="relative">
-                  <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                   {cartTotalItems > 0 && (
                     <div className="absolute -top-2.5 left-1/2 transform -translate-x-1/2 bg-transparent text-orange-500 text-xs font-bold">
                       {cartTotalItems > 99 ? '99+' : cartTotalItems}
                     </div>
                   )}
                 </div>
-                <span className="text-xs sm:text-sm hidden sm:inline">Cart</span>
+                <span className="text-xs sm:text-sm hidden sm:inline text-white">Cart</span>
               </div>
 
                 {/* Account/Sign in */}
@@ -542,43 +542,43 @@ export default function LandingPage() {
             {/* Second Row - AI Sourcing, Discovery, Become Supplier */}
             <div className="flex items-center justify-between mt-2">
               <div className="flex items-center gap-2 lg:gap-3">
-                <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/categories')}>
-                <Menu className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="text-xs sm:text-sm">All categories</span>
+                <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors text-white" onClick={() => router.push('/categories')}>
+                <Menu className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                <span className="text-xs sm:text-sm text-white">All categories</span>
               </div>
-                <span className="text-gray-300 text-xs sm:text-sm hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/featured')}>Featured selections</span>
-                <span className="text-gray-300 text-xs sm:text-sm hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/protection')}>Order protections</span>
+                <span className="text-white text-xs sm:text-sm hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/featured')}>Featured selections</span>
+                <span className="text-white text-xs sm:text-sm hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/protection')}>Order protections</span>
               <span 
-                  className="text-gray-300 hover:text-orange-400 cursor-pointer flex items-center space-x-1 text-xs sm:text-sm transition-colors"
+                  className="text-white hover:text-orange-400 cursor-pointer flex items-center space-x-1 text-xs sm:text-sm transition-colors"
                 onClick={() => router.push('/logistics')}
               >
-                <Truck className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span>Logistics</span>
+                <Truck className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                <span className="text-white">Logistics</span>
               </span>
               </div>
               <div className="flex items-center gap-2 lg:gap-3 text-xs sm:text-sm">
-                <span className="text-gray-700 dark:text-gray-300 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/ai-agent')}>
+                <span className="text-white cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/ai-agent')}>
                   <span className="flex items-center space-x-1">
-                    <Bot className="w-3 h-3 sm:w-4 sm:h-4" />
-                    <span>AI Sourcing</span>
+                    <Bot className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                    <span className="text-white">AI Sourcing</span>
                   </span>
               </span>
               <span 
-                  className="text-gray-700 dark:text-gray-300 hover:text-orange-400 cursor-pointer flex items-center space-x-1 transition-colors"
+                  className="text-white hover:text-orange-400 cursor-pointer flex items-center space-x-1 transition-colors"
                 onClick={() => router.push('/discover')}
               >
-                <Eye className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span>Discovery</span>
+                <Eye className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                  <span className="text-white">Discovery</span>
                 </span>
-                <span className="text-gray-700 dark:text-gray-300 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/become-supplier')}>
+                <span className="text-white cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/become-supplier')}>
                   <span className="flex items-center space-x-1">
-                    <Building2 className="w-3 h-3 sm:w-4 sm:h-4" />
-                    <span>Become Supplier</span>
+                    <Building2 className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                    <span className="text-white">Become Supplier</span>
                   </span>
               </span>
-                <span className="text-gray-700 dark:text-gray-300 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/support')}>Help</span>
-                <span className="text-gray-700 dark:text-gray-300 hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/buyer-central')}>Buyer Central</span>
-                <span className="text-gray-700 dark:text-gray-300 hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/app')}>App & extension</span>
+                <span className="text-white cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/support')}>Help</span>
+                <span className="text-white hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/buyer-central')}>Buyer Central</span>
+                <span className="text-white hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/app')}>App & extension</span>
             </div>
             </div>
           </div>
