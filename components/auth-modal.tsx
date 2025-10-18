@@ -77,10 +77,8 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
       } else {
         setAuthSuccess("Login successful! Welcome back.")
         // Auto-close after successful login (short delay for UX)
+        // Let AuthContext handle the redirect to ensure consistent behavior
         setTimeout(() => {
-          if (redirectUrl) {
-            router.push(redirectUrl)
-          }
           onClose()
         }, 800)
       }

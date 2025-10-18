@@ -266,11 +266,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Redirect immediately after successful login (unless prevented)
         if (!preventRedirect) {
-          // Only redirect if we're on the login page, otherwise stay on current page
-          if (pathname === '/auth/login' || pathname === '/auth/register') {
-            router.replace(result.redirectTo || '/')
-          }
-          // If on any other page, stay on that page
+          // Always redirect to home page after successful login for better UX
+          // This prevents users from staying on account pages after login
+          router.replace(result.redirectTo || '/')
         }
 
         return { success: true }
