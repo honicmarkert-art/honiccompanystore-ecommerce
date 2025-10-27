@@ -2402,7 +2402,23 @@ export default function Component() {
             error={infiniteError}
           >
             <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
-            {displayedProducts.length === 0 ? null : (
+            {displayedProducts.length === 0 ? (
+              <div className="col-span-full flex flex-col items-center justify-center py-16 px-4 text-center">
+                <Package className="w-16 h-16 text-gray-400 mb-4" />
+                <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
+                  No Products Found
+                </h3>
+                <p className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
+                  We couldn't find any products matching your filters. Try adjusting your search, categories, or price range.
+                </p>
+                <Button
+                  onClick={handleClearAllFilters}
+                  className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                >
+                  Clear All Filters
+                </Button>
+              </div>
+            ) : (
               <>
                 
                 {/* All Product Cards */}
@@ -2585,7 +2601,7 @@ export default function Component() {
                 })}
               </>
             )}
-        </div>
+            </div>
           </InfiniteScrollTrigger>
         )}
 
