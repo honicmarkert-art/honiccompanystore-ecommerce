@@ -434,7 +434,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Verify webhook checksum (ClickPesa uses checksum key, not webhook secret)
+// Verify webhook checksum using ClickPesa's method:
+// 1. Parse JSON payload
+// 2. Sort keys alphabetically
+// 3. Concatenate values only (not keys)
+// 4. Generate HMAC-SHA256 hash
+// 5. Compare with received signature
 function verifyWebhookSignature(payload: string, signature: string | null): boolean {
   if (!signature) {
     return false
@@ -446,14 +451,45 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
   }
 
   try {
-    // ClickPesa uses HMAC-SHA256 with checksum key
+    // Parse the JSON payload
+    const payloadObj = JSON.parse(payload)
+    
+    // 1. Sort keys alphabetically
+    const sortedKeys = Object.keys(payloadObj).sort()
+    
+    // 2. Concatenate values only (not keys!)
+    // Complex types (objects, arrays) should be serialized as strings
+    const payloadString = sortedKeys
+      .map(key => {
+        const value = payloadObj[key]
+        // If value is an object or array, stringify it
+        if (typeof value === 'object' && value !== null) {
+          return JSON.stringify(value)
+        }
+        return String(value)
+      })
+      .join('')
+    
+    logger.log('Checksum validation:', {
+      sortedKeys,
+      payloadString: payloadString.substring(0, 100),
+      payloadStringLength: payloadString.length
+    })
+    
+    // 3. Generate HMAC-SHA256 hash
     const expectedSignature = crypto
       .createHmac('sha256', checksumKey)
-      .update(payload, 'utf8')
+      .update(payloadString, 'utf8')
       .digest('hex')
 
-    // Compare signatures (usually prefixed with 'sha256=')
+    // 4. Compare signatures
     const receivedSignature = signature.replace('sha256=', '')
+    
+    logger.log('Signature comparison:', {
+      expected: expectedSignature,
+      received: receivedSignature,
+      match: expectedSignature === receivedSignature
+    })
     
     const isValid = crypto.timingSafeEqual(
       Buffer.from(expectedSignature, 'hex'),
@@ -462,6 +498,7 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
 
     return isValid
   } catch (error) {
+    logger.log('Checksum validation error:', error)
     return false
   }
 }
