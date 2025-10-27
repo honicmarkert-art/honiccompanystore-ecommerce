@@ -524,6 +524,12 @@ function CheckoutPageContent() {
       }
       if (!formData.billingAddress.phone.trim()) {
         errors.billingPhone = "Phone number is required"
+      } else {
+        // Validate Tanzania phone number format
+        const phoneValidation = validateTanzaniaPhone(formData.billingAddress.phone)
+        if (!phoneValidation.valid) {
+          errors.billingPhone = phoneValidation.error || "Invalid phone number"
+        }
       }
       if (!formData.billingAddress.email.trim()) {
         errors.billingEmail = "Email address is required"
@@ -548,6 +554,12 @@ function CheckoutPageContent() {
     }
     if (!formData.billingAddress.phone.trim()) {
       errors.billingPhone = "Phone number is required"
+    } else {
+      // Validate Tanzania phone number format
+      const phoneValidation = validateTanzaniaPhone(formData.billingAddress.phone)
+      if (!phoneValidation.valid) {
+        errors.billingPhone = phoneValidation.error || "Invalid phone number"
+      }
     }
     if (!formData.billingAddress.email.trim()) {
       errors.billingEmail = "Email address is required"
