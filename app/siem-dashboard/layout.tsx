@@ -64,16 +64,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     isLoading: true
   })
 
-  // Admin authentication check
+  // Admin authentication check - but allow 2FA to handle redirection
   useEffect(() => {
     if (!loading) {
       if (!isAuthenticated || !user) {
-        toast({
-          title: "Authentication Required",
-          description: "Please log in to access the admin panel",
-          variant: "destructive"
-        })
-        router.push('/auth/login?redirect=/siem-dashboard')
+        // Only redirect if not already on login page
+        if (!window.location.pathname.includes('/auth/login')) {
+          toast({
+            title: "Authentication Required",
+            description: "Please log in to access the admin panel",
+            variant: "destructive"
+          })
+          router.push('/auth/login?redirect=/siem-dashboard')
+        }
         return
       }
       

@@ -1973,7 +1973,7 @@ export default function Component() {
         </div>
 
         {/* Mobile Categories Row */}
-        <div className="lg:hidden flex items-center justify-start gap-3 py-3 px-4 overflow-x-auto overflow-y-visible" suppressHydrationWarning>
+        <div className="lg:hidden flex items-center justify-start gap-2 py-3 px-2 overflow-x-auto overflow-y-visible" suppressHydrationWarning>
           {/* Super Deal Link */}
           <Link 
             href="/coming-soon" 
@@ -1985,39 +1985,37 @@ export default function Component() {
               variant="ghost"
               size="sm"
               className={cn(
-                "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white flex-shrink-0",
+                "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white flex-shrink-0 h-7 px-3",
                 darkHeaderFooterClasses.buttonGhostText,
               )}
               style={{ borderRadius: '20px' }}
               suppressHydrationWarning
             >
-              <span className="text-sm font-medium text-red-500" suppressHydrationWarning>
+              <span className="text-[10px] font-medium text-red-500 whitespace-nowrap" suppressHydrationWarning>
             Super Offer
               </span>
               <span className="sr-only" suppressHydrationWarning>Super Offer</span>
             </Button>
           </Link>
           
-          {/* First 2 Main Categories */}
-          <Link 
-            href="/products?mainCategory=diy-electronic-components" 
-            className={cn(
-              "text-sm font-medium transition-colors hover:text-yellow-500 whitespace-nowrap flex-shrink-0",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            DIY Electronic
-          </Link>
-          <Link 
-            href="/products?mainCategory=home-electronic-devices" 
-            className={cn(
-              "text-sm font-medium transition-colors hover:text-yellow-500 whitespace-nowrap flex-shrink-0",
-              themeClasses.mainText
-            )}
-          >
-            Home Electronic
-          </Link>
+          {/* Main Categories - Show first 4 categories */}
+          {categoriesData.mainCategories.slice(0, 4).map((category: any) => {
+            // Get first word of category name for mobile
+            const firstWord = category.name.split(' ')[0]
+            return (
+              <Link 
+                key={category.id}
+                href={`/products?mainCategory=${category.slug}`} 
+                className={cn(
+                  "text-xs font-medium transition-colors hover:text-yellow-500 whitespace-nowrap flex-shrink-0",
+                  themeClasses.mainText
+                )}
+                prefetch={false}
+              >
+                {firstWord}
+              </Link>
+            )
+          })}
           
           {/* More Button */}
           <div ref={moreButtonRef} className="relative flex-shrink-0 more-categories-dropdown">
@@ -2057,7 +2055,7 @@ export default function Component() {
 
         {/* Ads Container - Above filter buttons */}
         {!adsLoading && advertisements.length > 0 && (
-          <div className="px-1 sm:px-2 lg:px-3 mb-4 mt-6">
+          <div className="px-1 sm:px-2 lg:px-3 mb-4 mt-10">
             <div 
               className="w-full relative overflow-hidden rounded-lg"
               onTouchStart={handleTouchStart}
@@ -2362,6 +2360,25 @@ export default function Component() {
               </div>
         )}
 
+        {/* No Products Found - Only show when not loading and no products */}
+        {!isLoading && !error && displayedProducts.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+            <Package className="w-16 h-16 text-gray-400 mb-4" />
+            <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
+              No Products Found
+            </h3>
+            <p className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
+              We couldn't find any products matching your filters. Try adjusting your search, categories, or price range.
+            </p>
+            <Button
+              onClick={handleClearAllFilters}
+              className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+            >
+              Clear All Filters
+            </Button>
+          </div>
+        )}
+
                 {/* Image Search Results Indicator */}
         {imageSearchResults.length > 0 && (
           <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
@@ -2394,7 +2411,7 @@ export default function Component() {
         )}
 
                 {/* Products Grid */}
-        {!isLoading && !error && (
+        {!isLoading && !error && displayedProducts.length > 0 && (
           <InfiniteScrollTrigger
             onLoadMore={infiniteLoadMore}
             hasMore={hasMoreProducts}
@@ -2402,23 +2419,6 @@ export default function Component() {
             error={infiniteError}
           >
             <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
-            {displayedProducts.length === 0 ? (
-              <div className="col-span-full flex flex-col items-center justify-center py-16 px-4 text-center">
-                <Package className="w-16 h-16 text-gray-400 mb-4" />
-                <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
-                  No Products Found
-                </h3>
-                <p className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
-                  We couldn't find any products matching your filters. Try adjusting your search, categories, or price range.
-                </p>
-                <Button
-                  onClick={handleClearAllFilters}
-                  className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                >
-                  Clear All Filters
-                </Button>
-              </div>
-            ) : (
               <>
                 
                 {/* All Product Cards */}
@@ -2600,7 +2600,6 @@ export default function Component() {
             )
                 })}
               </>
-            )}
             </div>
           </InfiniteScrollTrigger>
         )}

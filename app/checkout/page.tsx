@@ -34,6 +34,8 @@ import { useCompanyContext } from "@/components/company-provider"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { useCurrency } from "@/contexts/currency-context"
 import { useComingSoonModal } from "@/components/coming-soon-modal"
+import { useToast } from "@/hooks/use-toast"
+import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
 
 interface ShippingAddress {
   fullName: string
@@ -78,6 +80,7 @@ function CheckoutPageContent() {
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  const { toast } = useToast()
   
   // Fallback logo system - use local logo if API is not loaded or logo is not available
   const fallbackLogo = "/android-chrome-512x512.png"
@@ -239,7 +242,33 @@ function CheckoutPageContent() {
     try {
       // Guard: prevent placing order with empty cart
       if (!cart || cart.length === 0) {
-        alert('Your cart is empty. Please add items before placing an order.')
+        toast({
+          title: "Empty Cart",
+          description: "Your cart is empty. Please add items before placing an order.",
+          variant: "destructive"
+        })
+        return
+      }
+
+      // Validate phone number
+      const phoneValidation = validateTanzaniaPhone(formData.shippingAddress.phone)
+      if (!phoneValidation.valid) {
+        toast({
+          title: "Invalid Phone Number",
+          description: phoneValidation.error,
+          variant: "destructive"
+        })
+        return
+      }
+
+      // Validate email
+      const emailValidation = validateEmail(formData.shippingAddress.email)
+      if (!emailValidation.valid) {
+        toast({
+          title: "Invalid Email Address",
+          description: emailValidation.error,
+          variant: "destructive"
+        })
         return
       }
 
@@ -368,24 +397,37 @@ function CheckoutPageContent() {
           
           // Show the specific error to user
           if (errorData.error) {
-            alert(`Payment Gateway Error:\n${errorData.error}\n\n${errorData.debug ? JSON.stringify(errorData.debug, null, 2) : 'Check console for details'}`)
+            toast({
+              title: "Payment Gateway Error",
+              description: errorData.error || "Unable to create payment link. Please try again.",
+              variant: "destructive",
+              duration: 5000
+            })
           }
         }
       } catch (e) {
+        logger.error('ClickPesa redirect error:', e)
       }
 
       // If ClickPesa redirect failed, show error and don't proceed
       if (!clickpesaRedirectSuccess) {
-        
-        // Show detailed error in development
-        alert('Payment gateway error: Unable to redirect to payment page.\n\nPlease check browser console for details or contact support.')
+        toast({
+          title: "Payment Error",
+          description: "Unable to redirect to payment page. Please check your details and try again.",
+          variant: "destructive",
+          duration: 5000
+        })
         
         // Don't proceed to success page - keep user on checkout to retry
         // The order was already created in database, but payment is pending
         return
       }
     } catch (error) {
-      alert('Failed to place order. Please try again.')
+      toast({
+        title: "Order Failed",
+        description: "Failed to place order. Please try again.",
+        variant: "destructive"
+      })
     } finally {
       setIsProcessingPayment(false)
     }

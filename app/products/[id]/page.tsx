@@ -2169,7 +2169,7 @@ export default function ProductDetailPage() {
           </div>
         </header>
 
-        <main className="flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8 pt-20 sm:pt-24 lg:pt-24">
+        <main className="flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8 pt-4 sm:pt-8 lg:pt-12">
           {/* Skeleton Loading State */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
             {/* Product Image Gallery Skeleton */}
@@ -2451,7 +2451,7 @@ export default function ProductDetailPage() {
 
             {/* User Profile - Moved to right side after cart */}
             {isAuthenticated ? (
-              <div className="flex flex-col items-center mr-1">
+              <div className="flex flex-col items-center mr-1 -mt-2 sm:mt-0">
                 <div className="w-6 h-6 sm:w-8 sm:h-8">
               <UserProfile />
                 </div>

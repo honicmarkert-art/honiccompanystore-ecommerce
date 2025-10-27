@@ -73,22 +73,32 @@ export const formatAmountForClickPesa = (amount: number): string => {
 
 // Format phone number for ClickPesa (remove + and ensure country code)
 export const formatPhoneForClickPesa = (phone: string): string => {
-  // Remove any non-numeric characters except +
-  let cleaned = phone.replace(/[^\d+]/g, '')
+  if (!phone) return phone
   
-  // Remove + if present
-  if (cleaned.startsWith('+')) {
-    cleaned = cleaned.substring(1)
+  // Use the new validation utility
+  const { formatPhoneForPayment } = require('./phone-validation')
+  try {
+    return formatPhoneForPayment(phone)
+  } catch (error) {
+    // Fallback to old method if validation fails
+    logger.error('Phone validation failed, using fallback:', error)
+    // Remove any non-numeric characters except +
+    let cleaned = phone.replace(/[^\d+]/g, '')
+    
+    // Remove + if present
+    if (cleaned.startsWith('+')) {
+      cleaned = cleaned.substring(1)
+    }
+    
+    // If it doesn't start with country code, assume Tanzania (255)
+    if (cleaned.length === 10 && cleaned.startsWith('0')) {
+      cleaned = '255' + cleaned.substring(1)
+    } else if (cleaned.length === 9) {
+      cleaned = '255' + cleaned
+    }
+    
+    return cleaned
   }
-  
-  // If it doesn't start with country code, assume Tanzania (255)
-  if (cleaned.length === 10 && cleaned.startsWith('0')) {
-    cleaned = '255' + cleaned.substring(1)
-  } else if (cleaned.length === 9) {
-    cleaned = '255' + cleaned
-  }
-  
-  return cleaned
 }
 
 // Generate ClickPesa access token

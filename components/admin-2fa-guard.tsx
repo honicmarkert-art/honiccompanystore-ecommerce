@@ -58,7 +58,9 @@ export function Admin2FAGuard({ children }: Admin2FAGuardProps) {
         })
 
         // Reload to show admin content
-        window.location.reload()
+        setTimeout(() => {
+          window.location.reload()
+        }, 500)
       } else {
         setAttempts(prev => prev + 1)
         
@@ -151,9 +153,6 @@ export function Admin2FAGuard({ children }: Admin2FAGuardProps) {
           </div>
 
           <div className="text-center">
-            <p className="text-xs text-gray-500">
-              Demo: Use "admin123" or any 6-digit code
-            </p>
             {attempts > 0 && (
               <p className="text-xs text-red-500 mt-1">
                 {3 - attempts} attempts remaining
