@@ -31,7 +31,9 @@ export async function POST(request: NextRequest) {
       logger.log('⚠️ Webhook checksum validation failed:', {
         hasSignature: !!signature,
         hasChecksumKey: hasChecksumKey,
-        nodeEnv: process.env.NODE_ENV
+        nodeEnv: process.env.NODE_ENV,
+        signature: signature,
+        bodyPreview: body.substring(0, 200)
       })
       return NextResponse.json(
         { error: 'Invalid checksum' },
