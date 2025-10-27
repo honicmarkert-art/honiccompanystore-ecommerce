@@ -575,21 +575,27 @@ export default function AdminOrdersPage() {
     )
 
     try {
+      // Debug: Log the order object to see what fields exist
+      console.log('🔍 Full order object:', JSON.stringify(order, null, 2))
+      
       // Create a confirmed order record for tracking
       const confirmedOrderData = {
         originalOrderId: order.id,
-        orderNumber: order.orderNumber,
-        referenceId: order.referenceId,
-        pickupId: order.pickupId,
-        userId: order.userId,
-        totalAmount: order.total,
-        shippingAddress: order.shippingAddress,
-        billingAddress: order.shippingAddress,
-        paymentMethod: order.paymentMethod || 'clickpesa',
-        deliveryOption: order.deliveryOption,
+        orderNumber: order.orderNumber || order.order_number,
+        referenceId: order.referenceId || order.reference_id,
+        pickupId: order.pickupId || order.pickup_id,
+        userId: order.userId || order.user_id,
+        totalAmount: order.total || order.total_amount || order.totalAmount,
+        shippingAddress: order.shippingAddress || order.shipping_address,
+        billingAddress: order.billingAddress || order.billing_address || order.shippingAddress || order.shipping_address,
+        paymentMethod: order.paymentMethod || order.payment_method || 'clickpesa',
+        deliveryOption: order.deliveryOption || order.delivery_option,
         confirmedBy: null, // Set to null since we don't have admin user ID
         orderItems: order.order_items || []
       }
+      
+      // Debug: Log what we're sending
+      console.log('📦 Data being sent to API:', JSON.stringify(confirmedOrderData, null, 2))
 
       const confirmResponse = await fetch('/api/admin/confirmed-orders', {
         method: 'POST',

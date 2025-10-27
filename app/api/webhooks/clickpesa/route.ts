@@ -504,24 +504,19 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
     // Parse the JSON payload
     const payloadObj = JSON.parse(payload)
     
-    // 1. Sort keys alphabetically
-    const sortedKeys = Object.keys(payloadObj).sort()
+    // 1. Sort keys alphabetically and create sorted payload
+    const sortedPayload = Object.keys(payloadObj)
+      .sort()
+      .reduce((obj: any, key) => {
+        obj[key] = payloadObj[key]
+        return obj
+      }, {})
     
-    // 2. Concatenate values only (not keys!)
-    // Complex types (objects, arrays) should be serialized as strings
-    const payloadString = sortedKeys
-      .map(key => {
-        const value = payloadObj[key]
-        // If value is an object or array, stringify it
-        if (typeof value === 'object' && value !== null) {
-          return JSON.stringify(value)
-        }
-        return String(value)
-      })
-      .join('')
+    // 2. Concatenate values only (join all values directly)
+    const payloadString = Object.values(sortedPayload).join('')
     
     logger.log('Checksum validation:', {
-      sortedKeys,
+      sortedKeys: Object.keys(sortedPayload),
       payloadString: payloadString.substring(0, 100),
       payloadStringLength: payloadString.length
     })
@@ -529,22 +524,19 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
     // 3. Generate HMAC-SHA256 hash
     const expectedSignature = crypto
       .createHmac('sha256', checksumKey)
-      .update(payloadString, 'utf8')
+      .update(payloadString)
       .digest('hex')
 
     // 4. Compare signatures
     const receivedSignature = signature.replace('sha256=', '')
     
+    const isValid = expectedSignature === receivedSignature
+
     logger.log('Signature comparison:', {
       expected: expectedSignature,
       received: receivedSignature,
-      match: expectedSignature === receivedSignature
+      match: isValid
     })
-    
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(expectedSignature, 'hex'),
-      Buffer.from(receivedSignature, 'hex')
-    )
 
     return isValid
   } catch (error) {

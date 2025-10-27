@@ -3,9 +3,12 @@ import { createClient } from '@supabase/supabase-js'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 function getAdminClient() {
   try {
@@ -93,42 +96,71 @@ export async function POST(request: NextRequest) {
 
     const orderData = await request.json()
     
+    logger.log('📦 Received order confirmation request:', {
+      originalOrderId: orderData.originalOrderId,
+      orderNumber: orderData.orderNumber,
+      hasOrderItems: !!orderData.orderItems && orderData.orderItems.length > 0
+    })
     
     // Create confirmed order record
-    const confirmedOrderData = {
-      order_id: orderData.originalOrderId,
+    // Note: Only include fields that definitely exist in the table
+    const confirmedOrderData: any = {
+      order_id: orderData.originalOrderId, // Link to original order
       order_number: orderData.orderNumber,
       reference_id: orderData.referenceId,
       pickup_id: orderData.pickupId,
       user_id: orderData.userId || null,
-      shipping_address: orderData.shippingAddress,
-      billing_address: orderData.billingAddress,
       delivery_option: orderData.deliveryOption || 'shipping',
       total_amount: orderData.totalAmount,
       payment_method: orderData.paymentMethod || 'clickpesa',
-      payment_status: 'paid', // Confirmed orders are paid
+      payment_status: 'paid',
       status: 'confirmed',
       confirmed_by: orderData.confirmedBy || user?.id || null,
       confirmed_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
-
-
+    
+    // Only include shipping/billing if they exist as JSONB columns
+    // Try adding them as JSON strings if needed
+    if (orderData.shippingAddress && typeof orderData.shippingAddress === 'object') {
+      try {
+        confirmedOrderData.shipping_address = JSON.stringify(orderData.shippingAddress)
+      } catch (e) {
+        // Ignore error
+      }
+    }
+    
+    if (orderData.billingAddress && typeof orderData.billingAddress === 'object') {
+      try {
+        confirmedOrderData.billing_address = JSON.stringify(orderData.billingAddress)
+      } catch (e) {
+        // Ignore error
+      }
+    }
     const { data: confirmedOrder, error: orderError } = await supabase
       .from('confirmed_orders')
       .insert(confirmedOrderData)
       .select()
       .single()
-
+    
     if (orderError) {
-      console.error('Failed to create confirmed order:', orderError)
-      console.error('Order data being inserted:', confirmedOrderData)
+      logger.error('❌ Failed to create confirmed order:', {
+        error: orderError,
+        message: orderError.message,
+        details: orderError.details,
+        hint: orderError.hint,
+        code: orderError.code
+      })
+      logger.error('📝 Order data being inserted:', confirmedOrderData)
+      
       return NextResponse.json(
         { error: 'Failed to create confirmed order', details: orderError.message },
         { status: 500 }
       )
     }
+
+    logger.log('✅ Successfully created confirmed order:', confirmedOrder.id)
 
 
     // Copy order items from original order
@@ -144,15 +176,13 @@ export async function POST(request: NextRequest) {
         total_price: item.total_price,
         created_at: new Date().toISOString()
       }))
-
+      
       const { error: orderItemsError } = await supabase
         .from('confirmed_order_items')
         .insert(orderItems)
 
       if (orderItemsError) {
-        console.error('Failed to create confirmed order items:', orderItemsError)
-        console.error('Order items data:', orderItems)
-        // Don't fail the order creation, but log the error
+        logger.error('Failed to create confirmed order items:', orderItemsError)
       } else {
         logger.log('Successfully created confirmed order items:', orderItems.length, 'items')
       }

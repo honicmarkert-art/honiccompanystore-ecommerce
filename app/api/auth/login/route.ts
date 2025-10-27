@@ -45,6 +45,9 @@ export async function POST(request: NextRequest) {
     const validatedData = loginSchema.parse(body)
     const remember = !!validatedData.remember
     
+    // Track cookies that Supabase wants to set
+    const cookiesToSet: Array<{ name: string; value: string; options: any }> = []
+    
     // Create Supabase client with proper cookie handling
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -55,10 +58,12 @@ export async function POST(request: NextRequest) {
             return request.cookies.get(name)?.value
           },
           set(name: string, value: string, options: any) {
-            // This will be handled by the response
+            // Store cookie to set later
+            cookiesToSet.push({ name, value, options })
           },
           remove(name: string, options: any) {
-            // This will be handled by the response
+            // Store cookie to remove later
+            cookiesToSet.push({ name, value: '', options: { ...options, maxAge: 0 } })
           },
         },
       }
@@ -111,6 +116,9 @@ export async function POST(request: NextRequest) {
     // Check user's remember me setting from profile, fallback to request parameter
     const userRememberMe = profile?.settings?.rememberMe ?? remember
 
+    logger.log('Login successful for user:', data.user.id)
+    logger.log('User role determined as:', userRole)
+    
     // Create response with user data
     const response = NextResponse.json({
       success: true,
@@ -120,56 +128,33 @@ export async function POST(request: NextRequest) {
         email: data.user.email,
         name: data.user.user_metadata?.name || profile?.full_name || data.user.email,
         role: userRole,
-        isVerified: data.user.email_confirmed_at !== null
+        isVerified: data.user.email_confirmed_at !== null,
+        profile: profile
       },
       redirectTo: null // Don't force redirects, let the client decide
     }, { status: 200 })
 
-    // Set the official Supabase auth cookies properly
+    // Set the cookies that Supabase wanted to set
     const isProd = process.env.NODE_ENV === 'production'
     
-    logger.log('Setting auth cookies for user:', data.user.id)
-    logger.log('Access token length:', data.session.access_token.length)
-    logger.log('Refresh token length:', data.session.refresh_token.length)
+    for (const cookie of cookiesToSet) {
+      if (cookie.value) {
+        // Set cookie
+        response.cookies.set(cookie.name, cookie.value, {
+          httpOnly: cookie.options?.httpOnly !== false,
+          secure: cookie.options?.secure ?? isProd,
+          sameSite: cookie.options?.sameSite ?? 'lax',
+          path: cookie.options?.path ?? '/',
+          maxAge: cookie.options?.maxAge ?? 60 * 60 * 24 * 7
+        })
+      } else {
+        // Remove cookie
+        response.cookies.delete(cookie.name)
+      }
+    }
     
-    // Generate CSRF token for additional security
-    const csrfToken = crypto.randomUUID()
+    logger.log('Auth cookies set:', cookiesToSet.map(c => c.name))
     
-    response.cookies.set('sb-access-token', data.session.access_token, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: userRememberMe ? 60 * 60 * 24 * 7 : 60 * 60 // 7 days or 1 hour
-    })
-
-    response.cookies.set('sb-refresh-token', data.session.refresh_token, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: userRememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7 // 30 days or 7 days
-    })
-    
-    // Also set a session indicator cookie for better persistence
-    response.cookies.set('sb-session-active', 'true', {
-      httpOnly: false, // Allow client-side access
-      secure: isProd,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: userRememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7 // Same as refresh token
-    })
-    
-    // Set CSRF token for additional security
-    response.cookies.set('csrf-token', csrfToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict', // Stricter for CSRF token
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7 // 7 days
-    })
-    
-    logger.log('Auth cookies set successfully')
     return response
 
   } catch (error) {
