@@ -220,10 +220,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Show loading state while checking authentication
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="text-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900" suppressHydrationWarning>
+        <div className="text-center" suppressHydrationWarning>
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading admin panel...</p>
+          <p className="mt-4 text-gray-600 dark:text-gray-400" suppressHydrationWarning>Loading admin panel...</p>
         </div>
       </div>
     )
