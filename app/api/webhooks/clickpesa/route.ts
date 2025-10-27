@@ -37,6 +37,13 @@ export async function POST(request: NextRequest) {
     // Verify webhook signature/checksum - MANDATORY
     const hasChecksumKey = !!process.env.CLICKPESA_CHECKSUM_KEY
     
+    logger.log('🔐 Starting webhook signature validation:', {
+      hasSignature: !!signature,
+      hasChecksumKey: hasChecksumKey,
+      signatureLength: signature?.length,
+      bodyLength: body.length
+    })
+    
     // Reject webhook if no signature is provided
     if (!signature) {
       logger.log('❌ Webhook rejected: No signature provided')
@@ -56,12 +63,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Validate signature
+    logger.log('🔍 Validating checksum signature...')
     const isValidSignature = verifyWebhookSignature(body, signature)
     
     if (!isValidSignature) {
-      logger.log('⚠️ Webhook checksum validation failed:', {
-        signature: signature,
-        bodyPreview: body.substring(0, 200)
+      logger.log('❌ Webhook checksum validation FAILED:', {
+        receivedSignature: signature?.substring(0, 50),
+        bodyLength: body.length,
+        timestamp: new Date().toISOString()
       })
       return NextResponse.json(
         { error: 'Invalid checksum' },
@@ -69,7 +78,7 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    logger.log('✅ Webhook checksum validation passed')
+    logger.log('✅ Webhook checksum validation PASSED - processing webhook')
 
     const payload = JSON.parse(body)
     logger.log('📦 ClickPesa webhook payload:', payload)
@@ -502,18 +511,27 @@ export async function POST(request: NextRequest) {
 // 4. Generate HMAC-SHA256 hash
 // 5. Compare with received signature
 function verifyWebhookSignature(payload: string, signature: string | null): boolean {
+  logger.log('🔐 verifyWebhookSignature called:', {
+    hasSignature: !!signature,
+    signatureLength: signature?.length,
+    payloadLength: payload.length
+  })
+  
   if (!signature) {
+    logger.log('❌ No signature provided to verifyWebhookSignature')
     return false
   }
 
   const checksumKey = process.env.CLICKPESA_CHECKSUM_KEY
   if (!checksumKey) {
+    logger.log('❌ Checksum key not configured in environment')
     return false
   }
 
   try {
     // Parse the JSON payload
     const payloadObj = JSON.parse(payload)
+    logger.log('✅ Successfully parsed JSON payload')
     
     // 1. Sort keys alphabetically and create sorted payload
     const sortedPayload = Object.keys(payloadObj)
@@ -523,13 +541,14 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
         return obj
       }, {})
     
+    logger.log('📋 Sorted payload keys:', Object.keys(sortedPayload))
+    
     // 2. Concatenate values only (join all values directly)
     const payloadString = Object.values(sortedPayload).join('')
     
-    logger.log('Checksum validation:', {
-      sortedKeys: Object.keys(sortedPayload),
-      payloadString: payloadString.substring(0, 100),
-      payloadStringLength: payloadString.length
+    logger.log('📝 Payload string for checksum:', {
+      first100Chars: payloadString.substring(0, 100),
+      fullLength: payloadString.length
     })
     
     // 3. Generate HMAC-SHA256 hash
@@ -538,20 +557,37 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
       .update(payloadString)
       .digest('hex')
 
+    logger.log('🔑 Generated checksum:', expectedSignature)
+
     // 4. Compare signatures
     const receivedSignature = signature.replace('sha256=', '')
     
+    logger.log('📬 Received signature:', receivedSignature)
+    
     const isValid = expectedSignature === receivedSignature
 
-    logger.log('Signature comparison:', {
+    logger.log('🎯 Signature comparison result:', {
+      expectedLength: expectedSignature.length,
+      receivedLength: receivedSignature.length,
       expected: expectedSignature,
       received: receivedSignature,
       match: isValid
     })
 
+    if (!isValid) {
+      logger.log('❌ CHECKSUM VALIDATION FAILED')
+      logger.log('Full details:', {
+        expected: expectedSignature,
+        received: receivedSignature,
+        payloadPreview: payload.substring(0, 200)
+      })
+    } else {
+      logger.log('✅ CHECKSUM VALIDATION SUCCEEDED')
+    }
+
     return isValid
   } catch (error) {
-    logger.log('Checksum validation error:', error)
+    logger.log('❌ CHECKSUM VALIDATION ERROR:', error)
     return false
   }
 }
