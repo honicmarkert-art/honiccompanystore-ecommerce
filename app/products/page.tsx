@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
+import { createPortal } from 'react-dom'
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { logger } from '@/lib/logger'
 
@@ -18,6 +19,7 @@ import { OptimizedLink } from "@/components/optimized-link"
 import { useOptimizedNavigation } from "@/components/optimized-link"
 import { useRobustApi } from "@/hooks/use-robust-api"
 import { useInfiniteProducts } from "@/hooks/use-infinite-products"
+import { useCategoryFiltering } from "@/hooks/use-category-filtering"
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger"
 import { SearchModal } from "@/components/search-modal"
 import { SearchSuggestions } from "@/components/search-suggestions"
@@ -39,12 +41,13 @@ import {
   Phone,
   Laptop,
   Shirt,
-  Home,
   Dumbbell,
   Package,
   Tag,
   Building,
   ChevronDown,
+  ChevronLeft,
+  Check,
   TrendingUp,
   TrendingDown,
   Clock,
@@ -58,13 +61,13 @@ import {
   RefreshCcw,
   Wallet,
   Mail,
-  ChevronLeft,
   ChevronRight,
   MessageSquare,
   CreditCard,
   Coins,
   Ticket,
   Settings,
+  MoreHorizontal,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -94,11 +97,14 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { ProductGridSkeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 // import { useProducts } from "@/hooks/use-products" // Removed - using useProductsOptimized instead
 import { useCart } from "@/hooks/use-cart" // Import useCart hook
 import { useToast } from "@/hooks/use-toast" // Import useToast hook
+import { checkProductStock, validateAutoSelectedStock } from "@/utils/stock-validation"
+import { getLeftBadge, getRightBadge } from "@/utils/product-badges"
 import { useCompanyContext } from "@/components/company-provider"
 import { Footer } from "@/components/footer"
 import { useCurrency } from "@/contexts/currency-context"
@@ -107,64 +113,25 @@ import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { UserProfile } from "@/components/user-profile"
 
 // Category icons mapping - simplified
-const categoryIcons: { [key: string]: any } = {
-  // Electronics categories
-  "Microcontrollers": Laptop,
-  "Sensors": Package,
-  "Power Supply": Package,
-  "Development Boards": Laptop,
-  "Tools": Package,
-  "Resistors & Capacitors": Package,
-  "Diodes & Transistors": Package,
-  "Integrated Circuits": Laptop,
-  "Connectors & Cables": Package,
-  "Motors & Actuators": Package,
-  "Starter Kits": Package,
-  "Project Kits": Package,
-  "Educational Materials": Package,
-  "Robotics": Package,
-  "Accessories": Package,
-  
-  // Legacy categories
-  "Jewelry & Watches": Package,
-  "Luggages & Bags": Package,
-  "Home & Garden": Home,
-  "Hair Extensions & Wigs": Package,
-  "Men's Clothing": Shirt,
-  "Electronics": Laptop,
-  "Home Improvement & Lighting": Package,
-  "Home Appliances": Package,
-  "Automotive & Motorcycle": Package,
-  "Shoes": Package,
-  "Special Occasion Costume": Package,
-  "Women's Clothing": Shirt,
-  "Sports & Entertainment": Dumbbell,
-  "Beauty & Health": Package,
-  "Toys & Hobbies": Package,
-  "Baby & Kids": Package,
-  "Books & Media": Package,
-  "Food & Beverages": Package,
-  "Pet Supplies": Package,
-  "Office & School Supplies": Package,
-  "Party & Event Supplies": Package,
-  "Tools & Hardware": Package,
-  "Phone & Accessories": Phone,
-  "Computer & Office": Laptop,
-  "Fashion": Shirt,
-  "Sports & Outdoors": Dumbbell,
-  "Automotive": Package,
-  "Health & Beauty": Package,
-  "default": Package
-}
 
 export default function Component() {
   const router = useRouter()
   const pathname = usePathname()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   // const { products, isLoading, error, retry, preloadProducts } = useProducts() // Removed - using useProductsOptimized instead
-  const { addItem, isInCart, cartTotalItems, getItemQuantity } = useCart() // Use useCart hook
+  const { addItem, isInCart, cartUniqueProducts, getItemQuantity } = useCart() // Use useCart hook
   const { toast } = useToast() // Initialize toast
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  
+  // China import modal state
+  const [showChinaImportModal, setShowChinaImportModal] = useState(false)
+  const [pendingCartItem, setPendingCartItem] = useState<{
+    productId: number
+    quantity: number
+    variantId?: string
+    combination?: any
+    price: number
+  } | null>(null)
   
   // Fallback logo system - use local logo if API is not loaded or logo is not available
   const fallbackLogo = "/android-chrome-512x512.png"
@@ -175,7 +142,6 @@ export default function Component() {
   const { currency, setCurrency, formatPrice } = useCurrency() // Use global currency context
   const { navigateWithPrefetch } = useOptimizedNavigation() // Optimized navigation
   const [searchTerm, setSearchTerm] = useState("")
-  const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [activeBrand, setActiveBrand] = useState<string | null>(null)
   // Initialize search state from URL query ?search= on mount and when URL changes
   const urlSearchParams = useSearchParams()
@@ -192,9 +158,23 @@ export default function Component() {
     if (initial && initial !== searchTerm) {
       setSearchTerm(initial)
     }
-    const urlCategory = urlSearchParams?.get('category') || null
-    if (urlCategory && urlCategory !== activeCategory) {
-      setActiveCategory(urlCategory)
+    
+    // Initialize category state from URL
+    const urlMainCategory = urlSearchParams?.get('mainCategory') || null
+    const urlSubCategories = urlSearchParams?.get('subCategories')?.split(',') || []
+    
+    // Only set selectedMainCategory if it's different AND we're not in the middle of a checkbox operation
+    // The checkbox should only set selectedSubCategories, not selectedMainCategory
+    if (urlMainCategory && urlMainCategory !== selectedMainCategory) {
+      // Only set selectedMainCategory if there are no subcategories in URL
+      // This means it was clicked from the category name, not the checkbox
+      if (urlSubCategories.length === 0) {
+        setSelectedMainCategory(urlMainCategory)
+      }
+    }
+    
+    if (urlSubCategories.length > 0 && JSON.stringify(urlSubCategories) !== JSON.stringify(selectedSubCategories)) {
+      setSelectedSubCategories(urlSubCategories)
     }
   }, [urlSearchParams])
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
@@ -225,7 +205,6 @@ export default function Component() {
     setImageSearchResults(products)
     setImageSearchKeywords(keywords)
     // Clear other filters when doing image search
-    setActiveCategory(null)
     setSearchTerm("")
   }, [])
 
@@ -242,76 +221,64 @@ export default function Component() {
     setSearchTerm(suggestion)
     setShowSuggestions(false)
     setIsSearchFocused(false)
-    router.push(`/products?search=${encodeURIComponent(suggestion)}`)
-  }, [router])
+    // Preserve existing category params when applying a suggestion
+    const params = new URLSearchParams(urlSearchParams?.toString())
+    params.set('search', suggestion)
+    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+    router.push(nextUrl)
+  }, [router, urlSearchParams])
 
   // Removed useRobustProducts hook - was causing duplicate API calls!
   // Filter functions are now implemented locally below
   
-  // Hardcoded fallback categories for immediate display
-  const fallbackCategories = [
-    { id: 'fallback-1', name: 'Electronics', slug: 'electronics' },
-    { id: 'fallback-2', name: 'Microcontrollers', slug: 'microcontrollers' },
-    { id: 'fallback-3', name: 'Sensors', slug: 'sensors' },
-    { id: 'fallback-4', name: 'Motors', slug: 'motors' },
-    { id: 'fallback-5', name: 'LEDs', slug: 'leds' },
-    { id: 'fallback-6', name: 'Resistors', slug: 'resistors' },
-    { id: 'fallback-7', name: 'Capacitors', slug: 'capacitors' },
-    { id: 'fallback-8', name: 'Connectors', slug: 'connectors' },
-    { id: 'fallback-9', name: 'Tools', slug: 'tools' },
-    { id: 'fallback-10', name: 'Accessories', slug: 'accessories' }
-  ]
-  
   // Categories state using robust API
-  const { data: categories, isLoading: categoriesLoading, error: categoriesError, refetch: refetchCategories } = useRobustApi<any[]>({
+  const { data: categories, isLoading: categoriesLoading, error: categoriesError } = useRobustApi<any[]>({
     endpoint: '/api/categories',
     retryDelay: 1000,
     maxRetries: 3,
     rateLimitCooldown: 60000
   })
 
-  // Track if we're using fallback categories
-  const [isUsingFallbackCategories, setIsUsingFallbackCategories] = useState(true)
-
-  // Normalize categories response into array of { id, name, slug }
-  const categoriesList = useMemo(() => {
-    // If API is loading or failed, use fallback categories
-    if (categoriesLoading || categoriesError || !categories) {
-      setIsUsingFallbackCategories(true)
-      return fallbackCategories
+  // Process categories data
+  const categoriesData = useMemo(() => {
+    if (!categories || categoriesLoading || categoriesError) {
+      return { mainCategories: [], subCategories: [], allCategories: [] }
     }
 
-    // Some endpoints return { categories: string[] }, others may return an array directly
-    const raw = Array.isArray(categories) ? categories : (categories as any)?.categories
-    if (!Array.isArray(raw) || raw.length === 0) {
-      setIsUsingFallbackCategories(true)
-      return fallbackCategories
-    }
-
-    const apiCategories = raw.map((item: any, index: number) => {
-      const name = typeof item === 'string' ? item : item?.name
-      const slug = typeof item === 'string' ? item : item?.slug
-      const normalizedSlug = (slug || name || '')
-        .toString()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '')
-      return {
-        id: typeof item?.id !== 'undefined' ? item.id : index,
-        name: name || '',
-        slug: normalizedSlug,
-      }
-    }).filter(c => c.name)
-
-    // If API returned valid categories, use them; otherwise fallback
-    if (apiCategories.length > 0) {
-      setIsUsingFallbackCategories(false)
-      return apiCategories
+    // Handle different response formats
+    let categoriesArray: any[] = []
+    if (Array.isArray(categories)) {
+      categoriesArray = categories
+    } else if (categories && typeof categories === 'object' && 'categories' in categories && Array.isArray((categories as any).categories)) {
+      categoriesArray = (categories as any).categories
+    } else if (categories && typeof categories === 'object' && 'success' in categories && Array.isArray((categories as any).categories)) {
+      // Handle API response format: { success: true, categories: [...] }
+      categoriesArray = (categories as any).categories
     } else {
-      setIsUsingFallbackCategories(true)
-      return fallbackCategories
+      console.warn('Categories data format not recognized:', categories)
+      return { mainCategories: [], subCategories: [], allCategories: [] }
     }
+
+
+    const allCategories = categoriesArray.map((cat: any) => ({
+      id: cat.id,
+      name: cat.name,
+      slug: cat.slug,
+      parent_id: cat.parent_id,
+      parent_name: cat.parent?.name,
+      is_main: !cat.parent_id,
+      is_sub: !!cat.parent_id,
+      product_count: cat.product_count || 0
+    }))
+
+    const mainCategories = allCategories.filter(cat => cat.is_main)
+    const subCategories = allCategories.filter(cat => cat.is_sub)
+
+    return { mainCategories, subCategories, allCategories }
   }, [categories, categoriesLoading, categoriesError])
+
+
+
 
 
 
@@ -321,6 +288,7 @@ export default function Component() {
   
   // Hamburger menu state
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
+
 
 
   // Advertisements state
@@ -333,9 +301,6 @@ export default function Component() {
   const [touchStart, setTouchStart] = useState<number | null>(null)
   const [touchEnd, setTouchEnd] = useState<number | null>(null)
   
-  // Mobile category rotation state
-  const [mobileCategoryStartIndex, setMobileCategoryStartIndex] = useState(0)
-  const MOBILE_CATEGORIES_PER_ROW = 4 // Reduced to 4 to prevent overlapping
 
   // Auto-scroll after page load
   useEffect(() => {
@@ -356,24 +321,63 @@ export default function Component() {
 
   // Filter state
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 100000])
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [isPriceFilterOpen, setIsPriceFilterOpen] = useState(false)
-  const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false)
-  const [isCategoriesNavOpen, setIsCategoriesNavOpen] = useState(false)
+  const [isCategoryNavOpen, setIsCategoryNavOpen] = useState(false)
+  const [selectedMainCategory, setSelectedMainCategory] = useState<string | null>(null)
+  const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>([])
+  const [showMoreCategories, setShowMoreCategories] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
+  const moreButtonRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showMoreCategories) {
+        const target = event.target as Element
+        if (
+          !target.closest('.more-categories-dropdown') &&
+          !target.closest('.more-categories-portal')
+        ) {
+          setShowMoreCategories(false)
+        }
+      }
+    }
+
+    const handleResize = () => {
+      if (showMoreCategories && moreButtonRef.current) {
+        const rect = moreButtonRef.current.getBoundingClientRect()
+        
+        setDropdownPosition({
+          top: rect.bottom + 8,
+          left: rect.left
+        })
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('resize', handleResize)
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [showMoreCategories])
   const [sortOrder, setSortOrder] = useState('price-low')
 
   // Pagination state - URL-based page number
   const [currentPage, setCurrentPage] = useState(1)
   const PRODUCTS_PER_PAGE = 120
   const BATCH_SIZE = 24 // Load 24 at a time with infinite scroll
-  
-  // Get page from URL on mount
-  useEffect(() => {
-    const page = parseInt(urlSearchParams?.get('page') || '1')
-    if (page > 0) {
-      setCurrentPage(page)
-    }
-  }, [urlSearchParams])
+
+  // Convert category slugs to IDs for API filtering
+  const { mainCategoryId, subCategoryIds, allCategoryIds } = useCategoryFiltering({
+    selectedMainCategory,
+    selectedSubCategories,
+    categoriesData
+  })
+
+
+
 
   // Calculate initial offset based on current page
   const initialOffset = (currentPage - 1) * PRODUCTS_PER_PAGE
@@ -393,29 +397,44 @@ export default function Component() {
     limit: BATCH_SIZE,
     initialOffset, // Start from page offset
     // Server-side filtering with PostgreSQL full-text search
-    category: activeCategory || undefined,
     brand: activeBrand || undefined,
     search: searchTerm || undefined,
+    categories: selectedMainCategory || selectedSubCategories.length > 0 ? allCategoryIds : undefined,
     sortBy: sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
     sortOrder: sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
-    categories: selectedCategories.length > 0 ? selectedCategories : undefined,
     useOptimized: true,
     useMaterializedView: false,
-    enabled: true
+    enabled: !categoriesLoading // Only enable when categories are loaded
   })
+
+  // Force refetch when category parameters change
+  useEffect(() => {
+    if (allCategoryIds.length > 0 && !categoriesLoading) {
+      // Reset and refetch when categories are loaded and we have category IDs
+      infiniteReset()
+    }
+  }, [allCategoryIds, categoriesLoading, infiniteReset])
+  
+  // Get page from URL on mount
+  useEffect(() => {
+    const page = parseInt(urlSearchParams?.get('page') || '1')
+    if (page > 0) {
+      setCurrentPage(page)
+    }
+  }, [urlSearchParams])
+
+  // Infinite scroll products hook for enhanced performance
 
   // Local clearFilters function (no more duplicate API calls!)
   const clearFilters = useCallback(() => {
     // Reset all filter states
     setPriceRange([0, 100000])
-    setSelectedCategories([])
-    setActiveCategory(null)
     setActiveBrand(null)
     setSearchTerm("")
     setSortOrder('price-low')
-    // Reset infinite scroll
+    // Reset infinite scroll - the hook will automatically refetch due to dependency changes
     infiniteReset()
   }, [infiniteReset])
 
@@ -456,26 +475,32 @@ export default function Component() {
         const cacheBust = typeof window !== 'undefined' ? (localStorage.getItem('settings_cache_bust') || Date.now()) : Date.now()
         
         const [adsResponse, rotationResponse] = await Promise.all([
-          fetch(`/api/advertisements?placement=products&cb=${cacheBust}`, { cache: 'no-store' }),
+          fetch(`/api/advertisements?placement=products&cb=${cacheBust}`, { cache: 'no-store' })
+            .catch(() => ({ ok: false, status: 500 })),
           fetch(`/api/advertisements/rotation-time?cb=${cacheBust}`, { cache: 'no-store' })
+            .catch(() => ({ ok: false, status: 500 }))
         ])
         
-        if (adsResponse.ok) {
+        if (adsResponse.ok && adsResponse instanceof Response) {
           const data = await adsResponse.json()
           setAdvertisements(data || [])
           localStorage.setItem('ads_cache', JSON.stringify(data || []))
-        } else if (adsResponse.status === 429) {
+        } else if ('status' in adsResponse && adsResponse.status === 429) {
           if (cachedAds) {
             setAdvertisements(JSON.parse(cachedAds))
           }
         } else {
+          // Use cached data or empty array on error
+          if (cachedAds) {
+            setAdvertisements(JSON.parse(cachedAds))
+          }
         }
         
-        if (rotationResponse.ok) {
+        if (rotationResponse.ok && rotationResponse instanceof Response) {
           const rotationData = await rotationResponse.json()
           setAdRotationTime(rotationData.rotationTime || 10)
           localStorage.setItem('ads_rotation_cache', (rotationData.rotationTime || 10).toString())
-        } else if (rotationResponse.status === 429) {
+        } else if ('status' in rotationResponse && rotationResponse.status === 429) {
           if (cachedRotation) {
             setAdRotationTime(parseInt(cachedRotation))
           }
@@ -498,25 +523,12 @@ export default function Component() {
     if (advertisements.length <= 1) return // No need to rotate if only one ad
     
     const interval = setInterval(() => {
-      setCurrentAdIndex((prevIndex) => (prevIndex + 1) % advertisements.length)
+      setCurrentAdIndex((prevIndex: number) => (prevIndex + 1) % advertisements.length)
     }, adRotationTime * 1000) // Convert seconds to milliseconds
     
     return () => clearInterval(interval)
   }, [advertisements.length, adRotationTime])
 
-  // Auto-rotate mobile categories every 1 minute
-  useEffect(() => {
-    if (!categories || categories.length <= MOBILE_CATEGORIES_PER_ROW) return
-    
-    const interval = setInterval(() => {
-      setMobileCategoryStartIndex((prevIndex) => {
-        const maxStartIndex = Math.max(0, categories.length - MOBILE_CATEGORIES_PER_ROW)
-        return prevIndex >= maxStartIndex ? 0 : prevIndex + 1
-      })
-    }, 60000) // 1 minute = 60000ms
-    
-    return () => clearInterval(interval)
-  }, [categories, MOBILE_CATEGORIES_PER_ROW])
 
   // Touch swipe handlers for advertisements
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -537,11 +549,11 @@ export default function Component() {
 
     if (isLeftSwipe && advertisements.length > 1) {
       // Swipe left - next ad
-      setCurrentAdIndex((prev) => (prev + 1) % advertisements.length)
+      setCurrentAdIndex((prev: number) => (prev + 1) % advertisements.length)
     }
     if (isRightSwipe && advertisements.length > 1) {
       // Swipe right - previous ad
-      setCurrentAdIndex((prev) => prev === 0 ? advertisements.length - 1 : prev - 1)
+      setCurrentAdIndex((prev: number) => prev === 0 ? advertisements.length - 1 : prev - 1)
     }
   }
 
@@ -584,9 +596,12 @@ export default function Component() {
     category: product.category || '',
     brand: product.brand || '',
     originalPrice: product.original_price || product.price,
+    original_price: product.original_price, // Keep original_price field for badge calculation
     inStock: product.in_stock,
     freeDelivery: product.free_delivery,
     sameDayDelivery: product.same_day_delivery,
+    is_new: product.is_new, // For "New" badge calculation
+    updated_at: product.updated_at, // For "New" badge calculation
     variants: product.product_variants || [],
     gallery: product.image ? [product.image] : [],
     specifications: {},
@@ -635,20 +650,23 @@ export default function Component() {
       const existingIds = new Set(shuffledProducts.map((p: any) => p.id))
       const newOnes = products.filter((p: any) => !existingIds.has(p.id))
       if (newOnes.length > 0) {
-        setShuffledProducts(prev => [...prev, ...newOnes])
+        setShuffledProducts((prev: any[]) => [...prev, ...newOnes])
       }
     }
   }, [products, shuffledProducts])
 
-  // When filters/search change, reset the shuffle buffer so we only show the new filtered list
+  // When filters/search/categories change, reset the shuffle buffer so we only show the new filtered list
   useEffect(() => {
     setShuffledProducts([])
-  }, [activeCategory, activeBrand, searchTerm])
-  
+  }, [activeBrand, searchTerm, selectedMainCategory, selectedSubCategories])
+
   // Server-side filtering is now handled by the API!
   // Build the list to display (uses shuffled order when active)
   const displayedProducts = useMemo(() => {
-    const baseList = (shuffledProducts.length > 0) ? shuffledProducts : products
+    // Always prioritize the current products array from the API
+    // Only use shuffledProducts if it's more recent and products is empty
+    const baseList = products.length > 0 ? products : shuffledProducts
+
     const seen = new Set<number>()
     const uniqueProducts = baseList.filter((product: any) => {
       if (seen.has(product.id)) return false
@@ -682,7 +700,7 @@ export default function Component() {
     if (shuffledProducts.length > 0 && !isShufflingPaused) {
       shuffleIntervalRef.current = setInterval(() => {
         if (!isUserActiveRef.current) {
-          setShuffledProducts(prev => shuffleProducts(prev))
+          setShuffledProducts((prev: any[]) => shuffleProducts(prev))
         }
       }, SHUFFLE_INTERVAL)
     }
@@ -749,54 +767,60 @@ export default function Component() {
     const params = new URLSearchParams()
     params.set('page', (currentPage + 1).toString())
     
-    if (activeCategory) params.set('category', activeCategory)
     if (activeBrand) params.set('brand', activeBrand)
     if (searchTerm) params.set('search', searchTerm)
     if (sortOrder !== 'featured') params.set('sort', sortOrder)
     if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
     if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
-    if (selectedCategories.length > 0) params.set('categories', selectedCategories.join(','))
     
     return `/products?${params.toString()}`
-  }, [currentPage, activeCategory, activeBrand, searchTerm, sortOrder, priceRange, selectedCategories])
+  }, [currentPage, activeBrand, searchTerm, sortOrder, priceRange])
 
   // Track prefetched products to avoid duplicate requests
   const prefetchedProductsRef = useRef<Set<number>>(new Set())
-  const abortControllersRef = useRef<Map<number, AbortController>>(new Map())
+  const abortControllersRef = useRef<Map<number | string, AbortController>>(new Map())
 
-  // Optimized intelligent prefetching for visible products
+  // Optimized intelligent prefetching for visible products (batch mode)
   useEffect(() => {
     if (displayedProducts.length === 0) return
+    
+    // Don't prefetch when searching or when there are image search results
+    if (searchTerm || imageSearchResults.length > 0) return
 
-    // Only prefetch first 6 products that haven't been prefetched yet
+    // Collect first 24 products that haven't been prefetched yet
     const productsToPrefetch = displayedProducts
-      .slice(0, 6)
       .filter((product: any) => !prefetchedProductsRef.current.has(product.id))
+      .slice(0, 24)
 
-    productsToPrefetch.forEach((product: any, index: number) => {
-      // Mark as prefetched immediately to prevent duplicates
+    if (productsToPrefetch.length === 0) return
+
+    // Mark all as prefetched immediately to prevent duplicates
+    productsToPrefetch.forEach((product: any) => {
       prefetchedProductsRef.current.add(product.id)
-      
-      // Stagger prefetch requests to avoid overwhelming the server
-      setTimeout(() => {
-        const controller = new AbortController()
-        abortControllersRef.current.set(product.id, controller)
-        
-        fetch(`/api/products/${product.id}?minimal=false`, { 
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal
-        })
-          .catch(() => {}) // Silent fail for prefetch
-          .finally(() => {
-            abortControllersRef.current.delete(product.id)
-          })
-      }, index * 100) // 100ms delay between each prefetch
     })
-  }, [displayedProducts])
+    
+    // Make a single batch API call with all IDs
+    const productIds = productsToPrefetch.map((p: any) => p.id).join(',')
+    
+    const controller = new AbortController()
+    abortControllersRef.current.set('batch', controller)
+    
+    fetch(`/api/products?ids=${productIds}&minimal=false`, { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal
+    })
+      .catch(() => {}) // Silent fail for prefetch
+      .finally(() => {
+        abortControllersRef.current.delete('batch')
+      })
+  }, [displayedProducts, searchTerm, imageSearchResults])
 
   // Optimized scroll-based prefetching (observer created once, not on every render)
   useEffect(() => {
+    // Don't prefetch when searching or when there are image search results
+    if (searchTerm || imageSearchResults.length > 0) return
+    
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -837,10 +861,10 @@ export default function Component() {
     return () => {
       observer.disconnect()
       // Cancel any pending prefetch requests on cleanup
-      abortControllersRef.current.forEach(controller => controller.abort())
+      abortControllersRef.current.forEach((controller: AbortController) => controller.abort())
       abortControllersRef.current.clear()
     }
-  }, [displayedProducts])
+  }, [displayedProducts, searchTerm, imageSearchResults])
 
   // Old loadMoreProducts logic removed - now using InfiniteScrollTrigger component with useInfiniteProducts hook
 
@@ -870,14 +894,21 @@ export default function Component() {
         }
       })
     } else {
-      // Check if this is a multi-value attribute
-      const hasMultiValues = variants.some((variant: any) => variant.multiValues?.[type])
-      if (hasMultiValues) {
+      // Check if this is a multi-value attribute (array of objects in attributes)
+      const hasArrayValues = variants.some((variant: any) => 
+        variant.attributes?.[type] && Array.isArray(variant.attributes[type])
+      )
+      
+      if (hasArrayValues) {
         variants.forEach((variant: any) => {
-          if (variant.multiValues?.[type] && Array.isArray(variant.multiValues[type])) {
-            variant.multiValues[type].forEach((value: string) => {
-              if (value) {
-                values.add(value)
+          if (variant.attributes?.[type] && Array.isArray(variant.attributes[type])) {
+            variant.attributes[type].forEach((item: any) => {
+              if (item) {
+                // Handle both object format {value: "white"} and string format "white"
+                const value = typeof item === 'object' && item.value ? item.value : item
+                if (value) {
+                  values.add(value)
+                }
               }
             })
           }
@@ -924,24 +955,96 @@ export default function Component() {
     setPriceRange(newRange)
   }
 
-  const handleCategoryToggle = (categoryName: string) => {
-    setSelectedCategories(prev => 
-      prev.includes(categoryName) 
-        ? prev.filter(cat => cat !== categoryName)
-        : [...prev, categoryName]
-    )
-  }
 
   const handleClearAllFilters = () => {
-    setPriceRange([0, 100000])
-    setSelectedCategories([])
-    setSortOrder('price-low')
-    setActiveCategory(null)
+    setSelectedMainCategory(null)
+    setSelectedSubCategories([])
     clearFilters()
+    
+    // Update URL to remove category parameters
+    const params = new URLSearchParams(urlSearchParams?.toString())
+    params.delete('mainCategory')
+    params.delete('subCategories')
+    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+    router.push(nextUrl)
+  }
+
+  // Category navigation handlers
+  const handleMainCategorySelect = (categorySlug: string) => {
+    // This function only opens the subcategories view, doesn't select categories
+    // Category selection is handled by the checkbox
+    setSelectedMainCategory(categorySlug)
+  }
+
+  const handleOpenSubcategoriesView = (categorySlug: string) => {
+    // This function only opens the subcategories view without changing selection
+    setSelectedMainCategory(categorySlug)
+  }
+
+  const handleSubCategoryToggle = (subCategorySlug: string) => {
+    const newSubCategories = selectedSubCategories.includes(subCategorySlug) 
+      ? selectedSubCategories.filter((slug: string) => slug !== subCategorySlug)
+      : [...selectedSubCategories, subCategorySlug]
+    
+    setSelectedSubCategories(newSubCategories)
+    
+    // Update URL
+    const params = new URLSearchParams(urlSearchParams?.toString())
+    if (newSubCategories.length > 0) {
+      params.set('subCategories', newSubCategories.join(','))
+    } else {
+      params.delete('subCategories')
+    }
+    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+    router.push(nextUrl)
+  }
+
+  const handleBackToMainCategories = () => {
+    setSelectedMainCategory(null)
+    setSelectedSubCategories([])
+    
+    // Update URL
+    const params = new URLSearchParams(urlSearchParams?.toString())
+    params.delete('mainCategory')
+    params.delete('subCategories')
+    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+    router.push(nextUrl)
+  }
+
+  const handleClearCategoryFilters = () => {
+    setSelectedMainCategory(null)
+    setSelectedSubCategories([])
+    
+    // Update URL
+    const params = new URLSearchParams(urlSearchParams?.toString())
+    params.delete('mainCategory')
+    params.delete('subCategories')
+    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+    router.push(nextUrl)
   }
 
   const handleSortChange = (newSortOrder: string) => {
     setSortOrder(newSortOrder)
+  }
+
+  // Handle China import modal
+  const handleChinaImportConfirm = () => {
+    if (pendingCartItem) {
+      addItem(
+        pendingCartItem.productId,
+        pendingCartItem.quantity,
+        pendingCartItem.variantId,
+        pendingCartItem.combination,
+        pendingCartItem.price
+      )
+    }
+    setShowChinaImportModal(false)
+    setPendingCartItem(null)
+  }
+
+  const handleChinaImportCancel = () => {
+    setShowChinaImportModal(false)
+    setPendingCartItem(null)
   }
 
   const handleAddToCart = async (productId: number, productName: string, productPrice: number, productVariants?: any[], variantConfig?: any) => {
@@ -951,18 +1054,34 @@ export default function Component() {
     let hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
     
     // If variants array exists but is empty, fetch full product data
+    let fullProductData = null
     if (Array.isArray(productVariants) && productVariants.length === 0) {
       try {
         const response = await fetch(`/api/products/${productId}`)
         if (response.ok) {
-          const fullProduct = await response.json()
+          fullProductData = await response.json()
           
-          productVariants = fullProduct.variants || []
-          variantConfig = fullProduct.variantConfig || null
+          productVariants = fullProductData.variants || []
+          variantConfig = fullProductData.variantConfig || null
           hasVariants = productVariants && productVariants.length > 0
           hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
         }
       } catch (error) {
+      }
+    }
+
+    // Check basic product stock before proceeding
+    const productForStockCheck = products.find((p: any) => p.id === productId) || fullProductData
+    if (productForStockCheck) {
+      const stockCheck = checkProductStock(productForStockCheck)
+      
+      if (!stockCheck.isAvailable) {
+        toast({
+          title: "Out of Stock",
+          description: stockCheck.message || "This product is currently unavailable.",
+          variant: "destructive",
+        })
+        return
       }
     }
     
@@ -1024,11 +1143,19 @@ export default function Component() {
         
         derivedAttributeTypes.forEach((attrType: string) => {
           const values = getAttributeValuesForType(attrType, productVariants, variantConfig)
-          if (values.length > 0) {
-            autoSelectedAttributes[attrType] = values[0] // Select first option
-          }
+          if (values.length > 0) autoSelectedAttributes[attrType] = values[0] // Select first option
         })
         
+        // Validate stock for auto-selected attributes
+        const stockValidation = validateAutoSelectedStock(productForStockCheck)
+        if (!stockValidation.isAvailable) {
+          toast({
+            title: "Out of Stock",
+            description: stockValidation.message || "The selected options are currently unavailable.",
+            variant: "destructive",
+          })
+          return
+        }
         
         // Generate combination and calculate price
         const combination = autoSelectedAttributes
@@ -1040,8 +1167,22 @@ export default function Component() {
         // Auto-set quantity to 5 for products under 500 TZS
         const quantity = variantPrice < 500 ? 5 : 1
         
-        addItem(productId, quantity, variantId, combination, variantPrice)
+        // Check if this is a China import item
+        const product = products.find((p: any) => p.id === productId)
+        if (product && (product.importChina || product.import_china)) {
+          // Show modal for China import items
+          setPendingCartItem({
+            productId,
+            quantity,
+            variantId,
+            combination,
+            price: variantPrice
+          })
+          setShowChinaImportModal(true)
+          return
+        }
         
+        addItem(productId, quantity, variantId, combination, variantPrice)
         return
       }
     }
@@ -1051,6 +1192,21 @@ export default function Component() {
     
     // Auto-set quantity to 5 for products under 500 TZS
     const quantity = minPrice < 500 ? 5 : 1
+    
+    // Check if this is a China import item
+    const productForChinaCheck = products.find((p: any) => p.id === productId)
+    if (productForChinaCheck && (productForChinaCheck.importChina || productForChinaCheck.import_china)) {
+      // Show modal for China import items
+      setPendingCartItem({
+        productId,
+        quantity,
+        variantId: undefined,
+        combination: {},
+        price: minPrice
+      })
+      setShowChinaImportModal(true)
+      return
+    }
     
     addItem(productId, quantity, undefined, {}, minPrice)
   }
@@ -1065,11 +1221,11 @@ export default function Component() {
         priority={true} 
       />
       {/* Welcome Message Bar - Mobile Only */}
-      <div className="fixed top-0 z-50 w-full bg-stone-100/90 dark:bg-gray-900/95 backdrop-blur-sm border-b border-stone-200 dark:border-gray-700 sm:hidden" suppressHydrationWarning>
+      <div className="fixed top-0 z-50 w-full bg-stone-100/90 dark:bg-gray-900/95 backdrop-blur-sm sm:hidden" suppressHydrationWarning>
         <div className="flex items-center justify-center h-6 px-4" suppressHydrationWarning>
           {isAuthenticated && user ? (
             <div className="text-xs text-green-600 dark:text-green-400 font-medium">
-              Hi! {(user as any).user_metadata?.full_name || user.email?.split('@')[0] || 'User'} - Welcome again <span className="text-blue-600 dark:text-blue-400">{companyName}</span>
+              Welcome back to <span className="text-blue-600 dark:text-blue-400">{companyName}</span>
             </div>
           ) : (
             <button 
@@ -1100,7 +1256,7 @@ export default function Component() {
           </Button>
           {/* Mobile Logo - Near Nav Toggle */}
           <Link
-            href="/"
+            href="/home"
             className="flex items-center gap-1 sm:hidden text-sm font-semibold flex-shrink-0 min-w-0 ml-0.5 text-gray-900 dark:text-white"
               suppressHydrationWarning
           >
@@ -1115,7 +1271,7 @@ export default function Component() {
           </Link>
           {/* Desktop Logo */}
           <Link
-            href="/"
+            href="/home"
             className="hidden sm:flex items-center gap-1 sm:gap-2 text-sm sm:text-base lg:text-lg font-semibold flex-shrink-0 min-w-0 ml-2 sm:ml-0 text-gray-900 dark:text-white"
               suppressHydrationWarning
           >
@@ -1139,10 +1295,11 @@ export default function Component() {
                               </div>
           </Link>
 
+
           {/* All Categories Button */}
               <Button
-            onClick={() => setIsCategoriesNavOpen(true)}
-                variant="ghost"
+            onClick={() => setIsCategoryNavOpen(true)}
+            variant="outline"
             size="sm"
             className="hidden sm:flex items-center gap-2 ml-3 text-xs sm:text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
           >
@@ -1154,7 +1311,7 @@ export default function Component() {
           <div className="flex-1 min-w-0 mx-2 sm:mx-3 md:mx-4 lg:mx-6 xl:mx-8 2xl:mx-10 flex items-center relative" suppressHydrationWarning>
             <form 
               className="relative flex-1 flex items-center" 
-              onSubmit={(e) => {
+              onSubmit={(e: React.FormEvent) => {
                 e.preventDefault()
                 if (searchTerm.trim()) {
                   handleModalTextSearch(searchTerm.trim())
@@ -1182,7 +1339,7 @@ export default function Component() {
                     darkHeaderFooterClasses.inputPlaceholder,
                 )}
                 value={searchTerm}
-                onChange={(e) => {
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   const value = e.target.value
                   setSearchTerm(value)
                   setShowSuggestions(true)
@@ -1197,14 +1354,14 @@ export default function Component() {
                   }
                   // Debouncing is now handled by useEffect
                 }}
-                onKeyDown={(e) => {
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                   handleSearchActivity()
                   if (e.key === 'Enter') {
                     e.preventDefault()
                     submitSearch()
                   }
                 }}
-                onFocus={(e) => {
+                onFocus={(e: React.FocusEvent<HTMLInputElement>) => {
                   handleSearchActivity()
                   setIsSearchFocused(true)
                   if (searchTerm.length >= 2) {
@@ -1234,7 +1391,7 @@ export default function Component() {
               {/* Search Button */}
               <button
                 type="submit"
-                onClick={(e) => {
+                onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                   e.preventDefault()
                   if (searchTerm.trim()) {
                     handleModalTextSearch(searchTerm.trim())
@@ -1305,9 +1462,61 @@ export default function Component() {
             <Link href="/become-supplier" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
               Become Supplier
             </Link>
-            <Link href="/buyer-central" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
-              Buyer Central
-            </Link>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white mr-4",
+                    darkHeaderFooterClasses.buttonGhostText,
+                  )}
+                  style={{ borderRadius: '20px' }}
+                  suppressHydrationWarning
+                >
+                  <Settings className="w-3 h-3 text-white" />
+                  <span className="text-sm font-medium text-white" suppressHydrationWarning>
+                    Services
+                  </span>
+                  <span className="sr-only" suppressHydrationWarning>Services Menu</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg"
+              >
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={() => window.location.href = '/buyer-central'}
+                >
+                  <Settings className="w-4 h-4 mr-2" /> Our Services
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={() => window.location.href = '/services/electronics-supply'}
+                >
+                  <Package className="w-4 h-4 mr-2" /> Electronics Supply
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={() => window.location.href = '/services/prototyping'}
+                >
+                  <Settings className="w-4 h-4 mr-2" /> Prototyping Services
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={() => window.location.href = '/services/pcb-printing'}
+                >
+                  <Laptop className="w-4 h-4 mr-2" /> PCB Printing
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={() => window.location.href = '/services/ai-consultancy'}
+                >
+                  <TrendingUp className="w-4 h-4 mr-2" /> AI Consultancy
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Right Side Actions */}
@@ -1323,22 +1532,24 @@ export default function Component() {
                 <ShoppingCart className="w-3 h-3" />
                 <span className="sr-only">Shopping Cart</span>
                 <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground" suppressHydrationWarning>
-                  {cartTotalItems}
+                  {cartUniqueProducts}
                 </span>
               </Button>
             </Link>
 
             {/* Mobile Profile Button */}
-            <div className="sm:hidden">
+            <div className="sm:hidden mt-2">
               {isAuthenticated ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex flex-col leading-tight">
-                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Hi</span>
-                    <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px]">
-                      {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
-                    </span>
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className="rounded-full overflow-hidden">
+                    <UserProfile />
                   </div>
-                  <UserProfile />
+                  <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px]">
+                    {(() => {
+                      const name = (user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User';
+                      return name.length > 5 ? name.substring(0, 5) + '...' : name;
+                    })()}
+                  </span>
                 </div>
               ) : (
                 <DropdownMenu>
@@ -1429,15 +1640,17 @@ export default function Component() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
-                  variant="ghost"
-                  size="icon"
+                  variant="outline"
+                  size="sm"
                   className={cn(
-                      "flex items-center gap-1 group border border-transparent hover:border-white/20 hover:bg-transparent",
+                      "flex items-center gap-1 border-yellow-500 bg-transparent hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs",
                       darkHeaderFooterClasses.buttonGhostText,
                   )}
                     suppressHydrationWarning
                 >
-                    <Palette className="w-5 h-5 group-hover:text-yellow-500 transition-colors" />
+                    <span className="text-sm font-medium" suppressHydrationWarning>
+                      Theme
+                    </span>
                     <span className="sr-only" suppressHydrationWarning>Change Background Color ({backgroundColor})</span>
                 </Button>
               </DropdownMenuTrigger>
@@ -1526,7 +1739,7 @@ export default function Component() {
                 <ShoppingCart className="w-5 h-5" />
                 <span className="sr-only">Shopping Cart</span>
                 <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground" suppressHydrationWarning>
-                  {cartTotalItems}
+                  {cartUniqueProducts}
                 </span>
               </Button>
             </Link>
@@ -1535,7 +1748,7 @@ export default function Component() {
             <div className="hidden sm:block">
               {isAuthenticated ? (
                 <div className="flex flex-col items-center">
-                  <UserProfile />
+                <UserProfile />
                   <span className="text-xs text-white mt-1">
                     {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                   </span>
@@ -1649,153 +1862,214 @@ export default function Component() {
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Secondary Navigation - Main Categories */}
-              <nav className={cn(
-                "backdrop-blur-md fixed z-30 w-full",
-                // Adjust positioning: mobile header is top-6 (24px) + h-10 (40px) = 64px, desktop header is top-0 + h-16 (64px) = 64px
-                "top-[64px] sm:top-[64px]",
-                themeClasses.mainBg === "bg-white min-h-screen" 
-                  ? "bg-amber-100/80 border-b border-amber-200/50" 
-                  : "bg-stone-200/80 border-b border-stone-300/50"
-              )}>
-        <div className="flex items-center justify-center h-auto sm:h-8 px-1 sm:px-2 lg:px-4 xl:px-6 2xl:px-8 py-1 sm:py-0">
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-2 lg:gap-3 xl:gap-4 category-scroll w-full sm:w-auto sm:justify-center min-w-0">
-            {/* Removed legacy always-visible All button to avoid duplicates */}
-
-            {/* Mobile Categories - Only show 5 with rotation */}
-            {/* "All" button to clear category filter (mobile) */}
-            <button
-              key="mobile-all-categories"
-              onClick={() => {
-                setSearchTerm("")
-                setActiveCategory(null)
-                const params = new URLSearchParams(urlSearchParams?.toString())
-                params.delete('category')
-                const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                router.push(nextUrl)
-                handleFilterActivity()
-              }}
+        {/* Second Row - Main Categories */}
+        <div className="hidden lg:flex items-center justify-start gap-4 xl:gap-6 py-3 px-[100px]">
+          {/* Super Deal Link */}
+          <Link 
+            href="/coming-soon" 
+            target="_blank"
+            rel="noopener noreferrer"
+            prefetch={false}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
               className={cn(
-                "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden flex-shrink-0",
-                !activeCategory
-                  ? (themeClasses.mainBg === "bg-white min-h-screen" ? "text-black bg-amber-200/60" : "text-yellow-300 bg-yellow-700/30")
-                  : (themeClasses.mainBg === "bg-white min-h-screen" ? "text-neutral-700 hover:bg-neutral-100" : "text-white/80 hover:bg-white/10")
+                "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white",
+                darkHeaderFooterClasses.buttonGhostText,
               )}
+              style={{ borderRadius: '20px' }}
+              suppressHydrationWarning
             >
-              All
-            </button>
+              <span className="text-sm font-medium text-red-500" suppressHydrationWarning>
+            Super Offer
+              </span>
+              <span className="sr-only" suppressHydrationWarning>Super Offer</span>
+            </Button>
+          </Link>
+          
+          {/* Main Categories */}
+          <Link 
+            href="/products?mainCategory=diy-electronic-components" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            DIY Electronic Components
+          </Link>
+          <Link 
+            href="/products?mainCategory=home-electronic-devices" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            Home Electronic Devices
+          </Link>
+          <Link 
+            href="/products?mainCategory=computer-office" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            Computer & Office
+          </Link>
+          <Link 
+            href="/products?mainCategory=school-items" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            School Items
+          </Link>
+          <Link 
+            href="/products?mainCategory=clothes-and-shoes" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            Clothes & Shoes
+          </Link>
+          <Link 
+            href="/products?mainCategory=sport-and-entertainment" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            Sport & Entertainment
+          </Link>
+          <Link 
+            href="/products?mainCategory=games" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            Games
+          </Link>
+          <Link 
+            href="/products?mainCategory=fashion-and-jewelry" 
+            className={cn(
+              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            Fashion & Jewelry
+          </Link>
+        </div>
 
-            {categoriesList.slice(mobileCategoryStartIndex, mobileCategoryStartIndex + MOBILE_CATEGORIES_PER_ROW).map((category) => {
-              const IconComponent = categoryIcons[category.name] || categoryIcons.default
-              return (
-                <button
-                  key={category.name}
-                  onClick={() => {
-                    // Filter by specific category
-                    setSearchTerm("") // Clear search term when filtering by category
-                    setActiveCategory(category.name) // Set active category
-                    const params = new URLSearchParams(urlSearchParams?.toString())
-                    params.set('category', category.name)
-                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                    router.push(nextUrl)
-                    handleFilterActivity()
-                    // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
-                }}
-                className={cn(
-                  "flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer sm:hidden flex-shrink-0",
-                    activeCategory === category.name
-                    ? themeClasses.mainBg === "bg-white min-h-screen"
-                      ? "text-black bg-amber-200/60"
-                      : "text-black bg-stone-300/60"
-                    : themeClasses.mainBg === "bg-white min-h-screen"
-                      ? "text-black hover:text-black hover:bg-amber-200/40"
-                      : "text-black hover:text-black hover:bg-stone-300/40"
-                )}
-              >
-                  <IconComponent className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                <span>{category.name}</span>
-              </button>
-              )
-            })}
-
-            {/* Desktop Categories - Show all (hidden on mobile) */}
-            {/* Desktop "All" button placed first */}
-            <button
-              key="desktop-all-categories"
-              onClick={() => {
-                setSearchTerm("")
-                setActiveCategory(null)
-                const params = new URLSearchParams(urlSearchParams?.toString())
-                params.delete('category')
-                const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                router.push(nextUrl)
-                handleFilterActivity()
-              }}
+        {/* Mobile Categories Row */}
+        <div className="lg:hidden flex items-center justify-start gap-3 py-3 px-4 overflow-x-auto overflow-y-visible" suppressHydrationWarning>
+          {/* Super Deal Link */}
+          <Link 
+            href="/coming-soon" 
+            target="_blank"
+            rel="noopener noreferrer"
+            prefetch={false}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
               className={cn(
-                "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer flex-shrink-0",
-                !activeCategory
-                  ? (themeClasses.mainBg === "bg-white min-h-screen" ? "text-black bg-amber-200/60" : "text-yellow-300 bg-yellow-700/30")
-                  : (themeClasses.mainBg === "bg-white min-h-screen" ? "text-neutral-700 hover:bg-neutral-100" : "text-white/80 hover:bg-white/10")
+                "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white flex-shrink-0",
+                darkHeaderFooterClasses.buttonGhostText,
               )}
+              style={{ borderRadius: '20px' }}
+              suppressHydrationWarning
             >
-              All
-            </button>
-
-            {categoriesList.slice(0, 10).map((category) => {
-              const IconComponent = categoryIcons[category.name] || categoryIcons.default
-              return (
-                <button
-                  key={`desktop-${category.name}`}
-                  onClick={() => {
-                    // Filter by specific category
-                    setSearchTerm("") // Clear search term when filtering by category
-                    setActiveCategory(category.name) // Set active category
-                    const params = new URLSearchParams(urlSearchParams?.toString())
-                    params.set('category', category.name)
-                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                    router.push(nextUrl)
-                    handleFilterActivity()
-                    // Note: No need to call filterByCategory since useInfiniteProducts handles filtering
-                  }}
-                  className={cn(
-                    "hidden sm:flex items-center gap-1 px-1 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-xs font-medium transition-colors whitespace-nowrap cursor-pointer flex-shrink-0",
-                    activeCategory === category.name
-                      ? themeClasses.mainBg === "bg-white min-h-screen"
-                        ? "text-black bg-amber-200/60"
-                        : "text-black bg-stone-300/60"
-                      : themeClasses.mainBg === "bg-white min-h-screen"
-                        ? "text-black hover:text-black hover:bg-amber-200/40"
-                        : "text-black hover:text-black hover:bg-stone-300/40"
-                  )}
-                >
-                  <IconComponent className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                  <span>{category.name}</span>
-                </button>
-              )
-            })}
+              <span className="text-sm font-medium text-red-500" suppressHydrationWarning>
+            Super Offer
+              </span>
+              <span className="sr-only" suppressHydrationWarning>Super Offer</span>
+            </Button>
+          </Link>
+          
+          {/* First 2 Main Categories */}
+          <Link 
+            href="/products?mainCategory=diy-electronic-components" 
+            className={cn(
+              "text-sm font-medium transition-colors hover:text-yellow-500 whitespace-nowrap flex-shrink-0",
+              themeClasses.mainText
+            )}
+            prefetch={false}
+          >
+            DIY Electronic
+          </Link>
+          <Link 
+            href="/products?mainCategory=home-electronic-devices" 
+            className={cn(
+              "text-sm font-medium transition-colors hover:text-yellow-500 whitespace-nowrap flex-shrink-0",
+              themeClasses.mainText
+            )}
+          >
+            Home Electronic
+          </Link>
+          
+          {/* More Button */}
+          <div ref={moreButtonRef} className="relative flex-shrink-0 more-categories-dropdown">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                
+                if (moreButtonRef.current) {
+                  const rect = moreButtonRef.current.getBoundingClientRect()
+                  const dropdownWidth = 280 // match max-w-[280px]
+                  const pageMargin = 5 // requested 5px right margin
+                  
+                  setDropdownPosition({
+                    top: rect.bottom + 8,
+                    left: Math.min(rect.left, window.innerWidth - dropdownWidth - pageMargin)
+                  })
+                }
+                
+                setShowMoreCategories(prev => {
+                  return !prev
+                })
+              }}
+              className="flex items-center gap-1 text-sm font-medium hover:text-yellow-500 px-2 py-1 h-auto"
+            >
+              More
+              <MoreHorizontal className="w-3 h-3" />
+            </Button>
           </div>
         </div>
-      </nav>
+      </header>
 
-      <main className={cn("flex-1 pt-28 xs:pt-20 sm:pt-28", themeClasses.mainBg)} suppressHydrationWarning>
+
+      <main className={cn("flex-1 pt-24 xs:pt-24 sm:pt-24", themeClasses.mainBg)} suppressHydrationWarning>
 
         {/* Ads Container - Above filter buttons */}
         {!adsLoading && advertisements.length > 0 && (
-          <div className="px-1 sm:px-2 lg:px-3 mb-1">
+          <div className="px-1 sm:px-2 lg:px-3 mb-4 mt-6">
             <div 
-              className="w-full relative"
+              className="w-full relative overflow-hidden rounded-lg"
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
             >
               {/* Previous Arrow */}
               {advertisements.length > 1 && (
-                <button
-                  onClick={(e) => {
+              <button
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                     e.preventDefault()
-                    setCurrentAdIndex((prev) => prev === 0 ? advertisements.length - 1 : prev - 1)
+                    setCurrentAdIndex((prev: number) => prev === 0 ? advertisements.length - 1 : prev - 1)
                   }}
                   className="absolute left-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
                   aria-label="Previous ad"
@@ -1807,28 +2081,27 @@ export default function Component() {
               {/* Next Arrow */}
               {advertisements.length > 1 && (
                 <button
-                  onClick={(e) => {
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                     e.preventDefault()
-                    setCurrentAdIndex((prev) => (prev + 1) % advertisements.length)
+                    setCurrentAdIndex((prev: number) => (prev + 1) % advertisements.length)
                   }}
                   className="absolute right-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
                   aria-label="Next ad"
                 >
                   <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
+              </button>
               )}
 
               {advertisements[currentAdIndex] && (
                 <Link 
                   href={advertisements[currentAdIndex].link_url || "/products"}
-                  className="block cursor-pointer h-32 sm:h-48 relative z-10"
+                  className="block cursor-pointer h-32 sm:h-48 relative z-0"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <div className="relative overflow-hidden hover:scale-105 transition-all duration-500 rounded-sm h-full bg-gray-100 dark:bg-gray-800">
                     {advertisements[currentAdIndex].media_type === 'image' ? (
                       <LazyImage
-                        key={currentAdIndex}
                         src={advertisements[currentAdIndex].media_url}
                         alt={advertisements[currentAdIndex].title}
                         fill
@@ -1862,11 +2135,11 @@ export default function Component() {
               
               {/* Ad Navigation Dots */}
               {advertisements.length > 1 && (
-                <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
-                  {advertisements.map((_, index) => (
+                <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-10">
+                  {advertisements.map((_: any, index: number) => (
                     <button
                       key={index}
-                      onClick={(e) => {
+                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                         e.preventDefault()
                         setCurrentAdIndex(index)
                       }}
@@ -1877,19 +2150,21 @@ export default function Component() {
                       }`}
                       aria-label={`Go to ad ${index + 1}`}
                     />
-                  ))}
-                </div>
+            ))}
+          </div>
               )}
-            </div>
+        </div>
           </div>
         )}
 
         {/* Filter and Sort Section */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3 mt-1" suppressHydrationWarning>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
           {/* Left Side - Filter Buttons and Product Count */}
           <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto" suppressHydrationWarning>
             {/* Filter Buttons */}
-            <div className="flex items-center gap-2" suppressHydrationWarning>
+            <div className="flex flex-col gap-1" suppressHydrationWarning>
+              <span className={cn("text-[10px] sm:text-xs uppercase tracking-wide", themeClasses.textNeutralSecondary)}>Filter by</span>
+              <div className="flex items-center gap-2">
               {/* Price Filter Button */}
               <Dialog open={isPriceFilterOpen} onOpenChange={setIsPriceFilterOpen}>
                 <DialogTrigger asChild>
@@ -1948,64 +2223,6 @@ export default function Component() {
               </Dialog>
 
               {/* Category Filter Button */}
-              <Sheet open={isCategoryFilterOpen} onOpenChange={setIsCategoryFilterOpen}>
-                <SheetTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    "flex items-center gap-1 sm:gap-2 bg-transparent group h-8 sm:h-10",
-                    themeClasses.mainText,
-                    themeClasses.borderNeutralSecondary,
-                      selectedCategories.length > 0 && "border-yellow-500 text-yellow-500"
-                    )}
-                  >
-                    <Tag className="w-3 h-3 sm:w-4 sm:h-4 group-hover:text-yellow-500 transition-colors" />
-                    <span className="text-xs sm:text-sm group-hover:text-yellow-500 transition-colors">
-                      Categories {selectedCategories.length > 0 && `(${selectedCategories.length})`}
-                    </span>
-                  </Button>
-                </SheetTrigger>
-                <SheetContent className={cn(themeClasses.cardBg, themeClasses.mainText)}>
-                  <SheetHeader>
-                    <SheetTitle>Filter by Category</SheetTitle>
-                    <p className="text-sm text-muted-foreground">Select categories to filter products</p>
-                  </SheetHeader>
-                  <div className="mt-6 space-y-4">
-                    <div className="space-y-3">
-                      {categoriesList.map((category) => (
-                        <div key={category.id} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={category.slug}
-                            checked={selectedCategories.includes(category.name)}
-                            onCheckedChange={() => handleCategoryToggle(category.name)}
-                          />
-                          <Label htmlFor={category.slug} className="text-sm">
-                            {category.name}
-                          </Label>
-                </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                  <Button
-                        onClick={() => setSelectedCategories([])}
-                    variant="outline"
-                        size="sm"
-                        className="flex-1"
-                      >
-                        Clear All
-                  </Button>
-                  <Button
-                        onClick={() => setIsCategoryFilterOpen(false)}
-                        size="sm"
-                        className="flex-1 bg-yellow-500 hover:bg-yellow-600"
-                      >
-                        Apply
-                  </Button>
-          </div>
-                  </div>
-                </SheetContent>
-              </Sheet>
 
               {/* Clear All Filters Button */}
             <Button
@@ -2023,13 +2240,16 @@ export default function Component() {
                   Clear all
               </span>
             </Button>
+              </div>
             </div>
 
             {/* Product Count */}
-            <span className={cn("text-xs sm:text-sm whitespace-nowrap flex items-center gap-1", themeClasses.textNeutralSecondary)}>
-              <Package className={cn("w-3 h-3 sm:w-4 sm:h-4", themeClasses.textNeutralSecondary)} />
-              {displayedProducts.length} of {infiniteTotalCount > 0 ? infiniteTotalCount : products.length} products
-            </span>
+            {(infiniteTotalCount > 0 || products.length > 0) && (
+              <span className={cn("text-xs sm:text-sm whitespace-nowrap flex items-center gap-1", themeClasses.textNeutralSecondary)}>
+                <Package className={cn("w-3 h-3 sm:w-4 sm:h-4", themeClasses.textNeutralSecondary)} />
+                {Math.min(displayedProducts.length, infiniteTotalCount > 0 ? infiniteTotalCount : products.length)} of {infiniteTotalCount > 0 ? infiniteTotalCount : products.length} products
+              </span>
+            )}
           </div>
 
           {/* Right Side - Sort Dropdown */}
@@ -2105,7 +2325,10 @@ export default function Component() {
             </div>
                   </div>
 
-        {/* Loading State - Removed for faster UX */}
+        {/* Loading State */}
+        {isLoading && (
+          <ProductGridSkeleton count={24} />
+        )}
 
         {/* Error State (Rate limiting and other errors) */}
         {infiniteError && !infiniteLoading && (
@@ -2179,29 +2402,7 @@ export default function Component() {
             error={infiniteError}
           >
             <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
-            {displayedProducts.length === 0 ? (
-              // No Offers Found Message
-              <div className="col-span-full flex flex-col items-center justify-center py-12 px-4 text-center">
-                <Package className="w-16 h-16 text-neutral-400 mb-4" />
-                <h3 className={cn("text-lg font-semibold mb-2", themeClasses.mainText)}>
-                  No Products Available
-                </h3>
-                <p className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
-                  We couldn't find any products at the moment. Please check back later for new products.
-                </p>
-                <Button
-                  variant="outline"
-                  onClick={() => router.refresh()}
-                  className={cn(
-                    "border-neutral-300 hover:bg-neutral-100",
-                    themeClasses.mainText,
-                    themeClasses.borderNeutralSecondary,
-                  )}
-                >
-                  Refresh Page
-                </Button>
-              </div>
-            ) : (
+            {displayedProducts.length === 0 ? null : (
               <>
                 
                 {/* All Product Cards */}
@@ -2245,17 +2446,19 @@ export default function Component() {
                 onMouseEnter={handleProductHover}
                 onFocus={handleProductHover}
                 className={cn(
-                  "flex flex-col overflow-hidden rounded-sm",
+                  "flex flex-col overflow-hidden rounded-lg border-0 shadow-none",
+                  "transform transition-all duration-300 ease-in-out",
+                  "hover:scale-105 hover:shadow-xl hover:shadow-gray-300/60 dark:hover:shadow-gray-700/60",
+                  "hover:z-10 relative hover:ring-2 hover:ring-blue-500/20",
                   themeClasses.cardBg,
                   themeClasses.mainText,
-                  themeClasses.cardBorder,
                 )}
                 style={{ contentVisibility: 'auto', containIntrinsicSize: '320px 420px' }}
                     suppressHydrationWarning
               >
                     <OptimizedLink 
                       href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}` || window.location.href)}`} 
-                      className="block relative aspect-square overflow-hidden" 
+                      className="block relative aspect-square overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600" 
                       prefetch={false}
                       priority="low"
                       suppressHydrationWarning
@@ -2265,46 +2468,56 @@ export default function Component() {
                       src={product.image}
                       alt={product.name}
                       fill
-                      className="object-cover transition-transform duration-300 hover:scale-105"
+                      className="object-cover transition-transform duration-300 hover:scale-110"
                       priority={false}
                       quality={60}
                       sizes="(max-width: 640px) 40vw, (max-width: 1024px) 25vw, 20vw"
                     />
                   )}
-                  {/* Delivery Badges - Top Left */}
-                  <div className="absolute top-1 left-1 sm:top-2 sm:left-2 z-10 flex flex-col gap-0.5 sm:gap-1" suppressHydrationWarning>
-                    {product.freeDelivery && (
-                      <span className="bg-green-500 text-white text-[8px] sm:text-[10px] px-0.5 sm:px-1 py-0.5 rounded-none shadow-sm sm:shadow-md" suppressHydrationWarning>
-                        Free Delivery
-                      </span>
-                    )}
-                    {product.sameDayDelivery && (
-                      <span className="bg-blue-500 text-white text-[9px] sm:text-[10px] px-0.5 sm:px-1 py-0.5 rounded-none shadow-sm sm:shadow-md" suppressHydrationWarning>
-                        Same Day
-                      </span>
-                    )}
-                  </div>
+                  {/* Corner decoration */}
+                  <div className="absolute top-0 right-0 w-0 h-0 border-l-[20px] border-l-transparent border-t-[20px] border-t-orange-500 z-20"></div>
                   
-                  {/* Single Badge on Right */}
-                  <div className="absolute top-0 right-0 sm:top-0 sm:right-1.5 z-10" suppressHydrationWarning>
-                    {product.reviews > 1000 ? (
-                          <span className="bg-black/60 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md" suppressHydrationWarning>
-                        Popular
+                  {/* Origin Badge - Bottom Left if imported from China */}
+              {(product.importChina || product.import_china) && (
+                    <div className="absolute bottom-1 left-1 sm:bottom-2 sm:left-2 z-20" suppressHydrationWarning>
+                      <span className="inline-flex items-center justify-center bg-red-600 text-white text-[10px] sm:text-[12px] font-semibold px-2 sm:px-2 py-1 rounded-md shadow-sm sm:shadow-md" suppressHydrationWarning>
+                        i - China
                       </span>
-                    ) : product.id > 10 ? (
-                          <span className="bg-black/60 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md" suppressHydrationWarning>
-                        New
+                    </div>
+                  )}
+
+                  {/* Badges - Separate left and right badge systems */}
+                  {(() => {
+                    const leftBadge = getLeftBadge(product)
+                    const rightBadge = getRightBadge(product)
+                    
+                    
+                    return (
+                      <>
+                        {/* Left side badge (Popular vs Free Shipping) */}
+                        {leftBadge.type !== 'none' && (
+                          <div className="absolute top-0 left-0 sm:top-0 sm:left-1.5 z-10" suppressHydrationWarning>
+                            <span className={leftBadge.className} suppressHydrationWarning>
+                              {leftBadge.text}
                       </span>
-                    ) : discountPercentage > 0 ? (
-                           <span className="bg-black/60 text-white text-[8px] sm:text-[10px] font-semibold px-1 sm:px-1.5 py-0.5 rounded-none shadow-sm sm:shadow-md" suppressHydrationWarning>
-                        {discountPercentage.toFixed(0)}% OFF
-                      </span>
-                    ) : (
-                          <span className="bg-black/60 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md" suppressHydrationWarning>
-                        Free Shipping
-                      </span>
-                    )}
+                          </div>
+                        )}
+                        
+                        {/* Right side badge (New vs Discount) */}
+                        {rightBadge.type !== 'none' && (
+                          <div className="absolute top-0 right-0 sm:top-0 sm:right-1.5 z-10" suppressHydrationWarning>
+                            <span 
+                              className={rightBadge.className} 
+                              style={rightBadge.customStyle}
+                              suppressHydrationWarning
+                            >
+                              {rightBadge.text}
+                            </span>
                   </div>
+                        )}
+                      </>
+                    )
+                  })()}
                     </OptimizedLink>
                     <CardContent className="p-1 flex-1 flex flex-col justify-between" suppressHydrationWarning>
                       <OptimizedLink 
@@ -2313,7 +2526,7 @@ export default function Component() {
                         prefetch={false}
                         priority="low"
                       >
-                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 transition-colors" suppressHydrationWarning>{product.name}</h3>
+                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 transition-colors line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
                       </OptimizedLink>
                   <div
                     className={cn(
@@ -2358,7 +2571,7 @@ export default function Component() {
                 </CardContent>
                     <CardFooter className="px-1 pb-1 pt-0 flex flex-col gap-1" suppressHydrationWarning>
                   <Button
-                    className="w-full text-xs py-1 h-auto sm:text-sm lg:text-base bg-yellow-500 text-neutral-950 hover:bg-yellow-600 rounded-none"
+                    className="w-full text-xs py-1 h-auto sm:text-sm lg:text-base bg-yellow-500 text-neutral-950 hover:bg-yellow-600 rounded-b-sm rounded-t-none transform transition-all duration-200 hover:scale-105 hover:shadow-md"
                     onClick={() => handleAddToCart(product.id, product.name, product.price, product.variants, product.variantConfig)}
                         suppressHydrationWarning
                   >
@@ -2380,9 +2593,6 @@ export default function Component() {
         {!hasMoreProducts && currentPageProductCount >= PRODUCTS_PER_PAGE && hasNextPage && (
           <div className="flex flex-col items-center justify-center py-12 px-4 gap-4" suppressHydrationWarning>
             <div className="text-center">
-              <p className={cn("text-lg font-semibold mb-2", themeClasses.mainText)}>
-                Showing {currentPageProductCount} products (Page {currentPage})
-              </p>
               <p className={cn("text-sm mb-6", themeClasses.textNeutralSecondary)}>
                 {infiniteTotalCount > PRODUCTS_PER_PAGE 
                   ? `${infiniteTotalCount - currentPageProductCount} more products available` 
@@ -2406,111 +2616,249 @@ export default function Component() {
             <p className={cn("text-lg", themeClasses.textNeutralSecondary)}>You've reached the end of the list!</p>
           </div>
         )}
-        
-        {/* No products found */}
-        {products.length === 0 && !isLoading && (
-          <div className="flex justify-center py-8" suppressHydrationWarning>
-            <p className={cn("text-lg", themeClasses.textNeutralSecondary)}>
-              No products found matching your criteria.
-            </p>
-          </div>
-        )}
       </main>
 
-      {/* Categories Left Navigation Panel */}
-      <Sheet open={isCategoriesNavOpen} onOpenChange={setIsCategoriesNavOpen}>
-        <SheetContent side="left" className={cn(themeClasses.cardBg, themeClasses.mainText, "w-80 sm:w-96")}>
+
+      <Footer />
+
+      {/* Category Navigation Modal */}
+      <Sheet open={isCategoryNavOpen} onOpenChange={setIsCategoryNavOpen}>
+        <SheetContent side="left" className={cn("bg-white dark:bg-gray-900", themeClasses.mainText, "w-80 sm:w-96")}>
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Package className="w-5 h-5" />
               All Categories
-              {isUsingFallbackCategories && (
-                <span className="text-xs bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 px-2 py-1 rounded-full">
-                  Offline
-                </span>
-              )}
             </SheetTitle>
             <p className="text-sm text-muted-foreground">
-              {isUsingFallbackCategories 
-                ? "Showing cached categories (API unavailable)" 
-                : "Browse products by category"
-              }
+              Browse products by category
             </p>
           </SheetHeader>
           
-          <div className="mt-6 space-y-2">
-            {/* All Categories Option */}
+          <div className="mt-6 space-y-4">
+            {/* Main Categories View */}
+            {!selectedMainCategory && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Main Categories</h3>
             <Button
-              onClick={() => {
-                setActiveCategory(null)
-                clearFilters()
-                setIsCategoriesNavOpen(false)
-              }}
-              variant="ghost"
-              className={cn(
-                "w-full justify-start text-left h-auto py-3 px-4 hover:bg-gray-100 dark:hover:bg-gray-800",
-                activeCategory === null ? "bg-amber-100 dark:bg-amber-900/20" : ""
-              )}
-            >
-              <Home className="w-4 h-4 mr-3" />
+                    onClick={handleClearCategoryFilters}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                  >
+                    Clear All
+                  </Button>
+                </div>
+                <div className="space-y-1">
+                  {categoriesData.mainCategories.map((category: any) => {
+                    const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
+                    const subcategoriesForThisMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
+                    const isMainCategorySelected = subcategoriesForThisMain.length > 0 && 
+                      subcategoriesForThisMain.every((sub: any) => selectedSubCategories.includes(sub.slug)) &&
+                      selectedSubCategories.every((slug: string) => subcategoriesForThisMain.some((sub: any) => sub.slug === slug))
+                    
+                    const areAllSubcategoriesSelected = isMainCategorySelected && 
+                      subcategoriesUnderMain.every((sub: any) => selectedSubCategories.includes(sub.slug))
+                    
+                    return (
+                      <div key={category.id} className="flex items-center gap-3 p-3 rounded-lg">
+                        <div 
+                          className="flex-shrink-0 cursor-pointer select-none p-1"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            
+                            
+                            // Toggle checkbox state
+                            if (isMainCategorySelected) {
+                              // Deselect main category and clear subcategories
+                              setSelectedMainCategory(null)
+                              setSelectedSubCategories([])
+                              
+                              // Update URL to remove category filters
+                              const params = new URLSearchParams(urlSearchParams?.toString())
+                              params.delete('mainCategory')
+                              params.delete('subCategories')
+                              const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                              router.push(nextUrl)
+                            } else {
+                              // Select main category and all its subcategories WITHOUT opening subcategories view
+                              // Don't set selectedMainCategory here - that opens the view
+                              // Just set the subcategories and update URL
+                              const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
+                              
+                              
+                              setSelectedSubCategories(allSubSlugs)
+                              
+                              // Update URL
+                              const params = new URLSearchParams(urlSearchParams?.toString())
+                              params.set('mainCategory', category.slug)
+                              if (allSubSlugs.length > 0) {
+                                params.set('subCategories', allSubSlugs.join(','))
+                              } else {
+                                params.delete('subCategories')
+                              }
+                              const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                              router.push(nextUrl)
+                            }
+                          }}
+                        >
+                          <Checkbox
+                            checked={isMainCategorySelected}
+                            onCheckedChange={() => {}} // Handled by parent div onClick
+                          />
+                        </div>
+                        <div 
+                          className="flex-1 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2"
+                          onClick={() => handleOpenSubcategoriesView(category.slug)}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Package className="w-4 h-4" />
               <div className="flex flex-col">
-                <span className="font-medium">All Categories</span>
-                <span className="text-xs text-muted-foreground">View all products</span>
+                              <span className="font-medium">{category.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {subcategoriesUnderMain.length} subcategories
+                              </span>
               </div>
-            </Button>
-
-            {/* Category List */}
-              <div className="space-y-1">
-                {categoriesList.map((category) => {
-                  const IconComponent = categoryIcons[category.name] || categoryIcons.default
-                  return (
-                    <Button
-                      key={category.id}
-                      onClick={() => {
-                        setActiveCategory(category.name)
-                        setIsCategoriesNavOpen(false)
-                        const params = new URLSearchParams(urlSearchParams?.toString())
-                        params.set('category', category.name)
-                        const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                        router.push(nextUrl)
-                        handleFilterActivity()
-                      }}
-                      variant="ghost"
-                      className={cn(
-                        "w-full justify-start text-left h-auto py-3 px-4 hover:bg-gray-100 dark:hover:bg-gray-800",
-                        activeCategory === category.name ? "bg-amber-100 dark:bg-amber-900/20" : ""
-                      )}
-                    >
-                      <IconComponent className="w-4 h-4 mr-3" />
-                      <div className="flex flex-col">
-                        <span className="font-medium">{category.name}</span>
-                        <span className="text-xs text-muted-foreground">Browse {category.name.toLowerCase()} products</span>
+                          </div>
+                        </div>
                       </div>
-                    </Button>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
+            )}
+
+            {/* Subcategories View */}
+            {selectedMainCategory && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-4">
+                  <Button
+                    onClick={handleBackToMainCategories}
+                    variant="outline"
+                    size="sm"
+                    className="p-2"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <h3 className="text-sm font-semibold">
+                     {categoriesData.mainCategories.find((cat: any) => cat.slug === selectedMainCategory)?.name}
+                  </h3>
+              </div>
+                
+              <div className="space-y-1">
+                  {/* All subcategories option */}
+                  {(() => {
+                    const currentMainCategory = categoriesData.mainCategories.find((cat: any) => cat.slug === selectedMainCategory)
+                    const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === currentMainCategory?.id)
+                    const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
+                    const areAllSelected = allSubSlugs.length > 0 && allSubSlugs.every(slug => selectedSubCategories.includes(slug))
+                    
+                  return (
+                      <div className="flex items-center gap-3 p-3 rounded-lg">
+                        <div 
+                          className="flex-shrink-0 cursor-pointer select-none p-1"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            if (areAllSelected) {
+                              setSelectedSubCategories([])
+                            } else {
+                              setSelectedSubCategories(allSubSlugs)
+                            }
+                          }}
+                        >
+                          <Checkbox
+                            checked={areAllSelected}
+                            onCheckedChange={() => {}} // Handled by parent div onClick
+                          />
+                        </div>
+                        <div 
+                          className="flex-1 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2"
+                      onClick={() => {
+                            if (areAllSelected) {
+                              setSelectedSubCategories([])
+                            } else {
+                              setSelectedSubCategories(allSubSlugs)
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Package className="w-4 h-4" />
+                      <div className="flex flex-col">
+                              <span className="font-medium">All Subcategories</span>
+                              <span className="text-xs text-muted-foreground">Select all subcategories</span>
+                      </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Individual subcategories */}
+                   {categoriesData.subCategories
+                     .filter((sub: any) => sub.parent_id === categoriesData.mainCategories.find((cat: any) => cat.slug === selectedMainCategory)?.id)
+                     .map((subCategory: any) => (
+                      <div key={subCategory.id} className="flex items-center gap-3 p-3 rounded-lg">
+                        <div 
+                          className="flex-shrink-0 cursor-pointer select-none p-1"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            handleSubCategoryToggle(subCategory.slug)
+                          }}
+                        >
+                          <Checkbox
+                            checked={selectedSubCategories.includes(subCategory.slug)}
+                            onCheckedChange={() => {}} // Handled by parent div onClick
+                          />
+              </div>
+                        <div 
+                          className="flex-1 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2"
+                          onClick={() => handleSubCategoryToggle(subCategory.slug)}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Package className="w-4 h-4" />
+                            <div className="flex flex-col">
+                              <span className="font-medium">{subCategory.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {subCategory.product_count || 0} products
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                     ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer Actions */}
           <div className="mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="space-y-2">
               <Button
                 onClick={() => {
-                  setActiveCategory(null)
-                  handleClearAllFilters()
-                  setIsCategoriesNavOpen(false)
+                  setIsCategoryNavOpen(false)
+                }}
+                className="w-full bg-yellow-500 hover:bg-yellow-600"
+              >
+                Apply Filters
+              </Button>
+              <Button
+                onClick={() => {
+                  handleClearCategoryFilters()
+                  setIsCategoryNavOpen(false)
                 }}
                 variant="outline"
                 className="w-full"
               >
-              <RefreshCcw className="w-4 h-4 mr-2" />
               Clear All Filters
             </Button>
+            </div>
           </div>
         </SheetContent>
       </Sheet>
-
-      <Footer />
 
       {/* Mobile Hamburger Menu - Modern E-commerce Style */}
       <div className={`hamburger-overlay ${isHamburgerMenuOpen ? 'open' : ''}`} onClick={() => setIsHamburgerMenuOpen(false)} />
@@ -2580,9 +2928,9 @@ export default function Component() {
                   >
                     <div className="relative">
                       <ShoppingCart className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
-                      {cartTotalItems > 0 && (
+                      {cartUniqueProducts > 0 && (
                         <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-black">
-                          {cartTotalItems}
+                          {cartUniqueProducts}
                         </span>
                       )}
                     </div>
@@ -2602,23 +2950,7 @@ export default function Component() {
                 </div>
               </div>
 
-              {/* Categories */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Categories</h3>
-                <button
-                  onClick={() => {
-                    setIsHamburgerMenuOpen(false)
-                    setIsCategoriesNavOpen(true)
-                  }}
-                  className="w-full flex items-center justify-between p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                >
-                  <div className="flex items-center gap-3">
-                    <Package className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">All Categories</span>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors" />
-                </button>
-              </div>
+
 
               {/* Account Section */}
               <div className="space-y-3">
@@ -2818,6 +3150,105 @@ export default function Component() {
         onSearchTermChange={setSearchTerm}
         initialTab={searchModalInitialTab}
       />
+
+      {/* Portal Dropdown for More Categories */}
+      {showMoreCategories && moreButtonRef.current && (
+        <div 
+          className="fixed more-categories-portal bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-2xl z-[99999] min-w-[180px] max-w-[280px] ring-1 ring-black/5"
+          style={{
+            top: dropdownPosition.top,
+            left: dropdownPosition.left,
+          }}
+        >
+          {/* Dropdown Arrow */}
+          <div 
+            className="absolute -top-1 w-2 h-2 bg-white dark:bg-gray-800 border-l border-t border-gray-200 dark:border-gray-700 transform rotate-45"
+            style={{
+              left: moreButtonRef.current ? 
+                Math.min(16, moreButtonRef.current.getBoundingClientRect().width / 2 - 4) : 16
+            }}
+          ></div>
+          <div className="p-2">
+            <Link
+              href="/products?mainCategory=computer-office"
+              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
+              onClick={() => setShowMoreCategories(false)}
+            >
+              Computer & Office
+            </Link>
+            <Link
+              href="/products?mainCategory=school-items"
+              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
+              onClick={() => setShowMoreCategories(false)}
+            >
+              School Items
+            </Link>
+            <Link
+              href="/products?mainCategory=clothes-and-shoes"
+              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
+              onClick={() => setShowMoreCategories(false)}
+            >
+              Clothes & Shoes
+            </Link>
+            <Link
+              href="/products?mainCategory=sport-and-entertainment"
+              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
+              onClick={() => setShowMoreCategories(false)}
+            >
+              Sport & Entertainment
+            </Link>
+            <Link
+              href="/products?mainCategory=games"
+              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
+              onClick={() => setShowMoreCategories(false)}
+            >
+              Games
+            </Link>
+            <Link
+              href="/products?mainCategory=fashion-and-jewelry"
+              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
+              onClick={() => setShowMoreCategories(false)}
+            >
+              Fashion & Jewelry
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* China Import Modal */}
+      {showChinaImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-red-100 dark:bg-red-900/20 rounded-full">
+                <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white text-center mb-2">
+                Import Notice
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300 text-center mb-6">
+                This item is not available in our local stock at the moment however we can import it directly from China within 3 – 5 days. Same price, same quality, just a short wait!
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleChinaImportCancel}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleChinaImportConfirm}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

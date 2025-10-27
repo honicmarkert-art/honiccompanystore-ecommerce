@@ -16,9 +16,12 @@ import {
 import { dbOptimizer } from '@/lib/database-optimizer'
 import { cacheInvalidator } from '@/lib/cache'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 // POST /api/checkout - Process checkout with stock enforcement
 export async function POST(request: NextRequest) {
@@ -200,10 +203,9 @@ export async function POST(request: NextRequest) {
       variant_name: item.variant_name || null,
       variant_attributes: item.variant_attributes || null,
       quantity: item.quantity,
-      unit_price: item.price,
+      price: item.price,
       total_price: item.price * item.quantity,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      created_at: new Date().toISOString()
     }))
 
     const { error: orderItemsError } = await supabase

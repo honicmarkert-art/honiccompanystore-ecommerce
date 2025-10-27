@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { useToast } from '@/hooks/use-toast'
 
@@ -48,6 +48,25 @@ export interface CartResponse {
 
 const CART_STORAGE_KEY = 'guest_cart'
 
+// Migration function to convert old cart data to new object array format
+const migrateCartData = (cartData: any[]): CartItem[] => {
+  return cartData.map(item => ({
+    ...item,
+    variants: item.variants.map((variant: any) => ({
+      ...variant,
+      attributes: Object.entries(variant.attributes || {}).reduce((acc, [key, value]) => {
+        // If value is a comma-separated string, convert to object array
+        if (typeof value === 'string' && value.includes(',')) {
+          acc[key] = value.split(',').map(v => ({ value: v.trim() }))
+        } else {
+          acc[key] = value
+        }
+        return acc
+      }, {} as any)
+    }))
+  }))
+}
+
 // Build a canonical, stable variant id from attributes to guarantee merging
 const buildCanonicalVariantId = (
   variantId: string | undefined,
@@ -76,19 +95,27 @@ const areAttributesEqual = (
   a?: { [key: string]: string | string[] },
   b?: { [key: string]: string | string[] }
 ): boolean => {
+  
   if (!a && !b) return true
   if (!a || !b) return false
   const keysA = Object.keys(a).sort()
   const keysB = Object.keys(b).sort()
-  if (keysA.length !== keysB.length) return false
+  if (keysA.length !== keysB.length) {
+        return false
+  }
   for (let i = 0; i < keysA.length; i++) {
-    if (keysA[i] !== keysB[i]) return false
+    if (keysA[i] !== keysB[i]) {
+      return false
+    }
     const va = a[keysA[i]]
     const vb = b[keysA[i]]
     if (Array.isArray(va) || Array.isArray(vb)) {
-      const sa = Array.isArray(va) ? va.slice().sort().join(',') : String(va)
-      const sb = Array.isArray(vb) ? vb.slice().sort().join(',') : String(vb)
-      if (sa !== sb) return false
+      // For arrays, compare exact order and values (don't sort)
+      const sa = Array.isArray(va) ? va.join(',') : String(va)
+      const sb = Array.isArray(vb) ? vb.join(',') : String(vb)
+      if (sa !== sb) {
+        return false
+      }
     } else if (String(va) !== String(vb)) {
       return false
     }
@@ -128,13 +155,33 @@ export function useCart() {
   const [isLoading, setIsLoading] = useState(false)
   const [cartSubtotal, setCartSubtotal] = useState(0)
   const [cartTotalItems, setCartTotalItems] = useState(0)
+  const [cartUniqueProducts, setCartUniqueProducts] = useState(0)
   const [hasAttemptedMerge, setHasAttemptedMerge] = useState(false)
+  const cartAbortRef = useRef<AbortController | null>(null)
 
   // Migrate old cart items to new structure
   const migrateCartItem = useCallback((item: any): CartItem => {
-    // If item already has new structure, return as is
+    
+    // If item already has new structure, migrate attributes if needed
     if (item.variants && Array.isArray(item.variants)) {
-      return item
+      const migrated = {
+        ...item,
+        variants: item.variants.map((variant: any) => ({
+          ...variant,
+          attributes: Object.entries(variant.attributes || {}).reduce((acc, [key, value]) => {
+            // If value is a comma-separated string, convert to object array
+            if (typeof value === 'string' && value.includes(',')) {
+              acc[key] = value.split(',').map(v => ({ value: v.trim() }))
+            } else {
+              acc[key] = value
+            }
+            return acc
+          }, {} as any)
+        }))
+      }
+      
+      
+      return migrated
     }
     
     // Migrate old structure to new structure
@@ -143,7 +190,15 @@ export function useCart() {
       productId: item.productId,
       variants: [{
         variantId: item.variantId || 'default',
-        attributes: item.attributes || {},
+        attributes: Object.entries(item.attributes || {}).reduce((acc, [key, value]) => {
+          // If value is a comma-separated string, convert to object array
+          if (typeof value === 'string' && value.includes(',')) {
+            acc[key] = value.split(',').map(v => ({ value: v.trim() }))
+          } else {
+            acc[key] = value
+          }
+          return acc
+        }, {} as any),
         quantity: item.quantity || 1,
         price: item.price || 0,
         sku: item.sku,
@@ -165,15 +220,41 @@ export function useCart() {
   const loadServerCart = useCallback(async () => {
     if (!isAuthenticated) return
 
+    // Prevent multiple simultaneous calls
+    if (cartAbortRef.current) {
+      try { cartAbortRef.current.abort() } catch {}
+    }
+
     setIsLoading(true)
     try {
+      cartAbortRef.current = new AbortController()
       const response = await fetch('/api/cart', {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        signal: cartAbortRef.current.signal
       })
       
+      
+      if (response.status === 429) {
+        // brief backoff and single retry
+        await new Promise(r => setTimeout(r, 400 + Math.floor(Math.random() * 300)))
+        const retry = await fetch('/api/cart', {
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          signal: cartAbortRef.current.signal
+        })
+        if (retry.ok) {
+          const data: CartResponse = await retry.json()
+          const migratedCart = (data.items || []).map(migrateCartItem)
+          setCart(migratedCart)
+          setCartSubtotal(data.totals.subtotal)
+          setCartTotalItems(data.totals.total_items)
+          return
+        }
+      }
+
       if (response.ok) {
         const data: CartResponse = await response.json()
         const migratedCart = (data.items || []).map(migrateCartItem)
@@ -185,6 +266,7 @@ export function useCart() {
     } catch (error) {
     } finally {
       setIsLoading(false)
+      cartAbortRef.current = null
     }
   }, [isAuthenticated, migrateCartItem])
 
@@ -321,6 +403,16 @@ export function useCart() {
     }
   }, [isAuthenticated, loadServerCart, loadGuestCart, mergeGuestCart, hasAttemptedMerge])
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (cartAbortRef.current) {
+        try { cartAbortRef.current.abort() } catch {}
+        cartAbortRef.current = null
+      }
+    }
+  }, [])
+
   // Add item to cart with variant attributes
   const addItem = useCallback(async (
     productId: number, 
@@ -371,6 +463,7 @@ export function useCart() {
     }
     // Check if product already exists in cart
     const existingItem = cart.find(item => item.productId === productId)
+    
 
     if (existingItem) {
       
@@ -379,6 +472,7 @@ export function useCart() {
       const existingVariant = existingItem.variants.find(v => (
         v.variantId === normalizedVariantId || areAttributesEqual(v.attributes, variantAttributes)
       ))
+      
       
       if (existingVariant) {
         
@@ -525,8 +619,8 @@ export function useCart() {
           if (response.ok) {
             const responseData = await response.json()
 
-            // Reload cart to get updated data
-            await loadServerCart()
+            // Don't reload cart - the optimistic update is sufficient
+            // await loadServerCart()
           
           // Check if this was a partial stock response
           if (responseData.partialStock) {
@@ -687,6 +781,7 @@ export function useCart() {
 
   // Remove item from cart
   const removeItem = useCallback(async (productId: number, variantId?: string) => {
+    
     const item = cart.find(item => item.productId === productId)
 
     if (!item) return
@@ -727,6 +822,7 @@ export function useCart() {
       removedQuantity = item.totalQuantity
       removedPrice = item.totalPrice
     }
+    
 
     setCart(updatedCart)
     setCartTotalItems(prev => prev - removedQuantity)
@@ -742,43 +838,51 @@ export function useCart() {
           },
           credentials: 'include',
           body: JSON.stringify({
-            itemId: item.id,
+            productId: item.productId, // Pass productId to delete all variants
             quantity: 0
           })
         })
 
+
         if (!response.ok) {
-          // Rollback on error
-          await loadServerCart()
+          // Rollback on error - restore the original cart state
+          setCart(cart) // Restore original cart
+          setCartTotalItems(prev => prev + removedQuantity) // Restore quantity
+          setCartSubtotal(prev => prev + removedPrice) // Restore price
+          
           toast({
             title: "Error",
             description: "Failed to remove item. Please try again.",
             variant: "destructive",
-            duration: 6000, // Error message: 6 seconds (within 5000-8000ms range)
+            duration: 6000,
           })
         } else {
           toast({
             title: "Removed",
             description: "Item has been removed from your cart.",
-            duration: 500, // Success message: 500ms (within 300-1000ms range)
+            duration: 500,
           })
         }
       } catch (error) {
-        // Rollback on error
-        await loadServerCart()
+        // Rollback on error - restore the original cart state
+        setCart(cart) // Restore original cart
+        setCartTotalItems(prev => prev + removedQuantity) // Restore quantity
+        setCartSubtotal(prev => prev + removedPrice) // Restore price
+        
         toast({
           title: "Error",
           description: "Failed to remove item. Please try again.",
           variant: "destructive",
-          duration: 6000, // Error message: 6 seconds (within 5000-8000ms range)
+          duration: 6000,
         })
       }
     } else {
-      // For guest users, show success message
+      // For guest users, save to localStorage
+      localStorage.setItem('guest_cart', JSON.stringify(updatedCart))
       toast({
         title: "Removed",
         description: "Item has been removed from your cart.",
-        duration: 500, // Success message: 500ms (within 300-1000ms range)
+        duration: 500,
       })
     }
   }, [cart, loadServerCart, toast])
@@ -866,11 +970,21 @@ export function useCart() {
     if (!isAuthenticated) {
       const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0)
       const totalItems = cart.reduce((sum, item) => sum + item.totalQuantity, 0)
+      const uniqueProducts = cart.length // Count unique products (cart items)
       setCartSubtotal(subtotal)
       setCartTotalItems(totalItems)
+      setCartUniqueProducts(uniqueProducts)
       saveGuestCart(cart, subtotal, totalItems)
     }
   }, [cart, isAuthenticated, saveGuestCart])
+
+  // Update unique products count for authenticated users
+  useEffect(() => {
+    if (isAuthenticated) {
+      const uniqueProducts = cart.length
+      setCartUniqueProducts(uniqueProducts)
+    }
+  }, [cart, isAuthenticated])
 
 
   return {
@@ -878,6 +992,7 @@ export function useCart() {
     isLoading,
     cartSubtotal,
     cartTotalItems,
+    cartUniqueProducts,
     addItem,
     updateItemQuantity,
     removeItem,

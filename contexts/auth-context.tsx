@@ -38,7 +38,7 @@ interface AuthContextType {
   isAuthenticated: boolean
   isLoggingIn: boolean
   isAdmin: boolean
-  signIn: (email: string, password: string, remember?: boolean) => Promise<{ success: boolean; error?: string; type?: string }>
+  signIn: (email: string, password: string, remember?: boolean, preventRedirect?: boolean, redirectTo?: string) => Promise<{ success: boolean; error?: string; type?: string }>
   signUp: (name: string, email: string, password: string, confirmPassword: string, phone?: string) => Promise<{ success: boolean; error?: string; type?: string }>
   signOut: () => Promise<void>
   checkAuth: () => Promise<void>
@@ -89,22 +89,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (result.success && result.authenticated && result.user) {
           const userData = result.user
           
+          // Check if profile was loaded successfully
+          const isProfileLoaded = result.isProfileLoaded === true
+          
+          // If profile wasn't loaded (Supabase connectivity issue), check for admin email
+          let userRole = userData.role
+          if (!isProfileLoaded && userData.email) {
+            // Fallback: Check if email matches known admin emails
+            const adminEmails = ['admin1@honic.com', 'admin@honic.com', 'sieme@honic.com']
+            if (adminEmails.includes(userData.email.toLowerCase())) {
+              userRole = 'admin'
+            }
+          }
+          
           // Set user info with role from database (never trust client cookies)
           const userInfo: User = {
             id: userData.id,
             email: userData.email,
             name: userData.name,
-            role: userData.role,
+            role: userRole,
             isVerified: userData.isVerified,
             profile: userData.profile
           }
           
           setUser(userInfo)
           setIsAuthenticated(true)
-          setIsAdmin(userData.role === 'admin')
+          setIsAdmin(userRole === 'admin')
             
             // Handle role-based routing only if user is trying to access admin
-          if (userData.role === 'user' && pathname?.startsWith('/admin')) {
+          if (userRole === 'user' && pathname?.startsWith('/admin')) {
             router.replace('/')
           }
       } else {
@@ -154,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [checkAuth])
 
   // Secure sign in using HttpOnly cookies
-  const signIn = async (email: string, password: string, remember: boolean = false, preventRedirect: boolean = false) => {
+  const signIn = async (email: string, password: string, remember: boolean = false, preventRedirect: boolean = false, redirectTo?: string) => {
     // Check for lockout
     if (lockoutUntil && Date.now() < lockoutUntil) {
       const remainingTime = Math.ceil((lockoutUntil - Date.now()) / 1000 / 60)
@@ -266,9 +279,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Redirect immediately after successful login (unless prevented)
         if (!preventRedirect) {
-          // Always redirect to home page after successful login for better UX
-          // This prevents users from staying on account pages after login
-          router.replace(result.redirectTo || '/')
+          // Use the passed redirectTo parameter, or the API response redirectTo, or default to home
+          const finalRedirect = redirectTo || result.redirectTo || '/'
+          router.replace(finalRedirect)
         }
 
         return { success: true }
@@ -380,10 +393,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const result = await response.json()
       
       // Always clear local state regardless of API response
-      setUser(null)
-      setIsAuthenticated(false)
-      setIsAdmin(false)
-      
+        setUser(null)
+        setIsAuthenticated(false)
+        setIsAdmin(false)
+        
       // Clear all local storage and session storage
       if (typeof window !== 'undefined') {
         localStorage.clear()

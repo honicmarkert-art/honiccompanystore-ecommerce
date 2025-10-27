@@ -37,12 +37,28 @@ export async function validateAuth(request: NextRequest) {
   const { supabase, response } = getSupabase(request)
   const explicitLogout = request.cookies.get('explicit-logout')?.value === 'true'
   
-  // First try to get the current session
-  let { data: { session }, error: sessionError } = await supabase.auth.getSession()
+  // First validate user using getUser() for secure authentication
+  let { data: { user }, error: userError } = await supabase.auth.getUser()
+  let session = null
   
-  if (sessionError) {
-    console.error('Session error:', sessionError)
-    return { user: null, error: 'Session error', response, supabase }
+  if (userError || !user) {
+    console.error('User validation error:', userError)
+    // Try to get session for refresh logic
+    const { data: { session: sessionData }, error: sessionError } = await supabase.auth.getSession()
+    
+    if (sessionError || !sessionData) {
+      return { user: null, error: 'Authentication failed', response, supabase }
+    }
+    
+    session = sessionData
+    user = session.user
+    if (!user) {
+      return { user: null, error: 'User not found', response, supabase }
+    }
+  } else {
+    // Get session when user is valid
+    const { data: { session: sessionData } } = await supabase.auth.getSession()
+    session = sessionData
   }
 
   // If no session, try to refresh
@@ -119,7 +135,11 @@ export async function validateAuth(request: NextRequest) {
     }
   }
 
-  const user = session.user
+  // Use session.user if not already set from getUser()
+  if (!user && session) {
+    user = session.user
+  }
+  
   if (!user) {
     return { user: null, error: 'User not found', response, supabase }
   }

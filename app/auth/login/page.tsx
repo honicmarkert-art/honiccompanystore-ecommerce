@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { logger } from '@/lib/logger'
 
@@ -17,6 +17,8 @@ function LoginPageContent() {
   const [remember, setRemember] = useState<boolean>(false)
   const { signIn, isLoggingIn } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirectTo = searchParams.get('redirect') || '/'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -25,7 +27,7 @@ function LoginPageContent() {
         return
     }
 
-    const result = await signIn(email, password, remember, false) // Let AuthContext handle redirect
+    const result = await signIn(email, password, remember, false, redirectTo) // Pass redirect parameter
     
     if (result.success) {
       // AuthContext will handle the redirect to home page

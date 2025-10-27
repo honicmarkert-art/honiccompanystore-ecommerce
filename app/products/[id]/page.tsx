@@ -22,6 +22,7 @@ import {
   RefreshCcw,
   Heart,
   ChevronLeft,
+  ChevronDown,
   Share2,
   Headphones,
   MessageSquareText,
@@ -54,9 +55,10 @@ import {
   MessageSquare,
   Ticket,
   Play,
-  RotateCcw,
-  Edit,
-} from "lucide-react"
+    RotateCcw,
+    Edit,
+    Eye,
+  } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -75,6 +77,8 @@ import {
 } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useToast } from "@/hooks/use-toast" // Import useToast hook
+import { checkProductStock } from "@/utils/stock-validation"
+import { getLeftBadge, getRightBadge } from '@/utils/product-badges'
 import { useProducts } from "@/hooks/use-products"
 import { useOptimizedApi } from "@/hooks/use-optimized-api"
 import { useSharedDataCache } from "@/contexts/shared-data-cache"
@@ -82,7 +86,7 @@ import { OptimizedLink, useOptimizedNavigation } from "@/components/optimized-li
 import { type ProductVariant } from "@/hooks/use-products" // Import types from hook
 import { useCart, formatVariantHierarchy } from "@/hooks/use-cart" // Import useCart hook
 import { useParams, useRouter, usePathname, useSearchParams } from "next/navigation"
-import { useCompanyContext } from "@/components/company-provider"
+import { usePublicCompanyContext } from "@/contexts/public-company-context"
 // import { getPreviousPageName } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth-context"
 import { useWishlist } from "@/hooks/use-wishlist"
@@ -92,6 +96,13 @@ import { useCurrency } from "@/contexts/currency-context"
 import { UserProfile } from "@/components/user-profile"
 import { ImagePreloader } from "@/components/image-preloader"
 import { Footer } from "@/components/footer"
+import { 
+  ProductImageSkeleton, 
+  ProductInfoSkeleton, 
+  VariantSelectionSkeleton, 
+  RelatedProductsSkeleton,
+  ButtonSkeleton 
+} from "@/components/ui/skeleton"
 
 
 export default function ProductDetailPage() {
@@ -102,8 +113,8 @@ export default function ProductDetailPage() {
   const { navigateWithPrefetch } = useOptimizedNavigation()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { products, isLoading, preloadProducts, fetchFullProductDetails } = useProducts()
-  const { addItem, isInCart, cartTotalItems } = useCart() // Use useCart hook
-  const { companyName, companyLogo, companyColor, isLoaded: companyLoaded } = useCompanyContext()
+  const { addItem, isInCart, cartUniqueProducts } = useCart() // Use useCart hook
+  const { companyName, companyLogo, companyColor, isLoaded: companyLoaded } = usePublicCompanyContext()
   
   // Fallback logo system - use local logo if API is not loaded or logo is not available
   const fallbackLogo = "/android-chrome-512x512.png"
@@ -119,10 +130,8 @@ export default function ProductDetailPage() {
   const productId = leadingDigits
   
   // Get return URL from search params to preserve search state
-  const returnTo = searchParams?.get('returnTo') || (typeof window !== 'undefined' ? document.referrer || '/products' : '/products')
+  const returnTo = searchParams?.get('returnTo') || '/products'
   
-  // Debug: Log the return URL to see what we're getting
-  useEffect(() => {}, [returnTo, searchParams])
   
   // Validate product ID (but don't return early - violates Rules of Hooks!)
   const isValidProductId = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
@@ -134,9 +143,9 @@ export default function ProductDetailPage() {
     refetch: refetchProduct
   } = useOptimizedApi({
     endpoint: `/api/products/${productId}`,
-    params: { minimal: false },
-    ttl: 5 * 60 * 1000, // 5 minutes cache
-    staleWhileRevalidate: true,
+    params: { minimal: false, t: Date.now() }, // Cache busting
+    ttl: 0, // No cache to force fresh data
+    staleWhileRevalidate: false,
     refetchOnWindowFocus: true
   })
   
@@ -336,13 +345,27 @@ export default function ProductDetailPage() {
       const cacheBustParam = forceRefresh ? `?cb=${Date.now()}` : '?'
       const limitParam = 'limit=5' // Limit to first 5 images for better performance
       
+      // Abortable fetch with single retry on 429
+      const controller = new AbortController()
+      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+      
       const response = await fetch(`/api/products/${productId}/variant-images${cacheBustParam}${limitParam}`, {
         headers: {
           'Cache-Control': forceRefresh ? 'no-cache' : 'max-age=60'
-        }
+        },
+        signal: controller.signal
       })
       
       if (response.status === 429) {
+        await sleep(400 + Math.floor(Math.random() * 300))
+        const retry = await fetch(`/api/products/${productId}/variant-images?${limitParam}`, {
+          headers: { 'Cache-Control': 'no-cache' },
+          signal: controller.signal
+        })
+        if (retry.ok) {
+          const data = await retry.json()
+          setVariantImages(data.variantImages || [])
+        }
         return
       }
       
@@ -351,7 +374,7 @@ export default function ProductDetailPage() {
         setVariantImages(data.variantImages || [])
       }
     } catch (error) {
-      // Error fetching variant images
+      // Ignore AbortError; otherwise silent
     } finally {
       setIsLoadingVariantImages(false)
     }
@@ -475,7 +498,6 @@ export default function ProductDetailPage() {
               primaryAttribute: variant.primary_attribute,
               dependencies: variant.dependencies || {},
               primaryValues: variant.primary_values || [],
-              multiValues: variant.multi_values || {},
             }))
           : [])
 
@@ -546,21 +568,41 @@ export default function ProductDetailPage() {
     }
   }, [product, set])
 
-  // Prefetch related products for faster navigation
+  // Prefetch related products cautiously with abort + single 429 retry
   useEffect(() => {
-    if (product && products.length > 0) {
-      const relatedProducts = products
+    if (!product || products.length === 0) return
+    const controller = new AbortController()
+    const timeouts: ReturnType<typeof setTimeout>[] = []
+
+    const candidates = products
         .filter(p => p.id !== product.id && p.category === product.category)
-        .slice(0, 3) // Reduced from 5 to 3 to prevent 429 errors
-      
-      relatedProducts.forEach((relatedProduct, index) => {
-        setTimeout(() => {
-          fetch(`/api/products/${relatedProduct.id}?minimal=false`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-          }).catch(() => {}) // Silent fail for prefetch
-        }, index * 1000) // Increased delay from 200ms to 1000ms to prevent 429 errors
-      })
+      .slice(0, 3)
+
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+    const schedulePrefetch = (id: number, delay: number) => {
+      const t = setTimeout(async () => {
+        try {
+          const url = `/api/products/${id}?minimal=false`
+          const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' }, signal: controller.signal })
+          if (res.status === 429) {
+            await sleep(400 + Math.floor(Math.random() * 300))
+            await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' }, signal: controller.signal }).catch(() => {})
+          }
+        } catch (err: any) {
+          if (err?.name !== 'AbortError') {
+            // ignore
+          }
+        }
+      }, delay)
+      timeouts.push(t)
+    }
+
+    candidates.forEach((p, i) => schedulePrefetch(p.id, 600 * i))
+
+    return () => {
+      controller.abort()
+      timeouts.forEach(clearTimeout)
     }
   }, [product, products])
 
@@ -680,6 +722,86 @@ export default function ProductDetailPage() {
   const [hasPriceAlert, setHasPriceAlert] = useState(false) // Track if user has set a price alert
 
   const { toast } = useToast() // Initialize toast
+  
+  // China import modal state
+  const [showChinaImportModal, setShowChinaImportModal] = useState(false)
+  const [pendingCartAction, setPendingCartAction] = useState<{
+    type: 'add' | 'buy'
+    quantity: number
+    variantId?: string
+    combination?: any
+    price: number
+  } | null>(null)
+
+  // Handle China import modal
+  const handleChinaImportConfirm = () => {
+    if (pendingCartAction && displayProduct) {
+      if (pendingCartAction.type === 'add') {
+        addItem(
+          displayProduct.id,
+          pendingCartAction.quantity,
+          pendingCartAction.variantId,
+          pendingCartAction.combination,
+          pendingCartAction.price
+        )
+      } else if (pendingCartAction.type === 'buy') {
+        // Handle buy now action - create a separate cart item that won't merge
+        const buyNowItem = {
+          id: Date.now(), // Use timestamp as unique ID to prevent merging
+          productId: displayProduct.id,
+          variants: [{
+            variantId: pendingCartAction.variantId || 'base',
+            attributes: pendingCartAction.combination || {},
+            quantity: pendingCartAction.quantity,
+            price: pendingCartAction.price,
+            sku: displayProduct.sku,
+            image: displayProduct.image
+          }],
+          totalQuantity: pendingCartAction.quantity,
+          totalPrice: pendingCartAction.price * pendingCartAction.quantity,
+          currency: 'TZS',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          product: {
+            id: displayProduct.id,
+            name: displayProduct.name,
+            image: displayProduct.image,
+            price: pendingCartAction.price,
+            originalPrice: displayProduct.originalPrice,
+            inStock: displayProduct.inStock,
+            stockQuantity: displayProduct.stockQuantity,
+            sku: displayProduct.sku
+          }
+        }
+        
+        // Add this as a separate item to cart
+        addItem(
+          displayProduct.id,
+          pendingCartAction.quantity,
+          pendingCartAction.variantId,
+          pendingCartAction.combination,
+          pendingCartAction.price
+        )
+        
+        // Store the buy now item details for checkout
+        try {
+          sessionStorage.setItem('buy_now_item_data', JSON.stringify(buyNowItem))
+          sessionStorage.setItem('buy_now_mode', 'true')
+        } catch (error) {
+          // Fallback if sessionStorage fails
+        }
+        
+        router.push('/checkout')
+      }
+    }
+    setShowChinaImportModal(false)
+    setPendingCartAction(null)
+  }
+
+  const handleChinaImportCancel = () => {
+    setShowChinaImportModal(false)
+    setPendingCartAction(null)
+  }
 
   // Update admin product state when product changes
   useEffect(() => {
@@ -742,12 +864,6 @@ export default function ProductDetailPage() {
         types.add(key)
       })
       
-      // Extract from multi values (excluding _raw keys and numeric keys)
-      if (variant.multiValues) {
-        Object.keys(variant.multiValues).filter(key => !key.endsWith('_raw') && !/^\d+$/.test(key)).forEach(key => {
-            types.add(key)
-        })
-      }
     })
     
     const result = Array.from(types)
@@ -787,14 +903,24 @@ export default function ProductDetailPage() {
         })
       }
     } else {
-      // Check if this is a multi-value attribute
-      const hasMultiValues = displayProduct.variants.some((variant: any) => variant.multiValues?.[type])
-      if (hasMultiValues) {
+      // Check if this attribute has array values
+      const hasArrayValues = displayProduct.variants.some((variant: any) => 
+        variant.attributes?.[type] && Array.isArray(variant.attributes[type])
+      )
+      if (hasArrayValues) {
         displayProduct.variants.forEach((variant: any) => {
-          if (variant.multiValues?.[type] && Array.isArray(variant.multiValues[type])) {
-            variant.multiValues[type].forEach((value: string) => {
-              if (value) {
-                values.add(value)
+          if (variant.attributes?.[type] && Array.isArray(variant.attributes[type])) {
+            variant.attributes[type].forEach((item: any) => {
+              if (item) {
+                // Handle both object format {value: "white"} and string format "white"
+                const value = typeof item === 'object' && item.value ? item.value : item
+                if (value) {
+                  // Clean up the value by removing extra quotes and trimming spaces
+                  const cleanedValue = value.replace(/^["']|["']$/g, '').trim()
+                  if (cleanedValue) {
+                    values.add(cleanedValue)
+                  }
+                }
               }
             })
           }
@@ -809,8 +935,8 @@ export default function ProductDetailPage() {
       }
     }
     
-    const result = Array.from(values)
-    return result
+        const result = Array.from(values)
+        return result
   }
 
   // Check if a specific attribute value is available given current selections
@@ -851,14 +977,18 @@ export default function ProductDetailPage() {
         })
       }
       
-      // Check if this is a multi-value attribute
-      const hasMultiValues = displayProduct.variants.some((variant: any) => 
-        variant.multiValues?.[attributeType] && Array.isArray(variant.multiValues[attributeType])
+      // Check if this attribute has array values
+      const hasArrayValues = displayProduct.variants.some((variant: any) => 
+        variant.attributes?.[attributeType] && Array.isArray(variant.attributes[attributeType])
       )
-      if (hasMultiValues) {
+      if (hasArrayValues) {
         return displayProduct.variants.some((variant: any) => 
-          variant.multiValues?.[attributeType] && Array.isArray(variant.multiValues[attributeType]) && 
-          variant.multiValues[attributeType].includes(value)
+          variant.attributes?.[attributeType] && Array.isArray(variant.attributes[attributeType]) && 
+          variant.attributes[attributeType].some((item: any) => {
+            const v = typeof item === 'object' && item.value ? item.value : item
+            const cleanedValue = v.replace(/^["']|["']$/g, '').trim()
+            return cleanedValue === value
+          })
         )
       }
       
@@ -989,19 +1119,9 @@ export default function ProductDetailPage() {
 
   // Calculate quantity based on selected attributes
   const calculateQuantityFromSelections = (): number => {
-    let totalQuantity = 1
-    
-    Object.entries(selectedAttributes).forEach(([attribute, value]) => {
-      const isPrimary = displayProduct?.variantConfig?.type === 'primary-dependent' && 
-                       attribute === displayProduct.variantConfig.primaryAttribute
-      
-      if (!isPrimary && Array.isArray(value) && value.length > 0) {
-        // For non-primary attributes, multiply by number of selections
-        totalQuantity *= value.length
-      }
-    })
-    
-    return Math.max(1, totalQuantity)
+    // SINGLE SELECTION ONLY: No need to multiply by selections
+    // Each attribute can only have one value selected
+    return 1
   }
 
   // Helper function to generate cartesian product combinations
@@ -1133,7 +1253,25 @@ export default function ProductDetailPage() {
       // For simple logic OR when variantConfig is missing, select the first variant
       if (!displayProduct.variantConfig || displayProduct.variantConfig?.type === 'simple') {
         setSelectedVariant(displayProduct.variants[0])
-        setSelectedAttributes(displayProduct.variants[0].attributes || {})
+        // Convert object arrays to string values for selectedAttributes
+        const initialAttributes = displayProduct.variants[0].attributes || {}
+        const convertedAttributes: { [key: string]: string } = {}
+        
+        Object.entries(initialAttributes).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            // For arrays, take the first value
+            const firstItem = value[0]
+            if (typeof firstItem === 'object' && firstItem.value) {
+              convertedAttributes[key] = firstItem.value
+            } else {
+              convertedAttributes[key] = String(firstItem)
+            }
+          } else {
+            convertedAttributes[key] = String(value)
+          }
+        })
+        
+        setSelectedAttributes(convertedAttributes)
       }
       // For other logic types, don't auto-select - let user choose
     }
@@ -1161,9 +1299,13 @@ export default function ProductDetailPage() {
       // For other logic types, match all attributes
       matchingVariant = displayProduct.variants.find((variant: any) => {
         return Object.entries(selectedAttributes).every(([key, value]) => {
-          // Handle multi-value attributes
-          if (variant.multiValues?.[key]) {
-            return variant.multiValues[key].includes(value as string)
+          // Handle array attributes
+          if (variant.attributes?.[key] && Array.isArray(variant.attributes[key])) {
+            return variant.attributes[key].some((item: any) => {
+              const v = typeof item === 'object' && item.value ? item.value : item
+              const cleanedValue = v.replace(/^["']|["']$/g, '').trim()
+              return cleanedValue === value
+            })
           }
           
           // Handle multiple selections for non-primary attributes
@@ -1184,13 +1326,13 @@ export default function ProductDetailPage() {
     }
   }, [selectedAttributes, displayProduct?.variants])
 
-  // Update quantity when selections change
-  useEffect(() => {
-    const newQuantity = calculateQuantityFromSelections()
-    // For products under 500 TZS, ensure minimum quantity is 5
-    const finalQuantity = product && product.price < 500 ? Math.max(5, newQuantity) : newQuantity
-    setQuantity(finalQuantity)
-  }, [selectedAttributes, product])
+  // Update quantity when selections change - DISABLED to prevent auto-quantity changes
+  // useEffect(() => {
+  //   const newQuantity = calculateQuantityFromSelections()
+  //   // For products under 500 TZS, ensure minimum quantity is 5
+  //   const finalQuantity = product && product.price < 500 ? Math.max(5, newQuantity) : newQuantity
+  //   setQuantity(finalQuantity)
+  // }, [selectedAttributes, product])
 
   // Initialize individual quantities when attributes are selected
   useEffect(() => {
@@ -1199,9 +1341,12 @@ export default function ProductDetailPage() {
       const newIndividualQuantities: { [key: string]: number } = {}
       combinations.forEach(combination => {
         const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-        newIndividualQuantities[combinationKey] = quantity
+        newIndividualQuantities[combinationKey] = quantity // Use the main quantity for each combination
       })
       setIndividualQuantities(newIndividualQuantities)
+    } else if (combinations.length === 1) {
+      // Clear individual quantities when only one item is selected
+      setIndividualQuantities({})
     }
   }, [selectedAttributes, quantity])
 
@@ -1210,30 +1355,17 @@ export default function ProductDetailPage() {
     const entries = Object.entries(attributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
     
     if (entries.length === 0) return []
-    if (entries.length === 1) {
-      const [key, value] = entries[0]
-      const values = Array.isArray(value) ? value : [value]
-      return values.map(v => ({ [key]: v }))
-    }
     
-    // Generate cartesian product for multiple attributes
-    const combinations: Record<string, string>[] = []
-    const generateCombinations = (index: number, current: Record<string, string>) => {
-      if (index === entries.length) {
-        combinations.push({ ...current })
-        return
-      }
-      
-      const [key, value] = entries[index]
-      const values = Array.isArray(value) ? value : [value]
-      
-      values.forEach(v => {
-        generateCombinations(index + 1, { ...current, [key]: v })
-      })
-    }
+    // SINGLE SELECTION ONLY: Each attribute has only one value
+    // Convert to single combination
+    const combination: Record<string, string> = {}
+    entries.forEach(([key, value]) => {
+      // Handle both string values and arrays (for backward compatibility)
+      const singleValue = Array.isArray(value) ? value[0] : value
+      combination[key] = singleValue
+    })
     
-    generateCombinations(0, {})
-    return combinations
+    return [combination]
   }
 
   // Helper function to calculate price for a combination (MEMOIZED for performance)
@@ -1259,43 +1391,18 @@ export default function ProductDetailPage() {
 
   const handleAttributeSelect = (attributeType: string, value: string) => {
     setSelectedAttributes(prev => {
-      const isPrimary = displayProduct?.variantConfig?.type === 'primary-dependent' && 
-                       attributeType === displayProduct.variantConfig.primaryAttribute
-      const isSimplePrimary = displayProduct?.variantConfig?.type === 'simple' && 
-                             attributeType === displayProduct.variantConfig.primaryAttribute
-      const isMultiDependentPrimary = displayProduct?.variantConfig?.type === 'multi-dependent' && 
-                                     displayProduct.variantConfig.primaryAttributes?.includes(attributeType)
-      
-      if ((isPrimary || isSimplePrimary) && !isMultiDependentPrimary) {
-        // Primary attributes in Primary-Dependent and Simple logic: single selection only
+      // ENFORCE SINGLE SELECTION FOR ALL ATTRIBUTES
+      // If the same value is clicked, deselect it
         if (prev[attributeType] === value) {
           const newAttributes = { ...prev }
           delete newAttributes[attributeType]
           return newAttributes
         }
+      
+      // Select the new value (single selection only)
         return {
           ...prev,
           [attributeType]: value
-        }
-      } else {
-        // All other attributes (including Multi-Dependent primary attributes): multiple selection allowed
-        const currentValues = Array.isArray(prev[attributeType]) ? prev[attributeType] : 
-                            prev[attributeType] ? [prev[attributeType]] : []
-        
-        if (currentValues.includes(value)) {
-          // Remove value if already selected
-          const newValues = currentValues.filter(v => v !== value)
-          return {
-            ...prev,
-            [attributeType]: newValues.length > 0 ? newValues : undefined
-          }
-        } else {
-          // Add value to selection
-          return {
-            ...prev,
-            [attributeType]: [...currentValues, value]
-          }
-        }
       }
     })
     
@@ -1345,7 +1452,7 @@ export default function ProductDetailPage() {
   }
 
   const currentPrice = getCurrentPrice() || 0
-  const currentOriginalPrice = selectedVariant?.price || product?.originalPrice || 0
+  const currentOriginalPrice = selectedVariant?.originalPrice || product?.originalPrice || 0
   
   // Find matching variant image for the selected attributes
   const matchingVariantImage = findMatchingVariantImage(selectedAttributes)
@@ -1471,6 +1578,8 @@ export default function ProductDetailPage() {
   const [activeTab, setActiveTab] = useState<"specifications" | "reviews" | "qna" | "shipping" | "warranty">(
     "specifications",
   )
+  
+  const [expandedSpecs, setExpandedSpecs] = useState(false)
 
   // REMOVED EARLY RETURNS - they violate Rules of Hooks
   // Loading and not-found states are now handled at the end, after all hooks
@@ -1551,8 +1660,8 @@ export default function ProductDetailPage() {
       }, 0)
     }
     
-    // Otherwise, multiply quantity by number of combinations
-    return quantity * totalCombinations
+    // For multiple combinations, each should have the same quantity (not multiplied)
+    return quantity
   }, [selectedAttributes, quantity, individualQuantities])
 
   // Auto-select the first option for each attribute on initial load
@@ -1635,10 +1744,38 @@ export default function ProductDetailPage() {
     
     // Otherwise, calculate based on combinations
     const unitPrice = getCurrentUnitPrice
-    return unitPrice * quantity * totalCombinations
+    return unitPrice * quantity
   }, [selectedAttributes, calculateTotalPrice, individualQuantities, getCurrentUnitPrice, quantity, calculatePriceForCombination])
 
-  const handleAddToCart = () => {
+  const handleAddToCart = (): boolean | undefined => {
+    
+    // Check basic product stock first
+    if (displayProduct) {
+      const stockCheck = checkProductStock(displayProduct)
+      
+      if (!stockCheck.isAvailable) {
+        toast({
+          title: "Out of Stock",
+          description: stockCheck.message || "This product is currently unavailable.",
+          variant: "destructive",
+        })
+        return false
+      }
+    }
+    
+    // Check if this is a China import item first
+    if (displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
+      const currentPrice = getCurrentUnitPrice
+      setPendingCartAction({
+        type: 'add',
+        quantity,
+        variantId: selectedVariant?.id?.toString(),
+        combination: selectedAttributes,
+        price: currentPrice
+      })
+      setShowChinaImportModal(true)
+      return false
+    }
     
     // Validate that selected attributes have sufficient quantity
     if (displayProduct?.variants && Object.keys(selectedAttributes).length > 0) {
@@ -1650,7 +1787,7 @@ export default function ProductDetailPage() {
               description: `The selected option "${attrType}: ${attrValue}" is currently unavailable.`,
               variant: "destructive",
             })
-            return
+            return false
           }
         }
       }
@@ -1675,7 +1812,7 @@ export default function ProductDetailPage() {
           
           addItem(product.id, quantity, undefined, {}, fallbackPrice)
           
-          return
+          return true
         }
         
         // No attributes selected - auto-select first option for each attribute
@@ -1713,7 +1850,7 @@ export default function ProductDetailPage() {
             undefined  // image
           )
         }
-        return
+        return true
       }
     }
     
@@ -1724,7 +1861,7 @@ export default function ProductDetailPage() {
         description: "Please select all required options before adding to cart.",
         variant: "destructive",
       })
-      return
+      return false
     }
 
     // Check if we have individual quantities set (like in the dialog)
@@ -1745,11 +1882,28 @@ export default function ProductDetailPage() {
           // Create a unique variant ID for this combination
           const variantId = `combination-${index}-${combinationKey}`
           
+          // Convert attributes to object array format for cart storage
+          const cartAttributes: { [key: string]: any } = {}
+          Object.entries(combination).forEach(([key, value]) => {
+            // Check if this attribute has multiple values in the database
+            const hasMultipleValues = displayProduct.variants?.some((variant: any) => 
+              variant.attributes?.[key] && Array.isArray(variant.attributes[key]) && variant.attributes[key].length > 1
+            )
+            
+            if (hasMultipleValues && typeof value === 'string' && value.includes(',')) {
+              // Convert comma-separated string to object array
+              cartAttributes[key] = value.split(',').map(v => ({ value: v.trim() }))
+            } else {
+              // Keep as is for single values
+              cartAttributes[key] = value
+            }
+          })
+          
           addItem(
             product.id,
             qty,
             variantId,
-            combination,
+            cartAttributes,
             unitPrice,
             undefined, // sku
             undefined  // image
@@ -1772,7 +1926,7 @@ export default function ProductDetailPage() {
         addItem(product.id, quantity, undefined, {}, fallbackPrice)
         
         // Toast notification handled by cart hook
-        return
+        return true
       }
       
       // Simple case: single item with base quantity
@@ -1826,6 +1980,8 @@ export default function ProductDetailPage() {
         // Toast notification handled by cart hook
       }
     }
+    
+    return true
   }
 
   const handleAddToWishlist = async () => {
@@ -1945,6 +2101,7 @@ export default function ProductDetailPage() {
   if (isProductLoading) {
     return (
       <div className={cn("flex flex-col min-h-screen", themeClasses.mainBg, themeClasses.mainText)}>
+        {/* Full Header - No skeleton needed as it's hardcoded */}
         <header
           className={cn(
             "sticky top-0 z-40 w-full border-b",
@@ -1953,24 +2110,80 @@ export default function ProductDetailPage() {
           )}
         >
           <div className="flex items-center h-16 px-4 sm:px-6 lg:px-8 w-full">
-            <OptimizedLink
-              href={returnTo}
-              prefetch="hover"
-              priority="medium"
+            {/* Back Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(returnTo)}
               className={cn(
-                "flex items-center gap-2 text-lg font-semibold md:text-base",
+                "flex items-center gap-1 sm:gap-2 text-sm sm:text-base lg:text-lg font-semibold flex-shrink-0 min-w-0",
                 darkHeaderFooterClasses.textNeutralPrimary,
               )}
             >
-              <ChevronLeft className="w-5 h-5" />
-              <span>Back to Products</span>
+              <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Back to Products</span>
+              <span className="sm:hidden">Back</span>
+            </Button>
+
+            {/* Logo */}
+            <OptimizedLink
+              href="/home"
+              prefetch="hover"
+              priority="low"
+              className={cn(
+                "hidden sm:flex items-center gap-1 sm:gap-2 text-sm sm:text-base lg:text-lg font-semibold flex-shrink-0 min-w-0 ml-1 sm:ml-2 lg:ml-4 xl:ml-6",
+                darkHeaderFooterClasses.textNeutralPrimary,
+              )}
+            >
+              <Image
+                src={displayLogo}
+                alt={`${companyName} Logo`}
+                width={48}
+                height={48}
+                className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md"
+              />
+              <div className="hidden sm:flex flex-col">
+                <span 
+                  className="lg:text-lg xl:text-xl 2xl:text-2xl truncate font-bold" 
+                  style={{ color: companyColor }}
+                >
+                  {companyName}
+                </span>
+              </div>
             </OptimizedLink>
+
+            {/* Search Bar */}
+            <div className="flex-1 max-w-2xl mx-2 sm:mx-4 lg:mx-6 xl:mx-8 flex items-center relative">
+              <div className="relative flex-1 flex items-center">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 z-10 text-gray-400" />
+                  <div className="w-full h-10 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Cart Button */}
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
+            </div>
           </div>
         </header>
-        <main className="flex-1 container py-8 px-4 sm:px-6 lg:px-8 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto mb-4"></div>
-            <h1 className={cn("text-xl font-semibold", themeClasses.mainText)}>Loading product...</h1>
+
+        <main className="flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8 pt-20 sm:pt-24 lg:pt-24">
+          {/* Skeleton Loading State */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
+            {/* Product Image Gallery Skeleton */}
+            <ProductImageSkeleton />
+            
+            {/* Product Info Skeleton */}
+            <div className="space-y-6">
+              <ProductInfoSkeleton />
+              <VariantSelectionSkeleton />
+              <div className="flex gap-3">
+                <ButtonSkeleton className="h-12 w-32" />
+                <ButtonSkeleton className="h-12 w-24" />
+              </div>
+            </div>
           </div>
         </main>
         <Footer />
@@ -2067,7 +2280,10 @@ export default function ProductDetailPage() {
             variant="ghost"
             onClick={handleBackNavigation}
             className={cn(
-              "flex items-center gap-1 sm:gap-2 text-xs sm:text-sm font-semibold flex-shrink-0",
+              "flex items-center gap-1 sm:gap-2 text-xs sm:text-sm font-medium flex-shrink-0 transition-opacity",
+              isProductLoading 
+                ? "opacity-60 hover:opacity-80" 
+                : "opacity-80 hover:opacity-100",
               darkHeaderFooterClasses.textNeutralPrimary,
             )}
           >
@@ -2078,7 +2294,7 @@ export default function ProductDetailPage() {
 
           {/* Logo - Hidden on mobile */}
           <OptimizedLink
-            href="/"
+            href="/home"
             prefetch="hover"
             priority="low"
             className={cn(
@@ -2103,113 +2319,6 @@ export default function ProductDetailPage() {
             </div>
           </OptimizedLink>
 
-          {/* User Profile - Moved to left side */}
-          {isAuthenticated ? (
-            <div className="flex items-center gap-2 ml-2 sm:ml-4">
-              <div className="flex flex-col leading-tight">
-                <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Hi</span>
-                <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px] sm:max-w-[120px]">
-                  {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
-                </span>
-              </div>
-              <div className="flex flex-col items-center">
-                <UserProfile />
-                <span className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-1">
-                  {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="ml-2 sm:ml-4">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      "flex items-center gap-1 sm:gap-2 h-auto py-2 px-1 sm:px-2 cursor-pointer",
-                      "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
-                      darkHeaderFooterClasses.buttonGhostText,
-                      darkHeaderFooterClasses.buttonGhostHoverBg,
-                    )}
-                  >
-                    <User className="w-4 h-4 sm:w-4 sm:h-4" />
-                    <div className="hidden sm:flex flex-col items-start text-xs">
-                      <span>Welcome</span>
-                      <span className="font-semibold hover:text-yellow-500 transition-colors">Sign in / Register</span>
-                    </div>
-                    <div className="sm:hidden flex flex-col items-center text-xs">
-                      <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Account</span>
-                      <span className="font-semibold text-neutral-900 dark:text-white">Sign in</span>
-                    </div>
-                    <span className="sr-only">User Menu</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className={cn(
-                    "w-56",
-                    // Force solid backgrounds in both themes
-                    "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
-                  )}
-                >
-                  <div className="p-2 flex flex-col gap-2">
-                    <Button 
-                      onClick={() => openAuthModal('login')}
-                      className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                    >
-                      Sign in
-                    </Button>
-                    <button
-                      onClick={() => openAuthModal('register')}
-                      className={cn(
-                        "text-center text-sm hover:underline",
-                        darkHeaderFooterClasses.textNeutralSecondaryFixed,
-                      )}
-                    >
-                      Register
-                    </button>
-                  </div>
-                  <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
-                  <DropdownMenuItem
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Package className="w-4 h-4 mr-2" /> My Orders
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Coins className="w-4 h-4 mr-2" /> My Coins
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <MessageSquare className="w-4 h-4 mr-2" /> Message Center
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <CreditCard className="w-4 h-4 mr-2" /> Payment
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Heart className="w-4 h-4 mr-2" /> Wish List
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Ticket className="w-4 h-4 mr-2" /> My Coupons
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
 
           {/* Search Bar Container */}
           <div className="flex-1 max-w-2xl mx-2 sm:mx-4 lg:mx-6 xl:mx-8 flex items-center relative">
@@ -2279,9 +2388,7 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Right Side Actions */}
-          <div className="flex items-center gap-2 lg:gap-3 flex-shrink-0">
-
-
+          <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0 ml-auto">
             <Button
               variant="ghost"
               className={cn(
@@ -2331,20 +2438,152 @@ export default function ProductDetailPage() {
               >
                 <ShoppingCart className="w-3 h-3 sm:w-5 sm:h-5" />
                 <span className="sr-only">Shopping Cart</span>
-                {cartTotalItems > 0 && (
+                {cartUniqueProducts > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-orange-500 text-white text-[10px] sm:text-xs font-bold" suppressHydrationWarning>
-                    {cartTotalItems > 99 ? '99+' : cartTotalItems}
+                    {cartUniqueProducts > 99 ? '99+' : cartUniqueProducts}
                 </span>
                 )}
               </Button>
             </OptimizedLink>
 
+            {/* Spacer between cart and profile */}
+            <div className="w-2.5"></div>
+
+            {/* User Profile - Moved to right side after cart */}
+            {isAuthenticated ? (
+              <div className="flex flex-col items-center mr-1">
+                <div className="w-6 h-6 sm:w-8 sm:h-8">
+              <UserProfile />
+                </div>
+                <span className="hidden sm:block text-[8px] sm:text-[10px] text-neutral-500 dark:text-neutral-400 mt-0.5 sm:mt-1 truncate max-w-[60px] sm:max-w-[80px]">
+                  {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                </span>
+              </div>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "flex items-center gap-1 h-auto py-2 px-1 sm:px-2 mr-1 group border border-transparent hover:border-white/20 hover:bg-transparent",
+                      darkHeaderFooterClasses.buttonGhostText,
+                    )}
+                  >
+                    <User className="w-4 h-4 sm:w-5 sm:h-5 group-hover:text-yellow-500 transition-colors" />
+                    <div className="hidden sm:flex flex-col items-start text-[10px]">
+                      <span className="group-hover:text-yellow-500 transition-colors">Welcome</span>
+                      <span className="font-semibold group-hover:text-yellow-500 transition-colors">Sign in / Register</span>
+                    </div>
+                    <span className="sr-only">User Menu</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className={cn(
+                    "w-56",
+                    // Force solid backgrounds in both themes
+                    "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
+                  )}
+                >
+                  <div className="p-2 flex flex-col gap-2">
+                    <Button 
+                      onClick={() => openAuthModal('login')}
+                      className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                    >
+                      Sign in
+                    </Button>
+                    <button
+                      onClick={() => openAuthModal('register')}
+                      className={cn(
+                        "text-center text-sm hover:underline",
+                        darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                      )}
+                    >
+                      Register
+                    </button>
+                  </div>
+                  <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Package className="w-4 h-4 mr-2" /> My Orders
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Coins className="w-4 h-4 mr-2" /> My Coins
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <MessageSquare className="w-4 h-4 mr-2" /> Message Center
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <CreditCard className="w-4 h-4 mr-2" /> Payment
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Heart className="w-4 h-4 mr-2" /> Wish List
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                    onClick={() => openAuthModal('login')}
+                  >
+                    <Ticket className="w-4 h-4 mr-2" /> My Coupons
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
           </div>
         </div>
       </header>
 
-      <main className={cn("flex-1 w-full pt-20 pb-4 sm:pt-24 sm:pb-6 lg:pt-24 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8", themeClasses.mainBg)} suppressHydrationWarning>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
+      {/* China Import Notice - Fixed during scroll */}
+      {displayProduct && (displayProduct.importChina || displayProduct.import_china) && (
+        <div className="fixed top-16 sm:top-16 z-30 w-full bg-red-50 dark:bg-red-900/20 px-4 py-1.5 shadow-sm">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex items-center justify-center text-center">
+              <div className="flex items-center gap-2 text-xs text-red-700 dark:text-red-300">
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="font-large">Import Notice:</span>
+                <span className="ml-1">This item can be imported directly from China within 3-5 days. Same price, same quality, just a short wait!</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8", themeClasses.mainBg, displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
+        {/* Skeleton Loading State */}
+        {isLoading || isOptimizedLoading ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
+            {/* Product Image Gallery Skeleton */}
+            <ProductImageSkeleton />
+            
+            {/* Product Info Skeleton */}
+            <div className="space-y-6">
+              <ProductInfoSkeleton />
+              <VariantSelectionSkeleton />
+              <div className="flex gap-3">
+                <ButtonSkeleton className="h-12 w-32" />
+                <ButtonSkeleton className="h-12 w-24" />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
           {/* Product Image Gallery */}
           <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:gap-6">
             {/* Thumbnail Gallery (Left on LG screens, Top on SM screens) */}
@@ -2593,16 +2832,20 @@ export default function ProductDetailPage() {
                   </div>
                 )}
                 
-                {/* Discount Badge */}
-                {mainViewMode === 'image' && discountPercentage > 0 && (
-                  <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-semibold px-2 py-1 rounded-md shadow-md">
-                    -{discountPercentage.toFixed(0)}%
-                  </span>
+
+                {/* China Import Badge */}
+                {mainViewMode === 'image' && (displayProduct?.importChina || displayProduct?.import_china) && (
+                  <div className="absolute bottom-2 left-2 z-30">
+                    <span className="inline-flex items-center justify-center bg-red-600 text-white text-[10px] sm:text-[12px] font-semibold px-2 py-1 rounded shadow-sm">
+                      i - China
+                    </span>
+                  </div>
                 )}
+                
 
                 {/* View Mode Indicator */}
                 {mainViewMode !== 'image' && (
-                  <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs font-semibold px-2 py-1 rounded-md shadow-md">
+                  <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs font-semibold px-2 py-1 rounded shadow-sm z-20">
                     {mainViewMode === 'video' ? 'Video Mode' : '360° View'}
                   </div>
                 )}
@@ -2931,7 +3174,12 @@ export default function ProductDetailPage() {
                 // Check different possible attribute structures
                 if (variant.attributes && typeof variant.attributes === 'object') {
                   Object.keys(variant.attributes).forEach(key => {
-                    if (!types.includes(key)) {
+                    // Exclude _quantity fields, _quantities, and any technical fields from being shown as separate attributes
+                    if (!key.endsWith('_quantity') && 
+                        key !== '_quantities' && 
+                        key !== 'quantities' &&
+                        !key.startsWith('_') &&
+                        !types.includes(key)) {
                       types.push(key)
                     }
                   })
@@ -3110,14 +3358,12 @@ export default function ProductDetailPage() {
                             <span className={cn("text-xs italic text-gray-500", themeClasses.textNeutralSecondary)}>
                               Select your {type.toLowerCase()}
                               </span>
-                            {isPrimary && <span className="text-xs text-orange-600 font-medium">(Affects Price)</span>}
                           </Label>
                           <div className="flex items-center gap-1 sm:gap-2 mt-2 flex-wrap">
                                                       {getAttributeValues(type).map((value) => {
                             const isPrimary = type === displayProduct.variantConfig?.primaryAttribute
-                            const currentValues = Array.isArray(selectedAttributes[type]) ? selectedAttributes[type] : 
-                                                selectedAttributes[type] ? [selectedAttributes[type]] : []
-                            const isSelected = isPrimary ? selectedAttributes[type] === value : currentValues.includes(value)
+                            // SINGLE SELECTION ONLY: Check if this value is selected
+                            const isSelected = selectedAttributes[type] === value
                             const isAvailable = isAttributeValueAvailable(type, value)
                             
                             // For primary attributes, find the actual price from primaryValues
@@ -3194,18 +3440,12 @@ export default function ProductDetailPage() {
                             <span className={cn("text-xs italic text-gray-500", themeClasses.textNeutralSecondary)}>
                               Select your {type.toLowerCase()}
                             </span>
-                            {displayProduct.variantConfig?.primaryAttributes?.includes(type) && (
-                              <span className="text-xs text-orange-600 font-medium">(Affects Price)</span>
-                            )}
                             {isCurrentStep && <span className="text-xs text-blue-600 font-medium">(Select Next)</span>}
                           </Label>
                           <div className="flex items-center gap-1 sm:gap-2 mt-2 flex-wrap">
                             {getAttributeValues(type).map((value) => {
-                              // Handle both single and multiple selections
-                              const currentSelections = selectedAttributes[type]
-                              const isSelected = Array.isArray(currentSelections) 
-                                ? currentSelections.includes(value)
-                                : currentSelections === value
+                              // SINGLE SELECTION ONLY: Check if this value is selected
+                              const isSelected = selectedAttributes[type] === value
                               const isAvailable = isAttributeValueAvailable(type, value)
                               const isPrimary = displayProduct.variantConfig?.primaryAttributes?.includes(type)
                               
@@ -3272,53 +3512,6 @@ export default function ProductDetailPage() {
                   </div>
                 )}
 
-                {/* Compact Selection Summary */}
-                {Object.keys(selectedAttributes).length > 0 ? (
-                  <div 
-                    key={`preview-${JSON.stringify(individualQuantities)}-${quantity}`}
-                    className={cn("border rounded-lg p-2 sm:p-3 mt-4 shadow-sm", themeClasses.cardBg, themeClasses.cardBorder)}
-                  >
-                      {/* All items in one row with labels above and values below */}
-                      <div className="flex items-end justify-between gap-2">
-                        {/* Unit Price */}
-                        <div className="text-center flex-1">
-                          <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Unit Price</div>
-                          <div className={cn("text-xs sm:text-sm font-semibold", themeClasses.mainText)}>
-                            {formatPrice(getCurrentUnitPrice)}
-                        </div>
-                      </div>
-                        
-                        {/* Total Items */}
-                        <div className="text-center flex-1">
-                          <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Total Items</div>
-                          <div className={cn("text-xs sm:text-sm font-semibold", themeClasses.mainText)}>
-                            {calculateTrueTotalItems}
-                      </div>
-                    </div>
-                        
-                        {/* Total Price */}
-                        <div className="text-center flex-1">
-                          <div className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Total Price</div>
-                          <div className={cn("text-sm sm:text-lg font-bold text-green-600", themeClasses.mainText)}>
-                            {formatPrice(calculateTrueTotalPrice)}
-                        </div>
-                      </div>
-                      
-                        {/* Preview Button */}
-                        <div className="flex-1">
-                      <Button
-                        onClick={() => setIsSelectionPreviewOpen(true)}
-                        className={cn(
-                              "hover:bg-blue-700 text-white px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium w-full",
-                          backgroundColor === "white" ? "bg-blue-600" : "bg-blue-700"
-                        )}
-                      >
-                            Preview
-                      </Button>
-                        </div>
-                    </div>
-                  </div>
-                ) : null}
               </div>
             ) : displayProduct.variants && displayProduct.variants.length > 0 ? (
               // Fallback: Show variants even if attribute extraction fails
@@ -3365,11 +3558,22 @@ export default function ProductDetailPage() {
                             )}
                             {variant.attributes && Object.keys(variant.attributes).length > 0 && (
                               <div className="text-xs text-gray-500 mt-1">
-                                {Object.entries(variant.attributes || {}).filter(([key]) => !/^\d+$/.test(key)).map(([key, value]) => (
+                                {Object.entries(variant.attributes || {}).filter(([key]) => !/^\d+$/.test(key) && key !== '_quantities').map(([key, value]) => {
+                                  // Handle object arrays properly
+                                  let displayValue = value
+                                  if (Array.isArray(value)) {
+                                    displayValue = value.map(item => 
+                                      typeof item === 'object' && item.value ? item.value : item
+                                    ).join(', ')
+                                  } else if (typeof value === 'object' && value && 'value' in value) {
+                                    displayValue = (value as any).value
+                                  }
+                                  return (
                                   <span key={key} className="mr-2">
-                                    {key}: {String(value)}
+                                      {key}: {String(displayValue)}
                                   </span>
-                                ))}
+                                  )
+                                })}
                               </div>
                             )}
                           </div>
@@ -3413,7 +3617,6 @@ export default function ProductDetailPage() {
                 </div>
               </div>
             ) : null}
-
 
             {/* Quantity Selector and Add to Cart/Buy Now */}
             <div className="space-y-2 mt-4 sm:mt-6">
@@ -3518,6 +3721,30 @@ export default function ProductDetailPage() {
                   Bulk Order
                 </span>
               </Button>
+              
+              {/* Preview Button - Only show when attributes are selected */}
+              {Object.keys(selectedAttributes).length > 0 && (
+                <Button
+                  onClick={() => setIsSelectionPreviewOpen(true)}
+                  className={cn(
+                    "flex items-center gap-1 group border border-transparent hover:border-white/20 hover:bg-transparent text-xs px-2 py-1 h-7",
+                    backgroundColor === "dark" 
+                      ? "text-blue-400 hover:text-blue-300" 
+                      : "text-blue-600 hover:bg-blue-50"
+                  )}
+                >
+                  <Eye className={cn(
+                    "w-3 h-3 group-hover:text-blue-300 transition-colors",
+                    backgroundColor === "dark" && "group-hover:text-blue-300"
+                  )} /> 
+                  <span className={cn(
+                    "group-hover:text-blue-300 transition-colors text-xs",
+                    backgroundColor === "dark" && "group-hover:text-blue-300"
+                  )}>
+                    Preview
+                  </span>
+                </Button>
+              )}
             </div>
 
           </div>
@@ -3541,13 +3768,31 @@ export default function ProductDetailPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  // First, call handleAddToCart to ensure item is added (with auto-select if needed)
-                  handleAddToCart()
+                  // Check if this is a China import item first
+                  if (displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
+                    const currentPrice = getCurrentUnitPrice
+                    setPendingCartAction({
+                      type: 'buy',
+                      quantity,
+                      variantId: selectedVariant?.id?.toString(),
+                      combination: selectedAttributes,
+                      price: currentPrice
+                    })
+                    setShowChinaImportModal(true)
+                    return
+                  }
                   
-                  // Then navigate to cart page after a short delay to ensure cart is updated
-                  setTimeout(() => {
-                  navigateWithPrefetch('/cart', { priority: 'high' })
-                  }, 100)
+                  // First, call handleAddToCart to ensure item is added (with auto-select if needed)
+                  // If successful, navigate to cart. If out of stock, show toast only.
+                  const success = handleAddToCart()
+                  
+                  // Only navigate to cart if item was successfully added
+                  if (success) {
+                    // Then navigate to cart page after a short delay to ensure cart is updated
+                    setTimeout(() => {
+                      navigateWithPrefetch('/cart', { priority: 'high' })
+                    }, 100)
+                  }
                 }}
                 className={cn(
                   "flex-1 py-2 sm:py-3 text-sm sm:text-lg group border border-transparent hover:border-white/20 hover:bg-transparent",
@@ -3824,13 +4069,32 @@ export default function ProductDetailPage() {
             <div className="bg-transparent p-4 sm:p-6">
               <h2 className={cn("text-xl font-bold mb-4", themeClasses.mainText)}>Product Specifications</h2>
               <p className={cn("text-sm mb-6 leading-relaxed", themeClasses.mainText)}>{product.description}</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {product.specifications && Object.entries(product.specifications).map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between py-2 px-3 border-b border-opacity-10" style={{ borderColor: backgroundColor === "white" ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)" }}>
-                    <span className={cn("font-medium text-sm flex-shrink-0", themeClasses.mainText)}>{String(key)}:</span>
-                    <span className={cn("text-sm text-right break-words ml-2", themeClasses.textNeutralSecondary)}>{String(value)}</span>
+              <div className="relative">
+                <div className={cn(
+                  "grid grid-cols-1 md:grid-cols-2 gap-2 transition-all duration-300 ease-in-out",
+                  !expandedSpecs ? "max-h-96 overflow-hidden" : ""
+                )}>
+                  {product.specifications && Object.entries(product.specifications).map(([key, value]) => (
+                    <div key={key} className="flex items-center justify-between py-2 px-3 border-b border-opacity-10" style={{ borderColor: backgroundColor === "white" ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)" }}>
+                      <span className={cn("font-medium text-sm flex-shrink-0", themeClasses.mainText)}>{String(key)}:</span>
+                      <span className={cn("text-sm text-right break-words ml-2", themeClasses.textNeutralSecondary)}>{String(value)}</span>
+                    </div>
+                  ))}
+                </div>
+                
+                {product.specifications && Object.entries(product.specifications).length > 4 && (
+                  <div className="mt-4 text-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setExpandedSpecs(!expandedSpecs)}
+                      className={cn("flex items-center gap-2", themeClasses.textNeutralSecondary)}
+                    >
+                      {expandedSpecs ? 'Show Less' : 'Show More'}
+                      <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSpecs && "transform rotate-180")} />
+                    </Button>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}
@@ -3916,7 +4180,9 @@ export default function ProductDetailPage() {
               </div>
             </div>
           )}
-        </div>
+          </div>
+          </>
+        )}
       </main>
 
       {/* Related Products Section */}
@@ -3934,22 +4200,31 @@ export default function ProductDetailPage() {
             </OptimizedLink>
           </div>
           
-          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-1 sm:gap-3 md:gap-4 w-full">
+          <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-1 px-1 sm:px-2 lg:px-3 w-full">
             {rotatedRelatedProducts.map((relatedProduct: any) => {
                 const discountPercentage = ((relatedProduct.originalPrice - relatedProduct.price) / relatedProduct.originalPrice) * 100
+                
+                
+                // Get badges for the related product
+                const leftBadge = getLeftBadge(relatedProduct)
+                const rightBadge = getRightBadge(relatedProduct)
+                
+                
                 return (
                   <Card
                     key={relatedProduct.id}
                     className={cn(
-                      "flex flex-col overflow-hidden rounded-sm w-full",
+                      "flex flex-col overflow-hidden rounded-lg w-full border-0 shadow-none",
+                      "transform transition-all duration-300 ease-in-out",
+                      "hover:scale-105 hover:shadow-xl hover:shadow-gray-300/60 dark:hover:shadow-gray-700/60",
+                      "hover:z-10 relative hover:ring-2 hover:ring-blue-500/20",
                       themeClasses.cardBg,
                       themeClasses.mainText,
-                      themeClasses.cardBorder,
                     )}
                   >
                     <OptimizedLink 
                       href={`/products/${relatedProduct.id}-${encodeURIComponent(relatedProduct.slug || relatedProduct.name || 'product')}?returnTo=${encodeURIComponent(returnTo)}`} 
-                      className="block relative aspect-square overflow-hidden"
+                      className="block relative aspect-square overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600"
                       prefetch="hover"
                       priority="medium"
                     >
@@ -3959,48 +4234,53 @@ export default function ProductDetailPage() {
                           alt={relatedProduct.name}
                           fill
                           sizes="(max-width: 640px) 33vw, (max-width: 768px) 25vw, (max-width: 1024px) 20vw, (max-width: 1280px) 16vw, (max-width: 1536px) 14vw, 12vw"
-                          className="object-cover transition-transform duration-300 hover:scale-105"
+                          className="object-cover transition-transform duration-300 hover:scale-110"
                           priority={false} // Not priority since it's below the fold
-                          quality={80}
+                          quality={60}
                         />
                       )}
-                      {/* Delivery Badges - Top Left */}
-                      <div className="absolute top-1 left-1 sm:top-2 sm:left-2 z-10 flex flex-col gap-0.5 sm:gap-1">
-                        {relatedProduct.freeDelivery && (
-                          <span className="bg-green-500 text-white text-[8px] sm:text-[10px] px-0.5 sm:px-1 py-0.5 rounded-none shadow-sm sm:shadow-md">
-                            Free Delivery
-                          </span>
-                        )}
-                        {relatedProduct.sameDayDelivery && (
-                          <span className="bg-blue-500 text-white text-[9px] sm:text-[10px] px-0.5 sm:px-1 py-0.5 rounded-none shadow-sm sm:shadow-md">
-                            Same Day
-                          </span>
-                        )}
-                      </div>
                       
-                      {/* Single Badge on Right */}
-                      <div className="absolute top-0 right-0 sm:top-0 sm:right-1.5 z-10">
-                        {relatedProduct.reviews > 1000 ? (
-                          <span className="bg-black/60 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md">
-                            Popular
+                      {/* Orange chamfered corner - Top Right */}
+                      <div className="absolute top-0 right-0 w-0 h-0 border-l-[20px] border-l-transparent border-t-[20px] border-t-orange-500 z-20"></div>
+                      
+                      {/* Left Badge - Top Left */}
+                      {leftBadge.type !== 'none' && (
+                        <div className="absolute top-0 left-0 sm:top-0 sm:left-1.5 z-10" suppressHydrationWarning>
+                          <span 
+                            className={leftBadge.className}
+                            style={leftBadge.customStyle}
+                            suppressHydrationWarning
+                          >
+                            {leftBadge.text}
                           </span>
-                        ) : relatedProduct.id > 10 ? (
-                          <span className="bg-black/60 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md">
-                            New
+                        </div>
+                      )}
+                      
+                      {/* Right Badge - Top Right */}
+                      {rightBadge.type !== 'none' && (
+                        <div className="absolute top-0 right-0 sm:top-0 sm:right-1.5 z-10" suppressHydrationWarning>
+                          <span 
+                            className={rightBadge.className}
+                            style={rightBadge.customStyle}
+                            suppressHydrationWarning
+                          >
+                            {rightBadge.text}
                           </span>
-                        ) : discountPercentage > 0 ? (
-                          <span className="bg-black/60 text-white text-[8px] sm:text-[10px] font-semibold px-1 sm:px-1.5 py-0.5 rounded-none shadow-sm sm:shadow-md">
-                            {discountPercentage.toFixed(0)}% OFF
+                        </div>
+                      )}
+                      
+                      {/* Origin Badge - Bottom Left if imported from China */}
+                      {relatedProduct.importChina && (
+                        <div className="absolute bottom-1 left-1 sm:bottom-2 sm:left-2 z-10">
+                          <span className="bg-red-600 text-white text-[8px] sm:text-[10px] font-semibold px-1 sm:px-1.5 py-0.5 rounded-none shadow-sm sm:shadow-md">
+                            i - China
                           </span>
-                        ) : (
-                          <span className="bg-black/60 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md">
-                            Free Shipping
-                          </span>
-                        )}
                       </div>
+                      )}
+                      
                     </OptimizedLink>
                     <CardContent className="p-1 flex-1 flex flex-col justify-between">
-                      <h3 className="text-xs font-semibold sm:text-sm lg:text-base">{relatedProduct.name}</h3>
+                      <h3 className="text-xs font-semibold sm:text-sm lg:text-base line-clamp-2 overflow-hidden">{relatedProduct.name}</h3>
                       <div
                         className={cn(
                           "flex items-center gap-1 text-[10px] mt-0.5 sm:text-xs",
@@ -4035,7 +4315,7 @@ export default function ProductDetailPage() {
                     </CardContent>
                     <CardFooter className="px-1 pb-1 pt-0 flex flex-col gap-1">
                       <Button
-                        className="w-full text-xs py-1 h-auto sm:text-sm lg:text-base bg-yellow-500 text-neutral-950 hover:bg-yellow-600 rounded-none"
+                        className="w-full text-xs py-1 h-auto sm:text-sm lg:text-base bg-yellow-500 text-neutral-950 hover:bg-yellow-600 rounded-b-sm rounded-t-none transform transition-all duration-200 hover:scale-105 hover:shadow-md"
                         onClick={() => addItem(relatedProduct.id, 1)}
                       >
                         <ShoppingCart className="w-4 h-4 mr-2" /> Add to Cart
@@ -4264,64 +4544,108 @@ export default function ProductDetailPage() {
                       )
                     }
                     
-                    // For simple products with single selection, show the selection
-                    if (displayProduct?.variantConfig?.type === 'simple' && selectedEntries.length === 1) {
-                      const [attribute, value] = selectedEntries[0]
-                      const currentQty = quantity
-                      const unitPrice = (() => {
-                        // Check if this is a primary attribute with price
-                        if (displayProduct.variantConfig?.primaryAttribute === attribute) {
-                          const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-                            variant.primaryValues?.some((pv: any) => pv.value === value)
+                    // Handle all selections - both single and multiple
+                    const allItems: Array<{attribute: string, value: string, unitPrice: number}> = []
+                    
+                    selectedEntries.forEach(([attribute, value]) => {
+                      // Handle both single values and arrays of values
+                      const values = Array.isArray(value) ? value : [value]
+                      
+                      values.forEach(val => {
+                        const unitPrice = (() => {
+                          // Check if this is a primary attribute with price
+                          if (displayProduct.variantConfig?.primaryAttribute === attribute) {
+                            const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
+                              variant.primaryValues?.some((pv: any) => pv.value === val)
                             )
                             if (variantWithPrimaryValue) {
-                            const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === value) as { attribute: string; value: string; price?: string } | undefined
-                            return primaryValueObj?.price ? parseFloat(primaryValueObj.price) : displayProduct.price
+                              const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === val) as { attribute: string; value: string; price?: string } | undefined
+                              return primaryValueObj?.price ? parseFloat(primaryValueObj.price) : displayProduct.price
+                            }
                           }
-                        }
-                        return displayProduct.price
-                      })()
-                      
+                          return displayProduct.price
+                        })()
+                        
+                        allItems.push({
+                          attribute,
+                          value: val || '',
+                          unitPrice
+                        })
+                      })
+                    })
+                    
+                    if (allItems.length === 0) {
                       return (
                         <div className={cn(
-                          "flex items-center justify-between p-2 rounded border",
-                          backgroundColor === "white" ? "bg-gray-50 border-gray-200" : "bg-gray-700 border-gray-500"
+                          "text-sm",
+                          backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
                         )}>
-                      <div className="flex items-center gap-2">
-                            <span className={cn(
-                              "text-xs font-medium",
-                              backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                            )}>1.</span>
-                            <div className="flex items-center gap-1">
-                              <span className={cn(
-                                "text-xs font-semibold capitalize",
-                                backgroundColor === "white" ? "text-blue-800" : "text-blue-300"
-                              )}>
-                                {attribute}: {value}
-                        </span>
-                              <span className={cn(
-                                "text-xs",
-                                backgroundColor === "white" ? "text-gray-500" : "text-gray-400"
-                              )}>
-                                {formatPrice(unitPrice)}
-                          </span>
-                    </div>
-              </div>
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              "text-xs",
-                              backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                            )}>Qty: {currentQty}</span>
-                            <span className={cn(
-                              "text-xs font-semibold",
-                              backgroundColor === "white" ? "text-green-600" : "text-green-400"
-                            )}>
-                              {formatPrice(unitPrice * currentQty)}
-                            </span>
-            </div>
+                          Please select your options
                         </div>
                       )
                     }
+                    
+                    return allItems.map((item, index) => {
+                      const combinationKey = `${item.attribute}:${item.value}`
+                      const currentQty = getIndividualQuantity(combinationKey)
+                      return (
+                      <div key={`${item.attribute}-${item.value}-${index}`} className={cn(
+                        "flex items-center justify-between p-2 rounded border",
+                        backgroundColor === "white" ? "bg-gray-50 border-gray-200" : "bg-gray-700 border-gray-500"
+                      )}>
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "text-xs font-medium",
+                            backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
+                          )}>{index + 1}.</span>
+                          <div className="flex items-center gap-1">
+                            <span className={cn(
+                              "text-xs font-semibold capitalize",
+                              backgroundColor === "white" ? "text-blue-800" : "text-blue-300"
+                            )}>
+                              {item.attribute}: {item.value}
+                            </span>
+                            <span className={cn(
+                              "text-xs",
+                              backgroundColor === "white" ? "text-gray-500" : "text-gray-400"
+                            )}>
+                              {formatPrice(item.unitPrice)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center border rounded">
+                            <Button variant="ghost" size="icon" className="h-6 w-6"
+                              onClick={() => setIndividualQuantities(prev => {
+                                const next = { ...prev }
+                                next[combinationKey] = Math.max(1, (prev[combinationKey] || 1) - 1)
+                                return next
+                              })}>-</Button>
+                            <input
+                              className={cn("w-10 text-center text-xs bg-transparent", backgroundColor === "white" ? "text-gray-800" : "text-gray-100")}
+                              type="number"
+                              min={1}
+                              value={currentQty}
+                              onChange={(e) => {
+                                const val = Math.max(1, parseInt(e.target.value) || 1)
+                                setIndividualQuantities(prev => ({ ...prev, [combinationKey]: val }))
+                              }}
+                            />
+                            <Button variant="ghost" size="icon" className="h-6 w-6"
+                              onClick={() => setIndividualQuantities(prev => ({
+                                ...prev,
+                                [combinationKey]: (prev[combinationKey] || 1) + 1
+                              }))}>+</Button>
+                          </div>
+                          <span className={cn(
+                            "text-xs font-semibold",
+                            backgroundColor === "white" ? "text-green-600" : "text-green-400"
+                          )}>
+                            {formatPrice(item.unitPrice * currentQty)}
+                          </span>
+                        </div>
+                      </div>)
+                    })
                     
                     // For products with multiple attributes, show combinations
                     const combinations = generateAttributeCombinations(selectedAttributes)
@@ -4332,7 +4656,7 @@ export default function ProductDetailPage() {
                       const unitPrice = calculatePriceForCombination(combination)
                   
                   return (
-                        <div key={combinationKey} className={cn(
+                        <div key={`${combinationKey}-${index}`} className={cn(
                           "flex items-center justify-between p-2 rounded border",
                           backgroundColor === "white" ? "bg-gray-50 border-gray-200" : "bg-gray-700 border-gray-500"
                         )}>
@@ -4348,7 +4672,15 @@ export default function ProductDetailPage() {
                                 "text-xs font-semibold",
                                 backgroundColor === "white" ? "text-blue-800" : "text-blue-300"
                               )}>
-                                {Object.entries(combination).map(([key, value]) => `${key}: ${value}`).join(', ')}
+                                {Object.entries(combination).map(([key, value]) => {
+                                  const displayValue = (() => {
+                                    if (typeof value === 'object' && value !== null && 'value' in value) {
+                                      return String((value as { value: any }).value)
+                                    }
+                                    return String(value)
+                                  })()
+                                  return `${key}: ${displayValue}`
+                                }).join(', ')}
                               </span>
                               <span className={cn(
                                 "text-xs",
@@ -4437,8 +4769,8 @@ export default function ProductDetailPage() {
                             }, 0)
                           }
                           
-                          // Otherwise, multiply quantity by number of combinations
-                          return quantity * totalCombinations
+                          // For multiple combinations, show quantity per item (not multiplied by combinations)
+                          return quantity
                         })()}
                       </span>
                       <span className={cn(
@@ -4472,9 +4804,9 @@ export default function ProductDetailPage() {
                             return formatPrice(total)
                           }
                           
-                          // Otherwise, calculate based on combinations
+                          // For multiple combinations, calculate price per item
                           const unitPrice = getCurrentUnitPrice
-                          return formatPrice(unitPrice * quantity * totalCombinations)
+                          return formatPrice(unitPrice * quantity)
                         })()}
                       </span>
                       </div>
@@ -4508,7 +4840,22 @@ export default function ProductDetailPage() {
                     // Single selection
                     const [attribute, value] = selectedEntries[0]
                     const unitPrice = getCurrentUnitPrice
-                    addItem(pid, quantity, undefined, { [attribute]: value as string }, unitPrice, currentSKU, (mainImage as any) || product?.image)
+                    
+                    // Convert attributes to object array format for cart storage
+                    const cartAttributes: { [key: string]: any } = {}
+                    const hasMultipleValues = displayProduct.variants?.some((variant: any) => 
+                      variant.attributes?.[attribute] && Array.isArray(variant.attributes[attribute]) && variant.attributes[attribute].length > 1
+                    )
+                    
+                    if (hasMultipleValues && typeof value === 'string' && value.includes(',')) {
+                      // Convert comma-separated string to object array
+                      cartAttributes[attribute] = value.split(',').map(v => ({ value: v.trim() }))
+                    } else {
+                      // Keep as is for single values
+                      cartAttributes[attribute] = value
+                    }
+                    
+                    addItem(pid, quantity, undefined, cartAttributes, unitPrice, currentSKU, (mainImage as any) || product?.image)
                   } else {
                     // Multiple combinations
                     const combinations = generateAttributeCombinations(selectedAttributes)
@@ -4788,6 +5135,41 @@ export default function ProductDetailPage() {
         onClose={() => setIsQuantityLimitModalOpen(false)}
         productName={product?.name}
       />
+
+      {/* China Import Modal */}
+      {showChinaImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-red-100 dark:bg-red-900/20 rounded-full">
+                <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white text-center mb-2">
+                Import Notice
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300 text-center mb-6">
+                This item is not available in our local stock at the moment. However, we can import it directly from China within 3-5 days. Same price, same quality, just a short wait!
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleChinaImportCancel}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleChinaImportConfirm}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
     </div>
   )

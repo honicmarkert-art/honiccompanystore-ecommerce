@@ -1,6 +1,5 @@
 "use client"
 
-
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
 
@@ -46,11 +45,15 @@ interface Category {
   image_url?: string
   is_active: boolean
   display_order: number
+  parent_id?: number
+  parent_name?: string
+  level: number
+  children_count: number
   created_at: string
   updated_at: string
 }
 
-export default function AdminCategories() {
+export default function SiemCategories() {
   const { themeClasses } = useTheme()
   const { toast } = useToast()
   const [searchTerm, setSearchTerm] = useState("")
@@ -58,13 +61,20 @@ export default function AdminCategories() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
+  const [viewMode, setViewMode] = useState<'main' | 'subcategories' | 'flat'>('main')
+  const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set())
+  const [selectedMainCategory, setSelectedMainCategory] = useState<Category | null>(null)
 
   // Fetch categories from API
   useEffect(() => {
     const fetchCategories = async () => {
       try {
         setLoading(true)
-        const response = await fetch('/api/admin/categories')
+        const response = await fetch('/api/admin/categories', { credentials: 'include' })
+        if (!response.ok) {
+          const text = await response.text().catch(() => '')
+          console.error('[AdminCategories] /api/admin/categories failed:', response.status, response.statusText, text?.slice(0,200))
+        }
         if (response.ok) {
           const data = await response.json()
           setCategories(data)
@@ -96,6 +106,158 @@ export default function AdminCategories() {
       category.description.toLowerCase().includes(searchTerm.toLowerCase())
     )
   }, [categories, searchTerm])
+
+  // Organize categories hierarchically
+  const hierarchicalCategories = useMemo(() => {
+    const categoryMap = new Map<number, Category & { children: Category[] }>()
+    const rootCategories: (Category & { children: Category[] })[] = []
+
+    // First pass: create map and initialize children arrays
+    categories.forEach(category => {
+      categoryMap.set(category.id, { ...category, children: [] })
+    })
+
+    // Second pass: build hierarchy
+    categories.forEach(category => {
+      const categoryWithChildren = categoryMap.get(category.id)!
+      if (category.parent_id && categoryMap.has(category.parent_id)) {
+        const parent = categoryMap.get(category.parent_id)!
+        parent.children.push(categoryWithChildren)
+      } else {
+        rootCategories.push(categoryWithChildren)
+      }
+    })
+
+    return rootCategories
+  }, [categories])
+
+  // Get main categories (parent_id is null)
+  const mainCategories = useMemo(() => {
+    return categories.filter(cat => !cat.parent_id)
+  }, [categories])
+
+  // Get subcategories for a specific main category
+  const getSubcategories = (mainCategoryId: number) => {
+    return categories.filter(cat => cat.parent_id === mainCategoryId)
+  }
+
+  // Toggle category expansion
+  const toggleCategoryExpansion = (categoryId: number) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(categoryId)) {
+        newSet.delete(categoryId)
+      } else {
+        newSet.add(categoryId)
+      }
+      return newSet
+    })
+  }
+
+  // Render category tree recursively
+  const renderCategoryTree = (categories: (Category & { children: Category[] })[], level = 0): JSX.Element[] => {
+    return categories.map((category) => (
+      <div key={category.id}>
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder, `ml-${level * 4}`)}>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Tags className="h-5 w-5 text-muted-foreground" />
+                <div className="flex items-center space-x-2">
+                  {category.children.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleCategoryExpansion(category.id)}
+                      className="p-1 h-6 w-6"
+                    >
+                      {expandedCategories.has(category.id) ? '−' : '+'}
+                    </Button>
+                  )}
+                  <CardTitle className={themeClasses.mainText}>
+                    {category.name}
+                    {category.children.length > 0 && (
+                      <span className="ml-2 text-sm text-muted-foreground">
+                        ({category.children.length} subcategories)
+                      </span>
+                    )}
+                  </CardTitle>
+                </div>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+                  <DropdownMenuItem
+                    onClick={() => handleEditCategory(category)}
+                    className={themeClasses.buttonGhostHoverBg}
+                  >
+                    <Edit className="h-4 w-4 mr-2" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleDeleteCategory(category.id)}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Category Image */}
+            {category.image_url && (
+              <div className="relative aspect-video overflow-hidden rounded-md bg-gray-100">
+                <Image
+                  src={category.image_url}
+                  alt={category.name}
+                  fill
+                  className="object-cover"
+                />
+              </div>
+            )}
+            
+            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+              {category.description}
+            </p>
+            
+            <div className="flex items-center justify-between">
+              <Badge variant={category.is_active ? "default" : "secondary"}>
+                {category.is_active ? "Active" : "Inactive"}
+              </Badge>
+              <span className={cn("text-sm font-medium", themeClasses.mainText)}>
+                Order: {category.display_order}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-xs">
+              <span className={cn(themeClasses.textNeutralSecondary)}>Slug:</span>
+              <span className={cn("font-mono", themeClasses.mainText)}>{category.slug}</span>
+            </div>
+
+            {category.parent_name && (
+              <div className="flex items-center justify-between text-xs">
+                <span className={cn(themeClasses.textNeutralSecondary)}>Parent:</span>
+                <span className={cn("font-medium", themeClasses.mainText)}>{category.parent_name}</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        
+        {/* Render children if expanded */}
+        {category.children.length > 0 && expandedCategories.has(category.id) && (
+          <div className="mt-2">
+            {renderCategoryTree(category.children, level + 1)}
+          </div>
+        )}
+      </div>
+    ))
+  }
 
   const handleEditCategory = (category: Category) => {
     setEditingCategory(category)
@@ -149,9 +311,21 @@ export default function AdminCategories() {
     setEditingCategory(null)
   }
 
+  const handleMainCategorySelect = (category: Category) => {
+    setSelectedMainCategory(category)
+    setViewMode('subcategories')
+  }
+
+  const handleBackToMain = () => {
+    setSelectedMainCategory(null)
+    setViewMode('main')
+  }
+
   const stats = {
     totalCategories: categories.length,
     activeCategories: categories.filter(c => c.is_active).length,
+    mainCategories: mainCategories.length,
+    subCategories: categories.filter(c => c.parent_id).length,
     totalProducts: 0, // This would need to be calculated from products table
     avgProductsPerCategory: 0, // This would need to be calculated
   }
@@ -163,8 +337,41 @@ export default function AdminCategories() {
         <div>
           <h1 className={cn("text-3xl font-bold", themeClasses.mainText)}>Categories</h1>
           <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-            Manage your product categories and organization
+            Manage your product categories and organization with hierarchical structure
           </p>
+        </div>
+        <div className="flex items-center gap-4">
+          {/* View Mode Toggle */}
+          <div className="flex items-center gap-2">
+            <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>View:</span>
+            <Button
+              variant={viewMode === 'main' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setViewMode('main')
+                setSelectedMainCategory(null)
+              }}
+            >
+              Main Categories
+            </Button>
+            <Button
+              variant={viewMode === 'subcategories' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setViewMode('subcategories')}
+              disabled={!selectedMainCategory}
+            >
+              Subcategories
+            </Button>
+            <Button
+              variant={viewMode === 'flat' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setViewMode('flat')
+                setSelectedMainCategory(null)
+              }}
+            >
+              All Categories
+            </Button>
         </div>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
@@ -189,10 +396,11 @@ export default function AdminCategories() {
             />
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
@@ -202,6 +410,30 @@ export default function AdminCategories() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalCategories}</div>
+          </CardContent>
+        </Card>
+
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
+              Main Categories
+            </CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.mainCategories}</div>
+          </CardContent>
+        </Card>
+
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
+              Sub Categories
+            </CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.subCategories}</div>
           </CardContent>
         </Card>
 
@@ -228,18 +460,6 @@ export default function AdminCategories() {
             <div className="text-2xl font-bold">{stats.totalProducts}</div>
           </CardContent>
         </Card>
-
-        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
-              Avg Products/Category
-            </CardTitle>
-            <Tags className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.avgProductsPerCategory}</div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Search */}
@@ -260,9 +480,142 @@ export default function AdminCategories() {
         </CardContent>
       </Card>
 
-      {/* Categories Grid */}
+      {/* Categories Display */}
+      {viewMode === 'main' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className={cn("text-2xl font-semibold", themeClasses.mainText)}>Main Categories</h2>
+            <Button
+              onClick={() => {
+                setEditingCategory(null)
+                setIsAddDialogOpen(true)
+              }}
+              className="flex items-center gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Add Main Category
+            </Button>
+          </div>
+          
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {mainCategories.map((category) => {
+              const subcategoryCount = getSubcategories(category.id).length
+              return (
+                <Card 
+                  key={category.id} 
+                  className={cn(
+                    "cursor-pointer transition-all hover:shadow-lg hover:scale-105",
+                    themeClasses.cardBg, 
+                    themeClasses.cardBorder
+                  )}
+                  onClick={() => handleMainCategorySelect(category)}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Tags className="h-6 w-6 text-orange-500" />
+                        <CardTitle className={cn("text-lg", themeClasses.mainText)}>
+                          {category.name}
+                        </CardTitle>
+                      </div>
+                      <DropdownMenu onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+                          <DropdownMenuItem
+                            onClick={() => handleEditCategory(category)}
+                            className={themeClasses.buttonGhostHoverBg}
+                          >
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteCategory(category.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {/* Category Image */}
+                    {category.image_url && (
+                      <div className="relative aspect-video overflow-hidden rounded-md bg-gray-100">
+                        <Image
+                          src={category.image_url}
+                          alt={category.name}
+                          fill
+                          className="object-cover"
+                        />
+                      </div>
+                    )}
+                    
+                    <p className={cn("text-sm line-clamp-2", themeClasses.textNeutralSecondary)}>
+                      {category.description}
+                    </p>
+                    
+                    <div className="flex items-center justify-between">
+                      <Badge variant={category.is_active ? "default" : "secondary"}>
+                        {category.is_active ? "Active" : "Inactive"}
+                      </Badge>
+                      <span className={cn("text-sm font-medium", themeClasses.mainText)}>
+                        {subcategoryCount} subcategories
+                      </span>
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                      <p className={cn("text-xs text-center", themeClasses.textNeutralSecondary)}>
+                        Click to manage subcategories
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'subcategories' && selectedMainCategory && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button
+                variant="outline"
+                onClick={handleBackToMain}
+                className="flex items-center gap-2"
+              >
+                ← Back to Main Categories
+              </Button>
+              <div>
+                <h2 className={cn("text-2xl font-semibold", themeClasses.mainText)}>
+                  {selectedMainCategory.name} - Subcategories
+                </h2>
+                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                  Manage subcategories for {selectedMainCategory.name}
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                setEditingCategory(null)
+                setIsAddDialogOpen(true)
+              }}
+              className="flex items-center gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Add Subcategory
+            </Button>
+          </div>
+          
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {filteredCategories.map((category) => (
+            {getSubcategories(selectedMainCategory.id).map((category) => (
           <Card key={category.id} className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -329,6 +682,92 @@ export default function AdminCategories() {
           </Card>
         ))}
       </div>
+        </div>
+      )}
+
+      {viewMode === 'flat' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className={cn("text-2xl font-semibold", themeClasses.mainText)}>All Categories</h2>
+          </div>
+          
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {filteredCategories.map((category) => (
+              <Card key={category.id} className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Tags className="h-5 w-5 text-muted-foreground" />
+                      <CardTitle className={themeClasses.mainText}>{category.name}</CardTitle>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+                        <DropdownMenuItem
+                          onClick={() => handleEditCategory(category)}
+                          className={themeClasses.buttonGhostHoverBg}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleDeleteCategory(category.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Category Image */}
+                  {category.image_url && (
+                    <div className="relative aspect-video overflow-hidden rounded-md bg-gray-100">
+                      <Image
+                        src={category.image_url}
+                        alt={category.name}
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                  )}
+                  
+                  <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                    {category.description}
+                  </p>
+                  
+                  <div className="flex items-center justify-between">
+                    <Badge variant={category.is_active ? "default" : "secondary"}>
+                      {category.is_active ? "Active" : "Inactive"}
+                    </Badge>
+                    <span className={cn("text-sm font-medium", themeClasses.mainText)}>
+                      Order: {category.display_order}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className={cn(themeClasses.textNeutralSecondary)}>Slug:</span>
+                    <span className={cn("font-mono", themeClasses.mainText)}>{category.slug}</span>
+                  </div>
+
+                  {category.parent_name && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className={cn(themeClasses.textNeutralSecondary)}>Parent:</span>
+                      <span className={cn("font-medium", themeClasses.mainText)}>{category.parent_name}</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading && (
         <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
@@ -357,3 +796,4 @@ export default function AdminCategories() {
     </div>
   )
 } 
+

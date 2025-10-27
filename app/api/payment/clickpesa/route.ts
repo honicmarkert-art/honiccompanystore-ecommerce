@@ -126,6 +126,7 @@ export async function POST(request: NextRequest) {
         // Prepare ClickPesa checkout link request
         // ClickPesa supports multiple payment methods: mobile money, cards, bank transfers
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
+                       process.env.NEXT_PUBLIC_SITE_URL ||
                        (process.env.NODE_ENV === 'production' ? 'https://yourdomain.com' : 'http://localhost:3000')
         const webhookUrl = `${baseUrl}/api/webhooks/clickpesa`
         

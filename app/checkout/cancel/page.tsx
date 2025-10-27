@@ -73,7 +73,6 @@ function CheckoutCancelContent() {
             setOrderData(order)
           }
         } catch (error) {
-          console.error("Error loading order data:", error)
         }
       }
       setIsLoading(false)
@@ -148,7 +147,7 @@ function CheckoutCancelContent() {
                 <Link href="/cart">Return to Cart</Link>
               </Button>
               <Button asChild variant="outline" className="w-full">
-                <Link href="/">Continue Shopping</Link>
+                <Link href="/home">Continue Shopping</Link>
               </Button>
             </div>
 

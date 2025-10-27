@@ -11,7 +11,6 @@ export default function ErrorPage() {
 
   useEffect(() => {
     // Log error for debugging
-    console.error('Error page accessed - server error occurred')
   }, [])
 
   const handleRefresh = () => {
@@ -19,7 +18,7 @@ export default function ErrorPage() {
   }
 
   const handleGoHome = () => {
-    router.push('/')
+    router.push('/home')
   }
 
   return (

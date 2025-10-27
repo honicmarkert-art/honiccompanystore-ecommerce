@@ -150,7 +150,12 @@ function CheckoutSuccessContent() {
     const interval = setInterval(async () => {
       attempts += 1
       try {
-        const resp = await fetch('/api/admin/orders', { cache: 'no-store' })
+        const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+        let resp = await fetch('/api/admin/orders', { cache: 'no-store' })
+        if (resp.status === 429) {
+          await sleep(400 + Math.floor(Math.random() * 300))
+          resp = await fetch('/api/admin/orders', { cache: 'no-store' })
+        }
         if (resp.ok) {
           const data = await resp.json()
           const orders: any[] = data.orders || []
@@ -221,7 +226,7 @@ function CheckoutSuccessContent() {
                 <Link href="/checkout">Try Again</Link>
               </Button>
               <Button asChild variant="outline" className="w-full">
-                <Link href="/">Back to Home</Link>
+                <Link href="/home">Back to Home</Link>
               </Button>
             </div>
           </CardContent>
@@ -323,7 +328,7 @@ function CheckoutSuccessContent() {
 
             <div className="space-y-3">
               <Button asChild className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600">
-                <Link href="/">Continue Shopping</Link>
+                <Link href="/home">Continue Shopping</Link>
               </Button>
               <Button asChild variant="outline" className="w-full">
                 <Link href="/orders">View Orders</Link>

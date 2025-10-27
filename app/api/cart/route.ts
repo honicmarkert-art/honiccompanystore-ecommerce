@@ -7,10 +7,11 @@ export async function GET(request: NextRequest) {
   const { user, error: authError, response, supabase } = await validateAuth(request)
   
   if (authError || !user) {
+    logger.error('Cart API: Authentication error:', authError)
     return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
   }
 
-  // Join products so UI gets a single payload with all needed data
+  // Fetch cart items with product details
   const { data, error: cartErr } = await supabase
     .from('cart_items')
     .select(`
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
     .order('created_at', { ascending: false })
 
   if (cartErr) {
+    logger.error('Failed to fetch cart:', cartErr)
     return NextResponse.json({ error: 'Failed to fetch cart' }, { status: 500 })
   }
 
@@ -413,18 +415,27 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
   }
 
-  const { itemId, quantity } = await request.json()
-  if (!itemId || quantity == null || quantity < 0) {
+  const { itemId, productId, quantity } = await request.json()
+  if ((!itemId && !productId) || quantity == null || quantity < 0) {
     return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
   }
 
   if (quantity === 0) {
-    // Remove item
-    const { error: delErr } = await supabase
+    // Remove ALL cart items for this product (including all variants)
+    const deleteQuery = supabase
       .from('cart_items')
       .delete()
-      .eq('id', itemId)
       .eq('user_id', user.id)
+    
+    if (productId) {
+      // Delete all variants of the product
+      deleteQuery.eq('product_id', productId)
+    } else {
+      // Delete specific cart item (legacy support)
+      deleteQuery.eq('id', itemId)
+    }
+    
+    const { error: delErr } = await deleteQuery
 
     if (delErr) {
       return NextResponse.json({ error: 'Failed to remove item' }, { status: 500 })

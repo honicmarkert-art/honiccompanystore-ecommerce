@@ -92,7 +92,7 @@ export function useWishlist() {
 
 	const remove = useCallback(async (productId: number) => {
 		const next = items.filter(i => i.productId !== productId)
-		setItems(next)
+		setItems(next) // This triggers re-render
 		if (isAuthenticated) {
 			try { await fetch(`/api/user/wishlist?productId=${productId}`, { method: 'DELETE' }) } catch {}
 		} else {

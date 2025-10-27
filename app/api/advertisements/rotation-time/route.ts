@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -15,15 +18,15 @@ export async function GET() {
     
     const { data, error } = await supabase
       .from('admin_settings')
-      .select('value')
-      .eq('key', 'ad_rotation_time')
+      .select('service_image_rotation_time')
+      .eq('id', 1)
       .single()
     
     if (error && error.code !== 'PGRST116') {
       throw error
     }
     
-    const rotationTime = data?.value ? parseInt(data.value) : 10
+    const rotationTime = data?.service_image_rotation_time ? parseInt(data.service_image_rotation_time.toString()) : 10
     
     return NextResponse.json({ rotationTime })
   } catch (error) {

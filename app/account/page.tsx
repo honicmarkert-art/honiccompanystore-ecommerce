@@ -214,7 +214,7 @@ function AccountPageContent() {
         title: 'Success',
         description: 'Logged out successfully',
       })
-      router.push('/')
+      router.push('/home')
     } catch (error) {
       toast({
         title: 'Error',
@@ -237,7 +237,7 @@ function AccountPageContent() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 min-h-screen bg-background">
       
 
       {/* Header */}
@@ -353,7 +353,7 @@ function AccountPageContent() {
                 </div>
                 <div className="flex items-center space-x-2 sm:space-x-4">
                   {getStatusBadge(order.status)}
-                  <Button variant="outline" size="sm" onClick={() => router.push(`/account/orders/${order.id}`)}>
+                  <Button variant="outline" size="sm" onClick={() => router.push(`/account/orders/${order.orderNumber}`)}>
                     View Details
                   </Button>
                 </div>

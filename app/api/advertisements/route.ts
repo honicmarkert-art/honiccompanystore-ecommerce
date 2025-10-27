@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -33,7 +36,6 @@ export async function GET(request: Request) {
     
     return NextResponse.json(advertisements || [])
   } catch (error) {
-    console.error('Error fetching advertisements:', error)
     return NextResponse.json(
       { error: 'Failed to fetch advertisements' },
       { status: 500 }

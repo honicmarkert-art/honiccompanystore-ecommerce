@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 
 type BackgroundColor = "white" | "gray" | "dark"
 
@@ -206,8 +206,8 @@ export function useTheme() {
     }
   }
 
-  const themeClasses = getThemeClasses()
-  const headerFooterClasses = getHeaderFooterClasses(backgroundColor)
+  const themeClasses = useMemo(() => getThemeClasses(), [backgroundColor])
+  const headerFooterClasses = useMemo(() => getHeaderFooterClasses(backgroundColor), [backgroundColor])
 
   return { 
     backgroundColor, 

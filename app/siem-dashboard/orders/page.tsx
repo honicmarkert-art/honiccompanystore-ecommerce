@@ -116,7 +116,11 @@ export default function AdminOrdersPage() {
     }
     
     try {
-      const res = await fetch(`/api/admin/orders?t=${Date.now()}`, { cache: 'no-store' })
+      const res = await fetch(`/api/admin/orders?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        console.error('[AdminOrders] /api/admin/orders failed:', res.status, res.statusText, text?.slice(0,200))
+      }
       
       if (!res.ok) {
         const errorText = await res.text()

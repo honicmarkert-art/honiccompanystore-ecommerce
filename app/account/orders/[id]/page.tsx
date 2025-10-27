@@ -21,7 +21,8 @@ import {
   Calendar,
   User,
   Home,
-  ChevronRight
+  ChevronRight,
+  Eye
 } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
@@ -86,37 +87,37 @@ interface OrderStatus {
 function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
   const { user } = useAuth()
   const router = useRouter()
-  const { fetchOrderById, getOrderStatusHistory } = useOrders()
+  const { fetchOrderByNumber, getOrderStatusHistory } = useOrders()
   const [order, setOrder] = useState<Order | null>(null)
   const [statusHistory, setStatusHistory] = useState<OrderStatus[]>([])
   const [loading, setLoading] = useState(true)
-  const [orderId, setOrderId] = useState<string | null>(null)
+  const [orderNumber, setOrderNumber] = useState<string | null>(null)
   const [downloadingInvoice, setDownloadingInvoice] = useState(false)
 
   useEffect(() => {
-    const getOrderId = async () => {
+    const getOrderNumber = async () => {
       const resolvedParams = await params
-      setOrderId(resolvedParams.id)
+      setOrderNumber(resolvedParams.id) // This will now be orderNumber from URL
     }
-    getOrderId()
+    getOrderNumber()
   }, [params])
 
   useEffect(() => {
-    if (orderId) {
+    if (orderNumber) {
       fetchOrderDetails()
     }
-  }, [orderId])
+  }, [orderNumber])
 
   const fetchOrderDetails = async () => {
     try {
       setLoading(true)
       
-      // Fetch order details
-      const orderData = await fetchOrderById(orderId)
+      // Fetch order details by order number
+      const orderData = await fetchOrderByNumber(orderNumber)
       setOrder(orderData)
       
-      // Fetch status history
-      const statusData = await getOrderStatusHistory(orderId)
+      // Fetch status history by order number
+      const statusData = await getOrderStatusHistory(orderNumber)
       
       // Filter status history based on delivery option
       let filteredStatusHistory = statusData
@@ -134,7 +135,6 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       
       setStatusHistory(filteredStatusHistory)
     } catch (error) {
-      console.error('Error fetching order details:', error)
     } finally {
       setLoading(false)
     }
@@ -207,21 +207,21 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
     })
   }
 
-  const formatCurrency = (amount: number, currency: string = 'TZS') => {
+  const formatCurrency = (amount: number | undefined, currency: string = 'TZS') => {
+    if (!amount) return `${currency} 0`
     return `${currency} ${amount.toLocaleString()}`
   }
 
-  const handleDownloadInvoice = async (orderIdParam?: string, orderNumber?: string, format: 'html' | 'pdf' = 'html') => {
-    const currentOrderId = orderIdParam || orderId
+  const handleDownloadInvoice = async (orderNumber?: string, format: 'html' | 'pdf' = 'html') => {
     const currentOrderNumber = orderNumber || order?.orderNumber
     
-    if (!currentOrderId) return
+    if (!currentOrderNumber) return
     
     setDownloadingInvoice(true)
     try {
       const endpoint = format === 'pdf' 
-        ? `/api/user/orders/${currentOrderId}/invoice-pdf`
-        : `/api/user/orders/${currentOrderId}/invoice`
+        ? `/api/user/orders/${currentOrderNumber}/invoice-pdf`
+        : `/api/user/orders/${currentOrderNumber}/invoice`
       
       const response = await fetch(endpoint)
       
@@ -240,14 +240,13 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `invoice-${currentOrderNumber || currentOrderId}.${fileExtension}`
+      link.download = `invoice-${currentOrderNumber || order?.orderNumber}.${fileExtension}`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
       window.URL.revokeObjectURL(url)
       
     } catch (error) {
-      console.error('Error downloading invoice:', error)
       alert('Failed to download invoice. Please try again.')
     } finally {
       setDownloadingInvoice(false)
@@ -264,7 +263,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
 
   if (!order) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 min-h-screen bg-background">
         <Card>
           <CardContent className="p-8 text-center">
             <Package className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
@@ -292,19 +291,61 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
               Back to Orders
             </Button>
           </Link>
-          <div>
-            <h1 className="text-3xl font-bold">{order.orderNumber}</h1>
-            <p className="text-muted-foreground">Order placed on {formatDate(order.createdAt)}</p>
-          </div>
         </div>
         
-        <div className="flex items-center gap-4">
-          {getStatusIcon(order.status)}
-          {getStatusBadge(order.status)}
-          {getPaymentStatusBadge(order.paymentStatus)}
-          <Badge className={order.deliveryOption === 'pickup' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}>
-            {order.deliveryOption === 'pickup' ? 'Pickup Order' : 'Delivery Order'}
-          </Badge>
+        {/* Order Header Card - Improved Layout */}
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h1 className="text-2xl font-bold">{order.orderNumber}</h1>
+                  {getStatusBadge(order.status)}
+                </div>
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-4 h-4" />
+                    {formatDate(order.createdAt)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Package className="w-4 h-4" />
+                    {order.itemCount} item{order.itemCount !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-2xl font-bold">{formatCurrency(order.totalAmount, order.currency)}</p>
+                  <p className="text-xs text-muted-foreground">Total</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3 pt-4 border-t">
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Payment:</span>
+                <span className="text-sm">{order.paymentMethod}</span>
+                {getPaymentStatusBadge(order.paymentStatus)}
+              </div>
+              <div className="flex items-center gap-2">
+                <Truck className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Delivery:</span>
+                <Badge variant={order.deliveryOption === 'pickup' ? 'secondary' : 'outline'}>
+                  {order.deliveryOption === 'pickup' ? 'Pickup' : 'Delivery'}
+                </Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        {/* Action Button */}
+        <div className="flex items-center gap-3 mb-6">
+          <Button variant="outline" size="lg" className="w-full" onClick={() => handleDownloadInvoice()} disabled={downloadingInvoice}>
+            <Download className="w-4 h-4 mr-2" />
+            {downloadingInvoice ? 'Generating Invoice...' : 'Download Invoice'}
+          </Button>
         </div>
       </div>
 
@@ -324,8 +365,8 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                 {order.items.map((item) => (
                   <div key={item.id} className="flex gap-4 p-4 border rounded-lg">
                     <Image
-                      src={item.productImage}
-                      alt={item.productName}
+                      src={item.productImage || '/placeholder.jpg'}
+                      alt={item.productName || 'Product image'}
                       width={80}
                       height={80}
                       className="rounded-lg object-cover"
@@ -340,7 +381,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                       )}
                       <div className="flex items-center justify-between mt-2">
                         <span className="text-sm">Qty: {item.quantity}</span>
-                        <span className="font-semibold">{formatCurrency(item.totalPrice)}</span>
+                        <span className="font-semibold">{formatCurrency(item.unitPrice * item.quantity)}</span>
                       </div>
                     </div>
                   </div>
@@ -482,7 +523,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 {order.deliveryOption === 'pickup' ? <Package className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
-                {order.deliveryOption === 'pickup' ? 'Pickup Information' : 'Shipping Address'}
+                {order.deliveryOption === 'pickup' ? 'Pickup Information' : 'Delivery Information'}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -497,20 +538,39 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                   )}
                 </div>
                 
-                {/* Address Information */}
-                <div className="space-y-2">
-                  <p className="font-medium">{order.shippingAddress.fullName}</p>
-                  <p>{order.shippingAddress.address}</p>
-                  {order.shippingAddress.address2 && <p>{order.shippingAddress.address2}</p>}
-                  <p>{order.shippingAddress.city}, {order.shippingAddress.state}</p>
-                  <p>{order.shippingAddress.postalCode}, {order.shippingAddress.country}</p>
-                  {order.shippingAddress.phone && (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Phone className="w-4 h-4" />
-                      {order.shippingAddress.phone}
+                {/* Address Information - Only show if there's an address for delivery orders */}
+                {(order.deliveryOption === 'delivery' || order.deliveryOption === 'shipping') && order.shippingAddress && (
+                  <div className="space-y-2">
+                    {order.shippingAddress.fullName && (
+                      <p className="font-medium">{order.shippingAddress.fullName}</p>
+                    )}
+                    {order.shippingAddress.address && (
+                      <p>{order.shippingAddress.address}</p>
+                    )}
+                    {order.shippingAddress.address2 && <p>{order.shippingAddress.address2}</p>}
+                    {(order.shippingAddress.city || order.shippingAddress.state) && (
+                      <p>{[order.shippingAddress.city, order.shippingAddress.state].filter(Boolean).join(', ')}</p>
+                    )}
+                    {(order.shippingAddress.postalCode || order.shippingAddress.country) && (
+                      <p>{[order.shippingAddress.postalCode, order.shippingAddress.country].filter(Boolean).join(', ')}</p>
+                    )}
+                    {order.shippingAddress.phone && (
+                      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Phone className="w-4 h-4" />
+                        {order.shippingAddress.phone}
+                      </p>
+                    )}
+                  </div>
+                )}
+                
+                {/* For pickup orders, show pickup ID prominently if no address */}
+                {order.deliveryOption === 'pickup' && (!order.shippingAddress || !order.shippingAddress.fullName) && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Pickup orders don't require a shipping address. Please collect from our store.
                     </p>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Pickup Instructions */}
                 {order.deliveryOption === 'pickup' && (
@@ -537,10 +597,18 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  <p className="font-medium">{order.billingAddress.fullName}</p>
-                  <p>{order.billingAddress.address}</p>
-                  <p>{order.billingAddress.city}, {order.billingAddress.region}</p>
-                  <p>{order.billingAddress.postalCode}, {order.billingAddress.country}</p>
+                  {order.billingAddress.fullName && (
+                    <p className="font-medium">{order.billingAddress.fullName}</p>
+                  )}
+                  {order.billingAddress.address && (
+                    <p>{order.billingAddress.address}</p>
+                  )}
+                  {(order.billingAddress.city || order.billingAddress.region) && (
+                    <p>{[order.billingAddress.city, order.billingAddress.region].filter(Boolean).join(', ')}</p>
+                  )}
+                  {(order.billingAddress.postalCode || order.billingAddress.country) && (
+                    <p>{[order.billingAddress.postalCode, order.billingAddress.country].filter(Boolean).join(', ')}</p>
+                  )}
                   {order.billingAddress.phone && (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Phone className="w-4 h-4" />
@@ -589,7 +657,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                   <Button 
                     variant="outline" 
                     className="w-full"
-                    onClick={() => handleDownloadInvoice(orderId!, order!.orderNumber, 'pdf')}
+                    onClick={() => handleDownloadInvoice(order!.orderNumber, 'pdf')}
                     disabled={downloadingInvoice}
                   >
                     <Download className="w-4 h-4 mr-2" />

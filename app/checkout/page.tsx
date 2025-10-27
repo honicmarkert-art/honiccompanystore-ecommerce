@@ -76,6 +76,7 @@ function CheckoutPageContent() {
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem } = useCart()
   const { user } = useAuth()
+  const { openAuthModal } = useGlobalAuthModal()
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
   
   // Fallback logo system - use local logo if API is not loaded or logo is not available
@@ -87,10 +88,27 @@ function CheckoutPageContent() {
   // Get selected items for display
   const getSelectedItems = () => {
     let selectedIds: number[] = []
+    let buyNowMode: boolean = false
+    let buyNowItemData: any = null
+    
     try { 
       const raw = sessionStorage.getItem('selected_cart_items')
       if (raw) selectedIds = JSON.parse(raw) 
+      
+      const buyNowModeRaw = sessionStorage.getItem('buy_now_mode')
+      if (buyNowModeRaw === 'true') buyNowMode = true
+      
+      const buyNowDataRaw = sessionStorage.getItem('buy_now_item_data')
+      if (buyNowDataRaw) buyNowItemData = JSON.parse(buyNowDataRaw)
     } catch {}
+    
+    // If this is a "Buy Now" action, use the stored item data
+    if (buyNowMode && buyNowItemData) {
+      // Return only the specific "Buy Now" item with correct quantity and price
+      return [buyNowItemData]
+    }
+    
+    // Regular cart behavior - show all selected items or all cart items
     return selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
   }
 
@@ -98,6 +116,7 @@ function CheckoutPageContent() {
   const selectedItems = getSelectedItems()
   const selectedItemsCount = selectedItems.reduce((sum, item) => sum + item.totalQuantity, 0)
   const selectedSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
+  
   
   // Calculate shipping cost: 5,000 TZS if order is less than 100,000 TZS, otherwise free
   const FREE_SHIPPING_THRESHOLD = 100000
@@ -116,7 +135,18 @@ function CheckoutPageContent() {
   // Calculate shipping fee based on delivery option and order total
   const calculateShippingFee = () => {
     if (deliveryOption === 'pickup') return 0
-    return selectedSubtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_COST
+    
+    // If cart total >= 100,000 TZS: Free delivery for all
+    if (selectedSubtotal >= FREE_SHIPPING_THRESHOLD) return 0
+    
+    // If cart total < 100,000 TZS: Check if ALL selected products have free delivery
+    const allProductsHaveFreeDelivery = selectedItems.every(item => {
+      return (item as any)?.free_delivery === true || (item as any)?.freeDelivery === true
+    })
+    
+    // If ALL products have free delivery: Free delivery
+    // If MIXED products (some free, some paid): Apply delivery fee
+    return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
   }
   
   const shippingFee = calculateShippingFee()
@@ -213,50 +243,11 @@ function CheckoutPageContent() {
         return
       }
 
-      // Validate stock for items with variant attributes
+      // Skip complex stock validation for better performance
+      // Stock validation will be handled server-side during order processing
+      // Get selected items for order
       let selectedIds: number[] = []
       try { const raw = sessionStorage.getItem('selected_cart_items'); if (raw) selectedIds = JSON.parse(raw) } catch {}
-      const itemsToValidate = selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
-
-      for (const cartItem of itemsToValidate) {
-        for (const variant of cartItem.variants) {
-          if (variant.attributes && Object.keys(variant.attributes).length > 0) {
-            // Fetch product variants to check attribute-level stock
-            try {
-              const response = await fetch(`/api/products/${cartItem.productId}`)
-              if (response.ok) {
-                const productData = await response.json()
-                if (productData.variants && Array.isArray(productData.variants)) {
-                  const matchingVariant = productData.variants.find((v: any) => 
-                    v.primaryValues?.some((pv: any) => {
-                      return Object.entries(variant.attributes).some(([key, value]) => 
-                        pv.attribute === key && pv.value === value
-                      )
-                    })
-                  )
-                  if (matchingVariant) {
-                    const matchingPV = matchingVariant.primaryValues?.find((pv: any) => 
-                      Object.entries(variant.attributes).some(([key, value]) => 
-                        pv.attribute === key && pv.value === value
-                      )
-                    )
-                    if (matchingPV) {
-                      const availableQty = typeof matchingPV.quantity === 'number' ? matchingPV.quantity : parseInt(matchingPV.quantity) || 0
-                      if (availableQty < variant.quantity) {
-                        alert(`Insufficient stock for ${cartItem.product?.name} (${matchingPV.attribute}: ${matchingPV.value}). Available: ${availableQty}, Requested: ${variant.quantity}`)
-                        setIsProcessingPayment(false)
-                        return
-                      }
-                    }
-                  }
-                }
-              }
-            } catch (e) {
-              console.error('Error validating stock:', e)
-            }
-          }
-        }
-      }
 
       // Generate unique order ID
       const orderId = `ORD-${Date.now()}`
@@ -275,11 +266,11 @@ function CheckoutPageContent() {
           item.variants.map(variant => ({
           productId: item.productId,
             productName: item.product?.name || `Product ${item.productId}`,
-            variantId: null, // Use null since order_items table expects integer variant_id
+            variantId: variant.variantId ? parseInt(variant.variantId) : null, // Convert string to integer or null
             variantName: Object.values(variant.attributes).join(', ') || 'Default',
             variantAttributes: variant.attributes || {},
             quantity: variant.quantity,
-            price: variant.price, // unit price
+            unitPrice: variant.price, // unit price
             totalPrice: variant.price * variant.quantity, // total price for this variant
           name: item.product?.name || `Product ${item.productId}`,
           }))
@@ -308,7 +299,7 @@ function CheckoutPageContent() {
       let clickpesaRedirectSuccess = false
       try {
         const reference = result.order.referenceId || orderId
-        const resp = await fetch('/api/payment/clickpesa', {
+        let resp = await fetch('/api/payment/clickpesa', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -316,8 +307,8 @@ function CheckoutPageContent() {
             amount: String(orderData.totalAmount),
             currency: 'TZS',
             orderId: reference,
-            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
-            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
+            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
+            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
             customerDetails: {
               fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
               email: formData.billingAddress.email || formData.shippingAddress.email,
@@ -331,31 +322,49 @@ function CheckoutPageContent() {
             },
           }),
         })
+        if (resp.status === 429) {
+          // Rate limited - retry without delay
+          resp = await fetch('/api/payment/clickpesa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'create-checkout-link',
+              amount: String(orderData.totalAmount),
+              currency: 'TZS',
+              orderId: reference,
+              returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
+              cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
+              customerDetails: {
+                fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
+                email: formData.billingAddress.email || formData.shippingAddress.email,
+                phone: formData.billingAddress.phone || formData.shippingAddress.phone,
+                firstName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ')[0] || '',
+                lastName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ').slice(1).join(' ') || '',
+                address: formData.billingAddress.address1 || formData.shippingAddress.address1 || '',
+                city: formData.billingAddress.city || formData.shippingAddress.city || '',
+                country: formData.billingAddress.country || formData.shippingAddress.country || 'Tanzania',
+              },
+            }),
+          })
+        }
         if (resp.ok) {
           const data = await resp.json()
           try { sessionStorage.setItem('last_order_reference', reference) } catch {}
           if (data.checkoutLink) {
-            // Remove cart items only after successful ClickPesa link generation
-            try {
-              for (const it of selectedItems) {
-                await removeItem(it.productId)
-              }
-              sessionStorage.removeItem('selected_cart_items')
-            } catch (e) {
-              console.warn('Failed to remove cart items:', e)
-            }
+            // Don't clear cart immediately - wait for payment success
+            // Cart will be cleared by webhook when payment is successful
+            try { 
+              sessionStorage.setItem('last_order_reference', reference) 
+            } catch {}
             
             // Redirect to ClickPesa
             router.push(data.checkoutLink)
             clickpesaRedirectSuccess = true
             return // This will exit the function and prevent showing success page
           } else {
-            console.error('❌ No checkoutLink in response:', data)
           }
         } else {
-          console.error('❌ ClickPesa API Failed:', resp.status, resp.statusText)
           const errorData = await resp.json().catch(() => ({}))
-          console.error('❌ ClickPesa API Error Details:', JSON.stringify(errorData, null, 2))
           
           // Show the specific error to user
           if (errorData.error) {
@@ -363,12 +372,10 @@ function CheckoutPageContent() {
           }
         }
       } catch (e) {
-        console.error('❌ ClickPesa redirect exception:', e)
       }
 
       // If ClickPesa redirect failed, show error and don't proceed
       if (!clickpesaRedirectSuccess) {
-        console.error('❌ ClickPesa redirect failed! Payment gateway is not working.')
         
         // Show detailed error in development
         alert('Payment gateway error: Unable to redirect to payment page.\n\nPlease check browser console for details or contact support.')
@@ -378,7 +385,6 @@ function CheckoutPageContent() {
         return
       }
     } catch (error) {
-      console.error('Order processing failed:', error)
       alert('Failed to place order. Please try again.')
     } finally {
       setIsProcessingPayment(false)
@@ -390,13 +396,23 @@ function CheckoutPageContent() {
     try {
       
       // Submit order to public API
-      const response = await fetch('/api/orders', {
+      let response = await fetch('/api/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(orderData),
       })
+      if (response.status === 429) {
+        // Rate limited - retry without delay
+        response = await fetch('/api/orders', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(orderData),
+        })
+      }
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -404,20 +420,14 @@ function CheckoutPageContent() {
       }
 
       const result = await response.json()
-      logger.log('✅ Order successfully submitted:', result)
       
       // Store order IDs and payment URL for later use
       if (result.order.paymentUrl) {
-        logger.log('💰 Payment URL:', result.order.paymentUrl)
-        logger.log('🆔 Reference ID:', result.order.referenceId)
-        logger.log('📋 Pickup ID:', result.order.pickupId)
-        logger.log('💳 Payment Status:', result.order.paymentStatus)
         // You can store this in state or redirect to payment
       }
       
       return result
     } catch (error) {
-      console.error('Failed to submit order:', error)
       throw error
     }
   }
@@ -521,13 +531,13 @@ function CheckoutPageContent() {
       case 0:
         return validateDeliveryOption()
       case 1:
-        if (deliveryOption === 'shipping') {
+        if ((deliveryOption as string) === 'shipping') {
           return validateShippingAddress()
             } else {
           return validateBillingInformation()
         }
       case 2:
-        if (deliveryOption === 'shipping') {
+        if ((deliveryOption as string) === 'shipping') {
           return validateBillingInformation()
         }
         return true // Order review step
@@ -585,7 +595,7 @@ function CheckoutPageContent() {
                 <div 
                          className={cn(
                     "border-2 rounded-lg p-4 cursor-pointer transition-all",
-                    deliveryOption === 'shipping' 
+                    (deliveryOption as string) === 'shipping' 
                       ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" 
                       : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
                   )}
@@ -705,7 +715,7 @@ function CheckoutPageContent() {
         )
 
       case 1:
-        if (deliveryOption === 'shipping') {
+        if ((deliveryOption as string) === 'shipping') {
           return (
             <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
               <CardHeader className="p-3 sm:p-6">
@@ -1133,7 +1143,7 @@ function CheckoutPageContent() {
         }
 
       case 2:
-        if (deliveryOption === 'shipping') {
+        if ((deliveryOption as string) === 'shipping') {
           // For shipping, case 2 is billing information
           return (
             <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
@@ -1473,29 +1483,51 @@ function CheckoutPageContent() {
                 <div className="space-y-4">
                 <h3 className={cn("text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
                 <div className="space-y-4">
-                  {getSelectedItems().map((item, index) => (
+                  {selectedItems.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className={cn("text-gray-500", themeClasses.textNeutralSecondary)}>
+                        No items in cart. Please add items to your cart first.
+                      </p>
+                    </div>
+                  ) : (
+                    selectedItems.map((item, index) => (
                     <div key={index} className="flex items-start gap-2 sm:gap-4 p-2 sm:p-4 rounded-lg border border-gray-200 dark:border-gray-700">
                       <div className="flex-shrink-0 self-start">
                           {item.product?.image ? (
-                      <LazyImage
-                              src={item.product.image}
-                              alt={item.product.name || "Product image"}
-                              width={64}
-                              height={64}
-                          className="rounded-md object-contain w-16 h-16 sm:w-20 sm:h-20 bg-gray-50"
-                              priority={false} // Not priority since it's in a list
-                              quality={80}
-                        />
+                            <Link 
+                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
+                              className="block"
+                            >
+                              <LazyImage
+                                src={item.product.image}
+                                alt={item.product.name || "Product image"}
+                                width={64}
+                                height={64}
+                                className="rounded-md object-contain w-16 h-16 sm:w-20 sm:h-20 bg-gray-50 hover:opacity-80 transition-opacity"
+                                priority={false} // Not priority since it's in a list
+                                quality={80}
+                              />
+                            </Link>
                           ) : (
-                            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center">
-                              <span className="text-gray-400 text-xs">No Image</span>
+                            <Link 
+                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
+                              className="block"
+                            >
+                              <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
+                                <span className="text-gray-400 text-xs">No Image</span>
+                              </div>
+                            </Link>
+                          )}
                       </div>
-                      )}
-                    </div>
                       <div className="flex-1 min-w-0">
-                          <h4 className={cn("font-medium truncate text-sm sm:text-base", themeClasses.mainText)}>
-                            {item.product?.name || "Product"}
-                          </h4>
+                          <Link 
+                            href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
+                            className="hover:underline"
+                          >
+                            <h4 className={cn("font-medium truncate text-sm sm:text-base", themeClasses.mainText)}>
+                              {item.product?.name || `Product ${item.productId}`}
+                            </h4>
+                          </Link>
                           <p className={cn("text-xs sm:text-sm mt-1", themeClasses.textNeutralSecondary)}>
                             Quantity: {item.totalQuantity}
                           </p>
@@ -1504,7 +1536,8 @@ function CheckoutPageContent() {
                           </p>
               </div>
                     </div>
-                            ))}
+                            ))
+                  )}
                           </div>
                     </div>
 
@@ -1514,7 +1547,7 @@ function CheckoutPageContent() {
                       <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
                       <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
                     </div>
-                    {deliveryOption === 'shipping' && (
+                    {(deliveryOption as string) === 'shipping' && (
                       <div className="flex justify-between items-center text-sm">
                         <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
                         <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
@@ -1535,7 +1568,7 @@ function CheckoutPageContent() {
         }
 
       case 3:
-        if (deliveryOption === 'shipping') {
+        if ((deliveryOption as string) === 'shipping') {
           // For shipping, case 3 is order review
           if (orderPlaced || isProcessingPayment) {
             // Show loading message when order is placed or processing payment
@@ -1564,29 +1597,44 @@ function CheckoutPageContent() {
                 <div className="space-y-4">
                 <h3 className={cn("text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
                 <div className="space-y-4">
-                  {getSelectedItems().map((item, index) => (
+                  {selectedItems.map((item, index) => (
                     <div key={index} className="flex items-start space-x-4 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
                       <div className="flex-shrink-0">
                           {item.product?.image ? (
-                      <LazyImage
-                              src={item.product.image}
-                              alt={item.product.name || "Product image"}
-                              width={80}
-                              height={80}
-                          className="rounded-md object-cover"
-                              priority={false} // Not priority since it's in a list
-                              quality={80}
-                        />
+                            <Link 
+                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
+                              className="block"
+                            >
+                              <LazyImage
+                                src={item.product.image}
+                                alt={item.product.name || "Product image"}
+                                width={80}
+                                height={80}
+                                className="rounded-md object-cover hover:opacity-80 transition-opacity"
+                                priority={false} // Not priority since it's in a list
+                                quality={80}
+                              />
+                            </Link>
                           ) : (
-                            <div className="w-20 h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center">
-                              <span className="text-gray-400 text-xs">No Image</span>
-                          </div>
-                        )}
+                            <Link 
+                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
+                              className="block"
+                            >
+                              <div className="w-20 h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
+                                <span className="text-gray-400 text-xs">No Image</span>
+                              </div>
+                            </Link>
+                          )}
                       </div>
                         <div className="flex-1 min-w-0">
-                          <h4 className={cn("font-medium truncate", themeClasses.mainText)}>
-                            {item.product?.name || "Product"}
-                          </h4>
+                          <Link 
+                            href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
+                            className="hover:underline"
+                          >
+                            <h4 className={cn("font-medium truncate", themeClasses.mainText)}>
+                              {item.product?.name || "Product"}
+                            </h4>
+                          </Link>
                           <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
                             Quantity: {item.totalQuantity}
                           </p>
@@ -1618,7 +1666,7 @@ function CheckoutPageContent() {
                       <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
                       <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
                     </div>
-                    {deliveryOption === 'shipping' && (
+                    {(deliveryOption as string) === 'shipping' && (
                       <div className="flex justify-between items-center text-sm">
                         <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
                         <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
@@ -1674,7 +1722,7 @@ function CheckoutPageContent() {
               </div>
             </CardContent>
               <CardFooter className="justify-center">
-                <Link href="/">
+                <Link href="/home">
                   <Button className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600">
                     Continue Shopping
               </Button>
@@ -1760,7 +1808,7 @@ function CheckoutPageContent() {
         <div className="flex items-center justify-center h-8 px-4">
           {user ? (
             <div className="text-xs text-green-600 dark:text-green-400 font-medium">
-              Hi! {user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'} - Welcome again <span className="text-blue-600 dark:text-blue-400">{companyName || 'Honic Co.'}</span>
+              Hi! {(user as any)?.user_metadata?.full_name || user.email?.split('@')[0] || 'User'} - Welcome again <span className="text-blue-600 dark:text-blue-400">{companyName || 'Honic Co.'}</span>
             </div>
           ) : (
             <button 
@@ -1889,7 +1937,7 @@ function CheckoutPageContent() {
               </Button>
               
               {/* Show Place Order button on order review step, Continue button on other steps */}
-              {((deliveryOption === 'pickup' && currentStep === 2) || (deliveryOption === 'shipping' && currentStep === 3)) ? (
+              {((deliveryOption === 'pickup' && currentStep === 2) || ((deliveryOption as string) === 'shipping' && currentStep === 3)) ? (
                 <Button
                   onClick={handlePlaceOrder}
                   disabled={isProcessingPayment}

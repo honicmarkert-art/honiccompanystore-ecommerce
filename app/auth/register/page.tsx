@@ -97,7 +97,6 @@ export default function RegisterPage() {
         return
       }
     } catch (error) {
-      console.error('Registration error:', error)
     } finally {
       setIsSubmitting(false)
     }
@@ -133,7 +132,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         {/* Back to Home */}
         <Link 
-          href="/"
+          href="/home"
           className={cn(
             "inline-flex items-center gap-2 text-sm mb-6 hover:underline transition-colors",
             themeClasses.textNeutralSecondary

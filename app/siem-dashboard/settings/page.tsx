@@ -681,6 +681,7 @@ export default function SettingsPage() {
       const response = await fetch('/api/admin/hero-upload', {
         method: 'POST',
         body: formData,
+        credentials: 'include',
       })
 
       const result = await response.json()

@@ -4,9 +4,12 @@ import { generateOrderIds, formatPickupId } from '@/lib/order-ids'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 function getAdminClient() {
   try {
@@ -168,9 +171,24 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('🔍 [DEBUG] /api/admin/orders GET called')
+    console.log('🔍 [DEBUG] Request headers:', {
+      authorization: request.headers.get('authorization'),
+      cookie: request.headers.get('cookie')?.substring(0, 100) + '...',
+      userAgent: request.headers.get('user-agent')?.substring(0, 50)
+    })
+    
     // Validate admin access first
     const { user, error: authError } = await validateAdminAccess()
+    console.log('🔍 [DEBUG] validateAdminAccess result:', {
+      hasUser: !!user,
+      hasError: !!authError,
+      errorStatus: authError?.status,
+      errorMessage: authError ? await authError.text().catch(() => '') : null
+    })
+    
     if (authError) {
+      console.log('❌ [DEBUG] Authentication failed, returning error')
       return authError
     }
 
@@ -403,7 +421,7 @@ async function sendAdminNotification(orderData: any, orderId: string, referenceI
 // Function to generate payment URL
 function generatePaymentUrl(referenceId: string, amount: number): string {
   // Generate payment URL (simulate ClickPesa or other payment gateway)
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
   const paymentId = `PAY_${Date.now()}`
   
   // In a real app, this would integrate with your payment gateway

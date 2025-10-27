@@ -1,255 +1,139 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { z } from 'zod'
+import { createClient } from '@supabase/supabase-js'
+import { logger } from '@/lib/logger'
 
-const companySettingsSchema = z.object({
-  companyName: z.string().min(1, 'Company name is required'),
-  companyColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color format'),
-  companyTagline: z.string().min(1, 'Company tagline is required'),
-  companyLogo: z.string().min(1, 'Company logo is required'),
-  websiteUrl: z.string().url('Invalid website URL format').optional(),
-  contactEmail: z.string().email('Invalid email format').optional(),
-  contactPhone: z.string().optional(),
-  address: z.string().optional(),
-  currency: z.string().optional(),
-  timezone: z.string().optional(),
-  language: z.string().optional(),
-  theme: z.enum(['light', 'dark', 'system']).optional(),
-  notifications: z.object({
-    email: z.boolean(),
-    sms: z.boolean(),
-    push: z.boolean()
-  }).optional(),
-  apiKeys: z.object({
-    googleMaps: z.string().optional(),
-    dpoPayment: z.string().optional(),
-    stripe: z.string().optional()
-  }).optional(),
-  security: z.object({
-    twoFactorAuth: z.boolean(),
-    sessionTimeout: z.number(),
-    passwordPolicy: z.string()
-  }).optional(),
-  performance: z.object({
-    cacheEnabled: z.boolean(),
-    imageOptimization: z.boolean(),
-    cdnEnabled: z.boolean()
-  }).optional()
-})
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+// Simple in-memory rate limiting
+const requestCounts = new Map<string, { count: number; resetTime: number }>()
+const RATE_LIMIT = 30 // Max 30 requests per minute per IP
+const RATE_LIMIT_WINDOW = 60 * 1000 // 1 minute
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const key = ip
+  const current = requestCounts.get(key)
+  
+  if (!current || now > current.resetTime) {
+    requestCounts.set(key, { count: 1, resetTime: now + RATE_LIMIT_WINDOW })
+    return true
+  }
+  
+  if (current.count >= RATE_LIMIT) {
+    return false
+  }
+  
+  current.count++
+  return true
+}
+
+// GET - Fetch public company settings (no authentication required)
 export async function GET(request: NextRequest) {
   try {
-    // Create Supabase client
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return request.cookies.get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            // This will be handled by the response
-          },
-          remove(name: string, options: any) {
-            // This will be handled by the response
-          },
-        },
-      }
-    )
-
-    // Get admin settings from admin_settings table
-    const { data: settings, error: settingsError } = await supabase
-      .from('admin_settings')
-      .select('*')
-      .eq('id', 1)
-      .single()
-
-    if (settingsError) {
-      console.error('Error fetching company settings:', settingsError)
-      // Return default settings if no settings exist or table doesn't exist
-      return NextResponse.json({
-        companyName: 'honiccompanystore',
-        companyColor: '#3B82F6',
-        companyTagline: 'technology, innovation',
-        companyLogo: '/android-chrome-512x512.png',
-        websiteUrl: 'https://honic-co.com',
-        contactEmail: 'contact@honic-co.com',
-        contactPhone: '+255 123 456 789',
-        address: 'Dar es Salaam, Tanzania',
-        currency: 'TZS',
-        timezone: 'Africa/Dar_es_Salaam',
-        language: 'en',
-        theme: 'system',
-        notifications: {
-          email: true,
-          sms: false,
-          push: true
-        },
-        apiKeys: {
-          googleMaps: 'KNsu7C7EvTn1CgWdh03Af_3NGjs',
-          dpoPayment: 'your-dpo-api-key',
-          stripe: 'your-stripe-api-key'
-        },
-        security: {
-          twoFactorAuth: false,
-          sessionTimeout: 30,
-          passwordPolicy: 'strong'
-        },
-        performance: {
-          cacheEnabled: true,
-          imageOptimization: true,
-          cdnEnabled: false
+    // Rate limiting check
+    const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown'
+    if (!checkRateLimit(ip)) {
+      return NextResponse.json({ 
+        error: 'Too many requests. Please try again later.' 
+      }, { 
+        status: 429,
+        headers: {
+          'Retry-After': '60'
         }
       })
     }
 
-    // Map database fields to API response format
-    const mappedSettings = {
-      companyName: settings.company_name || 'honiccompanystore',
-      companyColor: settings.company_color || '#3B82F6',
-      companyTagline: settings.company_tagline || 'technology, innovation',
-      companyLogo: settings.company_logo || '/android-chrome-512x512.png',
-      websiteUrl: settings.website_url || 'https://honic-co.com',
-      contactEmail: settings.contact_email || 'contact@honic-co.com',
-      contactPhone: settings.contact_phone || '+255 123 456 789',
-      address: settings.address || 'Dar es Salaam, Tanzania',
-      currency: settings.currency || 'TZS',
-      timezone: settings.timezone || 'Africa/Dar_es_Salaam',
-      language: settings.language || 'en',
-      theme: settings.theme || 'system',
-      notifications: settings.notifications || {
-        email: true,
-        sms: false,
-        push: true
-      },
-      apiKeys: settings.api_keys || {
-        googleMaps: 'KNsu7C7EvTn1CgWdh03Af_3NGjs',
-        dpoPayment: 'your-dpo-api-key',
-        stripe: 'your-stripe-api-key'
-      },
-      security: settings.security || {
-        twoFactorAuth: false,
-        sessionTimeout: 30,
-        passwordPolicy: 'strong'
-      },
-      performance: settings.performance || {
-        cacheEnabled: true,
-        imageOptimization: true,
-        cdnEnabled: false
-      }
-    }
-
-    return NextResponse.json(mappedSettings)
-
-  } catch (error) {
-    console.error('Error in company settings GET:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    
-    // Validate input
-    const validatedData = companySettingsSchema.parse(body)
-    
-    // Create Supabase client
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return request.cookies.get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            // This will be handled by the response
-          },
-          remove(name: string, options: any) {
-            // This will be handled by the response
-          },
-        },
-      }
-    )
-
-    // Map API fields to database fields
-    const dbData: any = {
-      company_name: validatedData.companyName,
-      company_color: validatedData.companyColor,
-      company_tagline: validatedData.companyTagline,
-      company_logo: validatedData.companyLogo,
-      updated_at: new Date().toISOString()
-    }
-
-    // Add optional fields if they exist
-    if (validatedData.websiteUrl) dbData.website_url = validatedData.websiteUrl
-    if (validatedData.contactEmail) dbData.contact_email = validatedData.contactEmail
-    if (validatedData.contactPhone) dbData.contact_phone = validatedData.contactPhone
-    if (validatedData.address) dbData.address = validatedData.address
-    if (validatedData.currency) dbData.currency = validatedData.currency
-    if (validatedData.timezone) dbData.timezone = validatedData.timezone
-    if (validatedData.language) dbData.language = validatedData.language
-    if (validatedData.theme) dbData.theme = validatedData.theme
-    if (validatedData.notifications) dbData.notifications = validatedData.notifications
-    if (validatedData.apiKeys) dbData.api_keys = validatedData.apiKeys
-    if (validatedData.security) dbData.security = validatedData.security
-    if (validatedData.performance) dbData.performance = validatedData.performance
-
-    // Try to update existing record first
-    const { data: existingData, error: selectError } = await supabase
+    // Fetch only public company settings
+    const { data, error } = await supabase
       .from('admin_settings')
-      .select('id')
+      .select(`
+        company_name,
+        company_color,
+        company_logo,
+        main_headline,
+        hero_background_image,
+        hero_tagline_alignment,
+        service_retail_images,
+        service_prototyping_images,
+        service_pcb_images,
+        service_ai_images,
+        service_stem_images,
+        service_home_images,
+        service_image_rotation_time,
+        service_retail_image,
+        service_prototyping_image,
+        service_pcb_image,
+        service_ai_image,
+        service_stem_image,
+        website_url,
+        contact_email,
+        contact_phone,
+        address,
+        currency,
+        timezone,
+        language,
+        theme,
+        primary_color,
+        secondary_color,
+        accent_color
+      `)
       .eq('id', 1)
       .single()
 
-    let updateError
-    if (selectError || !existingData) {
-      // No existing record, try to insert
-      const { error: insertError } = await supabase
-        .from('admin_settings')
-        .insert({ id: 1, ...dbData })
-      
-      updateError = insertError
-    } else {
-      // Update existing record
-      const { error: upsertError } = await supabase
-        .from('admin_settings')
-        .update(dbData)
-        .eq('id', 1)
-      
-      updateError = upsertError
+    if (error && error.code !== 'PGRST116') {
+      logger.log('Error fetching public company settings:', error)
+      return NextResponse.json({ error: 'Failed to fetch company settings' }, { status: 500 })
     }
 
-    if (updateError) {
-      console.error('Error updating company settings:', updateError)
-      return NextResponse.json(
-        { error: 'Failed to update company settings' },
-        { status: 500 }
-      )
+    // Return public settings with defaults
+    const publicSettings = {
+      companyName: data?.company_name || 'Your Company',
+      companyColor: data?.company_color || '#3B82F6',
+      companyLogo: data?.company_logo || '/android-chrome-512x512.png',
+      mainHeadline: data?.main_headline || 'Welcome to Our Store',
+      heroBackgroundImage: data?.hero_background_image || '',
+      heroTaglineAlignment: data?.hero_tagline_alignment || 'center',
+      serviceRetailImages: data?.service_retail_images || [],
+      servicePrototypingImages: data?.service_prototyping_images || [],
+      servicePcbImages: data?.service_pcb_images || [],
+      serviceAiImages: data?.service_ai_images || [],
+      serviceStemImages: data?.service_stem_images || [],
+      serviceHomeImages: data?.service_home_images || [],
+      serviceImageRotationTime: data?.service_image_rotation_time || 10,
+      // Legacy single image support
+      serviceRetailImage: data?.service_retail_image || '',
+      servicePrototypingImage: data?.service_prototyping_image || '',
+      servicePcbImage: data?.service_pcb_image || '',
+      serviceAiImage: data?.service_ai_image || '',
+      serviceStemImage: data?.service_stem_image || '',
+      // Contact info
+      websiteUrl: data?.website_url || '',
+      contactEmail: data?.contact_email || '',
+      contactPhone: data?.contact_phone || '',
+      address: data?.address || '',
+      // Localization
+      currency: data?.currency || 'TZS',
+      timezone: data?.timezone || 'Africa/Dar_es_Salaam',
+      language: data?.language || 'en',
+      // Theme
+      theme: data?.theme || 'light',
+      primaryColor: data?.primary_color || '#3B82F6',
+      secondaryColor: data?.secondary_color || '#64748B',
+      accentColor: data?.accent_color || '#F59E0B'
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Company settings updated successfully'
+    // Set appropriate cache headers
+    return NextResponse.json(publicSettings, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        'X-Public-Settings': 'true'
+      }
     })
 
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Invalid company settings data', details: error.errors },
-        { status: 400 }
-      )
-    }
-
-    console.error('Error in company settings POST:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    logger.log('Error in public company settings API:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

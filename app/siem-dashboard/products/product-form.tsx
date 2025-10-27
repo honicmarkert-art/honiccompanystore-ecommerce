@@ -87,13 +87,15 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
     stockQuantity: "",
     freeDelivery: false,
     sameDayDelivery: false,
+    importChina: false,
     variantConfig: {
       type: 'simple' as 'simple' | 'primary-dependent' | 'multi-dependent',
       primaryAttribute: '',
       primaryAttributes: [] as string[],
       attributeOrder: [] as string[],
       dependencies: {} as Record<string, string[]>
-    }
+    },
+    hasBeenUpdated: false
   })
 
   // Predefined worldwide common attributes
@@ -126,6 +128,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
   // Initialize form with product data if editing
   useEffect(() => {
+    
     if (product && !categoriesLoading && !brandsLoading) {
       setFormData({
         name: product.name ?? "",
@@ -140,7 +143,24 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         model: product.model ?? "",
         image: product.image ?? "",
         specifications: product.specifications || {},
-        variants: product.variants || [],
+        variants: (product.variants || []).map((variant: any) => {
+          // Use the new stock_quantities structure
+          const quantities = variant.quantities || {}
+          const attributes = variant.attributes ? { ...variant.attributes } : {}
+          
+          // Clean attributes by removing any remaining _quantity fields
+          Object.keys(attributes).forEach(key => {
+            if (key.endsWith('_quantity') || key === '_quantities' || key === 'quantities') {
+              delete attributes[key]
+            }
+          })
+          
+          return {
+            ...variant,
+            attributes: attributes, // Clean attributes
+            quantities: quantities // Quantities from stock_quantities column
+          }
+        }),
         video: product.video ?? "",
         view360: product.view360 ?? "",
         variantImages: product.variantImages || [],
@@ -148,6 +168,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         inStock: product.inStock !== undefined ? product.inStock : true,
         stockQuantity: product.stockQuantity?.toString() ?? "",
         freeDelivery: product.freeDelivery || false,
+        importChina: product.importChina || product.import_china || false,
         sameDayDelivery: product.sameDayDelivery || false,
         variantConfig: product.variantConfig || {
           type: 'simple',
@@ -155,8 +176,10 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
           primaryAttributes: [],
           attributeOrder: [],
           dependencies: {}
-        }
+        },
+        hasBeenUpdated: false
       })
+      
 
       // Initialize specification fields
       if (product.specifications) {
@@ -189,9 +212,16 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
       if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
         
         product.variants.forEach((variant: any) => {
-          // Add attributes from variant.attributes
+          // Add attributes from variant.attributes (exclude _quantity fields and technical objects)
           if (variant.attributes) {
-            Object.keys(variant.attributes).forEach(attr => allAttributes.add(attr))
+            Object.keys(variant.attributes).forEach(attr => {
+              if (!attr.endsWith('_quantity') && 
+                  attr !== 'quantities' && 
+                  attr !== '_quantities' &&
+                  !attr.startsWith('_')) {
+                allAttributes.add(attr)
+              }
+            })
           }
           
           // Add attributes from primary_values
@@ -201,23 +231,89 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
             })
           }
           
-          // Add attributes from multi_values
-          if (variant.multiValues) {
-            Object.keys(variant.multiValues).forEach(attr => allAttributes.add(attr))
+          // Add attributes from attributes (exclude _quantity fields)
+          if (variant.attributes) {
+            Object.keys(variant.attributes).forEach(attr => {
+              if (!attr.endsWith('_quantity')) {
+                allAttributes.add(attr)
+              }
+            })
           }
         })
       }
 
       const attributesArray = Array.from(allAttributes)
-      setSelectedAttributes(attributesArray)
+      const filteredAttributes = attributesArray.filter(attr => 
+        attr !== 'quantities' && 
+        attr !== '_quantities' && 
+        !attr.endsWith('_quantity') && 
+        !attr.startsWith('_')
+      )
+      setSelectedAttributes(filteredAttributes)
     }
-  }, [product, categoriesLoading, brandsLoading])
+    }, [product, categoriesLoading, brandsLoading])
+
+  // Auto-refresh product data after updating (5 seconds, one-time)
+  useEffect(() => {
+    if (!product?.id || !formData.hasBeenUpdated) return
+
+    const refreshProductData = async () => {
+      try {
+        const response = await fetch(`/api/products/${product.id}`)
+        if (response.ok) {
+          const freshProduct = await response.json()
+          
+          // Update form data with fresh stock information
+          setFormData(prev => ({
+            ...prev,
+            stockQuantity: freshProduct.stockQuantity?.toString() ?? prev.stockQuantity,
+            inStock: freshProduct.inStock !== undefined ? freshProduct.inStock : prev.inStock,
+            variants: freshProduct.variants || prev.variants,
+            hasBeenUpdated: false // Reset the flag
+          }))
+        }
+      } catch (error) {
+      }
+    }
+
+    // Set up 5-second delay, then refresh once
+    const timeout = setTimeout(refreshProductData, 5000)
+    
+    // Cleanup timeout on unmount
+    return () => {
+      clearTimeout(timeout)
+    }
+  }, [product?.id, formData.hasBeenUpdated])
 
   const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({
+    
+    // Special handling for variant config changes
+    if (field === 'variantConfig') {
+      
+      // If changing from simple to multi-dependent, check if variants exist
+      if (formData.variantConfig?.type === 'simple' && value?.type === 'multi-dependent') {
+        if (formData.variants.length > 0) {
+          // Variants exist during type change - this might cause issues
+        }
+      }
+      
+      // If changing from multi-dependent to simple, warn about variant data
+      if (formData.variantConfig?.type === 'multi-dependent' && value?.type === 'simple') {
+        if (formData.variants.length > 0) {
+          // Variants exist during type change - variant data will be preserved but not used
+        }
+      }
+    }
+    
+    setFormData(prev => {
+      const newData = {
       ...prev,
       [field]: value
-    }))
+      }
+      
+      
+      return newData
+    })
   }
 
   const handleSpecificationChange = (key: string, value: string) => {
@@ -303,7 +399,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
           sku: "",
           attributes: {},
           primaryValues: [],
-          multiValues: {}
+          quantities: {}
         }
       ]
     }))
@@ -462,6 +558,11 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
   }
 
   const removeAttribute = (attribute: string) => {
+    // Prevent deletion of _quantity fields and quantities object - they should not be shown as separate attributes
+    if (attribute.endsWith('_quantity') || attribute === 'quantities') {
+      return
+    }
+    
     setSelectedAttributes(prev => prev.filter(attr => attr !== attribute))
     // Also remove this attribute from all variants
     setFormData(prev => ({
@@ -469,6 +570,8 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
       variants: prev.variants.map(variant => {
         const newAttributes = { ...variant.attributes }
         delete newAttributes[attribute]
+        // Also remove the corresponding _quantity field
+        delete newAttributes[`${attribute}_quantity`]
         return { ...variant, attributes: newAttributes }
       })
     }))
@@ -484,6 +587,24 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
               attributes: { 
                 ...variant.attributes, 
                 [attribute]: value 
+              } 
+            }
+          : variant
+      )
+    }))
+  }
+
+  // Separate function for updating quantity fields
+  const updateVariantQuantity = (variantIndex: number, attribute: string, quantity: string) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) => 
+        index === variantIndex 
+          ? { 
+              ...variant, 
+              quantities: { 
+                ...variant.quantities, 
+                [attribute]: quantity 
               } 
             }
           : variant
@@ -561,18 +682,19 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
     }))
   }
 
-  const updateMultiValue = (variantIndex: number, attribute: string, valueIndex: number, value: string) => {
+
+  // Smart attribute update - stores comma-separated values as arrays of objects in attributes
+  const updateSmartAttribute = (variantIndex: number, attribute: string, value: string) => {
     setFormData(prev => ({
       ...prev,
       variants: prev.variants.map((variant, index) =>
         index === variantIndex
           ? {
               ...variant,
-              multiValues: {
-                ...variant.multiValues,
-                [attribute]: variant.multiValues?.[attribute]?.map((val: string, vIndex: number) =>
-                  vIndex === valueIndex ? value : val
-                ) || []
+              // Store value in attributes - keep as string while typing, convert on blur
+              attributes: {
+                ...variant.attributes,
+                [attribute]: value // Keep as string for now, convert on blur
               }
             }
           : variant
@@ -580,64 +702,40 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
     }))
   }
 
-  const removeMultiValue = (variantIndex: number, attribute: string, valueIndex: number) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) =>
-        index === variantIndex
-          ? {
-              ...variant,
-              multiValues: {
-                ...variant.multiValues,
-                [attribute]: variant.multiValues?.[attribute]?.filter((_: any, vIndex: number) => vIndex !== valueIndex) || []
+  // Convert comma-separated string to array of objects on blur
+  const handleAttributeBlur = (variantIndex: number, attribute: string) => {
+    const variant = formData.variants[variantIndex]
+    const value = variant.attributes?.[attribute]
+    
+    if (typeof value === 'string' && value.includes(',')) {
+      setFormData(prev => ({
+        ...prev,
+        variants: prev.variants.map((variant, index) =>
+          index === variantIndex
+            ? {
+                ...variant,
+                attributes: {
+                  ...variant.attributes,
+                  [attribute]: value.split(',').map(v => v.trim()).filter(v => v).map(v => ({ value: v }))
+                }
               }
-            }
-          : variant
-      )
-    }))
+            : variant
+        )
+      }))
+    }
   }
 
-  const toggleMultiValueForVariant = (variantIndex: number, attribute: string) => {
+  // Smart quantity update - stores quantity in quantities
+  const updateSmartQuantity = (variantIndex: number, attribute: string, quantity: string) => {
     setFormData(prev => ({
       ...prev,
       variants: prev.variants.map((variant, index) =>
         index === variantIndex
           ? {
               ...variant,
-              multiValues: variant.multiValues?.[attribute] !== undefined
-                ? {
-                    ...variant.multiValues,
-                    [attribute]: undefined,
-                    [`${attribute}_raw`]: undefined
-                  }
-                : {
-                    ...variant.multiValues,
-                    [attribute]: [],
-                    [`${attribute}_raw`]: ""
-                  }
-            }
-          : variant
-      )
-    }))
-  }
-
-  const updateMultiValueCommaSeparated = (variantIndex: number, attribute: string, value: string) => {
-    // Store the raw input value for display
-    const rawValue = value
-    
-    // Process the values for storage (only non-empty values)
-    const values = value.split(',').map(v => v.trim()).filter(v => v.length > 0)
-    
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) =>
-        index === variantIndex
-          ? {
-              ...variant,
-              multiValues: {
-                ...variant.multiValues,
-                [attribute]: Array.isArray(values) ? values : [],
-                [`${attribute}_raw`]: rawValue // Store raw value for display
+              quantities: {
+                ...variant.quantities,
+                [attribute]: quantity
               }
             }
           : variant
@@ -686,15 +784,25 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
           return parseInt(formData.stockQuantity as string) || 0
         }
         
-        // Otherwise, auto-calculate from attribute quantities
+        // Otherwise, auto-calculate from all attribute quantities
         let total = 0
         formData.variants.forEach(variant => {
+          // Count primary values quantities
           if (Array.isArray(variant.primaryValues)) {
             variant.primaryValues.forEach((pv: any) => {
               const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
               total += qty
             })
           }
+          
+          // Count quantities object
+          if (variant.quantities) {
+            Object.keys(variant.quantities).forEach(attr => {
+              const qty = parseInt(variant.quantities[attr]) || 0
+              total += qty
+            })
+          }
+          
         })
         return total
       })()
@@ -717,19 +825,20 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
             if (pv?.attribute) usedAttributesSet.add(pv.attribute)
           })
         }
-        if (variant?.multiValues && typeof variant.multiValues === 'object') {
-          Object.keys(variant.multiValues).forEach(a => {
-            if (!a.endsWith('_raw')) usedAttributesSet.add(a)
-          })
-        }
       })
 
       const usedAttributes = Array.from(usedAttributesSet)
       const normalizedVariantConfig = (() => {
         const vc = { ...(formData.variantConfig || {}) }
-        // Ensure a sensible type if attributes exist
-        if (usedAttributes.length > 0 && (!vc.type || vc.type === 'simple')) {
+        
+        
+        // Only auto-change type if no type is set and attributes exist
+        // If user explicitly chose 'simple', respect their choice even with attributes
+        if (usedAttributes.length > 0 && !vc.type) {
           vc.type = 'multi-dependent'
+        } else if (usedAttributes.length > 0 && vc.type === 'simple') {
+          // Explicitly ensure the type stays 'simple'
+          vc.type = 'simple'
         }
         // Primary-dependent: ensure primaryAttribute
         if (vc.type === 'primary-dependent' && !vc.primaryAttribute && usedAttributes.length > 0) {
@@ -744,6 +853,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         vc.attributeOrder = Array.isArray(vc.attributeOrder) && vc.attributeOrder.length > 0
           ? Array.from(new Set([...vc.attributeOrder, ...usedAttributes]))
           : usedAttributes
+        
         return vc
       })()
 
@@ -764,19 +874,30 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
             return formData.inStock
           }
           
-          // Otherwise, auto-calculate from attribute quantities
+          // Otherwise, auto-calculate from all attribute quantities
           let total = 0
           formData.variants.forEach(variant => {
+            // Count primary values quantities
             if (Array.isArray(variant.primaryValues)) {
               variant.primaryValues.forEach((pv: any) => {
                 const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
                 total += qty
               })
             }
+            
+            // Count quantities object
+            if (variant.quantities) {
+              Object.keys(variant.quantities).forEach(attr => {
+                const qty = parseInt(variant.quantities[attr]) || 0
+                total += qty
+              })
+            }
+            
           })
           return total > 0
         })(),
         freeDelivery: formData.freeDelivery,
+        importChina: formData.importChina,
         sameDayDelivery: formData.sameDayDelivery,
         variantConfig: normalizedVariantConfig,
         // Include variant images data
@@ -788,9 +909,12 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         }))
       }
 
+
+
       // Call onSave if provided
       if (onSave) {
         const updatedProduct: any = await onSave(productData)
+        
         
         // If we got updated product data back, refresh the form data
         if (updatedProduct && typeof updatedProduct === 'object') {
@@ -804,6 +928,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
             ...prev,
             name: updatedProduct.name ?? prev.name,
             description: updatedProduct.description ?? prev.description,
+            hasBeenUpdated: true, // Set flag to trigger auto-refresh
             category: updatedProduct.category ?? prev.category,
             brand: updatedProduct.brand ?? prev.brand,
             price: updatedProduct.price?.toString() ?? prev.price,
@@ -814,7 +939,24 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
             model: updatedProduct.model ?? prev.model,
             image: updatedProduct.image ?? prev.image,
             specifications: updatedProduct.specifications || prev.specifications,
-            variants: updatedProduct.variants || prev.variants,
+            variants: (updatedProduct.variants || prev.variants).map((variant: any) => {
+              // Use the new stock_quantities structure
+              const quantities = variant.quantities || {}
+              const attributes = variant.attributes ? { ...variant.attributes } : {}
+              
+              // Clean attributes by removing any remaining _quantity fields
+              Object.keys(attributes).forEach(key => {
+                if (key.endsWith('_quantity') || key === '_quantities' || key === 'quantities') {
+                  delete attributes[key]
+                }
+              })
+              
+              return {
+                ...variant,
+                attributes: attributes, // Clean attributes
+                quantities: quantities // Quantities from stock_quantities column
+              }
+            }),
             video: updatedProduct.video ?? prev.video,
             view360: updatedProduct.view360 ?? prev.view360,
             variantImages: updatedProduct.variantImages || prev.variantImages,
@@ -823,9 +965,11 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
             stockQuantity: updatedProduct.stockQuantity?.toString() ?? prev.stockQuantity,
             freeDelivery: updatedProduct.freeDelivery ?? prev.freeDelivery,
             sameDayDelivery: updatedProduct.sameDayDelivery ?? prev.sameDayDelivery,
+            importChina: updatedProduct.importChina ?? prev.importChina,
             // Variant configuration
             variantConfig: updatedProduct.variantConfig || prev.variantConfig
           }))
+          
         }
       }
 
@@ -996,9 +1140,19 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                         {(() => {
                           let total = 0
                           formData.variants.forEach(variant => {
+                            // Check primaryValues quantities
                             if (Array.isArray(variant.primaryValues)) {
                               variant.primaryValues.forEach((pv: any) => {
                                 const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
+                                total += qty
+                              })
+                            }
+                            
+                            
+                            // Check quantities object
+                            if (variant.quantities && typeof variant.quantities === 'object') {
+                              Object.keys(variant.quantities).forEach(key => {
+                                const qty = parseInt(variant.quantities[key]) || 0
                                 total += qty
                               })
                             }
@@ -1042,12 +1196,22 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                         
                         let total = 0
                         formData.variants.forEach(variant => {
+                          // Count primary values quantities
                           if (Array.isArray(variant.primaryValues)) {
                             variant.primaryValues.forEach((pv: any) => {
                               const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
                               total += qty
                             })
                           }
+                          
+                          // Count quantities object
+                          if (variant.quantities) {
+                            Object.keys(variant.quantities).forEach(attr => {
+                              const qty = parseInt(variant.quantities[attr]) || 0
+                              total += qty
+                            })
+                          }
+                          
                         })
                         return total > 0 ? `Auto-calculated: ${total} units available` : 'Auto-calculated: Out of stock (override if needed)'
                       })()}
@@ -1067,6 +1231,17 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                   <Switch
                     checked={formData.freeDelivery}
                     onCheckedChange={(checked) => handleInputChange("freeDelivery", checked)}
+                  />
+                </div>
+
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label>Import from China</Label>
+            <p className="text-sm text-muted-foreground">Mark if this product is imported from China</p>
+          </div>
+          <Switch
+            checked={formData.importChina}
+            onCheckedChange={(checked) => handleInputChange("importChina", checked)}
                   />
                 </div>
 
@@ -1187,7 +1362,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                    <div>
                      <Label className="text-sm font-medium mb-2 block">Selected Attributes</Label>
                      <div className="flex flex-wrap gap-2">
-                       {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map(attribute => (
+                       {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw') && !attribute.endsWith('_quantity') && attribute !== 'quantities' && attribute !== '_quantities' && !attribute.startsWith('_')).map(attribute => (
                          <Badge key={attribute} variant="secondary" className="flex items-center gap-1 capitalize">
                            {attribute}
                            <Button
@@ -1398,12 +1573,22 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                         {(() => {
                           let total = 0
                           formData.variants.forEach(variant => {
+                            // Count primary values quantities
                             if (Array.isArray(variant.primaryValues)) {
                               variant.primaryValues.forEach((pv: any) => {
                                 const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
                                 total += qty
                               })
                             }
+                            
+                            // Count quantities object
+                            if (variant.quantities) {
+                              Object.keys(variant.quantities).forEach(attr => {
+                                const qty = parseInt(variant.quantities[attr]) || 0
+                                total += qty
+                              })
+                            }
+                            
                           })
                           return total
                         })()}
@@ -1465,15 +1650,15 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
 
                                      {/* Dynamic Attributes */}
-                   {(selectedAttributes.length > 0 || variant.attributes || variant.primaryValues || variant.multiValues) && (
+                   {(selectedAttributes.length > 0 || variant.attributes || variant.primaryValues) && (
                      <div className="space-y-3">
                        <Label className="text-sm font-medium">Attributes</Label>
                        <div className="grid gap-3 md:grid-cols-2">
-                         {(selectedAttributes.length > 0 ? selectedAttributes : Object.keys(variant.attributes || {})).filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map(attribute => {
+                         {(selectedAttributes.length > 0 ? selectedAttributes : Object.keys(variant.attributes || {})).filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw') && !attribute.endsWith('_quantity') && attribute !== 'quantities' && attribute !== '_quantities' && !attribute.startsWith('_')).map(attribute => {
                            const isPrimary = attribute === formData.variantConfig.primaryAttribute || 
                                            (formData.variantConfig.type === 'multi-dependent' && 
                                             formData.variantConfig.primaryAttributes?.includes(attribute))
-                           const isMultiValue = variant.multiValues?.[attribute] !== undefined
+                           // All non-primary attributes now support comma-separated values
                            
                            return (
                              <div key={attribute} className="space-y-1">
@@ -1485,21 +1670,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                        {formData.variantConfig.type === 'multi-dependent' ? '(Primary - Affects Price)' : '(Primary - Affects Price)'}
                                      </span>
                                    )}
-                                   {isMultiValue && !isPrimary && (
-                                     <span className="text-xs text-blue-600 font-medium">(Multi-Value)</span>
-                                   )}
                                  </Label>
-                                 {!isPrimary && (
-                                   <Button
-                                     type="button"
-                                     variant={isMultiValue ? "default" : "outline"}
-                                     size="sm"
-                                     onClick={() => toggleMultiValueForVariant(index, attribute)}
-                                     className="text-xs h-6 px-2"
-                                   >
-                                     {isMultiValue ? "Single" : "Multi"}
-                                   </Button>
-                                 )}
                                </div>
                                
                                {isPrimary ? (
@@ -1575,26 +1746,38 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                      Add {attribute} Value
                                    </Button>
                                  </div>
-                               ) : isMultiValue ? (
-                                 /* Multi-Value Attribute - Comma Separated Input */
+                               ) : (
+                                 /* Regular Attribute - Smart Input (Single or Comma-Separated) */
                                  <div className="space-y-2">
-                                   <Input
-                                     value={variant.multiValues?.[`${attribute}_raw`] ?? (Array.isArray(variant.multiValues?.[attribute]) ? variant.multiValues[attribute].join(", ") : "") ?? ""}
-                                     onChange={(e) => updateMultiValueCommaSeparated(index, attribute, e.target.value)}
-                                     placeholder={`Enter ${attribute} values separated by commas (e.g., 1k, 2k, 3k, 4k, 5k)`}
-                                     className="w-full"
-                                   />
+                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                     <Input
+                                       value={(() => {
+                                         const attrValue = variant.attributes?.[attribute]
+                                         if (Array.isArray(attrValue)) {
+                                           return attrValue.map(item => 
+                                             typeof item === 'object' && item.value ? item.value : item
+                                           ).join(', ')
+                                         }
+                                         return attrValue ?? ""
+                                       })()}
+                                       onChange={(e) => updateSmartAttribute(index, attribute, e.target.value)}
+                                       onBlur={() => handleAttributeBlur(index, attribute)}
+                                       placeholder={`Enter ${attribute} values separated by commas (e.g., Red, Blue, Green)`}
+                                       className="w-full"
+                                     />
+                                     <Input
+                                       type="number"
+                                       min="0"
+                                       value={variant.quantities?.[attribute] ?? ""}
+                                       onChange={(e) => updateSmartQuantity(index, attribute, e.target.value === '' ? '' : String(parseInt(e.target.value) || 0))}
+                                       placeholder="Quantity"
+                                       className="w-full"
+                                     />
+                                   </div>
                                    <p className="text-xs text-muted-foreground">
-                                     Separate multiple values with commas
+                                     Single value or comma-separated values (e.g., Red or Red, Blue, Green)
                                    </p>
                                  </div>
-                               ) : (
-                                 /* Regular Attribute - Single Value */
-                                 <Input
-                                   value={variant.attributes?.[attribute] ?? ""}
-                                   onChange={(e) => updateVariantAttribute(index, attribute, e.target.value)}
-                                   placeholder={`Enter ${attribute} (leave blank if not applicable)`}
-                                 />
                                )}
                              </div>
                            )

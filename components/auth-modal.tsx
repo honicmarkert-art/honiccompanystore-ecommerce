@@ -381,15 +381,23 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="register-phone" className="text-xs text-gray-900 dark:text-gray-100">Phone</Label>
+                  <Label htmlFor="register-phone" className="text-xs text-gray-900 dark:text-gray-100">Phone (numbers only)</Label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <Input
                       id="register-phone"
                       type="tel"
-                      placeholder="Phone"
+                      placeholder="e.g., +255123456789 or 0123456789"
                       value={registerForm.phone}
-                      onChange={(e) => setRegisterForm({ ...registerForm, phone: e.target.value })}
+                      onChange={(e) => {
+                        // Only allow numeric characters and + at the start
+                        const value = e.target.value
+                        // Allow digits and one + at the start
+                        const sanitized = value.replace(/[^+\d]/g, '') || ''
+                        // Ensure + only appears at the start
+                        const finalValue = sanitized.startsWith('+') ? '+' + sanitized.slice(1).replace(/[^0-9]/g, '') : sanitized.replace(/\+/g, '')
+                        setRegisterForm({ ...registerForm, phone: finalValue })
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault()
@@ -399,6 +407,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       className="pl-10 h-8 text-sm"
                     />
                   </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Only digits allowed (e.g., +255123456789 or 0123456789)</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">

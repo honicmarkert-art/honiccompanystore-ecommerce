@@ -70,7 +70,7 @@ export function useSavedLater() {
 
 	const remove = useCallback(async (productId: number) => {
 		const next = items.filter(i => i.productId !== productId)
-		setItems(next)
+		setItems(next) // This triggers re-render
 		if (isAuthenticated) { try { await fetch(`/api/user/saved-later?productId=${productId}`, { method: 'DELETE' }) } catch {} }
 		else { saveLocal(next) }
 	}, [items, isAuthenticated, saveLocal])

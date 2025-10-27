@@ -53,7 +53,21 @@ export async function GET(request: NextRequest) {
       }
     )
 
-    // Get current session first
+    // Get current session first - using getUser() for authentication instead of getSession()
+    let { data: { user }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !user) {
+      const errorResponse = NextResponse.json({
+        success: false,
+        authenticated: false,
+        message: 'Session verification failed'
+      }, { status: 500 })
+      
+      copyCookies(response, errorResponse)
+      return errorResponse
+    }
+    
+    // Get session for token refresh if needed
     let { data: { session }, error: sessionError } = await supabase.auth.getSession()
     
     if (sessionError) {
@@ -147,8 +161,10 @@ export async function GET(request: NextRequest) {
       session = refreshedSession
     }
 
-    // Get user from session (simplified - no need for separate getUser call)
-    const user = session.user
+    // Get user from session
+    if (session) {
+      user = session.user
+    }
     
     
     if (!user) {

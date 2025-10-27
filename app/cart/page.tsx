@@ -50,6 +50,8 @@ import { useTheme } from "@/hooks/use-theme"
 import { useCart } from "@/hooks/use-cart" // Import useCart hook
 import { useProducts } from "@/hooks/use-products" // Import useProducts hook
 import { useStock } from "@/hooks/use-stock" // Import useStock hook for real-time stock data
+import { useWishlist } from "@/hooks/use-wishlist" // Import useWishlist hook
+import { useSavedLater } from "@/hooks/use-saved-later" // Import useSavedLater hook
 import { useCompanyContext } from "@/components/company-provider"
 import { useCurrency } from "@/contexts/currency-context"
 import { useToast } from "@/hooks/use-toast"
@@ -68,12 +70,12 @@ export default function CartPage() {
 
 function CartPageContent() {
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
-  const { cart, updateItemQuantity, removeItem, cartTotalItems, cartSubtotal, clearCart, isLoading } = useCart() // Use useCart hook
+  const { cart, updateItemQuantity, removeItem, cartUniqueProducts, cartSubtotal, clearCart, isLoading } = useCart() // Use useCart hook
   const { products } = useProducts() // Use useProducts hook
   const { getStock, fetchStock } = useStock() // Use stock hook for real-time stock data
   const { currency, setCurrency, formatPrice } = useCurrency() // Use global currency context
   
-  // Debug logging
+  
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
   
   // Fallback logo system - use local logo if API is not loaded or logo is not available
@@ -84,8 +86,8 @@ function CartPageContent() {
   const pathname = usePathname()
   const { user, isAuthenticated, loading: authLoading } = useAuth() // Add auth context
   const { openAuthModal } = useGlobalAuthModal()
-  const [savedForLater, setSavedForLater] = useState<any[]>([])
-  const [wishlist, setWishlist] = useState<any[]>([])
+  const { items: wishlistItems, add: addToWishlist, remove: removeFromWishlist } = useWishlist() // Use wishlist hook
+  const { items: savedForLaterItems, add: addToSavedLater } = useSavedLater() // Use saved later hook
   const [previewItem, setPreviewItem] = useState<any>(null)
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -265,7 +267,7 @@ function CartPageContent() {
     return Math.min(calculatedWidth, maxWidth)
   }
 
-  const handleSaveForLater = useCallback(() => {
+  const handleSaveForLater = useCallback(async () => {
     if (cart.length === 0) {
       toast({
         title: "No items to save",
@@ -275,56 +277,105 @@ function CartPageContent() {
       return
     }
     
-    startTransition(() => {
-      setSavedForLater(prev => ([...prev, ...cart]))
+    // Add all cart items to saved for later in parallel
+    const productIds = cart.map(item => item.productId)
+    await Promise.all(productIds.map(productId => addToSavedLater(productId)))
+    
+    // Clear cart after saving
     clearCart()
-    })
+    
     toast({
       title: "Items saved for later",
       description: `${cart.length} items have been moved to your saved items.`,
     })
-  }, [cart, clearCart, toast])
+  }, [cart, clearCart, addToSavedLater, toast])
 
-  const handleAddToWishlist = (productId: number) => {
-    const isAlreadyInWishlist = wishlist.some(wishlistItem => 
-      wishlistItem.id === productId
+  const handleAddToWishlist = async (productId: number) => {
+    const isAlreadyInWishlist = wishlistItems.some(wishlistItem => 
+      wishlistItem.productId === productId
     )
     
     if (isAlreadyInWishlist) {
       // Remove from wishlist
-      setWishlist(wishlist.filter(wishlistItem => wishlistItem.id !== productId))
+      await removeFromWishlist(productId)
       toast({
         title: "Removed from wishlist",
         description: "Item has been removed from your wishlist.",
       })
     } else {
       // Add to wishlist
-    const item = cart.find(cartItem => cartItem.productId === productId)
-    if (item) {
-      setWishlist([...wishlist, { id: productId, name: item.product?.name || `Product ${productId}` }])
-      toast({
-        title: "Added to wishlist",
-        description: `${item.product?.name || `Product ${productId}`} has been added to your wishlist.`,
-      })
+      const item = cart.find(cartItem => cartItem.productId === productId)
+      if (item) {
+        await addToWishlist(productId)
+        toast({
+          title: "Added to wishlist",
+          description: `${item.product?.name || `Product ${productId}`} has been added to your wishlist.`,
+        })
       }
     }
   }
 
   const isInWishlist = useCallback((productId: number) => {
-    return wishlist.some(wishlistItem => wishlistItem.id === productId)
-  }, [wishlist])
+    return wishlistItems.some(wishlistItem => wishlistItem.productId === productId)
+  }, [wishlistItems])
 
   // Calculate shipping cost: 5,000 TZS if order is less than 100,000 TZS, otherwise free
-  const FREE_SHIPPING_THRESHOLD = 100000
+  const FREE_SHIPPING_THRESHOLD = 100000 // Back to original threshold
   const SHIPPING_COST = 5000
+  
   
   const selectedItems = cart.filter(i => selected[i.productId])
   const hasSelection = selectedItems.length > 0
-  const selectedItemsCount = hasSelection ? selectedItems.reduce((s,i)=>s+i.totalQuantity,0) : cartTotalItems
+  const selectedItemsCount = hasSelection ? selectedItems.reduce((s,i)=>s+i.totalQuantity,0) : cartUniqueProducts
   const selectedSubtotal = hasSelection ? selectedItems.reduce((s,i)=>s+i.totalPrice,0) : cartSubtotal
 
   const calculateShippingFee = (subtotal: number) => {
-    return subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_COST
+    // If cart total >= 100,000 TZS: Free delivery for all
+    if (subtotal >= FREE_SHIPPING_THRESHOLD) return 0
+    
+    // If cart total < 100,000 TZS: Check if ALL selected products have free delivery
+    const allProductsHaveFreeDelivery = selectedItems.every(item => {
+      const product = products.find(p => p.id === item.productId)
+      return (product as any)?.free_delivery === true || product?.freeDelivery === true
+    })
+    
+    // If ALL products have free delivery: Free delivery
+    // If MIXED products (some free, some paid): Apply delivery fee
+    return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
+  }
+
+  // Function to determine delivery status for each product
+  const getDeliveryStatus = (product: any, itemTotal: number) => {
+    // Check if cart total qualifies for free shipping
+    const cartQualifiesForFreeShipping = cartSubtotal >= FREE_SHIPPING_THRESHOLD
+    
+    // Check if individual product has free delivery (check both camelCase and snake_case)
+    const productHasFreeDelivery = product?.free_delivery === true || product?.freeDelivery === true
+    
+    // Check if product is from China (longer delivery time)
+    const isChinaImport = (product as any)?.import_china === true || product?.importChina === true
+    
+    // Calculate delivery days: 10 days for China imports, 3 days for local products
+    const deliveryDays = isChinaImport ? 10 : 3
+    const deliveryEndDate = new Date(Date.now() + deliveryDays * 24 * 60 * 60 * 1000)
+    
+    // Priority: Cart total threshold takes precedence
+    // If cart total >= 100,000 TZS: All products get free delivery
+    // If cart total < 100,000 TZS: Only products with free_delivery: true get free delivery
+    if (cartQualifiesForFreeShipping || (cartSubtotal < FREE_SHIPPING_THRESHOLD && productHasFreeDelivery)) {
+      return {
+        isFree: true,
+        text: `Free delivery ${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`,
+        color: "text-green-600"
+      }
+    } else {
+      // Show delivery fee with date
+      return {
+        isFree: false,
+        text: `Delivery: ${formatPrice(SHIPPING_COST)} ${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`,
+        color: "text-orange-600"
+      }
+    }
   }
   
   const shippingCost = calculateShippingFee(selectedSubtotal)
@@ -361,7 +412,12 @@ function CartPageContent() {
       )
       return
     }
-    try { sessionStorage.setItem('selected_cart_items', JSON.stringify(selectedIds)) } catch {}
+    try { 
+      sessionStorage.setItem('selected_cart_items', JSON.stringify(selectedIds))
+      // Clear "Buy Now" mode when proceeding from cart
+      sessionStorage.removeItem('buy_now_mode')
+      sessionStorage.removeItem('buy_now_item_data')
+    } catch {}
     router.push('/checkout')
   }
 
@@ -428,7 +484,7 @@ function CartPageContent() {
 
           {/* Logo */}
           <Link
-            href="/"
+            href="/home"
             className="flex items-center gap-2 text-lg font-semibold md:text-base ml-2 lg:ml-8 flex-shrink-0 text-gray-900 dark:text-white"
           >
             <Image
@@ -455,14 +511,14 @@ function CartPageContent() {
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="sm"
                   className={cn(
-                    "flex items-center gap-1",
+                    "flex items-center gap-1 px-3 py-2",
                     darkHeaderFooterClasses.buttonGhostText,
                     darkHeaderFooterClasses.buttonGhostHoverBg,
                   )}
                 >
-                  <Palette className="w-5 h-5" />
+                  <span className="text-sm font-medium">Theme</span>
                   <span className="sr-only">Change Theme</span>
                 </Button>
               </DropdownMenuTrigger>
@@ -539,7 +595,7 @@ function CartPageContent() {
                 <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
                 <span className="sr-only">Shopping Cart</span>
                 <span className="absolute -top-1 -right-1 flex h-3 w-3 sm:h-4 sm:w-4 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                  {cartTotalItems}
+                  {cartUniqueProducts}
                 </span>
               </Button>
             </Link>
@@ -548,7 +604,7 @@ function CartPageContent() {
             <div className="hidden sm:block">
             {isAuthenticated ? (
               <div className="flex flex-col items-center">
-                <UserProfile />
+              <UserProfile />
                 <span className="text-xs text-white mt-1">
                   {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                 </span>
@@ -681,7 +737,7 @@ function CartPageContent() {
         ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8" suppressHydrationWarning>
               {/* Cart Items List - Left Side */}
-              <div className="lg:col-span-2 space-y-2" data-cart-items suppressHydrationWarning>
+              <div className="lg:col-span-2 flex flex-col" data-cart-items suppressHydrationWarning>
                 {/* Cart Header with Stats */}
                 <div className={cn(
                   "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 rounded-lg border",
@@ -708,7 +764,7 @@ function CartPageContent() {
                   <div className="flex items-center justify-between sm:justify-end gap-2">
                     <div className="flex sm:hidden items-center gap-2 text-xs">
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Items: {cartTotalItems}
+                        Items: {cartUniqueProducts}
                       </span>
                       <span className={cn(themeClasses.textNeutralSecondary)}>
                         Total: {formatPrice(cartSubtotal)}
@@ -746,14 +802,21 @@ function CartPageContent() {
 
 
 
-                {/* Cart Items */}
-                <div className="space-y-1">
-                  {cart.slice().reverse().map((item, index) => {
+                {/* Cart Items - Scrollable Container */}
+                <div 
+                  className="flex-1 overflow-y-auto max-h-[85vh] space-y-3 pl-2 pt-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
+                  style={{
+                    direction: 'rtl',
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: '#d1d5db transparent'
+                  }}
+                >
+                  <div style={{ direction: 'ltr' }}>
+                    {cart.slice().reverse().map((item, index) => {
                     const product = products.find(p => p.id === item.productId) || item.product
                     const stockData = getStock(item.productId)
                     const stockQty = stockData?.stockQuantity ?? (product as any)?.stockQuantity ?? null
                     
-                    // Debug logging removed
                     
                     
                     // If item has multiple variants, display as one product with multiple selections
@@ -762,7 +825,7 @@ function CartPageContent() {
                         <Card
                           key={`${item.productId}-${index}`}
                           className={cn(
-                            "transition-all duration-200 hover:shadow-lg group rounded-sm",
+                            "transition-all duration-200 hover:shadow-lg group rounded-sm mb-2",
                             themeClasses.cardBg,
                             themeClasses.cardBorder,
                           )}
@@ -781,7 +844,7 @@ function CartPageContent() {
                                 />
                               </div>
                               {/* Product Image */}
-                              <Link href={`/products/${item.productId}`} className="flex-shrink-0">
+                              <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/cart')}`} className="flex-shrink-0">
                                 <div className="relative">
                                   {product?.image && (
                                     <LazyImage
@@ -799,7 +862,7 @@ function CartPageContent() {
 
                               {/* Product Details */}
                               <div className="flex-1 min-w-0">
-                                <Link href={`/products/${item.productId}`}>
+                                <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/cart')}`}>
                                   <h3 className={cn(
                                     "font-semibold text-xs hover:underline line-clamp-2",
                                     themeClasses.mainText
@@ -816,9 +879,9 @@ function CartPageContent() {
                                 </div>
 
                                 {/* Delivery estimate */}
-                                <div className="flex items-center gap-1 mt-0.5 sm:mt-1 text-[9px] sm:text-[10px] text-green-600">
+                                <div className={cn("flex items-center gap-1 mt-0.5 sm:mt-1 text-[9px] sm:text-[10px]", getDeliveryStatus(product, item.totalPrice).color)}>
                                   <Truck className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
-                                  <span>Free delivery by {new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}</span>
+                                  <span>{getDeliveryStatus(product, item.totalPrice).text}</span>
                                 </div>
                               </div>
 
@@ -901,7 +964,7 @@ function CartPageContent() {
                       <Card
                         key={`${item.productId}-${item.variants[0]?.variantId || "base"}-${index}`}
                         className={cn(
-                          "transition-all duration-200 hover:shadow-lg group rounded-sm",
+                          "transition-all duration-200 hover:shadow-lg group rounded-sm mb-3",
                           themeClasses.cardBg,
                           themeClasses.cardBorder,
                         )}
@@ -917,7 +980,7 @@ function CartPageContent() {
                                 onChange={() => toggleSelected(item.productId)}
                                 className="mt-1"
                               />
-                              <Link href={`/products/${item.productId}`} className="flex-shrink-0">
+                              <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/cart')}`} className="flex-shrink-0">
                               <div className="relative">
                                 {product?.image && (
                                   <LazyImage
@@ -943,7 +1006,7 @@ function CartPageContent() {
                             <div className="flex-1 min-w-0">
                               <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
                                 <div className="flex-1 min-w-0">
-                                  <Link href={`/products/${item.productId}`}>
+                                  <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/cart')}`}>
                                     <h3 className={cn(
                                       "font-semibold text-xs sm:text-base hover:underline line-clamp-2",
                                       themeClasses.mainText
@@ -971,9 +1034,9 @@ function CartPageContent() {
                                   </div>
 
                                   {/* Delivery estimate */}
-                                  <div className="flex items-center gap-0.5 mt-0.5 sm:mt-2 text-[9px] sm:text-xs text-green-600">
+                                  <div className={cn("flex items-center gap-0.5 mt-0.5 sm:mt-2 text-[9px] sm:text-xs", getDeliveryStatus(product, item.totalPrice).color)}>
                                     <Truck className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
-                                    <span>Free delivery by {new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}</span>
+                                    <span>{getDeliveryStatus(product, item.totalPrice).text}</span>
                                 </div>
 
                                   {/* Mobile: Quantity Controls and Actions below product details */}
@@ -1211,6 +1274,7 @@ function CartPageContent() {
                   </Card>
                     )
                   })}
+                  </div>
             </div>
 
               </div>
@@ -1357,7 +1421,11 @@ function CartPageContent() {
         <div className="mt-8 lg:mt-0 lg:col-span-3">
           <h3 className={cn("text-lg font-semibold mb-4", themeClasses.mainText)}>You might also like</h3>
           <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-4">
-            {products.slice(0, 8).map((product, index) => {
+            {useMemo(() => {
+              // Create a shuffled copy of products to show different recommendations each time
+              const shuffledProducts = [...products].sort(() => Math.random() - 0.5)
+              return shuffledProducts.slice(0, 8)
+            }, [products]).map((product, index) => {
               const discountPercentage = product.originalPrice && product.originalPrice > product.price
                 ? ((product.originalPrice - product.price) / product.originalPrice) * 100
                 : 0
@@ -1497,9 +1565,9 @@ function CartPageContent() {
                   >
                     <div className="relative">
                       <ShoppingCart className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
-                      {cartTotalItems > 0 && (
+                      {cartUniqueProducts > 0 && (
                         <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-black">
-                          {cartTotalItems}
+                          {cartUniqueProducts}
                         </span>
                       )}
                     </div>

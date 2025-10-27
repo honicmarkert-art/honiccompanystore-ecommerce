@@ -184,7 +184,6 @@ function CoinsPageContent() {
 
   const handleRedeemReward = (rewardId: string) => {
     // In real app, this would call an API to redeem the reward
-    logger.log('Redeeming reward:', rewardId)
   }
 
   const handleViewOrder = (orderId: string) => {
@@ -200,7 +199,7 @@ function CoinsPageContent() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 min-h-screen bg-background">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold">My Coins</h1>

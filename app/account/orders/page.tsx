@@ -27,6 +27,7 @@ import { ProtectedRoute } from '@/components/protected-route'
 import { useOrders } from '@/hooks/use-orders'
 import Link from 'next/link'
 import Image from 'next/image'
+import { OrdersListSkeleton } from '@/components/ui/skeleton'
 
 interface Order {
   id: string
@@ -63,13 +64,13 @@ interface Order {
 }
 
 interface OrderItem {
-  id: string
+    id: string
   productId: string
   productName: string
   productImage: string
   variantName?: string
   variantAttributes?: any
-  quantity: number
+    quantity: number
   unitPrice: number
   totalPrice: number
 }
@@ -201,11 +202,11 @@ function OrdersPageContent() {
     return `${currency} ${amount.toLocaleString()}`
   }
 
-  const handleDownloadInvoice = async (orderId: string, orderNumber: string) => {
-    setDownloadingInvoices(prev => new Set(prev).add(orderId))
+  const handleDownloadInvoice = async (orderNumber: string) => {
+    setDownloadingInvoices(prev => new Set(prev).add(orderNumber))
     
     try {
-      const response = await fetch(`/api/user/orders/${orderId}/invoice`)
+      const response = await fetch(`/api/user/orders/${orderNumber}/invoice`)
       
       if (!response.ok) {
         throw new Error('Failed to generate invoice')
@@ -226,12 +227,11 @@ function OrdersPageContent() {
       window.URL.revokeObjectURL(url)
       
     } catch (error) {
-      console.error('Error downloading invoice:', error)
       alert('Failed to download invoice. Please try again.')
     } finally {
       setDownloadingInvoices(prev => {
         const newSet = new Set(prev)
-        newSet.delete(orderId)
+        newSet.delete(orderNumber)
         return newSet
       })
     }
@@ -239,14 +239,14 @@ function OrdersPageContent() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg">Loading orders...</div>
+      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 min-h-screen bg-background">
+        <OrdersListSkeleton count={3} />
       </div>
     )
   }
 
   return (
-    <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
+    <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 min-h-screen bg-background">
       {/* Header */}
       <div className="mb-4 sm:mb-8">
         <h1 className="text-2xl sm:text-3xl font-bold">My Orders</h1>
@@ -328,82 +328,80 @@ function OrdersPageContent() {
         {filteredOrders.map((order) => (
             <Card key={order.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4 sm:p-6">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 sm:gap-4">
-                  {/* Order Info */}
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                  {getStatusIcon(order.status)}
-                  <div>
-                        <h3 className="font-semibold text-base sm:text-lg">{order.orderNumber}</h3>
-                    <p className="text-xs sm:text-sm text-muted-foreground">
-                          {formatDate(order.createdAt)}
-                    </p>
-                  </div>
-                  {getStatusBadge(order.status)}
-                </div>
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                  {/* Left Section: Order Info */}
+                  <div className="flex-1 space-y-3">
+                    {/* Order Number, Status, and Date */}
+                    <div className="flex items-center gap-3">
+                      <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1">
+                        <h3 className="font-bold text-lg">{order.orderNumber}</h3>
+                        <p className="text-xs sm:text-sm text-muted-foreground">{formatDate(order.createdAt)}</p>
+                      </div>
+                      {getStatusBadge(order.status)}
+                    </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 sm:gap-4 text-xs sm:text-sm">
-                      <div className="flex items-center gap-2">
-                        <Package className="w-4 h-4 text-muted-foreground" />
-                        <span>{order.itemCount} item{order.itemCount !== 1 ? 's' : ''}</span>
-              </div>
-                      <div className="flex items-center gap-2">
-                        <CreditCard className="w-4 h-4 text-muted-foreground" />
-                        <span>{order.paymentMethod}</span>
+                    {/* Item Count */}
+                    <div className="flex items-center gap-2">
+                      <Package className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">{order.itemCount} item{order.itemCount !== 1 ? 's' : ''}</span>
+                    </div>
+
+                    {/* Payment and Delivery Info */}
+                    <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm">
+                      <div className="flex items-center gap-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground">{order.paymentMethod}</span>
                         {getPaymentStatusBadge(order.paymentStatus)}
-                        </div>
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-4 h-4 text-muted-foreground" />
-                        <span>
-                          {order.deliveryOption === 'pickup' ? 'Pickup' : 'Delivery'} - {order.shippingAddress.city}, {order.shippingAddress.state}
+                      </div>
+                      <span className="text-muted-foreground">•</span>
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground">
+                          {order.deliveryOption === 'pickup' ? 'Pickup' : 'Delivery'}
+                          {order.shippingAddress?.city && ` - ${order.shippingAddress.city}`}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Order Items Preview */}
-                  <div className="flex items-center gap-2 mb-3 lg:mb-0">
-                    <div className="flex -space-x-2">
-                      {order.items.slice(0, 3).map((item, index) => (
-                        <div key={item.id} className="relative">
-                          <Image
-                            src={item.productImage}
-                            alt={item.productName}
-                            width={36}
-                            height={36}
-                            className="rounded-full border-2 border-white object-cover"
-                          />
-                          {index === 2 && order.items.length > 3 && (
-                            <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center text-white text-xs font-medium">
-                              +{order.items.length - 3}
-                            </div>
-                          )}
-                </div>
-                      ))}
+                  {/* Right Section: Product Image, Total, Actions */}
+                  <div className="flex items-center gap-4">
+                    {/* Product Image */}
+                    <div className="hidden sm:block">
+                      <div className="w-16 h-16 rounded-full bg-white p-1 flex items-center justify-center overflow-hidden">
+                        <Image
+                          src={order.items[0]?.productImage || '/placeholder.jpg'}
+                          alt={order.items[0]?.productName || 'Product'}
+                          width={56}
+                          height={56}
+                          className="rounded-full object-cover w-full h-full"
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Order Total & Actions */}
-                  <div className="flex flex-col items-end gap-2 sm:gap-3">
+                    {/* Total Amount */}
                     <div className="text-right">
-                      <p className="text-xl sm:text-2xl font-bold">{formatCurrency(order.totalAmount, order.currency)}</p>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Total</p>
+                      <p className="text-2xl font-bold">{formatCurrency(order.totalAmount, order.currency)}</p>
+                      <p className="text-xs text-muted-foreground">Total</p>
                     </div>
+
+                    {/* Action Buttons */}
                     <div className="flex gap-2">
-                      <Link href={`/account/orders/${order.id}`}>
-                        <Button variant="outline" size="sm">
-                  <Eye className="w-4 h-4 mr-2" />
-                  View Details
-                </Button>
+                      <Link href={`/account/orders/${order.orderNumber}`}>
+                        <Button variant="outline" size="sm" className="flex gap-2">
+                          <Eye className="w-4 h-4" />
+                          <span className="hidden sm:inline">View Details</span>
+                        </Button>
                       </Link>
                       <Button 
                         variant="outline" 
                         size="sm"
-                        onClick={() => handleDownloadInvoice(order.id, order.orderNumber)}
-                        disabled={downloadingInvoices.has(order.id)}
+                        onClick={() => handleDownloadInvoice(order.orderNumber)}
+                        disabled={downloadingInvoices.has(order.orderNumber)}
                       >
-                        <Download className="w-4 h-4 mr-2" />
-                        {downloadingInvoices.has(order.id) ? 'Generating...' : 'Invoice'}
+                        <Download className="w-4 h-4" />
+                        <span className="hidden sm:inline">{downloadingInvoices.has(order.orderNumber) ? 'Generating...' : 'Invoice'}</span>
                       </Button>
                     </div>
                   </div>
@@ -456,3 +454,4 @@ export default function OrdersPage() {
     </ProtectedRoute>
   )
 } 
+ 

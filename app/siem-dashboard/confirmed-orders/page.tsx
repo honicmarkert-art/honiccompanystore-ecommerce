@@ -53,7 +53,7 @@ interface ConfirmedOrderItem {
 
 interface ConfirmedOrder {
   id: string
-  original_order_id: number
+  order_id: string // Changed from original_order_id: number to order_id: string (UUID)
   referenceId: string
   pickupId: string
   orderNumber: string
@@ -109,7 +109,7 @@ export default function ConfirmedOrdersPage() {
   const fetchConfirmedOrders = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch('/api/admin/confirmed-orders', { cache: 'no-store' })
+    const res = await fetch('/api/admin/confirmed-orders', { cache: 'no-store', credentials: 'include' })
       if (!res.ok) throw new Error('Failed to fetch confirmed orders')
       const data = await res.json()
       const normalized: ConfirmedOrder[] = (data.orders || []).map((o: any) => {
@@ -123,7 +123,7 @@ export default function ConfirmedOrdersPage() {
         
         return {
           id: o.id,
-          original_order_id: o.original_order_id,
+          order_id: o.order_id,
           referenceId: o.reference_id || o.id,
           pickupId: o.pickup_id ? o.pickup_id : (o.created_at ? new Date(o.created_at).toISOString().slice(0,10).replace(/-/g,'') : ''),
           orderNumber: o.order_number || o.id,
@@ -383,6 +383,7 @@ export default function ConfirmedOrdersPage() {
       const res = await fetch('/api/admin/confirmed-orders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ id: order.id, status: newStatus })
       })
       if (res.ok) {
@@ -670,7 +671,7 @@ export default function ConfirmedOrdersPage() {
                                 </span>
                               )}
                               <span className={cn("text-xs px-2 py-1 rounded bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200", themeClasses.mainText)}>
-                                Original: #{order.original_order_id}
+                                Original: #{order.order_id}
                               </span>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -818,7 +819,7 @@ export default function ConfirmedOrdersPage() {
                   <div className="flex items-center gap-2">
                     <span className={cn("font-medium", themeClasses.mainText)}>Original Order ID:</span>
                     <span className={cn("text-sm font-mono", themeClasses.textNeutralSecondary)}>
-                      #{selectedOrder.original_order_id}
+                      #{selectedOrder.order_id}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">

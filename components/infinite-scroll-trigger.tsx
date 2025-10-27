@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
+import { ProductGridSkeleton } from '@/components/ui/skeleton'
 
 interface InfiniteScrollTriggerProps {
   onLoadMore: () => void
@@ -60,6 +61,13 @@ export function InfiniteScrollTrigger({
     <div className="w-full">
       {children}
       
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="pt-4">
+          <ProductGridSkeleton count={24} />
+        </div>
+      )}
+      
       {/* Trigger element at the bottom */}
       <div
         ref={elementRef}
@@ -68,12 +76,6 @@ export function InfiniteScrollTrigger({
           className
         )}
       >
-        {loading && (
-          <div className="flex items-center space-x-2 text-gray-500">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-500"></div>
-            <span>Loading more products...</span>
-          </div>
-        )}
         
         {error && !loading && (
           <div className="text-red-500 text-center">

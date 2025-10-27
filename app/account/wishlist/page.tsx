@@ -12,7 +12,6 @@ import {
   ShoppingCart,
   Trash2,
   Share2,
-  Eye,
   Plus,
   Minus,
   Star
@@ -29,6 +28,7 @@ import Link from 'next/link'
 interface WishlistItem {
   id: string
   productId: string
+  slug: string
   name: string
   price: number
   originalPrice?: number
@@ -61,6 +61,7 @@ function WishlistPageContent() {
       return {
         id: String(product.id),
         productId: String(product.id),
+        slug: product.slug || String(product.id), // Include slug for SEO-friendly URLs
         name: product.name,
         price: product.price,
         originalPrice: product.originalPrice,
@@ -134,10 +135,6 @@ function WishlistPageContent() {
     }
   }
 
-  const handleViewProduct = (productId: string) => {
-    router.push(`/products/${productId}`)
-  }
-
   const handleShareWishlist = () => {
     // In real app, this would share the wishlist
     navigator.clipboard.writeText(`${window.location.origin}/account/wishlist`)
@@ -161,7 +158,7 @@ function WishlistPageContent() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 min-h-screen bg-background">
       {/* Header */}
       <div className="mb-8">
         <div className="mb-4">
@@ -235,14 +232,14 @@ function WishlistPageContent() {
             style={{ contentVisibility: 'auto', containIntrinsicSize: '280px 380px' }}
           >
             <Link 
-              href={`/products/${item.productId}`} 
-              className="block relative aspect-square overflow-hidden" 
+              href={`/products/${item.slug}`} 
+              className="block relative aspect-square overflow-hidden rounded-lg" 
             >
               <Image
                 src={item.image}
                 alt={item.name}
                 fill
-                className="object-cover transition-transform duration-300 hover:scale-105"
+                className="object-cover transition-transform duration-300 hover:scale-105 rounded-lg"
                 sizes="(max-width: 640px) 40vw, (max-width: 1024px) 25vw, 20vw"
               />
               {/* Discount Badge */}
@@ -250,6 +247,15 @@ function WishlistPageContent() {
                 <div className="absolute top-0 right-0 sm:top-0 sm:right-1.5 z-10">
                   <span className="bg-black/60 text-white text-[8px] sm:text-[10px] font-semibold px-1 sm:px-1.5 py-0.5 rounded-none shadow-sm sm:shadow-md">
                     {getDiscountPercentage(item.originalPrice, item.price).toFixed(0)}% OFF
+                  </span>
+                </div>
+              )}
+              
+              {/* Origin Badge - Bottom Left if imported from China */}
+              {item.product?.importChina && (
+                <div className="absolute bottom-1 left-1 sm:bottom-2 sm:left-2 z-10">
+                  <span className="bg-red-600 text-white text-[8px] sm:text-[10px] font-semibold px-1 sm:px-1.5 py-0.5 rounded-none shadow-sm sm:shadow-md">
+                    i - China
                   </span>
                 </div>
               )}
@@ -276,19 +282,19 @@ function WishlistPageContent() {
                 </Button>
               </div>
             </Link>
-            <CardContent className="p-3 flex-1 flex flex-col justify-between min-h-[120px]">
+            <CardContent className="p-2 flex-1 flex flex-col justify-between min-h-[100px]">
               <div className="flex-1">
-                <Link href={`/products/${item.productId}`} className="block">
-                  <h3 className="text-sm font-semibold hover:text-blue-600 dark:hover:text-blue-400 transition-colors line-clamp-2 mb-2">
+                <Link href={`/products/${item.slug}`} className="block">
+                  <h3 className="text-xs sm:text-sm font-semibold hover:text-blue-600 dark:hover:text-blue-400 transition-colors line-clamp-2 mb-1">
                     {item.name}
                   </h3>
                 </Link>
                 {/* Rating */}
-                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mb-2">
+                <div className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 mb-1">
                   {Array.from({ length: 5 }).map((_, i) => (
                     <Star
                       key={i}
-                      className={`w-3 h-3 ${
+                      className={`w-2.5 h-2.5 ${
                         i < Math.floor(item.rating)
                           ? "fill-yellow-400 text-yellow-400"
                           : "text-gray-300 dark:text-gray-600"
@@ -298,33 +304,24 @@ function WishlistPageContent() {
                   <span>({item.reviewCount})</span>
                 </div>
                 {/* Price */}
-                <div className="flex flex-wrap items-baseline gap-x-2 mb-3">
-                  <div className="text-base font-bold">
+                <div className="flex flex-wrap items-baseline gap-x-2 mb-1">
+                  <div className="text-sm font-bold">
                     TZS {item.price.toFixed(0)}
                   </div>
                   {item.originalPrice && item.originalPrice > item.price && (
-                    <div className="text-sm text-gray-500 dark:text-gray-400 line-through">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 line-through">
                       TZS {item.originalPrice.toFixed(0)}
                     </div>
                   )}
                 </div>
               </div>
               {/* Action Buttons */}
-              <div className="flex gap-2 mt-auto">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleViewProduct(item.productId)}
-                  className="flex-1 text-xs h-8"
-                >
-                  <Eye className="w-3 h-3 mr-1" />
-                  View
-                </Button>
+              <div className="flex gap-2 mt-1">
                 <Button
                   size="sm"
                   disabled={!item.isInStock}
                   onClick={() => handleAddToCart(item)}
-                  className="flex-1 text-xs h-8"
+                  className="flex-1 text-xs h-7 w-full"
                 >
                   <ShoppingCart className="w-3 h-3 mr-1" />
                   Add

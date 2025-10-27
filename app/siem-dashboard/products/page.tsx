@@ -57,7 +57,7 @@ export default function AdminProducts() {
 
 function AdminProductsContent() {
   const { themeClasses } = useTheme()
-  const { products, addProduct, updateProduct, deleteProduct, resetToDefault, isLoading, fetchFullProducts } = useProducts()
+  const { products, addProduct, updateProduct, deleteProduct, resetToDefault, isLoading, fetchFullProducts, fetchFullProductDetails } = useProducts()
   const { formatPrice } = useCurrency() // Use global currency context
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
@@ -91,8 +91,15 @@ function AdminProductsContent() {
     })
   }, [products, searchTerm, selectedCategory, selectedBrand])
 
-  const handleEditProduct = (product: any) => {
-    setEditingProduct(product)
+  const handleEditProduct = async (product: any) => {
+    // Refresh the product data from the database before opening the form
+    try {
+      const refreshedProduct = await fetchFullProductDetails(product.id)
+      setEditingProduct(refreshedProduct)
+    } catch (error) {
+      // Fallback to original product data
+      setEditingProduct(product)
+    }
     setIsAddDialogOpen(true)
   }
 
@@ -156,22 +163,18 @@ function AdminProductsContent() {
                 }}
                 onSave={async (productData) => {
                   try {
-                    let updatedProduct = null
                     if (editingProduct) {
-                      updatedProduct = await updateProduct(editingProduct.id, productData)
-                      // Update the editingProduct with the returned data
-                      setEditingProduct(updatedProduct)
+                      await updateProduct(editingProduct.id, productData)
+                      // Refresh the product data after update
+                      const refreshedProduct = await fetchFullProductDetails(editingProduct.id)
+                      setEditingProduct(refreshedProduct)
                     } else {
-                      updatedProduct = await addProduct(productData)
+                      await addProduct(productData)
                     }
                     
                     // Force refresh the products list to ensure UI is up to date
                     await fetchFullProducts()
-                    
-                    // Return the updated product data so the form can refresh
-                    return updatedProduct
                   } catch (error) {
-                    console.error('Error saving product:', error)
                     
                     // Show user-friendly error message
                     const errorMessage = error instanceof Error ? error.message : 'Failed to save product'

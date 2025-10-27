@@ -105,17 +105,9 @@ export async function POST(request: NextRequest) {
       
       // Collect variant attributes (regular attributes object)
       const variantAttributes = rawVariants.flatMap((v: any) => 
-        v.attributes ? Object.values(v.attributes) : []
-      ).filter(Boolean)
-      
-      // Collect variant primaryValues (for primary-dependent variants)  
-      const variantPrimaryValues = rawVariants.flatMap((v: any) => 
-        (v.primary_values || v.primaryValues)?.map((pv: any) => pv.value) || []
-      ).filter(Boolean)
-      
-      // Collect variant multiValues (for multi-select attributes)
-      const variantMultiValues = rawVariants.flatMap((v: any) => 
-        (v.multi_values || v.multiValues) ? Object.values(v.multi_values || v.multiValues).flat() : []
+        v.attributes ? Object.values(v.attributes).flatMap(val => 
+          typeof val === 'string' && val.includes(',') ? val.split(',').map(s => s.trim()) : [val]
+        ) : []
       ).filter(Boolean)
       
       // Combine all searchable text including all variant data
@@ -130,7 +122,6 @@ export async function POST(request: NextRequest) {
         ...variantNames,
         ...variantAttributes,
         ...variantPrimaryValues,
-        ...variantMultiValues
       ].join(' ')
       
       return {

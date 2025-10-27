@@ -69,7 +69,7 @@ export function ProductHeader({ productName, category, productUrl }: ProductHead
           {/* Breadcrumb Navigation - Hidden on mobile */}
           <nav className="hidden md:flex text-sm text-muted-foreground items-center">
             <button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/home')}
               className="hover:text-foreground transition-colors"
             >
               Home

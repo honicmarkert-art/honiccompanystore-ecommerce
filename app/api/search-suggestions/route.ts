@@ -28,8 +28,8 @@ export async function GET(request: NextRequest) {
     // Search in product_variants table
     const { data: variants, error: variantsError } = await supabase
       .from('product_variants')
-      .select('variant_name, primary_values, multi_values')
-      .or(`variant_name.ilike.%${query}%, primary_values.ilike.%${query}%, multi_values.ilike.%${query}%`)
+      .select('variant_name, primary_values, attributes')
+      .or(`variant_name.ilike.%${query}%, primary_values.ilike.%${query}%, attributes.ilike.%${query}%`)
       .limit(10)
 
     if (variantsError) {
@@ -63,13 +63,20 @@ export async function GET(request: NextRequest) {
           }
         }
         
-        if (variant.multi_values) {
-          const multiValues = typeof variant.multi_values === 'string' 
-            ? JSON.parse(variant.multi_values) 
-            : variant.multi_values
-          if (Array.isArray(multiValues)) {
-            multiValues.forEach(value => {
-              if (typeof value === 'string') suggestions.add(value)
+        if (variant.attributes) {
+          const attributes = typeof variant.attributes === 'string' 
+            ? JSON.parse(variant.attributes) 
+            : variant.attributes
+          if (typeof attributes === 'object') {
+            Object.values(attributes).forEach(value => {
+              if (typeof value === 'string') {
+                // Handle comma-separated values
+                if (value.includes(',')) {
+                  value.split(',').forEach(v => suggestions.add(v.trim()))
+                } else {
+                  suggestions.add(value)
+                }
+              }
             })
           }
         }

@@ -9,6 +9,7 @@ import { useCompanyContext } from "@/components/company-provider"
 import { useCurrency } from "@/contexts/currency-context"
 import { useAuth } from "@/contexts/auth-context"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
+import { useCart } from "@/hooks/use-cart"
 import { CheckCircle, Clock, ArrowLeft, Home, Package, XCircle, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -22,6 +23,7 @@ function CheckoutReturnContent() {
   const { formatPrice } = useCurrency()
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
+  const { clearCart } = useCart()
 
   // Get order details from URL parameters
   let orderReference = searchParams.get('orderReference') || searchParams.get('order_reference') || searchParams.get('reference') || searchParams.get('order_id')
@@ -119,7 +121,7 @@ function CheckoutReturnContent() {
 
   const handleGoHome = () => {
     setIsRedirecting(true)
-    router.push('/')
+    router.push('/home')
   }
 
   // Fetch order data from database
@@ -128,7 +130,12 @@ function CheckoutReturnContent() {
     
     setIsLoadingOrder(true)
     try {
-      const response = await fetch(`/api/orders/${referenceId}`)
+      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+      let response = await fetch(`/api/orders/${referenceId}`)
+      if (response.status === 429) {
+        await sleep(400 + Math.floor(Math.random() * 300))
+        response = await fetch(`/api/orders/${referenceId}`)
+      }
       if (response.ok) {
         const data = await response.json()
         setOrderData(data.order)
@@ -160,7 +167,8 @@ function CheckoutReturnContent() {
     setIsRetryingPayment(true)
     try {
       // Use the correct ClickPesa API format
-      const response = await fetch('/api/payment/clickpesa', {
+      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+      let response = await fetch('/api/payment/clickpesa', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -170,8 +178,8 @@ function CheckoutReturnContent() {
           amount: String(orderData.totalAmount),
           currency: orderData.currency || 'TZS',
           orderId: orderData.referenceId,
-          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
-          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
+          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
+          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
           customerDetails: {
             fullName: orderData.billingAddress?.fullName || orderData.shippingAddress?.fullName || '',
             email: orderData.billingAddress?.email || orderData.shippingAddress?.email || '',
@@ -184,24 +192,36 @@ function CheckoutReturnContent() {
           },
         })
       })
+      if (response.status === 429) {
+        await sleep(400 + Math.floor(Math.random() * 300))
+        response = await fetch('/api/payment/clickpesa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create-checkout-link',
+            amount: String(orderData.totalAmount),
+            currency: orderData.currency || 'TZS',
+            orderId: orderData.referenceId,
+            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
+            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
+          })
+        })
+      }
 
       if (response.ok) {
         const data = await response.json()
         if (data.checkoutUrl || data.checkoutLink) {
           router.push(data.checkoutUrl || data.checkoutLink)
         } else {
-          console.error('No checkout URL received:', data)
           // Fallback to checkout page
           router.push('/checkout')
         }
       } else {
         const errorText = await response.text()
-        console.error('Failed to create payment retry:', response.status, errorText)
         // Fallback to checkout page
         router.push('/checkout')
       }
     } catch (error) {
-      console.error('Error retrying payment:', error)
       // Fallback to checkout page
       router.push('/checkout')
     } finally {
@@ -221,7 +241,6 @@ function CheckoutReturnContent() {
     const referenceId = orderData?.referenceId || normalizedReference || orderReference
     
     if (!referenceId) {
-      console.error('No reference ID available for retry:', { orderData, normalizedReference, orderReference })
       alert('Unable to retry payment. Please contact support.')
       return
     }
@@ -243,7 +262,8 @@ function CheckoutReturnContent() {
       const newReferenceId = `${referenceId}-retry-${timestamp}`
       
       // Create new ClickPesa checkout link with new reference ID
-      const response = await fetch('/api/payment/clickpesa', {
+      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+      let response = await fetch('/api/payment/clickpesa', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -253,8 +273,8 @@ function CheckoutReturnContent() {
           amount: String(orderData?.totalAmount || 0),
           currency: orderData?.currency || 'TZS',
           orderId: newReferenceId, // Use new reference ID
-          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
-          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
+          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
+          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
           customerDetails: {
             fullName: orderData?.billingAddress?.fullName || orderData?.shippingAddress?.fullName || 'Customer',
             email: orderData?.billingAddress?.email || orderData?.shippingAddress?.email || '',
@@ -267,6 +287,21 @@ function CheckoutReturnContent() {
           }
         })
       })
+      if (response.status === 429) {
+        await sleep(400 + Math.floor(Math.random() * 300))
+        response = await fetch('/api/payment/clickpesa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create-checkout-link',
+            amount: String(orderData?.totalAmount || 0),
+            currency: orderData?.currency || 'TZS',
+            orderId: newReferenceId,
+            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
+            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
+          })
+        })
+      }
 
       const result = await response.json()
       
@@ -274,11 +309,9 @@ function CheckoutReturnContent() {
         // Redirect to ClickPesa checkout
         router.push(result.checkoutUrl || result.checkoutLink)
       } else {
-        console.error('Failed to regenerate checkout link:', result)
         alert(`Payment system is temporarily unavailable. ${result.error || 'Please contact support or try again later.'}`)
       }
     } catch (error) {
-      console.error('Error regenerating payment:', error)
       alert('An error occurred while creating payment link. Please try again.')
     } finally {
       setIsRegeneratingOrder(false)
@@ -326,10 +359,8 @@ function CheckoutReturnContent() {
         // Refresh order data to get updated status
         await fetchOrderData(referenceId)
       } else {
-        console.error('❌ Failed to update retry payment status via return URL')
       }
     } catch (error) {
-      console.error('❌ Error updating retry payment status:', error)
     }
   }
 
@@ -373,6 +404,22 @@ function CheckoutReturnContent() {
     }
   }, [finalIsPaymentSuccessful, normalizedReference, orderReference])
 
+  // Clear guest cart from localStorage after successful payment
+  useEffect(() => {
+    if (finalIsPaymentSuccessful && !user && typeof window !== 'undefined') {
+      // Clear guest cart data from localStorage
+      localStorage.removeItem('guest_cart')
+      sessionStorage.removeItem('selected_cart_items')
+      sessionStorage.removeItem('buy_now_mode')
+      sessionStorage.removeItem('buy_now_item_data')
+      
+      // Optionally clear the cart hook (this will trigger a re-render)
+      if (clearCart) {
+        clearCart()
+      }
+    }
+  }, [finalIsPaymentSuccessful, user, clearCart])
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center p-4">
       {/* Welcome Message Bar - Mobile Only */}
@@ -380,7 +427,7 @@ function CheckoutReturnContent() {
         <div className="flex items-center justify-center h-6 px-4">
           {user ? (
             <div className="text-xs text-green-600 dark:text-green-400 font-medium">
-              Hi! {user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'} - Welcome again <span className="text-blue-600 dark:text-blue-400">{companyName || 'Honic Co.'}</span>
+              Hi! {(user as any).user_metadata?.full_name || user.email?.split('@')[0] || 'User'} - Welcome again <span className="text-blue-600 dark:text-blue-400">{companyName || 'Honic Co.'}</span>
             </div>
           ) : (
             <button 

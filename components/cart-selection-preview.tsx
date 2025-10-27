@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -26,6 +26,7 @@ export function CartSelectionPreview({
 }: CartSelectionPreviewProps) {
   const { themeClasses } = useTheme()
   const [localQuantities, setLocalQuantities] = useState<{ [key: string]: number }>({})
+  
 
   // Initialize local quantities from item variants
   useState(() => {
@@ -118,7 +119,7 @@ export function CartSelectionPreview({
                 const subtotal = variant.price * qty
                 
                 return (
-                  <div key={variant.variantId} className={cn(
+                  <div key={`${variant.variantId}-${index}`} className={cn(
                     "p-2 rounded border space-y-2",
                     "bg-white dark:bg-gray-800",
                     "border-gray-300 dark:border-gray-600"
@@ -136,9 +137,17 @@ export function CartSelectionPreview({
                         "text-gray-900 dark:text-gray-100"
                       )}>
                         {Object.keys(variant.attributes).length > 0 
-                          ? Object.entries(variant.attributes).map(([key, value]) => 
-                              `${key}: ${value}`
-                            ).join(', ')
+                          ? Object.entries(variant.attributes).map(([key, value]) => {
+                              let display: string
+                              if (Array.isArray(value)) {
+                                display = value.map((item: any) => (typeof item === 'object' && item?.value) ? item.value : String(item)).join(', ')
+                              } else if (typeof value === 'object' && (value as any)?.value) {
+                                display = String((value as any).value)
+                              } else {
+                                display = String(value)
+                              }
+                              return `${key}: ${display}`
+                            }).join(', ')
                           : 'Standard Product'
                         }
                       </span>

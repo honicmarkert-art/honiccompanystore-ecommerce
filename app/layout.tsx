@@ -4,6 +4,7 @@ import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
 import { CompanyProvider } from '@/components/company-provider'
+import { PublicCompanyProvider } from '@/contexts/public-company-context'
 import { AuthProvider } from '@/contexts/auth-context'
 import { GlobalAuthModalProvider } from '@/contexts/global-auth-modal'
 import { CurrencyProvider } from '@/contexts/currency-context'
@@ -150,16 +151,18 @@ export default function RootLayout({
                 <GlobalAuthModalProvider>
                   <CurrencyProvider>
                     <CompanyProvider>
-                      <RoutePrefetcher />
-                      <AdvancedRoutePrefetcher />
-                      <PerformanceOptimizer />
-                      <ScrollRestoration />
-                      <PageTransitionMonitor />
-                      <OptimizedPageWrapper>
-                        {children}
-                      </OptimizedPageWrapper>
-                      <HydrationFix />
-                      <Toaster />
+                      <PublicCompanyProvider>
+                        <RoutePrefetcher />
+                        <AdvancedRoutePrefetcher />
+                        <PerformanceOptimizer />
+                        <ScrollRestoration />
+                        <PageTransitionMonitor />
+                        <OptimizedPageWrapper>
+                          {children}
+                        </OptimizedPageWrapper>
+                        <HydrationFix />
+                        <Toaster />
+                      </PublicCompanyProvider>
                     </CompanyProvider>
                   </CurrencyProvider>
                 </GlobalAuthModalProvider>

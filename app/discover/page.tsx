@@ -8,7 +8,7 @@ export default function DiscoverPage() {
       description="Explore and discover new products, suppliers, and opportunities. Our discovery platform helps you find exactly what you're looking for."
       icon={<Eye className="w-10 h-10 text-white" />}
       category="Navigation"
-      estimatedLaunch="Q2 2024"
+      estimatedLaunch="Q2 2025"
       features={[
         "Advanced search and filtering",
         "Product discovery algorithms",

@@ -15,7 +15,10 @@ export async function GET() {
   try {
     const { data: categories, error } = await supabase
       .from('categories')
-      .select('*')
+      .select(`
+        *,
+        parent:parent_id(name, slug)
+      `)
       .order('display_order', { ascending: true })
 
     if (error) {
@@ -34,7 +37,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, description, slug, image_url, is_active, display_order } = body
+    const { name, description, slug, image_url, is_active, display_order, parent_id } = body
 
     // Validate required fields
     if (!name || !slug) {
@@ -61,9 +64,13 @@ export async function POST(request: NextRequest) {
         slug,
         image_url,
         is_active: is_active ?? true,
-        display_order: display_order ?? 0
+        display_order: display_order ?? 0,
+        parent_id: parent_id || null
       })
-      .select()
+      .select(`
+        *,
+        parent:parent_id(name, slug)
+      `)
       .single()
 
     if (error) {
@@ -82,7 +89,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const { id, name, description, slug, image_url, is_active, display_order } = body
+    const { id, name, description, slug, image_url, is_active, display_order, parent_id } = body
 
     if (!id) {
       return NextResponse.json({ error: 'Category ID is required' }, { status: 400 })
@@ -121,12 +128,16 @@ export async function PUT(request: NextRequest) {
     if (image_url !== undefined) updateData.image_url = image_url
     if (is_active !== undefined) updateData.is_active = is_active
     if (display_order !== undefined) updateData.display_order = display_order
+    if (parent_id !== undefined) updateData.parent_id = parent_id
 
     const { data: category, error } = await supabase
       .from('categories')
       .update(updateData)
       .eq('id', id)
-      .select()
+      .select(`
+        *,
+        parent:parent_id(name, slug)
+      `)
       .single()
 
     if (error) {

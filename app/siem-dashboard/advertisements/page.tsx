@@ -53,7 +53,11 @@ export default function AdvertisementsPage() {
   const fetchAdvertisements = async () => {
     try {
       setIsLoading(true)
-      const response = await fetch('/api/admin/advertisements')
+      const response = await fetch('/api/admin/advertisements', { credentials: 'include' })
+      if (!response.ok) {
+        const text = await response.text().catch(() => '')
+        console.error('[AdminAds] /api/admin/advertisements failed:', response.status, response.statusText, text?.slice(0,200))
+      }
       if (response.ok) {
         const data = await response.json()
         setAdvertisements(data.advertisements || [])
@@ -71,7 +75,11 @@ export default function AdvertisementsPage() {
 
   const fetchRotationTime = async () => {
     try {
-      const response = await fetch('/api/admin/settings/ad-rotation')
+      const response = await fetch('/api/admin/settings/ad-rotation', { credentials: 'include' })
+      if (!response.ok) {
+        const text = await response.text().catch(() => '')
+        console.error('[AdminAds] /api/admin/settings/ad-rotation failed:', response.status, response.statusText, text?.slice(0,200))
+      }
       if (response.ok) {
         const data = await response.json()
         setRotationTime(data.rotationTime || 10)
@@ -85,6 +93,7 @@ export default function AdvertisementsPage() {
       const response = await fetch('/api/admin/settings/ad-rotation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ rotationTime })
       })
 
@@ -204,6 +213,7 @@ export default function AdvertisementsPage() {
       const response = await fetch('/api/admin/advertisements', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(updateData)
       })
 
@@ -262,6 +272,7 @@ export default function AdvertisementsPage() {
 
       const response = await fetch('/api/admin/advertisements', {
         method: 'POST',
+        credentials: 'include',
         body: formDataToSend
       })
 
@@ -322,6 +333,7 @@ export default function AdvertisementsPage() {
       const response = await fetch('/api/admin/advertisements', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ id, is_active: !currentStatus })
       })
 

@@ -101,7 +101,7 @@ export default function AccountSettingsPage() {
           </div>
         </div>
         <div className="text-sm text-gray-500">
-          <Link href="/">Home</Link>
+          <Link href="/home">Home</Link>
           <span className="mx-2">/</span>
           <Link href="/account">Account</Link>
           <span className="mx-2">/</span>

@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shimmer animation for skeleton loading */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 /* Hide browser extension attributes to prevent hydration mismatches */
 [data-bis_skin_checked],
 [data-bis_skin],

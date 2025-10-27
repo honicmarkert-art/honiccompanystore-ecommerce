@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { validateServerSession } from '@/lib/security-server'
 import { getCachedData, setCachedData, CACHE_TTL, generateCacheKey } from '@/lib/database-optimization'
 import { enhancedCache, performanceMonitor, performanceUtils } from '@/lib/performance-monitor'
@@ -43,6 +43,9 @@ export async function GET(request: NextRequest) {
     // Sorting parameters
     const sortBy = searchParams.get('sortBy') || 'created_at'
     const sortOrder = searchParams.get('sortOrder') || 'desc'
+    
+    // Batch IDs parameter for prefetching
+    const idsParam = searchParams.get('ids')
 
     // Generate cache key based on parameters (including filters)
     const cacheKey = generateCacheKey('products', {
@@ -85,34 +88,50 @@ export async function GET(request: NextRequest) {
     }
 
     // Build optimized query with proper TypeScript handling
-    let queryBuilder: any = supabase.from('products')
+    // Use regular client for public GET operations, admin client only for admin operations
+    const { createClient } = await import('@supabase/supabase-js')
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const publicClient = createClient(supabaseUrl, supabaseAnonKey)
+    
+    let queryBuilder: any = publicClient.from('products')
     
     // Select fields based on request type
     if (minimal) {
       queryBuilder = queryBuilder.select(`
         id, name, price, original_price, image, category, brand, 
-        rating, reviews, in_stock, stock_quantity, free_delivery, same_day_delivery,
-        variant_config, product_variants (*)
+        rating, reviews, in_stock, stock_quantity, free_delivery, same_day_delivery, import_china,
+        is_new, updated_at, variant_config, product_variants (*)
       `)
     } else if (enriched) {
       // Enriched data for list views - includes most fields needed for product cards
       queryBuilder = queryBuilder.select(`
         id, name, price, original_price, description, 
         image, category, brand, rating, reviews, 
-        in_stock, stock_quantity, free_delivery, same_day_delivery,
+        in_stock, stock_quantity, free_delivery, same_day_delivery, import_china,
         created_at, updated_at, variant_config,
         product_variants (*)
       `)
     } else {
-      queryBuilder = queryBuilder.select(`
+      queryBuilder = queryBuilder      .select(`
         *,
-        product_variants (*)
+        product_variants (*),
+        categories!category_id (id, name, slug, parent_id)
       `)
     }
 
     // Apply filters
+    // Handle batch IDs for prefetching
+    if (idsParam) {
+      const idList = idsParam.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))
+      if (idList.length > 0) {
+        queryBuilder = queryBuilder.in('id', idList)
+      }
+    }
+    
     if (category) {
-      queryBuilder = queryBuilder.eq('category', category)
+      // Filter by category_id (foreign key) instead of category string
+      queryBuilder = queryBuilder.eq('category_id', category)
     }
     if (brand) {
       queryBuilder = queryBuilder.eq('brand', brand)
@@ -138,11 +157,16 @@ export async function GET(request: NextRequest) {
     }
     
     // Multiple categories filtering (comma-separated)
-    if (categories) {
+    if (categories !== undefined && categories !== null) {
       const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
+      
       if (categoryList.length > 0) {
-        queryBuilder = queryBuilder.in('category', categoryList)
+        queryBuilder = queryBuilder.in('category_id', categoryList)
+      } else {
+        // If categories parameter exists but is empty, return no products
+        queryBuilder = queryBuilder.eq('category_id', '00000000-0000-0000-0000-000000000000')
       }
+    } else {
     }
     // Search filtering (only when search term is provided)
     // NOTE: We don't filter at database level for search - we do fuzzy search in-memory
@@ -190,10 +214,10 @@ export async function GET(request: NextRequest) {
     const offsetNum = offset ? parseInt(offset) : 0
     
     // Build count query with same filters
-    let countQuery = supabase.from('products').select('id', { count: 'exact', head: true })
+    let countQuery = publicClient.from('products').select('id', { count: 'exact', head: true })
     
     // Apply same filters as main query
-    if (category) countQuery = countQuery.eq('category', category)
+    if (category) countQuery = countQuery.eq('category_id', category)
     if (brand) countQuery = countQuery.eq('brand', brand)
     if (minPrice) {
       const min = parseFloat(minPrice)
@@ -204,9 +228,15 @@ export async function GET(request: NextRequest) {
       if (!isNaN(max) && max >= 0) countQuery = countQuery.lte('price', max)
     }
     if (inStock === 'true') countQuery = countQuery.eq('in_stock', true)
-    if (categories) {
+    if (categories !== undefined && categories !== null) {
       const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
-      if (categoryList.length > 0) countQuery = countQuery.in('category', categoryList)
+      
+      if (categoryList.length > 0) {
+        countQuery = countQuery.in('category_id', categoryList)
+      } else {
+        // If categories parameter exists but is empty, return no products
+        countQuery = countQuery.eq('category_id', '00000000-0000-0000-0000-000000000000')
+      }
     }
     // Don't filter count query by search - we do fuzzy search in-memory
     // Count will be adjusted after fuzzy search filtering
@@ -251,12 +281,12 @@ export async function GET(request: NextRequest) {
       
       try {
         // Use PostgreSQL full-text search with basic textSearch
-        const { data: searchResults, error: searchError } = await supabase
+        const { data: searchResults, error: searchError } = await publicClient
           .from('products')
           .select(`
             id, name, description, category, brand, price, image,
             product_variants (
-              sku, model, attributes, primary_values, multi_values
+              sku, model, attributes, primary_values
             )
           `)
           .textSearch('search_vector', sanitized, { type: 'websearch' })
@@ -265,7 +295,7 @@ export async function GET(request: NextRequest) {
         if (searchError) {
           logger.error('Full-text search error:', searchError)
           // Fallback to simple ILIKE search
-          const { data: fallbackResults, error: fallbackError } = await supabase
+          const { data: fallbackResults, error: fallbackError } = await publicClient
             .from('products')
             .select('id')
             .or(`name.ilike.%${sanitized}%,description.ilike.%${sanitized}%,category.ilike.%${sanitized}%,brand.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
@@ -299,10 +329,9 @@ export async function GET(request: NextRequest) {
               variant.model || '',
               JSON.stringify(variant.attributes || {}),
               JSON.stringify(variant.primary_values || []),
-              JSON.stringify(variant.multi_values || {})
             ]
             
-            // Also extract individual values from primary_values and multi_values
+            // Also extract individual values from primary_values
             if (variant.primary_values && Array.isArray(variant.primary_values)) {
               variant.primary_values.forEach((pv: any) => {
                 if (pv.value) variantTexts.push(pv.value)
@@ -310,15 +339,6 @@ export async function GET(request: NextRequest) {
               })
             }
             
-            if (variant.multi_values && typeof variant.multi_values === 'object') {
-              Object.values(variant.multi_values).forEach((values: any) => {
-                if (Array.isArray(values)) {
-                  values.forEach((value: any) => variantTexts.push(value))
-                } else if (typeof values === 'string') {
-                  variantTexts.push(values)
-                }
-              })
-            }
             
             // Join all text and search
             const variantText = variantTexts.join(' ').toLowerCase()
@@ -351,7 +371,7 @@ export async function GET(request: NextRequest) {
       } catch (error) {
         logger.error('Search execution error:', error)
         // Fallback to simple ILIKE search
-        const { data: fallbackResults, error: fallbackError } = await supabase
+        const { data: fallbackResults, error: fallbackError } = await publicClient
           .from('products')
           .select('id')
           .or(`name.ilike.%${sanitized}%,description.ilike.%${sanitized}%,category.ilike.%${sanitized}%,brand.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
@@ -407,7 +427,7 @@ export async function GET(request: NextRequest) {
         for (const v of variants) {
           const vSku = (v.sku || '').toLowerCase()
           const vModel = (v.model || '').toLowerCase()
-          const vText = `${vSku} ${vModel} ${JSON.stringify(v.attributes||{})} ${JSON.stringify(v.primary_values||[])} ${JSON.stringify(v.multi_values||{})}`.toLowerCase()
+          const vText = `${vSku} ${vModel} ${JSON.stringify(v.attributes||{})} ${JSON.stringify(v.primary_values||[])}`.toLowerCase()
           if (vSku.startsWith(firstWord) || vModel.startsWith(firstWord)) score += 25
           if (vText.includes(queryLower)) { score += 10; break }
         }
@@ -450,16 +470,28 @@ export async function GET(request: NextRequest) {
       id: product.id,
       name: product.name,
         originalPrice,
+        original_price: product.original_price, // Keep raw original_price for badge calculation
         price,
         rating,
         reviews,
       image: product.image,
-      category: product.category,
+      category: product.categories?.name || product.category,
+      category_id: product.category_id,
+      category_slug: product.categories?.slug,
+      category_parent_id: product.categories?.parent_id,
       brand: product.brand,
         inStock: effectiveInStock,
         stockQuantity,
+        // Include snake_case fields for stock validation compatibility
+        in_stock: effectiveInStock,
+        stock_quantity: stockQuantity,
         freeDelivery: !!product.free_delivery,
         sameDayDelivery: !!product.same_day_delivery,
+        free_delivery: product.free_delivery, // Keep raw field for badge calculation
+        same_day_delivery: product.same_day_delivery, // Keep raw field for badge calculation
+        importChina: !!(product as any).import_china,
+        is_new: product.is_new, // For "New" badge calculation
+        updated_at: product.updated_at, // For "New" badge calculation
       }
 
       // Always include variant data for auto-selection functionality
@@ -471,11 +503,21 @@ export async function GET(request: NextRequest) {
           sku: variant.sku,
           model: variant.model,
           variantType: variant.variant_type,
-          attributes: variant.attributes || {},
+          attributes: (() => {
+            const attrs = variant.attributes || {}
+            const displayAttrs = { ...attrs }
+            Object.keys(displayAttrs).forEach(key => {
+              if (Array.isArray(displayAttrs[key])) {
+                displayAttrs[key] = displayAttrs[key].map(item => 
+                  typeof item === 'object' && item.value ? item.value : item
+                ).join(', ')
+              }
+            })
+            return displayAttrs
+          })(),
           primaryAttribute: variant.primary_attribute,
           dependencies: variant.dependencies || {},
           primaryValues: variant.primary_values || [],
-          multiValues: variant.multi_values || {},
           stockQuantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
           inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true
         })) || [],
@@ -493,8 +535,8 @@ export async function GET(request: NextRequest) {
       sku: product.sku,
       model: product.model,
       views: product.views,
-      video: product.video ? (product.video.startsWith('http') ? product.video : supabase.storage.from('product-videos').getPublicUrl(product.video).data.publicUrl) : null,
-      view360: product.view360 ? (product.view360.startsWith('http') ? product.view360 : supabase.storage.from('product-models').getPublicUrl(product.view360).data.publicUrl) : null,
+      video: product.video ? (product.video.startsWith('http') ? product.video : publicClient.storage.from('product-videos').getPublicUrl(product.video).data.publicUrl) : null,
+      view360: product.view360 ? (product.view360.startsWith('http') ? product.view360 : publicClient.storage.from('product-models').getPublicUrl(product.view360).data.publicUrl) : null,
           stockQuantity,
       variantImages: product.variant_images || []
         }
@@ -601,7 +643,7 @@ export async function POST(request: NextRequest) {
       ...productData,
       name: securityUtils.sanitizeInput(productData.name),
       description: productData.description ? securityUtils.sanitizeInput(productData.description) : '',
-      category: productData.category ? securityUtils.sanitizeInput(productData.category) : '',
+      category_id: productData.category_id,
       brand: productData.brand ? securityUtils.sanitizeInput(productData.brand) : ''
     }
 
@@ -624,7 +666,7 @@ export async function POST(request: NextRequest) {
       rating: productData.rating || 0,
       reviews: productData.reviews || 0,
       image: productData.image,
-      category: productData.category,
+      category_id: productData.category_id,
       brand: productData.brand,
       description: productData.description,
       specifications: productData.specifications || {},
@@ -638,6 +680,7 @@ export async function POST(request: NextRequest) {
       stock_quantity: productData.stockQuantity,
       free_delivery: productData.freeDelivery || false,
       same_day_delivery: productData.sameDayDelivery || false,
+      import_china: productData.importChina || false,
       variant_config: productData.variantConfig,
       variant_images: productData.variantImages || []
     }
@@ -647,7 +690,8 @@ export async function POST(request: NextRequest) {
       in_stock: supabaseProduct.in_stock
     })
 
-    const { data: product, error } = await supabase
+    const adminClient = createAdminSupabaseClient()
+    const { data: product, error } = await adminClient
       .from('products')
       .insert(supabaseProduct)
       .select()
@@ -674,7 +718,7 @@ export async function POST(request: NextRequest) {
     // Only update product stock from variants if there are variants with quantities
     // Otherwise, keep the manually set stock quantity from initial insert
     if (productData.variants && productData.variants.length > 0 && calculatedTotalStock > 0) {
-      await supabase
+      await adminClient
         .from('products')
         .update({ 
           stock_quantity: calculatedTotalStock,
@@ -714,14 +758,13 @@ export async function POST(request: NextRequest) {
           primary_attribute: primaryAttribute,
           dependencies: variant.dependencies || {},
           primary_values: variant.primaryValues || [],
-          multi_values: variant.multiValues || {},
           stock_quantity: typeof variant.stockQuantity === 'number' ? variant.stockQuantity : null
         }
       })
 
       logger.log('Transformed variants for database:', variants)
 
-      const { data: insertedVariants, error: variantError } = await supabase
+      const { data: insertedVariants, error: variantError } = await adminClient
         .from('product_variants')
         .insert(variants)
         .select()
@@ -745,7 +788,10 @@ export async function POST(request: NextRequest) {
       rating: product.rating,
       reviews: product.reviews,
       image: product.image,
-      category: product.category,
+      category: product.categories?.name || product.category,
+      category_id: product.category_id,
+      category_slug: product.categories?.slug,
+      category_parent_id: product.categories?.parent_id,
       brand: product.brand,
       description: product.description,
       specifications: product.specifications || {},
@@ -782,11 +828,15 @@ export async function PUT(request: NextRequest) {
 
     const { id, ...updates } = await request.json()
     
+    
     logger.log('🔍 PUT Product Data Received:', {
       id,
       stockQuantity: updates.stockQuantity,
       inStock: updates.inStock,
-      variantsLength: updates.variants?.length || 0
+      variantsLength: updates.variants?.length || 0,
+      importChina: updates.importChina,
+      freeDelivery: updates.freeDelivery,
+      sameDayDelivery: updates.sameDayDelivery
     })
     
     // Transform the updates for Supabase
@@ -797,7 +847,7 @@ export async function PUT(request: NextRequest) {
     if (updates.rating !== undefined) supabaseUpdates.rating = updates.rating
     if (updates.reviews !== undefined) supabaseUpdates.reviews = updates.reviews
     if (updates.image !== undefined) supabaseUpdates.image = updates.image
-    if (updates.category !== undefined) supabaseUpdates.category = updates.category
+    if (updates.category_id !== undefined) supabaseUpdates.category_id = updates.category_id
     if (updates.brand !== undefined) supabaseUpdates.brand = updates.brand
     if (updates.description !== undefined) supabaseUpdates.description = updates.description
     if (updates.specifications !== undefined) supabaseUpdates.specifications = updates.specifications
@@ -811,21 +861,28 @@ export async function PUT(request: NextRequest) {
     if (updates.stockQuantity !== undefined) supabaseUpdates.stock_quantity = updates.stockQuantity
     if (updates.freeDelivery !== undefined) supabaseUpdates.free_delivery = updates.freeDelivery
     if (updates.sameDayDelivery !== undefined) supabaseUpdates.same_day_delivery = updates.sameDayDelivery
+    if (updates.importChina !== undefined) supabaseUpdates.import_china = updates.importChina
     if (updates.variantConfig !== undefined) supabaseUpdates.variant_config = updates.variantConfig
     if (updates.variantImages !== undefined) supabaseUpdates.variant_images = updates.variantImages
 
+
     logger.log('📝 Updating product with stock:', {
       stock_quantity: supabaseUpdates.stock_quantity,
-      in_stock: supabaseUpdates.in_stock
+      in_stock: supabaseUpdates.in_stock,
+      import_china: supabaseUpdates.import_china,
+      free_delivery: supabaseUpdates.free_delivery,
+      same_day_delivery: supabaseUpdates.same_day_delivery
     })
 
-    const { data: product, error } = await supabase
+    const adminClient = createAdminSupabaseClient()
+    const { data: product, error } = await adminClient
       .from('products')
       .update(supabaseUpdates)
       .eq('id', id)
       .select(`
         *,
-        product_variants (*)
+        product_variants (*),
+        categories!category_id (id, name, slug, parent_id)
       `)
       .single()
 
@@ -837,6 +894,15 @@ export async function PUT(request: NextRequest) {
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
+
+    logger.log('✅ Product updated successfully:', {
+      id: product.id,
+      name: product.name,
+      import_china: product.import_china,
+      free_delivery: product.free_delivery,
+      same_day_delivery: product.same_day_delivery
+    })
+
 
     // Handle variants update
     if (updates.variants !== undefined) {
@@ -860,7 +926,7 @@ export async function PUT(request: NextRequest) {
       // Only update product stock from variants if there are actually variants
       // Otherwise, keep the manually set stock quantity
       if (updates.variants && updates.variants.length > 0) {
-        await supabase
+        await adminClient
           .from('products')
           .update({ 
             stock_quantity: calculatedTotalStock,
@@ -870,7 +936,7 @@ export async function PUT(request: NextRequest) {
       }
       
       // First, delete existing variants
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await adminClient
         .from('product_variants')
         .delete()
         .eq('product_id', id)
@@ -908,14 +974,13 @@ export async function PUT(request: NextRequest) {
             primary_attribute: primaryAttribute,
             dependencies: variant.dependencies || {},
             primary_values: variant.primaryValues || [],
-            multi_values: variant.multiValues || {},
             stock_quantity: typeof variant.stockQuantity === 'number' ? variant.stockQuantity : null
           }
         })
 
         logger.log('Transformed variants for database:', variants)
 
-        const { data: insertedVariants, error: variantError } = await supabase
+        const { data: insertedVariants, error: variantError } = await adminClient
           .from('product_variants')
           .insert(variants)
           .select()
@@ -934,7 +999,7 @@ export async function PUT(request: NextRequest) {
     // Get fresh variants after update
     let freshVariants = []
     if (updates.variants !== undefined) {
-      const { data: variantData } = await supabase
+      const { data: variantData } = await adminClient
         .from('product_variants')
         .select('*')
         .eq('product_id', id)
@@ -946,11 +1011,21 @@ export async function PUT(request: NextRequest) {
         sku: variant.sku,
         model: variant.model,
         variantType: variant.variant_type,
-        attributes: variant.attributes || {},
+        attributes: (() => {
+          const attrs = variant.attributes || {}
+          const displayAttrs = { ...attrs }
+          Object.keys(displayAttrs).forEach(key => {
+            if (Array.isArray(displayAttrs[key])) {
+              displayAttrs[key] = displayAttrs[key].map(item => 
+                typeof item === 'object' && item.value ? item.value : item
+              ).join(', ')
+            }
+          })
+          return displayAttrs
+        })(),
         primaryAttribute: variant.primary_attribute,
         dependencies: variant.dependencies || {},
         primaryValues: variant.primary_values || [],
-        multiValues: variant.multi_values || {}
       })) || []
     } else {
       // Use existing variants if not updated
@@ -961,11 +1036,21 @@ export async function PUT(request: NextRequest) {
         sku: variant.sku,
         model: variant.model,
         variantType: variant.variant_type,
-        attributes: variant.attributes || {},
+        attributes: (() => {
+          const attrs = variant.attributes || {}
+          const displayAttrs = { ...attrs }
+          Object.keys(displayAttrs).forEach(key => {
+            if (Array.isArray(displayAttrs[key])) {
+              displayAttrs[key] = displayAttrs[key].map(item => 
+                typeof item === 'object' && item.value ? item.value : item
+              ).join(', ')
+            }
+          })
+          return displayAttrs
+        })(),
         primaryAttribute: variant.primary_attribute,
         dependencies: variant.dependencies || {},
         primaryValues: variant.primary_values || [],
-        multiValues: variant.multi_values || {}
       })) || []
     }
 
@@ -978,7 +1063,10 @@ export async function PUT(request: NextRequest) {
       rating: product.rating,
       reviews: product.reviews,
       image: product.image,
-      category: product.category,
+      category: product.categories?.name || product.category,
+      category_id: product.category_id,
+      category_slug: product.categories?.slug,
+      category_parent_id: product.categories?.parent_id,
       brand: product.brand,
       description: product.description,
       specifications: product.specifications || {},
@@ -992,9 +1080,11 @@ export async function PUT(request: NextRequest) {
       stockQuantity: product.stock_quantity,
       freeDelivery: product.free_delivery,
       sameDayDelivery: product.same_day_delivery,
+      importChina: !!(product as any).import_china,
       variants: freshVariants,
       variantConfig: product.variant_config
     }
+
 
     return NextResponse.json(transformedProduct)
   } catch (error) {
@@ -1016,8 +1106,10 @@ export async function DELETE(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const id = parseInt(searchParams.get('id') || '0')
     
+    const adminClient = createAdminSupabaseClient()
+    
     // First delete variants
-    const { error: variantError } = await supabase
+    const { error: variantError } = await adminClient
       .from('product_variants')
       .delete()
       .eq('product_id', id)
@@ -1027,7 +1119,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Then delete the product
-    const { error } = await supabase
+    const { error } = await adminClient
       .from('products')
       .delete()
       .eq('id', id)

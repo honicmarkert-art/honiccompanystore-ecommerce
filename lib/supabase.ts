@@ -38,7 +38,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   global: {
     headers: {
-      'X-Client-Info': 'aliexpress-clone'
+      'X-Client-Info': 'aliexpress-clone',
+      'apikey': supabaseAnonKey
     }
   }
 })

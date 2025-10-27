@@ -29,36 +29,18 @@ export function AuthStatusIndicator() {
   })
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        setAuthStatus(prev => ({ ...prev, loading: true }))
-        
-        const response = await fetch('/api/auth/test-admin', {
-          credentials: 'include'
-        })
-        
-        const data = await response.json()
-        
-        setAuthStatus({
-          authenticated: data.authenticated || false,
-          isAdmin: data.isAdmin || false,
-          loading: false,
-          error: data.error,
-          user: data.user
-        })
-      } catch (error) {
-        console.error('Auth check error:', error)
-        setAuthStatus({
-          authenticated: false,
-          isAdmin: false,
-          loading: false,
-          error: 'Failed to check authentication'
-        })
-      }
-    }
-
-    checkAuth()
-  }, [])
+    // Use the existing auth context instead of making API calls
+    setAuthStatus({
+      authenticated: isAuthenticated,
+      isAdmin: user?.role === 'admin' || user?.isAdmin === true,
+      loading: false,
+      user: user ? {
+        id: user.id,
+        email: user.email,
+        role: user.role || 'user'
+      } : undefined
+    })
+  }, [isAuthenticated, user])
 
   if (authStatus.loading) {
     return (

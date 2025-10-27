@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
+// Use regular client for public operations
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Cache for stock data
 let stockCache: Map<number, { stock: any, timestamp: number }> = new Map()
@@ -118,14 +119,22 @@ export async function GET(request: NextRequest) {
 // POST /api/stock - Update stock for products (admin only)
 export async function POST(request: NextRequest) {
   try {
+    // Import admin client for admin operations
+    const { createClient } = await import('@supabase/supabase-js')
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey)
+    
+    // TODO: Add proper admin authentication here
+    // For now, this endpoint should be protected by middleware or admin guard
+    
     const { productId, stockQuantity, inStock } = await request.json()
     
     if (!productId || stockQuantity === undefined || inStock === undefined) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    // Update stock in database
-    const { error } = await supabase
+    // Update stock in database using admin client
+    const { error } = await adminClient
       .from('products')
       .update({ 
         stock_quantity: stockQuantity,

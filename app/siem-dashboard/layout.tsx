@@ -83,7 +83,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           description: "Admin privileges required to access this area",
           variant: "destructive"
         })
-        router.push('/')
+        router.push('/home')
         return
       }
     }
@@ -91,9 +91,29 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   // Fetch order counts for navigation badges
   const fetchOrderCounts = async () => {
+    // Only fetch if user is authenticated and is admin
+    if (!isAuthenticated || !isAdmin) {
+      return
+    }
+    
+    
     try {
       const timestamp = Date.now()
-      const pendingRes = await fetch(`/api/admin/orders?t=${timestamp}`, { cache: 'no-store' })
+      const pendingRes = await fetch(`/api/admin/orders?t=${timestamp}`, { cache: 'no-store', credentials: 'include' })
+      if (!pendingRes.ok) {
+        const text = await pendingRes.text().catch(() => '')
+        
+        // If profile not found, don't keep retrying
+        if (pendingRes.status === 404) {
+          return
+        }
+        
+        // If unauthorized, redirect to login
+        if (pendingRes.status === 401) {
+          router.push('/auth/login?redirect=/siem-dashboard')
+          return
+        }
+      }
       
       
       const pendingData = pendingRes.ok ? await pendingRes.json() : { orders: [] }
@@ -102,7 +122,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       let confirmedOrders = 0
       try {
-        const confirmedRes = await fetch(`/api/admin/confirmed-orders?t=${timestamp}`, { cache: 'no-store' })
+      const confirmedRes = await fetch(`/api/admin/confirmed-orders?t=${timestamp}`, { cache: 'no-store', credentials: 'include' })
+      if (!confirmedRes.ok) {
+        const text = await confirmedRes.text().catch(() => '')
+        
+        // If unauthorized, redirect to login
+        if (confirmedRes.status === 401) {
+          router.push('/auth/login?redirect=/siem-dashboard')
+          return
+        }
+      }
         if (confirmedRes.ok) {
           const confirmedData = await confirmedRes.json()
           confirmedOrders = confirmedData.orders?.length || 0
@@ -146,42 +175,44 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   // Fetch order counts on component mount
   useEffect(() => {
-    fetchOrderCounts()
-    
-    // Refresh counts every 30 seconds
-    const interval = setInterval(fetchOrderCounts, 30000)
-    
-    // Realtime: update counts on new orders and confirmed orders
-    
-    const ordersChannel = supabaseClient
-      .channel('admin-layout-orders-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload) => {
-        fetchOrderCounts()
-      })
-      .subscribe((status) => {
-        // Silent subscription handling
-      })
-
-    const confirmedChannel = supabaseClient
-      .channel('admin-layout-confirmed-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'confirmed_orders' }, (payload) => {
-        fetchOrderCounts()
-      })
-      .subscribe((status) => {
-        // Silent subscription handling
-      })
+    // Only fetch if user is authenticated and is admin
+    if (isAuthenticated && isAdmin) {
+      fetchOrderCounts()
       
-    return () => {
-      clearInterval(interval)
-      try {
-        supabaseClient.getChannels().forEach(ch => {
-          if (ch.topic?.includes('admin-layout-')) {
-            supabaseClient.removeChannel(ch)
-          }
+      // Refresh counts every 30 seconds
+      const interval = setInterval(fetchOrderCounts, 30000)
+    
+      // Realtime: update counts on new orders and confirmed orders
+      const ordersChannel = supabaseClient
+        .channel('admin-layout-orders-realtime')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload) => {
+          fetchOrderCounts()
         })
-      } catch {}
+        .subscribe((status) => {
+          // Silent subscription handling
+        })
+
+      const confirmedChannel = supabaseClient
+        .channel('admin-layout-confirmed-realtime')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'confirmed_orders' }, (payload) => {
+          fetchOrderCounts()
+        })
+        .subscribe((status) => {
+          // Silent subscription handling
+        })
+        
+      return () => {
+        clearInterval(interval)
+        try {
+          supabaseClient.getChannels().forEach(ch => {
+            if (ch.topic?.includes('admin-layout-')) {
+              supabaseClient.removeChannel(ch)
+            }
+          })
+        } catch {}
+      }
     }
-  }, [])
+  }, [isAuthenticated, isAdmin])
 
   // Show loading state while checking authentication
   if (loading) {
@@ -230,7 +261,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <span className="text-lg font-semibold">Admin Panel</span>
               </Link>
               <Link 
-                href="/" 
+                href="/home" 
                 className={cn("ml-2 text-sm text-blue-500 hover:text-blue-600 underline", themeClasses.mainText)}
                 title="Go to main site"
               >
@@ -366,10 +397,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className={cn(themeClasses.mainText, themeClasses.buttonGhostHoverBg)}
+                    size="sm"
+                    className={cn(themeClasses.mainText, themeClasses.buttonGhostHoverBg, "px-3 py-2")}
                   >
-                    <Palette className="w-5 h-5" />
+                    <span className="text-sm font-medium">Theme</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>

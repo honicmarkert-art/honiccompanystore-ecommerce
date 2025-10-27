@@ -17,8 +17,10 @@ export interface Product {
   rating: number
   reviews: number
   inStock: boolean
+  stockQuantity?: number
   freeDelivery?: boolean
   sameDayDelivery?: boolean
+  is_new?: boolean
   specifications: Record<string, any>
   variants?: ProductVariant[]
   variantImages?: Array<{
@@ -48,6 +50,7 @@ export interface ProductVariant {
   attributes?: Record<string, string>
   multiValues?: Record<string, string[]>
   primaryValues?: Array<{ attribute: string; value: string; price?: string }>
+  quantities?: Record<string, number>
   inStock: boolean
   sku?: string
   model?: string
@@ -150,7 +153,6 @@ export function useProducts(): UseProductsReturn {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch products'
       setError(errorMessage)
-      console.error('Optimized products fetch error:', err)
     } finally {
       setIsLoading(false)
     }
@@ -204,8 +206,11 @@ export function useProducts(): UseProductsReturn {
       const isAdminPage = pathname.startsWith('/admin')
       const apiUrl = isAdminPage ? '/api/products' : '/api/products?minimal=true'
       
+      // Add cache busting to force fresh data
+      const cacheBustUrl = `${apiUrl}${apiUrl.includes('?') ? '&' : '?'}cache_bust=${Date.now()}`
+      
       preloadPromise = Promise.race([
-        fetch(`${apiUrl}${apiUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+        fetch(cacheBustUrl, {
           headers: {
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache'
@@ -257,6 +262,8 @@ export function useProducts(): UseProductsReturn {
       if (data !== null) {
         // Handle both old (array) and new (object with products array) API response formats
         const productsArray = Array.isArray(data) ? data : (data?.products || [])
+        
+        
         setProducts(productsArray)
         setIsLoading(false)
       } else {
@@ -264,14 +271,12 @@ export function useProducts(): UseProductsReturn {
         setIsLoading(false)
       }
     } catch (err) {
-      console.error('Error fetching products:', err)
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch products'
       setError(errorMessage)
       preloadPromise = null
       
       // If it's a timeout error, try to use cached data if available
       if (errorMessage.includes('timeout') && productsCache) {
-        console.log('Using cached data due to timeout')
         setProducts(productsCache)
         setError(null)
       }
@@ -325,7 +330,6 @@ export function useProducts(): UseProductsReturn {
             return productsArray
           })
           .catch(err => {
-            console.error('Error preloading products:', err)
             preloadPromise = null
             // Don't throw error for preload failures - just log them
             return null
@@ -389,7 +393,6 @@ export function useProducts(): UseProductsReturn {
         productsCache = null
       }, 1000)
     } catch (err) {
-      console.error('Error adding product:', err)
       // Rollback optimistic insert
       setProducts(prevProducts)
       throw err
@@ -443,7 +446,6 @@ export function useProducts(): UseProductsReturn {
       
       return updatedProduct
     } catch (err) {
-      console.error('Error updating product:', err)
       // Rollback optimistic update
       setProducts(prevProducts)
       throw err
@@ -468,7 +470,6 @@ export function useProducts(): UseProductsReturn {
         productsCache = null
       }, 1000)
     } catch (err) {
-      console.error('Error deleting product:', err)
       throw err
     }
   }, [])
@@ -487,7 +488,6 @@ export function useProducts(): UseProductsReturn {
       // Refresh products after reset
       await fetchProducts()
     } catch (err) {
-      console.error('Error resetting products:', err)
       throw err
     }
   }, [fetchProducts])
@@ -548,7 +548,6 @@ export function useProducts(): UseProductsReturn {
       
       return await response.json()
     } catch (error) {
-      console.error('Error fetching full product details:', error)
       return null
     }
   }, [lastFetchTime, isRateLimited])
@@ -573,7 +572,6 @@ export function useProducts(): UseProductsReturn {
       cacheTimestamp = Date.now()
       return productsArray
     } catch (error) {
-      console.error('Error fetching full products:', error)
       return null
     }
   }, [])

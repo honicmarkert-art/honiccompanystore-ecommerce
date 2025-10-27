@@ -86,13 +86,36 @@ export function useOrders() {
     }
   }, [isAuthenticated])
 
-  const fetchOrderById = useCallback(async (orderId: string): Promise<Order | null> => {
+  const fetchOrderByNumber = useCallback(async (orderNumber: string): Promise<Order | null> => {
     if (!isAuthenticated) {
       return null
     }
 
     try {
-      const response = await fetch(`/api/user/orders/${orderId}`)
+      const response = await fetch(`/api/user/orders/${orderNumber}`)
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null
+        }
+        throw new Error('Failed to fetch order')
+      }
+      
+      const data = await response.json()
+      return data // The API returns the order directly, not wrapped in { order }
+    } catch (err) {
+      console.error('Error fetching order by number:', err)
+      throw err
+    }
+  }, [isAuthenticated])
+
+  const fetchOrderById = useCallback(async (orderNumber: string): Promise<Order | null> => {
+    if (!isAuthenticated) {
+      return null
+    }
+
+    try {
+      const response = await fetch(`/api/user/orders/${orderNumber}`)
       
       if (!response.ok) {
         if (response.status === 404) {
@@ -135,13 +158,13 @@ export function useOrders() {
     }
   }, [isAuthenticated])
 
-  const updateOrder = useCallback(async (orderId: string, updates: Partial<Order>): Promise<Order | null> => {
+  const updateOrder = useCallback(async (orderNumber: string, updates: Partial<Order>): Promise<Order | null> => {
     if (!isAuthenticated) {
       throw new Error('Must be authenticated to update order')
     }
 
     try {
-      const response = await fetch(`/api/user/orders/${orderId}`, {
+      const response = await fetch(`/api/user/orders/${orderNumber}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -161,13 +184,13 @@ export function useOrders() {
     }
   }, [isAuthenticated])
 
-  const getOrderStatusHistory = useCallback(async (orderId: string): Promise<OrderStatus[]> => {
+  const getOrderStatusHistory = useCallback(async (orderNumber: string): Promise<OrderStatus[]> => {
     if (!isAuthenticated) {
       return []
     }
 
     try {
-      const response = await fetch(`/api/user/orders/${orderId}/status-history`)
+      const response = await fetch(`/api/user/orders/${orderNumber}/status-history`)
       
       if (!response.ok) {
         throw new Error('Failed to fetch status history')
@@ -213,6 +236,7 @@ export function useOrders() {
     error,
     fetchOrders,
     fetchOrderById,
+    fetchOrderByNumber,
     createOrder,
     updateOrder,
     getOrderStatusHistory,

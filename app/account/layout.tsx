@@ -8,11 +8,21 @@ import { ShoppingBag, MessageCircle, CreditCard, Heart, Settings, User, ChevronR
 import { useAuth } from '@/contexts/auth-context'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useCart } from '@/hooks/use-cart'
+import { useWishlist } from '@/hooks/use-wishlist'
+import { useSavedLater } from '@/hooks/use-saved-later'
+import { useOrders } from '@/hooks/use-orders'
 
 export default function AccountLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const pathname = usePathname()
   const { cartTotalItems } = useCart()
+  const { items: wishlistItems } = useWishlist()
+  const { items: savedLaterItems } = useSavedLater()
+  const { orders } = useOrders()
+  
+  const wishlistCount = wishlistItems.length
+  const savedLaterCount = savedLaterItems.length
+  const ordersCount = orders.length
   const nav = [
     { href: '/account', label: 'Overview', icon: User },
     { href: '/account/orders', label: 'Orders', icon: ShoppingBag },
@@ -106,6 +116,12 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
               <nav className="space-y-1">
                 {nav.map(({ href, label, icon: Icon }) => {
                   const active = pathname === href
+                  let count = 0
+                  if (href === '/cart') count = cartTotalItems
+                  else if (href === '/account/wishlist') count = wishlistCount
+                  else if (href === '/account/saved-later') count = savedLaterCount
+                  else if (href === '/account/orders') count = ordersCount
+                  
                   return (
                     <Link
                       key={href}
@@ -119,9 +135,9 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
                       <span className="truncate">{label}</span>
-                      {href === '/cart' && cartTotalItems > 0 && (
+                      {count > 0 && (
                         <span className="ml-auto inline-flex items-center justify-center rounded-full bg-orange-500 text-white text-xs font-semibold min-w-[20px] h-5 px-1">
-                          {cartTotalItems}
+                          {count}
                         </span>
                       )}
                     </Link>
@@ -170,7 +186,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
             <nav aria-label="Breadcrumb" className="mb-6 text-sm text-gray-500 dark:text-gray-400 pl-4 sm:pl-2">
               <ol className="flex items-center gap-1">
                 <li>
-                  <Link href="/" className="hover:text-orange-600">Home</Link>
+                  <Link href="/home" className="hover:text-orange-600">Home</Link>
                 </li>
                 <li className="mx-1 text-gray-400"><ChevronRight className="w-4 h-4" /></li>
                 <li>
@@ -199,7 +215,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
                     <Link
                       key={href}
                       href={href}
-                      className={`px-3 py-1.5 sm:px-4 sm:py-2 text-sm rounded-t-md border ${active ? 'border-b-white bg-white text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700' : 'bg-gray-50 hover:bg-white text-gray-700 dark:text-gray-300 border-transparent'}`}
+                      className={`px-3 py-1.5 sm:px-4 sm:py-2 text-sm rounded-t-md border ${active ? 'border-b-white bg-white text-gray-900 dark:text-gray-900 border-gray-300 dark:border-gray-700' : 'bg-gray-50 hover:bg-white text-gray-900 dark:text-gray-900 border-transparent'}`}
                     >
                       {cfg.label}
                     </Link>

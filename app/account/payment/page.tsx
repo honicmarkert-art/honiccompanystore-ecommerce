@@ -310,7 +310,7 @@ function PaymentPageContent() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 min-h-screen bg-background">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Payment & Billing Information</h1>
@@ -320,7 +320,7 @@ function PaymentPageContent() {
       {/* Payment Methods */}
       <Card className="mb-8">
         <CardHeader>
-          <CardTitle>Payment Methods</CardTitle>
+            <CardTitle>Payment Methods</CardTitle>
         </CardHeader>
         <CardContent>
           {paymentMethods.length === 0 ? (
@@ -332,72 +332,72 @@ function PaymentPageContent() {
               </p>
               <div className="flex justify-center space-x-2">
                 <Button onClick={() => setIsAddCardOpen(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Card
-                </Button>
-                <Button variant="outline" onClick={() => setIsAddMobileOpen(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Mobile Money
-                </Button>
-              </div>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Card
+              </Button>
+              <Button variant="outline" onClick={() => setIsAddMobileOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Mobile Money
+              </Button>
             </div>
+          </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {paymentMethods.map((method) => (
-                <div key={method.id} className="p-4 border rounded-lg">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-3">
-                      {method.type === 'mobile' ? getProviderIcon(method.provider) : getPaymentIcon(method.type)}
-                      <div>
-                        <h4 className="font-medium">{method.name}</h4>
-                        <p className="text-sm text-muted-foreground">{method.number}</p>
-                        {method.expiry && (
-                          <p className="text-xs text-muted-foreground">Expires {method.expiry}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      {method.isDefault && (
-                        <Badge className="bg-green-100 text-green-800">Default</Badge>
-                      )}
-                      {!method.isActive && (
-                        <Badge variant="secondary">Inactive</Badge>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {paymentMethods.map((method) => (
+              <div key={method.id} className="p-4 border rounded-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    {method.type === 'mobile' ? getProviderIcon(method.provider) : getPaymentIcon(method.type)}
+                    <div>
+                      <h4 className="font-medium">{method.name}</h4>
+                      <p className="text-sm text-muted-foreground">{method.number}</p>
+                      {method.expiry && (
+                        <p className="text-xs text-muted-foreground">Expires {method.expiry}</p>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex space-x-2">
-                      {!method.isDefault && method.isActive && (
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleSetDefault(method.id)}
-                        >
-                          Set Default
-                        </Button>
-                      )}
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        disabled={!method.isActive}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleDeleteMethod(method.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <Shield className="w-4 h-4 text-green-600" />
-                      <span className="text-xs text-muted-foreground">Secure</span>
-                    </div>
+                  <div className="flex items-center space-x-2">
+                    {method.isDefault && (
+                      <Badge className="bg-green-100 text-green-800">Default</Badge>
+                    )}
+                    {!method.isActive && (
+                      <Badge variant="secondary">Inactive</Badge>
+                    )}
                   </div>
                 </div>
-              ))}
+                <div className="flex items-center justify-between">
+                  <div className="flex space-x-2">
+                    {!method.isDefault && method.isActive && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleSetDefault(method.id)}
+                      >
+                        Set Default
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      disabled={!method.isActive}
+                    >
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => handleDeleteMethod(method.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <Shield className="w-4 h-4 text-green-600" />
+                    <span className="text-xs text-muted-foreground">Secure</span>
+                  </div>
+                </div>
+              </div>
+            ))}
             </div>
           )}
         </CardContent>
@@ -601,16 +601,16 @@ function PaymentPageContent() {
               <div className="text-lg text-muted-foreground">No transactions found</div>
             </div>
           ) : (
-            <div className="space-y-4">
+          <div className="space-y-4">
               {paymentStatuses.map((paymentStatus) => (
                 <div key={paymentStatus.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <div className="p-2 bg-gray-100 rounded-lg">
-                      <CreditCard className="w-4 h-4" />
-                    </div>
-                    <div>
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 bg-gray-100 rounded-lg">
+                    <CreditCard className="w-4 h-4" />
+                  </div>
+                  <div>
                       <p className="font-medium">Order {paymentStatus.order_number}</p>
-                      <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground">
                         {paymentStatus.payment_method} • {new Date(paymentStatus.created_at).toLocaleDateString()}
                       </p>
                       {paymentStatus.transaction_id && (
@@ -618,9 +618,9 @@ function PaymentPageContent() {
                           Transaction ID: {paymentStatus.transaction_id}
                         </p>
                       )}
-                    </div>
                   </div>
-                  <div className="flex items-center space-x-4">
+                </div>
+                <div className="flex items-center space-x-4">
                     {getStatusBadge(paymentStatus.payment_status)}
                     <span className="font-bold">TZS {paymentStatus.amount.toFixed(0)}</span>
                     <Button 
@@ -630,10 +630,10 @@ function PaymentPageContent() {
                     >
                       View Order
                     </Button>
-                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
+          </div>
           )}
         </CardContent>
       </Card>

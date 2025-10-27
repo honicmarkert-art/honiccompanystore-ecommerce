@@ -11,16 +11,24 @@ export const runtime = 'nodejs'
 // GET - Fetch categories from categories table
 export async function GET(request: NextRequest) {
   try {
-    // Read categories from dedicated table
+    // Read categories from dedicated table with hierarchy and product counts
     const { data, error } = await supabase
       .from('categories')
-      .select('id, name, slug, is_active, display_order')
+      .select(`
+        id, 
+        name, 
+        slug, 
+        is_active, 
+        display_order,
+        parent_id,
+        parent:parent_id(name, slug),
+        products!category_id(count)
+      `)
       .eq('is_active', true)
       .order('display_order', { ascending: true })
       .order('name', { ascending: true })
 
     if (error) {
-      console.error('Error fetching categories:', error)
       // If Supabase is unreachable or DNS fails, serve safe defaults
       const message = String(error?.message || '')
       const isNetworkFailure =
@@ -30,12 +38,12 @@ export async function GET(request: NextRequest) {
 
       if (isNetworkFailure) {
         const fallbackCategories = [
-          { id: 'all', name: 'All', slug: 'all' },
-          { id: 'sensors', name: 'Sensors', slug: 'sensors' },
-          { id: 'modules', name: 'Modules', slug: 'modules' },
-          { id: 'components', name: 'Components', slug: 'components' },
-          { id: 'tools', name: 'Tools', slug: 'tools' },
-          { id: 'accessories', name: 'Accessories', slug: 'accessories' },
+          { id: 'all', name: 'All', slug: 'all', product_count: 0 },
+          { id: 'sensors', name: 'Sensors', slug: 'sensors', product_count: 0 },
+          { id: 'modules', name: 'Modules', slug: 'modules', product_count: 0 },
+          { id: 'components', name: 'Components', slug: 'components', product_count: 0 },
+          { id: 'tools', name: 'Tools', slug: 'tools', product_count: 0 },
+          { id: 'accessories', name: 'Accessories', slug: 'accessories', product_count: 0 },
         ]
         return NextResponse.json({
           success: true,
@@ -56,6 +64,12 @@ export async function GET(request: NextRequest) {
       id: c.id,
       name: c.name,
       slug: c.slug || (c.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+      parent_id: c.parent_id,
+      parent_name: c.parent?.[0]?.name,
+      parent_slug: c.parent?.[0]?.slug,
+      is_main: !c.parent_id,
+      is_sub: !!c.parent_id,
+      product_count: c.products?.[0]?.count || 0,
     }))
 
     return NextResponse.json({
@@ -75,12 +89,12 @@ export async function GET(request: NextRequest) {
 
     if (isNetworkFailure) {
       const fallbackCategories = [
-        { id: 'all', name: 'All', slug: 'all' },
-        { id: 'sensors', name: 'Sensors', slug: 'sensors' },
-        { id: 'modules', name: 'Modules', slug: 'modules' },
-        { id: 'components', name: 'Components', slug: 'components' },
-        { id: 'tools', name: 'Tools', slug: 'tools' },
-        { id: 'accessories', name: 'Accessories', slug: 'accessories' },
+        { id: 'all', name: 'All', slug: 'all', product_count: 0 },
+        { id: 'sensors', name: 'Sensors', slug: 'sensors', product_count: 0 },
+        { id: 'modules', name: 'Modules', slug: 'modules', product_count: 0 },
+        { id: 'components', name: 'Components', slug: 'components', product_count: 0 },
+        { id: 'tools', name: 'Tools', slug: 'tools', product_count: 0 },
+        { id: 'accessories', name: 'Accessories', slug: 'accessories', product_count: 0 },
       ]
       return NextResponse.json({
         success: true,

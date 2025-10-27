@@ -17,10 +17,17 @@ interface CategoryFormProps {
   onSave: (category: any) => void
 }
 
+interface MainCategory {
+  id: number
+  name: string
+  slug: string
+}
+
 export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
   const { themeClasses } = useTheme()
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [mainCategories, setMainCategories] = useState<MainCategory[]>([])
 
   // Form state
   const [formData, setFormData] = useState({
@@ -30,7 +37,26 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
     image_url: "",
     is_active: true,
     display_order: 0,
+    parent_id: null as number | null,
   })
+
+  // Fetch main categories for parent selection
+  useEffect(() => {
+    const fetchMainCategories = async () => {
+      try {
+        const response = await fetch('/api/admin/categories')
+        if (response.ok) {
+          const data = await response.json()
+          // Filter only main categories (parent_id is null)
+          const mainCats = data.filter((cat: any) => !cat.parent_id)
+          setMainCategories(mainCats)
+        }
+      } catch (error) {
+        console.error('Error fetching main categories:', error)
+      }
+    }
+    fetchMainCategories()
+  }, [])
 
   // Initialize form with category data if editing
   useEffect(() => {
@@ -42,6 +68,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
         image_url: category.image_url || "",
         is_active: category.is_active ?? true,
         display_order: category.display_order ?? 0,
+        parent_id: category.parent_id || null,
       })
     }
   }, [category])
@@ -89,6 +116,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify(body),
       })
 
@@ -145,6 +173,30 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
             URL-friendly version of the category name
           </p>
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="parent_id">Parent Category</Label>
+        <select
+          id="parent_id"
+          value={formData.parent_id || ""}
+          onChange={(e) => handleInputChange("parent_id", e.target.value ? parseInt(e.target.value) : null)}
+          className={cn(
+            "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+            themeClasses.inputBg,
+            themeClasses.mainText
+          )}
+        >
+          <option value="">Select a main category (optional)</option>
+          {mainCategories.map((mainCat) => (
+            <option key={mainCat.id} value={mainCat.id}>
+              {mainCat.name}
+            </option>
+          ))}
+        </select>
+        <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
+          Leave empty to create a main category, or select a parent to create a subcategory
+        </p>
       </div>
 
       <div className="space-y-2">

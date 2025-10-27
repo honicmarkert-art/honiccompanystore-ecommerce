@@ -4,16 +4,14 @@ import { useState } from 'react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useCompanyContext } from '@/components/company-provider'
+import { usePublicCompanyContext } from '@/contexts/public-company-context'
 import { logger } from '@/lib/logger'
 import { 
   Mail, 
   Phone, 
   MapPin, 
   Facebook, 
-  Twitter, 
   Instagram, 
-  Linkedin, 
   Youtube,
   ArrowRight,
   Download,
@@ -25,10 +23,11 @@ export function Footer() {
   const { 
     companyName, 
     companyColor, 
-    companyTagline, 
     companyLogo,
-    settings: adminSettings
-  } = useCompanyContext()
+    contactEmail,
+    contactPhone,
+    address
+  } = usePublicCompanyContext()
   
   const [email, setEmail] = useState('')
 
@@ -41,17 +40,16 @@ export function Footer() {
 
   const footerLinks = {
     company: [
+      { name: 'Home', href: '/home' },
       { name: 'About Us', href: '/about' },
       { name: 'Contact Us', href: '/contact' },
-      { name: 'Support', href: '/support' },
-      { name: 'All Categories', href: '/categories' }
+      { name: 'Support', href: '/support' }
     ],
     services: [
       { name: 'Electronics Supply', href: '/services/electronics' },
       { name: 'Prototyping Services', href: '/services/prototyping' },
       { name: 'PCB Printing', href: '/services/pcb' },
-      { name: 'AI Consultancy', href: '/services/ai' },
-      { name: 'Logistics Solutions', href: '/services/logistics' }
+      { name: 'AI Consultancy', href: '/services/ai' }
     ],
     support: [
       { name: 'Help Center', href: '/support' },
@@ -71,14 +69,12 @@ export function Footer() {
 
   const socialLinks = [
     { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, href: '/social/facebook' },
-    { name: 'Twitter', icon: <Twitter className="w-5 h-5" />, href: '/social/twitter' },
     { name: 'Instagram', icon: <Instagram className="w-5 h-5" />, href: '/social/instagram' },
-    { name: 'LinkedIn', icon: <Linkedin className="w-5 h-5" />, href: '/social/linkedin' },
     { name: 'YouTube', icon: <Youtube className="w-5 h-5" />, href: '/social/youtube' }
   ]
 
   return (
-    <footer className="bg-gray-950 text-gray-300">
+    <footer className="bg-gray-950 text-gray-300" suppressHydrationWarning>
       {/* Main Footer Content */}
       <div className="px-6 py-8 sm:py-12">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 sm:gap-8">
@@ -141,24 +137,24 @@ export function Footer() {
               and AI-driven guidance for students, developers, and businesses worldwide.
             </p>
             
-            {/* Contact Info - from Admin Settings */}
+            {/* Contact Info - from Public Company Settings */}
             <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
-              {adminSettings?.contactEmail && (
+              {contactEmail && (
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <Mail className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
-                  <span className="text-xs sm:text-sm">{adminSettings.contactEmail}</span>
+                  <span className="text-xs sm:text-sm">{contactEmail}</span>
                 </div>
               )}
-              {adminSettings?.contactPhone && (
+              {contactPhone && (
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <Phone className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
-                  <span className="text-xs sm:text-sm">{adminSettings.contactPhone}</span>
+                  <span className="text-xs sm:text-sm">{contactPhone}</span>
                 </div>
               )}
-              {adminSettings?.address && (
+              {address && (
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
-                  <span className="text-xs sm:text-sm">{adminSettings.address}</span>
+                  <span className="text-xs sm:text-sm">{address}</span>
                 </div>
               )}
             </div>

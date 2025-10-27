@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { validateAdminAccess } from '@/lib/admin-auth'
+import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 
@@ -62,7 +62,6 @@ export async function PATCH(
       .single()
 
     if (updateError) {
-      console.error('🔧 Error updating order status:', updateError)
       return NextResponse.json({ error: 'Failed to update order status', details: updateError.message }, { status: 500 })
     }
 
@@ -75,7 +74,6 @@ export async function PATCH(
     })
 
   } catch (error) {
-    console.error('🔧 Error in PATCH /api/admin/orders/[orderId]:', error)
     return NextResponse.json({ error: 'Internal server error', details: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }
 }
@@ -93,10 +91,7 @@ export async function DELETE(
       return authError
     }
 
-    const { client: supabase, error: envError } = getAdminClient()
-    if (envError) {
-      return NextResponse.json({ error: 'Server not configured', details: envError }, { status: 500 })
-    }
+    const supabase = createAdminSupabaseClient()
 
     if (!orderId) {
       return NextResponse.json({ error: 'Order ID is required' }, { status: 400 })

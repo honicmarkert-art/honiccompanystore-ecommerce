@@ -72,7 +72,6 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ products })
       }
     } catch (supabaseError) {
-      console.log('Supabase error, falling back to static data:', supabaseError)
     }
 
     // Fallback to static data

@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { logger } from '@/lib/logger'
+import { secureOrderUpdate, ReferenceIdSecurity } from '@/lib/reference-id-security'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 // ClickPesa webhook handler
 export async function POST(request: NextRequest) {
@@ -21,7 +25,6 @@ export async function POST(request: NextRequest) {
     // Verify webhook signature (skip in development for testing)
     const isValidSignature = process.env.NODE_ENV === 'development' || verifyWebhookSignature(body, signature)
     if (!isValidSignature) {
-      console.error('❌ Invalid webhook signature')
       return NextResponse.json(
         { error: 'Invalid signature' },
         { status: 401 }
@@ -70,7 +73,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (!orderReference) {
-      console.error('❌ No order reference found in webhook payload')
       return NextResponse.json(
         { error: 'No order reference found' },
         { status: 400 }
@@ -136,9 +138,10 @@ export async function POST(request: NextRequest) {
     }
 
     // If still not found, try partial matching (for cases like "218cf8f1ac1e446f90f64016bcb80b4 Oretry1759662681519")
+    let baseReference = null
     if (orderError) {
       logger.log('🔄 Trying partial reference matching...')
-      const baseReference = orderReference.split(' ')[0] // Get the first part before space
+      baseReference = orderReference.split(' ')[0] // Get the first part before space
       const normalizedBaseReference = baseReference.replace(/[^A-Za-z0-9]/g, '').toLowerCase()
       
       logger.log('🔍 Trying base reference:', {
@@ -192,19 +195,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (orderError || !order) {
-      console.error('❌ Order not found for reference:', {
-        originalReference: orderReference,
-        normalizedReference: normalizedReference,
-        baseReference: orderReference.split(' ')[0],
-        normalizedBaseReference: orderReference.split(' ')[0]?.replace(/[^A-Za-z0-9]/g, '').toLowerCase(),
-        error: orderError,
-        attemptedFormats: [
-          normalizedReference,
-          orderReference,
-          orderReference.split(' ')[0]?.replace(/[^A-Za-z0-9]/g, '').toLowerCase(),
-          orderReference.split(' ')[0]
-        ]
-      })
       return NextResponse.json(
         { error: 'Order not found' },
         { status: 404 }
@@ -228,48 +218,27 @@ export async function POST(request: NextRequest) {
       orderStatus = 'pending' // Admin still needs to confirm
     }
 
-    // Update the order with payment information
-    // Start with basic fields that definitely exist
+    // Use secure order update with reference_id protection
+    const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
     let updateData: any = {
       payment_status: paymentStatus,
       status: orderStatus,
-      failure_reason: failureReason || null
+      failure_reason: failureReason || null,
+      clickpesa_transaction_id: transactionId,
+      payment_method: 'clickpesa',
+      payment_timestamp: timestamp
     }
 
-    // Check if ClickPesa fields exist by trying a simple update first
-    const { error: basicUpdateError } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('id', order.id)
-
-    if (basicUpdateError) {
-      console.error('❌ Error with basic update:', basicUpdateError)
+    const updateResult = await secureOrderUpdate(order.id, updateData, undefined, clientIP || undefined)
+    
+    if (!updateResult.success) {
       return NextResponse.json(
-        { error: 'Failed to update order', details: basicUpdateError.message },
+        { error: 'Failed to update order', details: updateResult.error },
         { status: 500 }
       )
     }
-
-    // If basic update succeeded, try to add ClickPesa fields
-    try {
-      const { error: clickpesaUpdateError } = await supabase
-        .from('orders')
-        .update({
-          clickpesa_transaction_id: transactionId,
-          payment_method: 'clickpesa',
-          payment_timestamp: timestamp
-        })
-        .eq('id', order.id)
-
-      if (clickpesaUpdateError) {
-        logger.log('⚠️ ClickPesa fields not available, basic update successful')
-        logger.log('💡 Run database migration to add ClickPesa fields')
-      } else {
-        logger.log('✅ ClickPesa fields updated successfully')
-      }
-    } catch (error) {
-      logger.log('⚠️ ClickPesa fields not available, basic update successful')
-    }
+    
+    logger.log('✅ Order updated securely with reference_id protection')
 
 
     logger.log('✅ Order updated successfully:', {
@@ -281,7 +250,7 @@ export async function POST(request: NextRequest) {
       failureReason: failureReason || null
     })
 
-    // If payment is successful, reduce stock quantities (only if not already reduced)
+    // If payment is successful, reduce stock quantities and clear cart (only if not already processed)
     if (paymentStatus === 'paid' && order.payment_status !== 'paid' && order.payment_status !== 'success') {
       try {
         const isRetryPayment = order.payment_status === 'failed' || order.payment_status === 'pending'
@@ -300,7 +269,7 @@ export async function POST(request: NextRequest) {
           .eq('order_id', order.id)
 
         if (itemsError) {
-          console.error('❌ Error fetching order items for stock reduction:', itemsError)
+          // Error fetching order items for stock reduction
         } else if (orderItems && orderItems.length > 0) {
           // Reduce stock for each item
           for (const item of orderItems) {
@@ -314,7 +283,6 @@ export async function POST(request: NextRequest) {
                   .eq('product_id', item.product_id)
 
                 if (variantsError || !variants || variants.length === 0) {
-                  console.error('❌ Error fetching variants for stock reduction:', item.product_id, variantsError)
                   continue
                 }
 
@@ -372,7 +340,6 @@ export async function POST(request: NextRequest) {
                   .single()
 
                 if (fetchError) {
-                  console.error('❌ Error fetching product for stock reduction:', item.product_id, fetchError)
                   continue
                 }
 
@@ -390,18 +357,36 @@ export async function POST(request: NextRequest) {
                   .eq('id', item.product_id)
 
                 if (updateError) {
-                  console.error('❌ Error updating stock for product:', item.product_id, updateError)
-                } else {
-                  logger.log('✅ Stock reduced for product:', item.product_id, 'by', item.quantity, `(${currentStock} -> ${newStock})`)
+                  // Error updating stock for product
                 }
               }
             } catch (stockError) {
-              console.error('❌ Error in stock reduction for product:', item.product_id, stockError)
+              // Error in stock reduction for product
             }
           }
         }
       } catch (stockReductionError) {
-        console.error('❌ Error in stock reduction process:', stockReductionError)
+        // Error in stock reduction process
+      }
+
+      // Clear cart for authenticated users after successful payment
+      if (order.user_id) {
+        try {
+          logger.log('🛒 Clearing cart for user after successful payment:', order.user_id)
+          
+          const { error: clearCartError } = await supabase
+            .from('cart_items')
+            .delete()
+            .eq('user_id', order.user_id)
+
+          if (clearCartError) {
+            logger.log('⚠️ Failed to clear cart after payment:', clearCartError)
+          } else {
+            logger.log('✅ Cart cleared successfully after payment')
+          }
+        } catch (cartClearError) {
+          logger.log('⚠️ Error clearing cart after payment:', cartClearError)
+        }
       }
     }
 
@@ -412,7 +397,7 @@ export async function POST(request: NextRequest) {
         .update({ updated_at: new Date().toISOString() })
         .eq('id', order.id)
     } catch (realtimeError) {
-      console.warn('⚠️ Real-time update failed:', realtimeError)
+      // Real-time update failed
     }
 
     const isRetryPayment = order.payment_status === 'failed' || order.payment_status === 'pending'
@@ -432,7 +417,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('❌ ClickPesa webhook error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -443,13 +427,11 @@ export async function POST(request: NextRequest) {
 // Verify webhook signature
 function verifyWebhookSignature(payload: string, signature: string | null): boolean {
   if (!signature) {
-    console.warn('⚠️ No signature provided')
     return false
   }
 
   const secret = process.env.CLICKPESA_WEBHOOK_SECRET || 'test-secret-key-for-development'
   if (!secret) {
-    console.warn('⚠️ No webhook secret configured')
     return false
   }
 
@@ -468,17 +450,8 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
       Buffer.from(receivedSignature, 'hex')
     )
 
-    logger.log('🔐 Signature verification:', {
-      payload: payload.substring(0, 100) + '...',
-      secret: secret.substring(0, 10) + '...',
-      expected: expectedSignature,
-      received: receivedSignature,
-      isValid
-    })
-
     return isValid
   } catch (error) {
-    console.error('❌ Signature verification error:', error)
     return false
   }
 }

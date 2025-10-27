@@ -3,9 +3,14 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 async function getClient() {
   const cookieStore = await cookies()
+  
+  // Create a response to handle cookie updates
+  const response = new NextResponse()
+  
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -14,6 +19,12 @@ async function getClient() {
         get(name: string) {
           return cookieStore.get(name)?.value
         },
+        set(name: string, value: string, options: any) {
+          response.cookies.set(name, value, options)
+        },
+        remove(name: string, options: any) {
+          response.cookies.delete(name)
+        },
       },
     }
   )
@@ -21,16 +32,33 @@ async function getClient() {
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('🔍 [ORDERS API] Starting GET request')
+    
     const supabase = await getClient()
+    console.log('✅ [ORDERS API] Supabase client created')
     
     // Get the current user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
+    console.log('👤 [ORDERS API] User auth result:', { 
+      hasUser: !!user, 
+      userId: user?.id, 
+      userEmail: user?.email,
+      authError 
+    })
     
     if (authError || !user) {
+      console.error('❌ [ORDERS API] Authentication failed:', authError)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-
-    // Fetch orders for the user with product images and confirmed order status
+    
+    console.log('🔍 [ORDERS API] Fetching orders for user:', user.id)
+    console.log('🔍 [ORDERS API] Query details:', {
+      table: 'orders',
+      filter: 'user_id = ' + user.id,
+      select: 'orders.*, order_items(*)'
+    })
+    
+    // Fetch orders for the user (without products JOIN to avoid RLS issues)
     const { data: orders, error: ordersError } = await supabase
       .from('orders')
       .select(`
@@ -45,41 +73,106 @@ export async function GET(request: NextRequest) {
           quantity,
           price,
           total_price,
-          created_at,
-          products (
-            id,
-            name,
-            image,
-            gallery
-          )
+          created_at
         )
       `)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
+    console.log('📦 [ORDERS API] Query result:', {
+      hasOrders: !!orders,
+      ordersCount: orders?.length,
+      hasError: !!ordersError,
+      errorCode: ordersError?.code,
+      errorMessage: ordersError?.message,
+      errorDetails: ordersError
+    })
+
     if (ordersError) {
-      console.error('Error fetching orders:', ordersError)
-      return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
+      console.error('❌ [ORDERS API] Orders fetch error:', {
+        code: ordersError.code,
+        message: ordersError.message,
+        details: ordersError.details,
+        hint: ordersError.hint,
+        fullError: JSON.stringify(ordersError, null, 2)
+      })
+      return NextResponse.json({ 
+        error: 'Failed to fetch orders', 
+        details: ordersError.message,
+        code: ordersError.code
+      }, { status: 500 })
+    }
+    
+    console.log('✅ [ORDERS API] Successfully fetched', orders?.length || 0, 'orders')
+
+    // Fetch product images for all order items
+    console.log('🖼️ [ORDERS API] Fetching product images...')
+    const allProductIds = new Set<number>()
+    orders?.forEach(order => {
+      order.order_items?.forEach((item: any) => {
+        if (item.product_id) allProductIds.add(item.product_id)
+      })
+    })
+    
+    console.log('📦 [ORDERS API] Unique product IDs to fetch:', Array.from(allProductIds))
+    
+    let productImagesMap = new Map<number, string>()
+    if (allProductIds.size > 0) {
+      try {
+        // Fetch product images (public read access)
+        const { data: products, error: productsError } = await supabase
+          .from('products')
+          .select('id, image')
+          .in('id', Array.from(allProductIds))
+        
+        console.log('✅ [ORDERS API] Products fetch result:', {
+          hasData: !!products,
+          count: products?.length,
+          hasError: !!productsError
+        })
+        
+        if (products && !productsError) {
+          products.forEach(product => {
+            productImagesMap.set(product.id, product.image || '/placeholder.jpg')
+          })
+        }
+      } catch (error) {
+        console.error('⚠️ [ORDERS API] Error fetching product images:', error)
+      }
     }
 
     // Check confirmed orders for status updates
+    console.log('🔍 [ORDERS API] Checking confirmed orders...')
     const orderIds = orders?.map(order => order.id) || []
+    console.log('📋 [ORDERS API] Order IDs to check:', orderIds)
     let confirmedOrdersMap = new Map()
     
     if (orderIds.length > 0) {
-      const { data: confirmedOrders } = await supabase
+      console.log('🔍 [ORDERS API] Querying confirmed_orders table...')
+      const { data: confirmedOrders, error: confirmedOrdersError } = await supabase
         .from('confirmed_orders')
-        .select('original_order_id, status, confirmed_at, notes')
-        .in('original_order_id', orderIds)
+        .select('order_id, status, confirmed_at')
+        .in('order_id', orderIds)
+      
+      console.log('✅ [ORDERS API] Confirmed orders query result:', {
+        hasData: !!confirmedOrders,
+        count: confirmedOrders?.length,
+        hasError: !!confirmedOrdersError,
+        errorDetails: confirmedOrdersError ? {
+          code: confirmedOrdersError.code,
+          message: confirmedOrdersError.message
+        } : null
+      })
       
       if (confirmedOrders) {
         confirmedOrders.forEach(confirmed => {
-          confirmedOrdersMap.set(confirmed.original_order_id, confirmed)
+          confirmedOrdersMap.set(confirmed.order_id, confirmed)
         })
       }
     }
 
     // Transform the data to match our frontend interface
+    console.log('🔄 [ORDERS API] Transforming orders data...')
     const transformedOrders = orders?.map(order => {
       const confirmedOrder = confirmedOrdersMap.get(order.id)
       const finalStatus = confirmedOrder?.status || order.status
@@ -117,23 +210,34 @@ export async function GET(request: NextRequest) {
         items: order.order_items?.map((item: any) => ({
           id: item.id,
           productId: item.product_id,
-          productName: item.product_name || item.products?.name || 'Unknown Product',
-          productImage: item.products?.image || '/placeholder-product.jpg',
+          productName: item.product_name || 'Unknown Product',
+          productImage: productImagesMap.get(item.product_id) || '/placeholder.jpg',
           variantName: item.variant_name,
           variantAttributes: item.variant_attributes,
           quantity: item.quantity,
           unitPrice: item.price,
           totalPrice: item.total_price
         })) || [],
-        notes: confirmedOrder?.notes || order.notes
+        notes: order.notes
       }
     }) || []
 
+    console.log('✅ [ORDERS API] Successfully transformed', transformedOrders.length, 'orders')
+    console.log('✅ [ORDERS API] Returning response with', transformedOrders.length, 'orders')
+
     return NextResponse.json({ orders: transformedOrders })
 
-  } catch (error) {
-    console.error('Error in orders API:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } catch (error: any) {
+    console.error('❌ [ORDERS API] Exception caught:', {
+      message: error.message,
+      stack: error.stack,
+      error: error.toString(),
+      fullError: JSON.stringify(error, null, 2)
+    })
+    return NextResponse.json({ 
+      error: 'Internal server error', 
+      details: error.message 
+    }, { status: 500 })
   }
 }
 
@@ -179,7 +283,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (orderError) {
-      console.error('Error creating order:', orderError)
       return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
     }
 
@@ -188,9 +291,12 @@ export async function POST(request: NextRequest) {
       const orderItems = items.map((item: any) => ({
         order_id: order.id,
         product_id: item.productId,
+        product_name: item.productName || 'Unknown Product',
         variant_id: item.variantId,
+        variant_name: item.variantName || null,
+        variant_attributes: item.variantAttributes || null,
         quantity: item.quantity,
-        unit_price: item.unitPrice,
+        price: item.unitPrice || item.price, // Use unitPrice if available, fallback to price
         total_price: item.totalPrice
       }))
 
@@ -199,7 +305,6 @@ export async function POST(request: NextRequest) {
         .insert(orderItems)
 
       if (itemsError) {
-        console.error('Error creating order items:', itemsError)
         return NextResponse.json({ error: 'Failed to create order items' }, { status: 500 })
       }
     }
@@ -207,7 +312,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ order })
 
   } catch (error) {
-    console.error('Error in orders POST API:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

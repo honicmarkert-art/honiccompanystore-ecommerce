@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { generateOrderIds, formatPickupId } from '@/lib/order-ids'
 import { logger } from '@/lib/logger'
+import { secureOrderCreation, ReferenceIdSecurity } from '@/lib/reference-id-security'
 
 
 
@@ -44,11 +45,11 @@ export async function POST(request: NextRequest) {
     logger.log('Original referenceId:', referenceId)
     logger.log('Clean referenceId:', cleanReferenceId)
     
-    // Create order record with only existing columns
+    // Create order record with reference_id and pickup_id stored in database
     const basicOrderData = {
       order_number: orderData.orderNumber,
-      reference_id: cleanReferenceId, // UUID without hyphens
-      pickup_id: pickupId,
+      reference_id: cleanReferenceId, // Store reference ID in database
+      pickup_id: pickupId,            // Store pickup ID in database
       user_id: orderData.userId || null, // null for guest users
       // Use objects for JSON/JSONB columns
       shipping_address: orderData.shippingAddress,
@@ -64,31 +65,23 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     } as any
 
-    logger.log('🔍 basicOrderData.reference_id:', basicOrderData.reference_id)
+    logger.log('🔍 basicOrderData:', basicOrderData)
 
-    let order: any = null
-    let orderError: any = null
-    try {
-      const result = await supabase
-        .from('orders')
-        .insert(basicOrderData)
-        .select()
-        .single()
-      order = result.data
-      orderError = result.error
-    } catch (e: any) {
-      orderError = e
-    }
-
-    if (orderError) {
+    // Use secure order creation with reference_id validation
+    const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
+    const creationResult = await secureOrderCreation(basicOrderData, null, clientIP)
+    
+    if (!creationResult.success) {
       return NextResponse.json(
-        { error: 'Order creation failed', details: orderError.message },
+        { error: 'Order creation failed', details: creationResult.error },
         { status: 500 }
       )
     }
+    
+    const order = creationResult.data
 
     logger.log('🔍 Database Debug:')
-    logger.log('Stored order.reference_id:', order.reference_id)
+    logger.log('Stored order.id:', order.id)
 
 
     // Create order items
@@ -101,7 +94,7 @@ export async function POST(request: NextRequest) {
         variant_id: item.variantId,
         variant_name: item.variantName,
         quantity: item.quantity,
-        price: item.price,
+        price: item.unitPrice || item.price, // Use unitPrice if available, fallback to price
         total_price: item.totalPrice,
         created_at: new Date().toISOString(),
       }))
@@ -120,14 +113,14 @@ export async function POST(request: NextRequest) {
 
     }
 
-    // Return order data with generated IDs
+    // Return order data with stored IDs
     const responseData = {
       success: true,
       order: {
         id: order.id,
         orderNumber: order.order_number,
-        referenceId: order.reference_id,
-        pickupId: order.pickup_id,
+        referenceId: order.reference_id, // Use stored reference ID
+        pickupId: order.pickup_id,       // Use stored pickup ID
         totalAmount: order.total_amount,
         paymentStatus: order.payment_status,
         status: order.status,

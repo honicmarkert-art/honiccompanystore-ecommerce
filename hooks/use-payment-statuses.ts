@@ -49,7 +49,6 @@ export function usePaymentStatuses(): UsePaymentStatusesReturn {
       }
 
       const data = await response.json()
-      console.log('Payment statuses data:', data)
       setPaymentStatuses(data.paymentStatuses || [])
     } catch (err) {
       console.error('Payment statuses fetch error:', err)
