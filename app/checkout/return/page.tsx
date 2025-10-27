@@ -326,9 +326,9 @@ function CheckoutReturnContent() {
     if (normalizedReference) {
       fetchOrderData(normalizedReference)
       
-      // Poll for updates every 2 seconds for 30 seconds to catch webhook updates
+      // Poll for updates every 1 second for 60 seconds to catch webhook updates
       let pollCount = 0
-      const maxPolls = 15 // 30 seconds total (15 polls * 2 seconds)
+      const maxPolls = 60 // 60 seconds total (60 polls * 1 second)
       const pollInterval = setInterval(() => {
         pollCount++
         if (pollCount >= maxPolls) {
@@ -336,15 +336,13 @@ function CheckoutReturnContent() {
           return
         }
         
-        // Only poll if payment is still pending
-        if (orderData?.paymentStatus === 'pending') {
-          fetchOrderData(normalizedReference)
-        }
-      }, 2000)
+        // Poll regardless of current status to catch webhook updates
+        fetchOrderData(normalizedReference)
+      }, 1000)
       
       return () => clearInterval(pollInterval)
     }
-  }, [normalizedReference, orderData?.paymentStatus])
+  }, [normalizedReference])
 
   // Hybrid approach: Use return URL as backup for retry payments
   // Webhooks handle initial payments, return URL handles retry payments

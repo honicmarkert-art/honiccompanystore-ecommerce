@@ -250,8 +250,11 @@ function CheckoutPageContent() {
         return
       }
 
+      // For pickup orders, validate billing address; for shipping, validate shipping address
+      const customerInfo = deliveryOption === 'pickup' ? formData.billingAddress : formData.shippingAddress
+
       // Validate phone number
-      const phoneValidation = validateTanzaniaPhone(formData.shippingAddress.phone)
+      const phoneValidation = validateTanzaniaPhone(customerInfo.phone)
       if (!phoneValidation.valid) {
         toast({
           title: "Invalid Phone Number",
@@ -262,7 +265,7 @@ function CheckoutPageContent() {
       }
 
       // Validate email
-      const emailValidation = validateEmail(formData.shippingAddress.email)
+      const emailValidation = validateEmail(customerInfo.email)
       if (!emailValidation.valid) {
         toast({
           title: "Invalid Email Address",
@@ -283,14 +286,14 @@ function CheckoutPageContent() {
       
       // Prepare order data (reuse selectedIds from validation above)
       const selectedItems = selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
-
+      
       const orderData = {
         orderNumber: orderId,
         userId: user?.id || null, // null for guest users
-        // Extract customer information from shipping address
-        customerName: formData.shippingAddress.fullName,
-        customerEmail: formData.shippingAddress.email,
-        customerPhone: formData.shippingAddress.phone,
+        // Extract customer information from the appropriate address based on delivery option
+        customerName: customerInfo.fullName,
+        customerEmail: customerInfo.email,
+        customerPhone: customerInfo.phone,
         items: selectedItems.flatMap(item => 
           item.variants.map(variant => ({
           productId: item.productId,
@@ -1846,10 +1849,10 @@ function CheckoutPageContent() {
 
   if (!isClient) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center">
+      <div className="min-h-screen flex items-center justify-center" suppressHydrationWarning>
+        <div className="flex flex-col items-center" suppressHydrationWarning>
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-yellow-500 border-t-transparent mb-3"></div>
-          <span className="text-sm text-neutral-500">Loading checkout…</span>
+          <span className="text-sm text-neutral-500" suppressHydrationWarning>Loading checkout…</span>
         </div>
       </div>
     )

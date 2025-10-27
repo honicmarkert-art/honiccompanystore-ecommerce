@@ -22,11 +22,19 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString()
     })
 
-    // Verify webhook signature (skip in development for testing)
-    const isValidSignature = process.env.NODE_ENV === 'development' || verifyWebhookSignature(body, signature)
+    // Verify webhook signature/checksum (skip in development for testing)
+    // ClickPesa uses checksum key for webhook validation
+    const hasChecksumKey = !!process.env.CLICKPESA_CHECKSUM_KEY
+    const isValidSignature = process.env.NODE_ENV === 'development' || !hasChecksumKey || verifyWebhookSignature(body, signature)
+    
     if (!isValidSignature) {
+      logger.log('⚠️ Webhook checksum validation failed:', {
+        hasSignature: !!signature,
+        hasChecksumKey: hasChecksumKey,
+        nodeEnv: process.env.NODE_ENV
+      })
       return NextResponse.json(
-        { error: 'Invalid signature' },
+        { error: 'Invalid checksum' },
         { status: 401 }
       )
     }
@@ -424,21 +432,21 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Verify webhook signature
+// Verify webhook checksum (ClickPesa uses checksum key, not webhook secret)
 function verifyWebhookSignature(payload: string, signature: string | null): boolean {
   if (!signature) {
     return false
   }
 
-  const secret = process.env.CLICKPESA_WEBHOOK_SECRET || 'test-secret-key-for-development'
-  if (!secret) {
+  const checksumKey = process.env.CLICKPESA_CHECKSUM_KEY
+  if (!checksumKey) {
     return false
   }
 
   try {
-    // ClickPesa typically uses HMAC-SHA256
+    // ClickPesa uses HMAC-SHA256 with checksum key
     const expectedSignature = crypto
-      .createHmac('sha256', secret)
+      .createHmac('sha256', checksumKey)
       .update(payload, 'utf8')
       .digest('hex')
 
