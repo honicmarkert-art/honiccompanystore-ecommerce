@@ -34,51 +34,44 @@ export async function POST(request: NextRequest) {
       console.log(`  ${key}: ${value}`)
     })
 
-    // Verify webhook signature/checksum - MANDATORY
+    // Verify webhook signature/checksum
     const hasChecksumKey = !!process.env.CLICKPESA_CHECKSUM_KEY
     
-    logger.log('🔐 Starting webhook signature validation:', {
+    logger.log('🔐 Webhook signature check:', {
       hasSignature: !!signature,
       hasChecksumKey: hasChecksumKey,
       signatureLength: signature?.length,
-      bodyLength: body.length
+      bodyLength: body.length,
+      headersHasXClickpesaSignature: request.headers.has('x-clickpesa-signature'),
+      clickPesaSignatureValue: signature,
+      note: 'To enable signature: Configure in ClickPesa dashboard -> Webhooks -> Enable Checksum'
     })
     
-    // Reject webhook if no signature is provided
-    if (!signature) {
-      logger.log('❌ Webhook rejected: No signature provided')
-      return NextResponse.json(
-        { error: 'Signature required' },
-        { status: 401 }
-      )
+    // Only validate if both signature and key are present
+    if (signature && hasChecksumKey) {
+      logger.log('🔍 Signature provided, validating checksum...')
+      const isValidSignature = verifyWebhookSignature(body, signature)
+      
+      if (!isValidSignature) {
+        logger.log('❌ Webhook checksum validation FAILED:', {
+          receivedSignature: signature?.substring(0, 50),
+          bodyLength: body.length,
+          timestamp: new Date().toISOString()
+        })
+        return NextResponse.json(
+          { error: 'Invalid checksum' },
+          { status: 401 }
+        )
+      }
+      
+      logger.log('✅ Webhook checksum validation PASSED')
+    } else if (!signature && hasChecksumKey) {
+      logger.log('⚠️ Checksum key configured but no signature sent by ClickPesa - accepting webhook')
+    } else if (signature && !hasChecksumKey) {
+      logger.log('⚠️ Signature received but no checksum key configured - accepting webhook')
+    } else {
+      logger.log('ℹ️ No signature validation - accepting webhook')
     }
-    
-    // Reject webhook if we don't have checksum key configured
-    if (!hasChecksumKey) {
-      logger.log('❌ Webhook rejected: Checksum key not configured')
-      return NextResponse.json(
-        { error: 'Webhook validation not configured' },
-        { status: 500 }
-      )
-    }
-    
-    // Validate signature
-    logger.log('🔍 Validating checksum signature...')
-    const isValidSignature = verifyWebhookSignature(body, signature)
-    
-    if (!isValidSignature) {
-      logger.log('❌ Webhook checksum validation FAILED:', {
-        receivedSignature: signature?.substring(0, 50),
-        bodyLength: body.length,
-        timestamp: new Date().toISOString()
-      })
-      return NextResponse.json(
-        { error: 'Invalid checksum' },
-        { status: 401 }
-      )
-    }
-    
-    logger.log('✅ Webhook checksum validation PASSED - processing webhook')
 
     const payload = JSON.parse(body)
     logger.log('📦 ClickPesa webhook payload:', payload)

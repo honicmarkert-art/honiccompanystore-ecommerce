@@ -49,7 +49,23 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 		console.log('🔍 [DEBUG] validateServerSession: Starting validation...')
 		
 		const cookieStore = await cookies()
-		const accessToken = cookieStore.get('sb-access-token')?.value
+		
+		// Try to get access token - check both possible cookie names
+		let accessToken = cookieStore.get('sb-access-token')?.value
+		
+		// If not found, try extracting from the full auth token cookie
+		if (!accessToken) {
+			const authTokenCookie = cookieStore.get('sb-qobobocldfjhdkpjyuuq-auth-token')?.value
+			if (authTokenCookie) {
+				try {
+					const parsed = JSON.parse(authTokenCookie)
+					accessToken = parsed.access_token
+				} catch (e) {
+					console.log('Could not parse auth token cookie')
+				}
+			}
+		}
+		
 		console.log('🔍 [DEBUG] validateServerSession: Access token found:', !!accessToken)
 		
 		if (!accessToken) {
