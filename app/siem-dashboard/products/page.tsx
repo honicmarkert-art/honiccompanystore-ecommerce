@@ -182,8 +182,8 @@ function AdminProductsContent() {
                     // If it's an authentication error, show a more helpful message
                     if (errorMessage.includes('Authentication required') || errorMessage.includes('401')) {
                       alert('Your session has expired. Please log in again to continue.')
-                      // Optionally redirect to login
-                      window.location.href = '/auth/login'
+                      // Redirect to login with redirect parameter
+                      window.location.href = '/auth/login?redirect=/siem-dashboard/products'
                       return
                     }
                     
