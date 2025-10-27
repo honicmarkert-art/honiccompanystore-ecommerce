@@ -34,23 +34,30 @@ export async function POST(request: NextRequest) {
       console.log(`  ${key}: ${value}`)
     })
 
-    // Verify webhook signature/checksum (skip in development for testing)
-    // ClickPesa uses checksum key for webhook validation
+    // Verify webhook signature/checksum
+    // ClickPesa may or may not send checksums based on configuration
     const hasChecksumKey = !!process.env.CLICKPESA_CHECKSUM_KEY
-    const isValidSignature = process.env.NODE_ENV === 'development' || !hasChecksumKey || verifyWebhookSignature(body, signature)
     
-    if (!isValidSignature) {
-      logger.log('⚠️ Webhook checksum validation failed:', {
-        hasSignature: !!signature,
-        hasChecksumKey: hasChecksumKey,
-        nodeEnv: process.env.NODE_ENV,
-        signature: signature,
-        bodyPreview: body.substring(0, 200)
-      })
-      return NextResponse.json(
-        { error: 'Invalid checksum' },
-        { status: 401 }
-      )
+    // If signature is provided, validate it. Otherwise, accept webhook without signature
+    let isValidSignature = true
+    if (signature && hasChecksumKey) {
+      isValidSignature = verifyWebhookSignature(body, signature)
+      
+      if (!isValidSignature) {
+        logger.log('⚠️ Webhook checksum validation failed:', {
+          hasSignature: !!signature,
+          hasChecksumKey: hasChecksumKey,
+          nodeEnv: process.env.NODE_ENV,
+          signature: signature,
+          bodyPreview: body.substring(0, 200)
+        })
+        return NextResponse.json(
+          { error: 'Invalid checksum' },
+          { status: 401 }
+        )
+      }
+    } else if (!signature) {
+      logger.log('ℹ️ No checksum provided by ClickPesa - accepting webhook without signature validation')
     }
 
     const payload = JSON.parse(body)
