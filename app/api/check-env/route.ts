@@ -1,17 +1,35 @@
 import { NextResponse } from 'next/server'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 export async function GET() {
   try {
+    // Security: Only show safe/non-sensitive environment info
+    // Never expose keys, secrets, or URLs in production
+    const isDevelopment = process.env.NODE_ENV === 'development'
+    
+    if (!isDevelopment) {
+      // In production, only return minimal safe info
+      return NextResponse.json({
+        environment: 'production',
+        status: 'operational'
+      })
+    }
+
+    // In development, show more detailed info
     const envInfo = {
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       NODE_ENV: process.env.NODE_ENV,
-      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-      // Add any other environment variables you want to check
+      hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      hasSupabaseKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      hasAppUrl: !!process.env.NEXT_PUBLIC_APP_URL,
+      // Never expose actual values of environment variables
+      supabaseUrlPreview: process.env.NEXT_PUBLIC_SUPABASE_URL ? `${process.env.NEXT_PUBLIC_SUPABASE_URL.substring(0, 30)}...` : 'Not set',
+      appUrl: process.env.NEXT_PUBLIC_APP_URL
     }
 
     return NextResponse.json(envInfo)

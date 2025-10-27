@@ -14,22 +14,26 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseClientWithUser()
 
-    // Search in products table
+    // Sanitize and escape user input to prevent injection
+    const sanitizedQuery = query.replace(/[%_]/g, (char) => `\\${char}`).trim()
+    const searchPattern = `%${sanitizedQuery}%`
+
+    // Search in products table - using Supabase's text search
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('name, description, brand, category')
-      .or(`name.ilike.%${query}%, description.ilike.%${query}%, brand.ilike.%${query}%, category.ilike.%${query}%`)
+      .or(`name.ilike.${searchPattern},description.ilike.${searchPattern},brand.ilike.${searchPattern},category.ilike.${searchPattern}`)
       .limit(10)
 
     if (productsError) {
       logger.error('Error fetching product suggestions:', productsError)
     }
 
-    // Search in product_variants table
+    // Search in product_variants table - using Supabase's text search
     const { data: variants, error: variantsError } = await supabase
       .from('product_variants')
       .select('variant_name, primary_values, attributes')
-      .or(`variant_name.ilike.%${query}%, primary_values.ilike.%${query}%, attributes.ilike.%${query}%`)
+      .or(`variant_name.ilike.${searchPattern},primary_values.ilike.${searchPattern},attributes.ilike.${searchPattern}`)
       .limit(10)
 
     if (variantsError) {
