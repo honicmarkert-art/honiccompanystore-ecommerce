@@ -23,7 +23,6 @@ export function supabaseAdmin(): SupabaseClient | null {
 					// Add custom fetch configuration to handle Node.js HTTPS issues
 					return fetch(url, {
 						...options,
-						timeout: 30000, // 30 second timeout
 						keepalive: true,
 						headers: {
 							...options.headers,
