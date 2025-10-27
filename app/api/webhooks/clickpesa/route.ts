@@ -16,10 +16,22 @@ export async function POST(request: NextRequest) {
     const body = await request.text()
     const signature = request.headers.get('x-clickpesa-signature')
     
+    // Log ALL headers to see what ClickPesa actually sends
+    const allHeaders = Object.fromEntries(request.headers.entries())
+    
     logger.log('🔔 ClickPesa webhook received:', {
       hasSignature: !!signature,
+      signature: signature || 'NOT PROVIDED',
       bodyLength: body.length,
+      allHeaders: allHeaders,
+      bodyContent: body.substring(0, 300), // First 300 chars
       timestamp: new Date().toISOString()
+    })
+    
+    // Additional debug: log ALL headers individually
+    console.log('🔍 Webhook Headers from ClickPesa:')
+    request.headers.forEach((value, key) => {
+      console.log(`  ${key}: ${value}`)
     })
 
     // Verify webhook signature/checksum (skip in development for testing)
@@ -107,6 +119,13 @@ export async function POST(request: NextRequest) {
       .select('*')
       .eq('reference_id', normalizedReference)
       .single()
+    
+    logger.log('🔍 First query result:', {
+      foundOrder: !!order,
+      error: orderError?.message,
+      orderId: order?.id,
+      orderReferenceId: order?.reference_id
+    })
 
     // If not found, try original reference
     if (orderError && normalizedReference !== orderReference) {
@@ -117,8 +136,32 @@ export async function POST(request: NextRequest) {
         .eq('reference_id', orderReference)
         .single()
       
+      logger.log('🔍 Second query result:', {
+        foundOrder: !!result.data,
+        error: result.error?.message,
+        orderId: result.data?.id,
+        orderReferenceId: result.data?.reference_id
+      })
+      
       order = result.data
       orderError = result.error
+    }
+    
+    // If still not found, try case-insensitive search with all existing orders
+    if (orderError) {
+      logger.log('🔄 Trying case-insensitive search...')
+      const { data: allRecentOrders } = await supabase
+        .from('orders')
+        .select('id, reference_id, order_number, payment_status')
+        .order('created_at', { ascending: false })
+        .limit(10)
+      
+      logger.log('📋 Recent orders in database:', allRecentOrders?.map(o => ({
+        id: o.id,
+        reference_id: o.reference_id,
+        order_number: o.order_number,
+        payment_status: o.payment_status
+      })))
     }
 
     // If still not found, try retry reference matching (for cases like "e62d9c1ae22347bbbbd487bc87c72d71retry1759665048447")
