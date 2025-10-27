@@ -20,6 +20,11 @@ const validatePrice = (price: number) => price >= 0
 const validateStock = (stock: number) => stock >= 0
 const sanitizeInput = (input: string) => input.trim()
 
+// Escape SQL wildcard characters for LIKE/ILIKE queries to prevent injection
+const escapeSqlWildcards = (input: string): string => {
+  return input.replace(/[%_]/g, (char) => `\\${char}`)
+}
+
 // GET - Fetch all products with optimized caching and minimal payload support
 export async function GET(request: NextRequest) {
   const startTime = Date.now()
@@ -278,6 +283,7 @@ export async function GET(request: NextRequest) {
     let filteredProducts = products
     if (performSearch && search) {
       const sanitized = securityUtils.sanitizeInput(search)
+      const escapedSearch = escapeSqlWildcards(sanitized)
       
       try {
         // Use PostgreSQL full-text search with basic textSearch
@@ -298,7 +304,7 @@ export async function GET(request: NextRequest) {
           const { data: fallbackResults, error: fallbackError } = await publicClient
             .from('products')
             .select('id')
-            .or(`name.ilike.%${sanitized}%,description.ilike.%${sanitized}%,category.ilike.%${sanitized}%,brand.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
+            .or(`name.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%,category.ilike.%${escapedSearch}%,brand.ilike.%${escapedSearch}%,sku.ilike.%${escapedSearch}%`)
             .limit(limit ? parseInt(limit) : 100)
 
           if (fallbackError) {
@@ -374,7 +380,7 @@ export async function GET(request: NextRequest) {
         const { data: fallbackResults, error: fallbackError } = await publicClient
           .from('products')
           .select('id')
-          .or(`name.ilike.%${sanitized}%,description.ilike.%${sanitized}%,category.ilike.%${sanitized}%,brand.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
+          .or(`name.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%,category.ilike.%${escapedSearch}%,brand.ilike.%${escapedSearch}%,sku.ilike.%${escapedSearch}%`)
           .limit(limit ? parseInt(limit) : 100)
 
         if (fallbackError) {

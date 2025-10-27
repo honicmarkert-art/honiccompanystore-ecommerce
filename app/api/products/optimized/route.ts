@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '@/lib/supabase-server'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+// Escape SQL wildcard characters for LIKE/ILIKE queries to prevent injection
+const escapeSqlWildcards = (input: string): string => {
+  return input.replace(/[%_]/g, (char) => `\\${char}`)
+}
 export async function GET(request: NextRequest) {
   try {
   const { searchParams } = new URL(request.url)
@@ -68,7 +72,8 @@ export async function GET(request: NextRequest) {
       queryBuilder = queryBuilder.eq('brand', brand)
     }
     if (search) {
-      queryBuilder = queryBuilder.or(`name.ilike.%${search}%,description.ilike.%${search}%,brand.ilike.%${search}%`)
+      const escapedSearch = escapeSqlWildcards(search)
+      queryBuilder = queryBuilder.or(`name.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%,brand.ilike.%${escapedSearch}%`)
     }
 
     // Apply sorting
@@ -102,7 +107,8 @@ export async function GET(request: NextRequest) {
         countQuery = countQuery.eq('brand', brand)
       }
       if (search) {
-        countQuery = countQuery.or(`name.ilike.%${search}%,description.ilike.%${search}%,brand.ilike.%${search}%`)
+        const escapedSearch = escapeSqlWildcards(search)
+        countQuery = countQuery.or(`name.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%,brand.ilike.%${escapedSearch}%`)
       }
 
       const { count, error: countError } = await countQuery

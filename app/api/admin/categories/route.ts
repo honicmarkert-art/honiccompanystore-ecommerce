@@ -6,6 +6,13 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
 
+// Sanitize input to prevent injection
+const sanitizeInput = (input: string | undefined): string => {
+  if (!input) return ''
+  // Remove any potentially dangerous characters
+  return input.trim().replace(/[<>'";]/g, '')
+}
+
 // GET /api/admin/categories - Get all categories
 export async function GET() {
   if (!supabase) {
@@ -44,11 +51,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Name and slug are required' }, { status: 400 })
     }
 
+    // Sanitize inputs
+    const sanitizedName = sanitizeInput(name)
+    const sanitizedSlug = sanitizeInput(slug)
+
     // Check if category with same name or slug already exists
     const { data: existingCategory } = await supabase
       .from('categories')
       .select('id')
-      .or(`name.eq.${name},slug.eq.${slug}`)
+      .or(`name.eq.${sanitizedName},slug.eq.${sanitizedSlug}`)
       .single()
 
     if (existingCategory) {
@@ -59,9 +70,9 @@ export async function POST(request: NextRequest) {
     const { data: category, error } = await supabase
       .from('categories')
       .insert({
-        name,
+        name: sanitizedName,
         description,
-        slug,
+        slug: sanitizedSlug,
         image_url,
         is_active: is_active ?? true,
         display_order: display_order ?? 0,
@@ -108,10 +119,12 @@ export async function PUT(request: NextRequest) {
 
     // Check if another category with same name or slug exists
     if (name || slug) {
+      const sanitizedName = sanitizeInput(name)
+      const sanitizedSlug = sanitizeInput(slug)
       const { data: duplicateCategory } = await supabase
         .from('categories')
         .select('id')
-        .or(`name.eq.${name || ''},slug.eq.${slug || ''}`)
+        .or(`name.eq.${sanitizedName || ''},slug.eq.${sanitizedSlug || ''}`)
         .neq('id', id)
         .single()
 
@@ -122,9 +135,9 @@ export async function PUT(request: NextRequest) {
 
     // Update category
     const updateData: any = {}
-    if (name !== undefined) updateData.name = name
+    if (name !== undefined) updateData.name = sanitizedName
     if (description !== undefined) updateData.description = description
-    if (slug !== undefined) updateData.slug = slug
+    if (slug !== undefined) updateData.slug = sanitizedSlug
     if (image_url !== undefined) updateData.image_url = image_url
     if (is_active !== undefined) updateData.is_active = is_active
     if (display_order !== undefined) updateData.display_order = display_order
