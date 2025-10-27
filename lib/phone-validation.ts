@@ -27,15 +27,21 @@ export function validateTanzaniaPhone(phone: string): { valid: boolean; error?: 
     digitsOnly = digitsOnly.substring(1)
   }
   
-  // Check if it's a 9-digit number (without country code)
+  // Check for incomplete numbers (too short)
+  if (digitsOnly.length < 10 && !digitsOnly.startsWith('255')) {
+    if (digitsOnly.startsWith('0') && digitsOnly.length >= 2 && digitsOnly.length < 10) {
+      return { valid: false, error: `Phone number incomplete (entered ${digitsOnly.length} digits, need 10). Please complete your number (e.g., ${digitsOnly}1234567890).` }
+    }
+    return { valid: false, error: `Phone number too short (entered ${digitsOnly.length} digits, need 10 or 12). Please enter complete number (e.g., 0712345678 or +255 712 345 678)` }
+  }
+
+  // Check if it's a 9-digit number (without country code and without leading 0)
   if (digitsOnly.length === 9) {
-    // Tanzania mobile numbers start with 7, 6, or 5, not 1
+    // Tanzania mobile numbers can start with various digits (5, 6, 7, etc.)
     if (digitsOnly.startsWith('1')) {
-      return { valid: false, error: "Tanzania phone numbers do not start with 1. Please enter a valid number (e.g., +255 712 345 678)" }
+      return { valid: false, error: "Tanzania phone numbers do not start with 1. Please enter a valid number (e.g., +255 712 345 678 or 0712 345 678)" }
     }
-    if (!digitsOnly.match(/^[567]\d{8}$/)) {
-      return { valid: false, error: "Invalid Tanzania phone number. Must start with 5, 6, or 7 (e.g., +255 712 345 678)" }
-    }
+    // Accept any 9-digit number (Tanzania has various operators)
     return { valid: true, formatted: '255' + digitsOnly }
   }
   
@@ -45,17 +51,18 @@ export function validateTanzaniaPhone(phone: string): { valid: boolean; error?: 
     if (mobilePart.startsWith('0')) {
       return { valid: false, error: "Remove leading 0 after country code (e.g., use 255712345678 not 2550712345678)" }
     }
-    if (!mobilePart.match(/^[567]\d{8}$/)) {
-      return { valid: false, error: "Invalid Tanzania phone number. Must start with 5, 6, or 7 (e.g., +255 712 345 678)" }
-    }
+    // Accept any 9-digit mobile part
     return { valid: true, formatted: digitsOnly }
   }
-  
-  // Check if it starts with 0 (local format)
+
+  // Check if it starts with 0 (local format) - e.g., 0652345678 (Halotel)
   if (digitsOnly.startsWith('0')) {
     const withoutZero = digitsOnly.substring(1)
-    if (withoutZero.length === 9 && withoutZero.match(/^[567]\d{8}$/)) {
+    if (withoutZero.length === 9) {
+      // Valid 9-digit number after removing leading 0
       return { valid: true, formatted: '255' + withoutZero }
+    } else if (withoutZero.length < 9) {
+      return { valid: false, error: `Phone number incomplete (entered ${digitsOnly.length} digits, need 10). Please complete your number.` }
     }
   }
   

@@ -325,8 +325,26 @@ function CheckoutReturnContent() {
   useEffect(() => {
     if (normalizedReference) {
       fetchOrderData(normalizedReference)
+      
+      // Poll for updates every 2 seconds for 30 seconds to catch webhook updates
+      let pollCount = 0
+      const maxPolls = 15 // 30 seconds total (15 polls * 2 seconds)
+      const pollInterval = setInterval(() => {
+        pollCount++
+        if (pollCount >= maxPolls) {
+          clearInterval(pollInterval)
+          return
+        }
+        
+        // Only poll if payment is still pending
+        if (orderData?.paymentStatus === 'pending') {
+          fetchOrderData(normalizedReference)
+        }
+      }, 2000)
+      
+      return () => clearInterval(pollInterval)
     }
-  }, [normalizedReference])
+  }, [normalizedReference, orderData?.paymentStatus])
 
   // Hybrid approach: Use return URL as backup for retry payments
   // Webhooks handle initial payments, return URL handles retry payments

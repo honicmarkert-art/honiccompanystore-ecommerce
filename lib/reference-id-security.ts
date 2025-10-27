@@ -184,6 +184,13 @@ export async function secureOrderUpdate(
     // Add timestamp
     sanitizedData.updated_at = new Date().toISOString()
     
+    // Log the update attempt for debugging
+    logger.log('🔧 Attempting to update order:', {
+      orderId,
+      updateData: sanitizedData,
+      usingServiceRole: true
+    })
+
     // Perform the update
     const { data: updatedOrder, error: updateError } = await supabase
       .from('orders')
@@ -193,8 +200,22 @@ export async function secureOrderUpdate(
       .single()
     
     if (updateError) {
-      return { success: false, error: 'Failed to update order' }
+      logger.log('❌ Order update failed:', {
+        error: updateError,
+        code: updateError.code,
+        message: updateError.message,
+        details: updateError.details,
+        hint: updateError.hint
+      })
+      return { success: false, error: updateError.message || 'Failed to update order' }
     }
+    
+    logger.log('✅ Order update succeeded:', {
+      orderId,
+      updatedFields: Object.keys(sanitizedData),
+      newStatus: sanitizedData.status,
+      newPaymentStatus: sanitizedData.payment_status
+    })
     
     // Log successful update
     await ReferenceIdSecurity.logSecurityEvent(

@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Server-side Supabase client using service role key for admin operations
+// This client BYPASSES Row Level Security (RLS) due to the service role key
+// Used by: Webhooks, Admin operations, Background jobs
 export function getSupabaseClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -13,6 +15,15 @@ export function getSupabaseClient() {
     auth: {
       autoRefreshToken: false,
       persistSession: false
+    },
+    db: {
+      schema: 'public'
+    },
+    global: {
+      // Service role key bypasses RLS - use with caution!
+      headers: {
+        'x-client-info': 'supabase-js-service-role'
+      }
     }
   })
 }
