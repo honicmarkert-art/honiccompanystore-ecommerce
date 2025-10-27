@@ -1,0 +1,34 @@
+{
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "destination": "https://www.honiccompanystore.com/:path*",
+      "permanent": true,
+      "has": [
+        {
+          "type": "host",
+          "value": "honiccompanystore.com"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "destination": "https://www.honiccompanystore.com/:path*",
+      "permanent": true,
+      "has": [
+        {
+          "type": "host",
+          "value": "www.honiccompanystore.com"
+        }
+      ],
+      "missing": [
+        {
+          "type": "header",
+          "key": "x-forwarded-proto",
+          "value": "https"
+        }
+      ]
+    }
+  ]
+}
+

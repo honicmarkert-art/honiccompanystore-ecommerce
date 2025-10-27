@@ -20,25 +20,34 @@ import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Analytics } from '@vercel/analytics/react'
 
 export const metadata: Metadata = {
-  title: 'honiccompanystore - Shopping',
-  description: 'Discover amazing products at unbeatable prices. Fast shipping, secure payments, and exceptional customer service.',
+  title: 'Honic Company Store - Online Shopping in Tanzania',
+  description: 'Shop the best deals on electronics, fashion, home goods, and more. Free shipping across Tanzania. Best prices guaranteed!',
   generator: 'Next.js',
-  keywords: 'online shopping, ecommerce, electronics, fashion, home goods',
-  authors: [{ name: 'honiccompanystore' }],
+  keywords: 'online shopping, Tanzania, electronics, fashion, home goods, marketplace, best deals, free shipping',
+  authors: [{ name: 'Honic Company Store' }],
+  alternates: {
+    canonical: 'https://www.honiccompanystore.com'
+  },
   openGraph: {
-    title: 'honiccompanystore - Shopping',
-    description: 'Discover amazing products at unbeatable prices',
+    title: 'Honic Company Store - Online Shopping in Tanzania',
+    description: 'Shop the best deals on electronics, fashion, home goods, and more. Free shipping across Tanzania.',
     type: 'website',
     locale: 'en_US',
+    url: 'https://www.honiccompanystore.com',
+    siteName: 'Honic Company Store',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'honiccompanystore - Shopping',
-    description: 'Discover amazing products at unbeatable prices',
+    title: 'Honic Company Store - Online Shopping in Tanzania',
+    description: 'Shop the best deals on electronics, fashion, home goods, and more.',
   },
   robots: {
     index: true,
     follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+    },
   },
 }
 
