@@ -53,18 +53,28 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 		// Try to get access token - check both possible cookie names
 		let accessToken = cookieStore.get('sb-access-token')?.value
 		
-		// If not found, try extracting from the full auth token cookie
-		if (!accessToken) {
-			const authTokenCookie = cookieStore.get('sb-qobobocldfjhdkpjyuuq-auth-token')?.value
-			if (authTokenCookie) {
-				try {
-					const parsed = JSON.parse(authTokenCookie)
-					accessToken = parsed.access_token
-				} catch (e) {
-					console.log('Could not parse auth token cookie')
+			// If not found, try extracting from the full auth token cookie
+			if (!accessToken) {
+				const authTokenCookie = cookieStore.get('sb-qobobocldfjhdkpjyuuq-auth-token')?.value
+				
+				if (authTokenCookie) {
+					try {
+						// Check if it starts with 'base64-' and extract the actual base64 string
+						let base64String = authTokenCookie
+						if (authTokenCookie.startsWith('base64-')) {
+							base64String = authTokenCookie.substring(7) // Remove 'base64-' prefix
+						}
+						
+						// Decode from Base64
+						const decoded = Buffer.from(base64String, 'base64').toString('utf-8')
+						const parsed = JSON.parse(decoded)
+						accessToken = parsed.access_token
+						console.log('✅ Successfully extracted access token from auth token cookie')
+					} catch (e) {
+						console.log('❌ Could not extract access token:', e)
+					}
 				}
 			}
-		}
 		
 		console.log('🔍 [DEBUG] validateServerSession: Access token found:', !!accessToken)
 		
