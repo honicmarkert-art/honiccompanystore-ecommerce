@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
+import React, { useState, useMemo, useEffect, useRef, useCallback, Suspense } from "react"
 import { createPortal } from 'react-dom'
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { logger } from '@/lib/logger'
@@ -114,7 +114,7 @@ import { UserProfile } from "@/components/user-profile"
 
 // Category icons mapping - simplified
 
-export default function Component() {
+function ChinaPageContent() {
   const router = useRouter()
   const pathname = usePathname()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
@@ -3559,5 +3559,20 @@ export default function Component() {
       )}
 
     </div>
+  )
+}
+
+export default function ChinaPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    }>
+      <ChinaPageContent />
+    </Suspense>
   )
 }
