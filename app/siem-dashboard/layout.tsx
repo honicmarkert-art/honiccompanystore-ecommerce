@@ -69,28 +69,28 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (!loading) {
       // Add a small delay to allow 2FA guard to show first
       const timer = setTimeout(() => {
-        if (!isAuthenticated || !user) {
-          // Only redirect if not already on login page
-          if (!window.location.pathname.includes('/auth/login')) {
-            toast({
-              title: "Authentication Required",
-              description: "Please log in to access the admin panel",
-              variant: "destructive"
-            })
-            router.push('/auth/login?redirect=/siem-dashboard')
-          }
-          return
-        }
-        
-        if (!isAdmin) {
+      if (!isAuthenticated || !user) {
+        // Only redirect if not already on login page
+        if (!window.location.pathname.includes('/auth/login')) {
           toast({
-            title: "Access Denied",
-            description: "Admin privileges required to access this area",
+            title: "Authentication Required",
+            description: "Please log in to access the admin panel",
             variant: "destructive"
           })
-          router.push('/home')
-          return
+          router.push('/auth/login?redirect=/siem-dashboard')
         }
+        return
+      }
+      
+      if (!isAdmin) {
+        toast({
+          title: "Access Denied",
+          description: "Admin privileges required to access this area",
+          variant: "destructive"
+        })
+        router.push('/home')
+        return
+      }
       }, 1000) // 1 second delay to allow 2FA form to show
       
       return () => clearTimeout(timer)

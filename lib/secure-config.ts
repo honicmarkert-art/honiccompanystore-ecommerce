@@ -75,7 +75,7 @@ export const securityConfig = {
       scriptSrc: [
         "'self'",
         "'unsafe-inline'", // Only for development
-        "https://qobobocldfjhdkpjyuuq.supabase.co",
+        process.env.NEXT_PUBLIC_SUPABASE_URL || "",
         "https://*.supabase.co"
       ],
       styleSrc: [
@@ -90,18 +90,18 @@ export const securityConfig = {
       imgSrc: [
         "'self'",
         "data:",
-        "https://qobobocldfjhdkpjyuuq.supabase.co",
+        process.env.NEXT_PUBLIC_SUPABASE_URL || "",
         "https://*.supabase.co"
       ],
       connectSrc: [
         "'self'",
-        "https://qobobocldfjhdkpjyuuq.supabase.co",
+        process.env.NEXT_PUBLIC_SUPABASE_URL || "",
         "https://*.supabase.co",
         "https://api.clickpesa.com"
       ],
       mediaSrc: [
         "'self'",
-        "https://qobobocldfjhdkpjyuuq.supabase.co",
+        process.env.NEXT_PUBLIC_SUPABASE_URL || "",
         "https://*.supabase.co"
       ],
     }

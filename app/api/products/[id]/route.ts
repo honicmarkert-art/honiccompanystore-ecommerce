@@ -99,6 +99,7 @@ export async function GET(
       rating: product.rating,
       reviews: product.reviews,
       image: product.image,
+      category_id: (product as any).category_id,
       category: product.category,
       brand: product.brand,
       description: product.description,
@@ -167,17 +168,42 @@ export async function GET(
         }
         return config
       })(),
-      variantImages: product.variant_images || []
+      variantImages: (() => {
+        const images = product.variant_images || []
+        
+        
+        // Normalize to ensure consistent format
+        const normalized = images.map((img: any): { imageUrl: string } => {
+          if (typeof img === 'string') {
+            return { imageUrl: img }
+          } else if (img && typeof img === 'object' && img.imageUrl) {
+            return { imageUrl: img.imageUrl }
+          }
+          return { imageUrl: String(img || '') }
+        }).filter((img: { imageUrl: string }) => img.imageUrl)
+        
+        return normalized
+      })()
     }
 
     // Cache the result with longer TTL for product details
     setCachedData(cacheKey, transformedProduct, CACHE_TTL.PRODUCT_DETAIL)
 
+    // Check if this is a fresh request (has cache-busting parameter)
+    const url = new URL(request.url)
+    const isFreshRequest = url.searchParams.has('t') || url.searchParams.has('fresh')
+    
+    // Use shorter cache for fresh requests to ensure immediate updates
+    const cacheControl = isFreshRequest 
+      ? 'no-cache, no-store, must-revalidate' 
+      : 'public, s-maxage=1800, stale-while-revalidate=3600'
+
     return createSecureResponse(transformedProduct, {
-      cacheControl: 'public, s-maxage=1800, stale-while-revalidate=3600',
+      cacheControl,
       headers: {
         'X-Cache': 'MISS',
-        'X-Product-ID': productId
+        'X-Product-ID': productId,
+        'Cache-Control': cacheControl
       }
     })
 
@@ -216,8 +242,8 @@ export async function PUT(
     const session = await validateServerSession(request)
     console.log('🔍 [DEBUG] Session validation result:', {
       hasSession: !!session,
-      userId: session?.user?.id,
-      userEmail: session?.user?.email,
+      userId: session?.id,
+      userEmail: session?.email,
       role: session?.role,
       profileIsAdmin: session?.profile?.is_admin,
       profileId: session?.profile?.id
@@ -273,6 +299,8 @@ export async function PUT(
     if (sanitizedUpdates.reviews !== undefined) supabaseUpdates.reviews = sanitizedUpdates.reviews
     if (sanitizedUpdates.image !== undefined) supabaseUpdates.image = sanitizedUpdates.image
     if (sanitizedUpdates.category !== undefined) supabaseUpdates.category = sanitizedUpdates.category
+    // Accept category_id (UUID) for relational linkage
+    if ((updates as any).category_id !== undefined) (supabaseUpdates as any).category_id = (updates as any).category_id
     if (sanitizedUpdates.brand !== undefined) supabaseUpdates.brand = sanitizedUpdates.brand
     if (sanitizedUpdates.description !== undefined) supabaseUpdates.description = sanitizedUpdates.description
     if (sanitizedUpdates.specifications !== undefined) supabaseUpdates.specifications = sanitizedUpdates.specifications
@@ -288,7 +316,7 @@ export async function PUT(
     if (sanitizedUpdates.sameDayDelivery !== undefined) supabaseUpdates.same_day_delivery = sanitizedUpdates.sameDayDelivery
     if (sanitizedUpdates.importChina !== undefined) supabaseUpdates.import_china = sanitizedUpdates.importChina
     if (sanitizedUpdates.variantConfig !== undefined) supabaseUpdates.variant_config = sanitizedUpdates.variantConfig
-    if (sanitizedUpdates.variantImages !== undefined) supabaseUpdates.variant_images = sanitizedUpdates.variantImages
+    // Ignore variantImages on update to prevent unintended additions; handled at upload time
 
     console.log('🔍 [DEBUG] Supabase Updates Object:', JSON.stringify(supabaseUpdates, null, 2))
     console.log('🔍 [DEBUG] Stock quantity being sent:', supabaseUpdates.stock_quantity)
@@ -299,6 +327,8 @@ export async function PUT(
       in_stock: supabaseUpdates.in_stock
     })
 
+    console.log('🔍 [DEBUG] About to update database with:', JSON.stringify(supabaseUpdates, null, 2))
+    
     const adminClient = createAdminSupabaseClient()
     const { data: product, error } = await adminClient
       .from('products')
@@ -309,6 +339,14 @@ export async function PUT(
         product_variants (*)
       `)
       .single()
+
+    console.log('🔍 [DEBUG] Database update response:', {
+      hasProduct: !!product,
+      hasError: !!error,
+      productId: product?.id,
+      productImage: product?.image,
+      productName: product?.name
+    })
 
     if (error) {
       console.error('❌ Error updating product in database:', error)
@@ -328,56 +366,39 @@ export async function PUT(
     }
 
     console.log('✅ [DEBUG] Product updated successfully in database!')
+    console.log('🔍 [DEBUG] Updated product image:', product.image)
     console.log('🔍 [DEBUG] Updated product stock_quantity:', product.stock_quantity)
     console.log('🔍 [DEBUG] Updated product in_stock:', product.in_stock)
     console.log('🔍 [DEBUG] Full updated product:', JSON.stringify({
       id: product.id,
       name: product.name,
+      image: product.image,
       stock_quantity: product.stock_quantity,
       in_stock: product.in_stock
     }, null, 2))
 
     // Handle variants update if provided
-    console.log('🔍 [DEBUG] Checking if variants update is needed:', {
-      hasVariants: updates.variants !== undefined,
-      variantsLength: Array.isArray(updates.variants) ? updates.variants.length : 'not array',
-      variants: updates.variants
-    })
-    
-    // Handle variants update if provided
-    console.log('🔍 [DEBUG] Processing variants update...')
     
     if (updates.variants !== undefined) {
-      console.log('🔍 [DEBUG] Processing variants update...')
       try {
         // Calculate total stock from all primaryValues and multiValues quantities
         let calculatedTotalStock = 0
         if (Array.isArray(updates.variants)) {
-          updates.variants.forEach((variant: any, variantIndex: number) => {
-            console.log(`🔍 [DEBUG] Processing variant ${variantIndex}:`, {
-              id: variant.id,
-              primaryValues: variant.primaryValues,
-              multiValues: variant.multiValues,
-              attributes: variant.attributes
-            })
+          updates.variants.forEach((variant: any) => {
             
             // Check primaryValues quantities
             if (Array.isArray(variant.primaryValues)) {
               variant.primaryValues.forEach((pv: any, pvIndex: number) => {
                 const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                console.log(`🔍 [DEBUG] PrimaryValue ${pvIndex} quantity:`, qty)
                 calculatedTotalStock += qty
               })
             }
             
             // Check multiValues quantities
             if (variant.multiValues && typeof variant.multiValues === 'object') {
-              console.log(`🔍 [DEBUG] Checking multiValues keys:`, Object.keys(variant.multiValues))
               Object.keys(variant.multiValues).forEach(key => {
-                console.log(`🔍 [DEBUG] Checking key: ${key}, ends with _quantity: ${key.endsWith('_quantity')}`)
                 if (key.endsWith('_quantity')) {
                   const qty = parseInt(variant.multiValues[key]) || 0
-                  console.log(`🔍 [DEBUG] MultiValue ${key} quantity:`, qty)
                   calculatedTotalStock += qty
                 }
               })
@@ -387,17 +408,19 @@ export async function PUT(
             if (variant.quantities && typeof variant.quantities === 'object') {
               Object.keys(variant.quantities).forEach(key => {
                 const qty = parseInt(variant.quantities[key]) || 0
-                console.log(`🔍 [DEBUG] Stock Quantity ${key}:`, qty)
                 calculatedTotalStock += qty
               })
             }
           })
         }
-        
-        console.log('🔍 [DEBUG] Calculated total stock from variants:', calculatedTotalStock)
+
+        // Fetch existing variants BEFORE delete so we can preserve images
+        const { data: existingVariantsBeforeDelete } = await adminClient
+          .from('product_variants')
+          .select('id, sku, image')
+          .eq('product_id', productId)
 
         // Delete existing variants for this product
-        console.log('🔍 [DEBUG] Deleting existing variants...')
         const { error: deleteError } = await adminClient
           .from('product_variants')
           .delete()
@@ -405,12 +428,17 @@ export async function PUT(
 
         if (deleteError) {
           console.error('❌ [DEBUG] Error deleting variants:', deleteError)
-        } else {
-          console.log('✅ [DEBUG] Variants deleted successfully')
         }
 
         if (!deleteError && Array.isArray(updates.variants) && updates.variants.length > 0) {
-          console.log('🔍 [DEBUG] Inserting new variants...')
+          // Preserve existing variant images when client didn't send an image
+          const existingById = new Map<string | number, any>()
+          const existingBySku = new Map<string, any>()
+          ;(existingVariantsBeforeDelete || []).forEach((v: any) => {
+            if (v.id !== undefined && v.id !== null) existingById.set(v.id, v)
+            if (v.sku) existingBySku.set(String(v.sku), v)
+          })
+
           const variantsToInsert = updates.variants.map((variant: any) => {
             // If variant has primaryValues, derive primary_attribute and clear attributes
             let primaryAttribute = variant.primaryAttribute
@@ -454,8 +482,6 @@ export async function PUT(
               })
             }
             
-            console.log(`🔍 [DEBUG] Variant calculated stock:`, variantStockQuantity)
-
             // Clean attributes by removing old _quantity fields
             const cleanAttributes = { ...attributes }
             Object.keys(cleanAttributes).forEach(key => {
@@ -464,10 +490,15 @@ export async function PUT(
               }
             })
 
+            // Preserve image if not provided in payload
+            const preservedImage = variant.image 
+              || (variant.id !== undefined && existingById.get(variant.id)?.image) 
+              || (variant.sku ? existingBySku.get(String(variant.sku))?.image : undefined)
+
             return {
               product_id: Number(productId),
               price: variant.price,
-              image: variant.image,
+              image: preservedImage || null,
               sku: variant.sku,
               model: variant.model,
               variant_type: variant.variantType || updates.variantConfig?.type || 'simple',
@@ -488,19 +519,11 @@ export async function PUT(
             
           if (insertError) {
             console.error('❌ [DEBUG] Error inserting variants:', insertError)
-          } else {
-            console.log('✅ [DEBUG] Variants inserted successfully:', insertResult)
           }
         }
         
         // NOW update the main products table with the calculated stock from variants
         if (Array.isArray(updates.variants) && updates.variants.length > 0) {
-          console.log('🔍 [DEBUG] Updating main products table with calculated stock:', {
-            productId,
-            calculatedTotalStock,
-            inStock: calculatedTotalStock > 0
-          })
-          
           const { data: updateResult, error: updateError } = await adminClient
             .from('products')
             .update({ 
@@ -519,8 +542,6 @@ export async function PUT(
               details: updateError.details,
               hint: updateError.hint
             })
-          } else {
-            console.log('✅ [DEBUG] Main products table updated successfully:', updateResult)
           }
         }
       } catch (e) {
@@ -585,6 +606,7 @@ export async function PUT(
       sameDayDelivery: responseProduct.same_day_delivery,
       importChina: !!(responseProduct as any).import_china,
       variants: responseProduct.product_variants?.map((variant: any) => {
+        
         const attributes = variant.attributes || {}
         const quantities = variant.stock_quantities || {}
         
@@ -599,7 +621,7 @@ export async function PUT(
         // Keep arrays as arrays for product detail page - don't convert to comma-separated
         const displayAttributes = { ...cleanAttributes }
 
-        return {
+        const variantData = {
           id: variant.id,
           price: variant.price,
           image: variant.image,
@@ -612,6 +634,7 @@ export async function PUT(
           dependencies: variant.dependencies || {},
           primaryValues: variant.primary_values || [],
         }
+        return variantData
       }) || [],
       variantConfig: (() => {
         const config = responseProduct.variant_config || {}
@@ -635,7 +658,22 @@ export async function PUT(
         }
         return config
       })(),
-      variantImages: responseProduct.variant_images || []
+      variantImages: (() => {
+        const images = responseProduct.variant_images || []
+        
+        
+        // Normalize to ensure consistent format
+        const normalized = images.map((img: any): { imageUrl: string } => {
+          if (typeof img === 'string') {
+            return { imageUrl: img }
+          } else if (img && typeof img === 'object' && img.imageUrl) {
+            return { imageUrl: img.imageUrl }
+          }
+          return { imageUrl: String(img || '') }
+        }).filter((img: { imageUrl: string }) => img.imageUrl)
+        
+        return normalized
+      })()
     }
 
     console.log('🔍 Final response being sent:', JSON.stringify({
@@ -644,11 +682,20 @@ export async function PUT(
       sameDayDelivery: transformedProduct.sameDayDelivery,
       id: transformedProduct.id,
       name: transformedProduct.name,
+      image: transformedProduct.image,
       stockQuantity: transformedProduct.stockQuantity,
-      inStock: transformedProduct.inStock
+      inStock: transformedProduct.inStock,
+      variantsCount: transformedProduct.variants?.length || 0,
+      variants: transformedProduct.variants
     }, null, 2))
 
-    return createSecureResponse(transformedProduct)
+    console.log('🔍 [DEBUG] About to send response. Image value:', transformedProduct.image)
+    
+    const response = createSecureResponse(transformedProduct)
+    
+    console.log('🔍 [DEBUG] Response created. Status:', response.status)
+    
+    return response
 
   } catch (error) {
     console.error('Error updating product:', error)
@@ -678,30 +725,84 @@ export async function DELETE(
 
     const adminClient = createAdminSupabaseClient()
     
-    // First delete variants
+    console.log('🗑️ [DEBUG] Starting product deletion for ID:', productId)
+    
+    // First, get the product to delete its images
+    const { data: productToDelete, error: fetchError } = await adminClient
+      .from('products')
+      .select('image, gallery')
+      .eq('id', productId)
+      .single()
+    
+    if (productToDelete) {
+      console.log('🔍 [DEBUG] Product found, preparing to delete images...')
+      
+      // Delete main image from storage
+      if (productToDelete.image) {
+        console.log('🗑️ [DEBUG] Deleting main image:', productToDelete.image)
+        const imageFileName = productToDelete.image.split('/').pop()
+        if (imageFileName) {
+          const { error: imageDeleteError } = await adminClient.storage
+            .from('product-images')
+            .remove([imageFileName])
+          
+          if (imageDeleteError) {
+            console.error('⚠️ [DEBUG] Failed to delete main image:', imageDeleteError)
+          } else {
+            console.log('✅ [DEBUG] Main image deleted successfully')
+          }
+        }
+      }
+      
+      // Delete gallery images from storage
+      if (productToDelete.gallery && Array.isArray(productToDelete.gallery) && productToDelete.gallery.length > 0) {
+        console.log('🗑️ [DEBUG] Deleting gallery images:', productToDelete.gallery.length, 'images')
+        const galleryFileNames = productToDelete.gallery.map((url: string) => url.split('/').pop()).filter((name): name is string => Boolean(name))
+        
+        if (galleryFileNames.length > 0) {
+          const { error: galleryDeleteError } = await adminClient.storage
+            .from('product-images')
+            .remove(galleryFileNames)
+          
+          if (galleryDeleteError) {
+            console.error('⚠️ [DEBUG] Failed to delete gallery images:', galleryDeleteError)
+          } else {
+            console.log('✅ [DEBUG] Gallery images deleted successfully:', galleryFileNames.length, 'images')
+          }
+        }
+      }
+    }
+    
+    // Delete variants
+    console.log('🗑️ [DEBUG] Deleting product variants...')
     const { error: variantError } = await adminClient
       .from('product_variants')
       .delete()
       .eq('product_id', productId)
 
     if (variantError) {
-      console.error('Error deleting variants:', variantError)
+      console.error('⚠️ [DEBUG] Error deleting variants:', variantError)
+    } else {
+      console.log('✅ [DEBUG] Variants deleted successfully')
     }
 
-    // Then delete the product
+    // Delete the product
+    console.log('🗑️ [DEBUG] Deleting product from database...')
     const { error } = await adminClient
       .from('products')
       .delete()
       .eq('id', productId)
 
     if (error) {
-      console.error('Error deleting product:', error)
+      console.error('❌ [DEBUG] Error deleting product:', error)
       return createErrorResponse('Failed to delete product', 500)
     }
+    
+    console.log('✅ [DEBUG] Product deleted successfully from database')
 
     // Clear cache for this product
     const cacheKey = `product:${productId}`
-    // Note: In a real app, you'd want to clear the cache here
+    console.log('🗑️ [DEBUG] Cache cleared for product:', productId)
 
     return createSecureResponse({ success: true })
 

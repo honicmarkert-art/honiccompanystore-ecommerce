@@ -18,7 +18,7 @@ interface CategoryFormProps {
 }
 
 interface MainCategory {
-  id: number
+  id: string
   name: string
   slug: string
 }
@@ -28,6 +28,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
   const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mainCategories, setMainCategories] = useState<MainCategory[]>([])
+  const [currentCategoryId, setCurrentCategoryId] = useState<string | number | null>(null)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -37,7 +38,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
     image_url: "",
     is_active: true,
     display_order: 0,
-    parent_id: null as number | null,
+    parent_id: null as string | null,
   })
 
   // Fetch main categories for parent selection
@@ -61,17 +62,36 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
   // Initialize form with category data if editing
   useEffect(() => {
     if (category) {
-      setFormData({
-        name: category.name || "",
-        description: category.description || "",
-        slug: category.slug || "",
-        image_url: category.image_url || "",
-        is_active: category.is_active ?? true,
-        display_order: category.display_order ?? 0,
-        parent_id: category.parent_id || null,
-      })
+      const categoryId = String(category.id)
+      // Only initialize if this is a different category
+      if (currentCategoryId !== categoryId) {
+        setCurrentCategoryId(categoryId)
+        setFormData({
+          name: category.name || "",
+          description: category.description || "",
+          slug: category.slug || "",
+          image_url: category.image_url || "",
+          is_active: category.is_active ?? true,
+          display_order: category.display_order ?? 0,
+          parent_id: category.parent_id || null,
+        })
+      }
+    } else {
+      // Reset form when category is null (new category)
+      if (currentCategoryId !== null) {
+        setCurrentCategoryId(null)
+        setFormData({
+          name: "",
+          description: "",
+          slug: "",
+          image_url: "",
+          is_active: true,
+          display_order: 0,
+          parent_id: null,
+        })
+      }
     }
-  }, [category])
+  }, [category?.id, currentCategoryId]) // Only depend on category ID, not the whole object
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({
@@ -180,7 +200,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
         <select
           id="parent_id"
           value={formData.parent_id || ""}
-          onChange={(e) => handleInputChange("parent_id", e.target.value ? parseInt(e.target.value) : null)}
+          onChange={(e) => handleInputChange("parent_id", e.target.value ? e.target.value : null)}
           className={cn(
             "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
             themeClasses.inputBg,
@@ -189,7 +209,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
         >
           <option value="">Select a main category (optional)</option>
           {mainCategories.map((mainCat) => (
-            <option key={mainCat.id} value={mainCat.id}>
+            <option key={mainCat.id} value={String(mainCat.id)}>
               {mainCat.name}
             </option>
           ))}

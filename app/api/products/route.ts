@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
     const maxPrice = searchParams.get('maxPrice')
     const inStock = searchParams.get('inStock')
     const categories = searchParams.get('categories') // Comma-separated list
+    const isChina = searchParams.get('isChina') // Filter by import_china
     
     // Sorting parameters
     const sortBy = searchParams.get('sortBy') || 'created_at'
@@ -66,7 +67,8 @@ export async function GET(request: NextRequest) {
       inStock,
       categories,
       sortBy,
-      sortOrder
+      sortOrder,
+      isChina
     })
 
     // Check enhanced cache first
@@ -106,7 +108,7 @@ export async function GET(request: NextRequest) {
       queryBuilder = queryBuilder.select(`
         id, name, price, original_price, image, category, brand, 
         rating, reviews, in_stock, stock_quantity, free_delivery, same_day_delivery, import_china,
-        is_new, updated_at, variant_config, product_variants (*)
+        is_new, updated_at, variant_config, sold_count, product_variants (*)
       `)
     } else if (enriched) {
       // Enriched data for list views - includes most fields needed for product cards
@@ -114,7 +116,7 @@ export async function GET(request: NextRequest) {
         id, name, price, original_price, description, 
         image, category, brand, rating, reviews, 
         in_stock, stock_quantity, free_delivery, same_day_delivery, import_china,
-        created_at, updated_at, variant_config,
+        created_at, updated_at, variant_config, sold_count,
         product_variants (*)
       `)
     } else {
@@ -159,6 +161,11 @@ export async function GET(request: NextRequest) {
     // Stock filtering
     if (inStock === 'true') {
       queryBuilder = queryBuilder.eq('in_stock', true)
+    }
+    
+    // China import filtering
+    if (isChina === 'true') {
+      queryBuilder = queryBuilder.eq('import_china', true)
     }
     
     // Multiple categories filtering (comma-separated)
@@ -233,6 +240,7 @@ export async function GET(request: NextRequest) {
       if (!isNaN(max) && max >= 0) countQuery = countQuery.lte('price', max)
     }
     if (inStock === 'true') countQuery = countQuery.eq('in_stock', true)
+    if (isChina === 'true') countQuery = countQuery.eq('import_china', true)
     if (categories !== undefined && categories !== null) {
       const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
       
@@ -279,57 +287,74 @@ export async function GET(request: NextRequest) {
       })
     }
     
-    // Apply PostgreSQL full-text search if search term provided
+    // Apply keyword-based search if search term provided
     let filteredProducts = products
     if (performSearch && search) {
       const sanitized = securityUtils.sanitizeInput(search)
       const escapedSearch = escapeSqlWildcards(sanitized)
       
+      // Extract keywords from search query (remove common stop words and short words)
+      const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'ya', 'inch', 'inches'])
+      const keywords = sanitized
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(word => word.length >= 2 && !stopWords.has(word))
+        .map(word => word.replace(/[^\w]/g, '')) // Remove special characters
+        .filter(word => word.length >= 2)
+      
+      // If no meaningful keywords found, use the original search
+      const searchKeywords = keywords.length > 0 ? keywords : [sanitized.toLowerCase()]
+      
       try {
-        // Use PostgreSQL full-text search with basic textSearch
-        const { data: searchResults, error: searchError } = await publicClient
-          .from('products')
-          .select(`
-            id, name, description, category, brand, price, image,
-            product_variants (
-              sku, model, attributes, primary_values
-            )
-          `)
-          .textSearch('search_vector', sanitized, { type: 'websearch' })
-          .limit(limit ? parseInt(limit) : 100)
+        // Build OR query for keyword matching
+        const keywordConditions = searchKeywords.map(keyword => {
+          const escapedKeyword = escapeSqlWildcards(keyword)
+          return `name.ilike.%${escapedKeyword}%,description.ilike.%${escapedKeyword}%,category.ilike.%${escapedKeyword}%,brand.ilike.%${escapedKeyword}%`
+        }).join(',')
 
-        if (searchError) {
-          logger.error('Full-text search error:', searchError)
-          // Fallback to simple ILIKE search
-          const { data: fallbackResults, error: fallbackError } = await publicClient
+        // Search products using keyword OR logic
+        const { data: keywordResults, error: keywordError } = await publicClient
+          .from('products')
+          .select('id, name, description, category, brand')
+          .or(keywordConditions)
+          .limit(limit ? parseInt(limit) : 500)
+
+        if (keywordError) {
+          logger.error('Keyword search error:', keywordError)
+        }
+
+        // Also try full-text search as a secondary method
+        let fullTextResults: any[] = []
+        try {
+          const { data: searchResults, error: searchError } = await publicClient
             .from('products')
-            .select('id')
-            .or(`name.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%,category.ilike.%${escapedSearch}%,brand.ilike.%${escapedSearch}%,sku.ilike.%${escapedSearch}%`)
+            .select(`
+              id, name, description, category, brand, price, image,
+              product_variants (
+                sku, model, attributes, primary_values
+              )
+            `)
+            .textSearch('search_vector', sanitized, { type: 'websearch' })
             .limit(limit ? parseInt(limit) : 100)
 
-          if (fallbackError) {
-            logger.error('Fallback search error:', fallbackError)
-            filteredProducts = []
-          } else {
-            const fallbackIds = new Set(fallbackResults?.map(r => r.id) || [])
-            filteredProducts = products.filter((p: any) => fallbackIds.has(p.id))
+          if (!searchError && searchResults) {
+            fullTextResults = searchResults
           }
-        } else {
-          // No full-text search results, search within variant data
-          filteredProducts = []
+        } catch (ftError) {
+          logger.error('Full-text search error:', ftError)
         }
         
-        // Always search within variant data for additional matches (regardless of full-text results)
-        const searchResultIds = new Set((searchResults || []).map((r: any) => r.id))
+        // Combine keyword and full-text results
+        const keywordIds = new Set((keywordResults || []).map((r: any) => r.id))
+        const fullTextIds = new Set(fullTextResults.map((r: any) => r.id))
+        const allMatchedIds = new Set([...keywordIds, ...fullTextIds])
         
         // Search within variant data for additional matches
         const variantMatches = products.filter((p: any) => {
-          if (searchResultIds.has(p.id)) return false // Already matched by full-text search
+          if (allMatchedIds.has(p.id)) return false // Already matched
           
-          // Check if any variant contains the search term
           const variants = p.product_variants || []
           return variants.some((variant: any) => {
-            // Extract all text from variant data
             const variantTexts = [
               variant.sku || '',
               variant.model || '',
@@ -337,7 +362,6 @@ export async function GET(request: NextRequest) {
               JSON.stringify(variant.primary_values || []),
             ]
             
-            // Also extract individual values from primary_values
             if (variant.primary_values && Array.isArray(variant.primary_values)) {
               variant.primary_values.forEach((pv: any) => {
                 if (pv.value) variantTexts.push(pv.value)
@@ -345,50 +369,92 @@ export async function GET(request: NextRequest) {
               })
             }
             
-            
-            // Join all text and search
             const variantText = variantTexts.join(' ').toLowerCase()
-            const searchLower = sanitized.toLowerCase()
             
-            // Check for exact match or partial match
-            return variantText.includes(searchLower) || 
-                   searchLower.split(' ').some(word => variantText.includes(word))
+            // Check if any keyword matches
+            return searchKeywords.some(keyword => variantText.includes(keyword))
           })
         })
         
-        // Simple substring search across product core fields (fallback for short queries like "sal")
-        const searchLowerSimple = sanitized.toLowerCase()
+        // Simple substring search across product core fields
         const simpleMatches = products.filter((p: any) => {
+          if (allMatchedIds.has(p.id)) return false // Already matched
+          
           const text = `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.brand || ''}`.toLowerCase()
-          return text.includes(searchLowerSimple)
+          
+          // Check if any keyword matches
+          return searchKeywords.some(keyword => text.includes(keyword))
         })
 
-        // Combine full-text results with variant and simple matches, de-duplicated
-        const fullTextMatches = searchResults ? products.filter((p: any) => searchResultIds.has(p.id)) : []
-        const combined = [...fullTextMatches, ...variantMatches, ...simpleMatches]
-        const seenIds = new Set<number>()
-        filteredProducts = combined.filter((p: any) => {
-          if (seenIds.has(p.id)) return false
-          seenIds.add(p.id)
-          return true
+        // Combine all matches and score by relevance (more keyword matches = higher score)
+        const allMatches = [
+          ...products.filter((p: any) => allMatchedIds.has(p.id)),
+          ...variantMatches,
+          ...simpleMatches
+        ]
+        
+        // Score products by number of keyword matches
+        const scoredProducts = allMatches.map((p: any) => {
+          const productText = `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.brand || ''}`.toLowerCase()
+          const matchCount = searchKeywords.filter(keyword => productText.includes(keyword)).length
+          return { product: p, score: matchCount }
         })
         
-        logger.log(`Full-text search: "${search}" matched ${filteredProducts.length}/${products.length} products`)
+        // Sort by score (more matches first) and remove duplicates
+        const seenIds = new Set<number>()
+        filteredProducts = scoredProducts
+          .sort((a, b) => b.score - a.score) // Higher score first
+          .filter(({ product }) => {
+            if (seenIds.has(product.id)) return false
+            seenIds.add(product.id)
+            return true
+          })
+          .map(({ product }) => product)
+        
+        logger.log(`Keyword search: "${search}" (keywords: ${searchKeywords.join(', ')}) matched ${filteredProducts.length}/${products.length} products`)
       } catch (error) {
         logger.error('Search execution error:', error)
-        // Fallback to simple ILIKE search
+        // Fallback to keyword-based ILIKE search
+        const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'ya', 'inch', 'inches'])
+        const keywords = sanitized
+          .toLowerCase()
+          .split(/\s+/)
+          .filter(word => word.length >= 2 && !stopWords.has(word))
+          .map(word => word.replace(/[^\w]/g, ''))
+          .filter(word => word.length >= 2)
+        
+        const searchKeywords = keywords.length > 0 ? keywords : [sanitized.toLowerCase()]
+        
+        // Build keyword-based OR query
+        const keywordConditions = searchKeywords.map(keyword => {
+          const escapedKeyword = escapeSqlWildcards(keyword)
+          return `name.ilike.%${escapedKeyword}%,description.ilike.%${escapedKeyword}%,category.ilike.%${escapedKeyword}%,brand.ilike.%${escapedKeyword}%`
+        }).join(',')
+        
         const { data: fallbackResults, error: fallbackError } = await publicClient
           .from('products')
           .select('id')
-          .or(`name.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%,category.ilike.%${escapedSearch}%,brand.ilike.%${escapedSearch}%,sku.ilike.%${escapedSearch}%`)
-          .limit(limit ? parseInt(limit) : 100)
+          .or(keywordConditions)
+          .limit(limit ? parseInt(limit) : 500)
 
         if (fallbackError) {
           logger.error('Fallback search error:', fallbackError)
           filteredProducts = []
         } else {
           const fallbackIds = new Set(fallbackResults?.map(r => r.id) || [])
-          filteredProducts = products.filter((p: any) => fallbackIds.has(p.id))
+          
+          // Score and sort by keyword matches
+          const scoredProducts = products
+            .filter((p: any) => fallbackIds.has(p.id))
+            .map((p: any) => {
+              const productText = `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.brand || ''}`.toLowerCase()
+              const matchCount = searchKeywords.filter(keyword => productText.includes(keyword)).length
+              return { product: p, score: matchCount }
+            })
+            .sort((a, b) => b.score - a.score)
+            .map(({ product }) => product)
+          
+          filteredProducts = scoredProducts
         }
       }
     }
@@ -498,6 +564,14 @@ export async function GET(request: NextRequest) {
         importChina: !!(product as any).import_china,
         is_new: product.is_new, // For "New" badge calculation
         updated_at: product.updated_at, // For "New" badge calculation
+        // Generate deterministic random sold_count if not present (for now)
+        // Uses product ID as seed for consistency
+        sold_count: (product as any).sold_count || (() => {
+          // Deterministic random based on product ID (consistent per product)
+          const seed = product.id
+          const random = ((seed * 9301 + 49297) % 233280) / 233280
+          return Math.floor(random * 5000) + 100 // Random between 100-5100
+        })(),
       }
 
       // Always include variant data for auto-selection functionality
@@ -582,14 +656,23 @@ export async function GET(request: NextRequest) {
       pagination: paginationInfo
     }
 
+    // Check if this is a fresh request (has cache-busting parameter)
+    const url = new URL(request.url)
+    const isFreshRequest = url.searchParams.has('t') || url.searchParams.has('fresh')
+    
     // Cache the result using enhanced cache
     enhancedCache.set(cacheKey, responseData, CACHE_TTL.PRODUCTS)
     
     const apiTime = Date.now() - startTime
     performanceMonitor.recordMetrics({ apiTime, cacheHitRate: 0 })
+    
+    // Use no-cache for fresh requests to ensure immediate updates
+    const cacheControl = isFreshRequest 
+      ? 'no-cache, no-store, must-revalidate' 
+      : 'public, s-maxage=1800, stale-while-revalidate=3600'
 
     return createSecureResponse(responseData, {
-      cacheControl: 'public, s-maxage=1800, stale-while-revalidate=3600',
+      cacheControl,
       headers: {
         'X-Cache': 'MISS',
         'X-Payload-Size': minimal ? 'minimal' : 'full',
@@ -599,6 +682,7 @@ export async function GET(request: NextRequest) {
         'X-API-Time': apiTime.toString(),
         'X-Cache-Hit-Rate': '0',
         'X-Data-Source': 'PRODUCTS_TABLE',
+        'Cache-Control': cacheControl,
         ...(performSearch && {
           'X-Search-Applied': 'true',
           'X-Search-Matched': filteredProducts.length.toString()
@@ -631,7 +715,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
-    const productData = await request.json()
+    // Never trust client-provided id during create
+    const { id: _ignoreId, ...productData } = await request.json()
     
     logger.log('🔍 POST Product Data Received:', {
       stockQuantity: productData.stockQuantity,
@@ -651,6 +736,32 @@ export async function POST(request: NextRequest) {
       description: productData.description ? securityUtils.sanitizeInput(productData.description) : '',
       category_id: productData.category_id,
       brand: productData.brand ? securityUtils.sanitizeInput(productData.brand) : ''
+    }
+
+    // If category_id missing but category provided, try to resolve UUID from categories table by name or slug
+    if (!sanitizedData.category_id && (productData.category || productData.category_slug)) {
+      const { createClient } = await import('@supabase/supabase-js')
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      const publicClient = createClient(supabaseUrl, supabaseAnonKey)
+
+      const categoryName = (productData.category || '').trim()
+      const categorySlug = (productData.category_slug || (categoryName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''))
+
+      const { data: cat, error: catError } = await publicClient
+        .from('categories')
+        .select('id, name, slug')
+        .or(`name.eq.${categoryName},slug.eq.${categorySlug}`)
+        .maybeSingle()
+
+      if (!catError && cat?.id) {
+        sanitizedData.category_id = cat.id
+      }
+    }
+
+    // Final guard: require category_id for creation if categories exist in system
+    if (!sanitizedData.category_id) {
+      return createErrorResponse('Please select a valid sub category', 400)
     }
 
     // Validate price and stock
@@ -691,6 +802,9 @@ export async function POST(request: NextRequest) {
       variant_images: productData.variantImages || []
     }
 
+    // Use resolved/validated category_id
+    ;(supabaseProduct as any).category_id = sanitizedData.category_id
+
     logger.log('📝 Inserting product with stock:', {
       stock_quantity: supabaseProduct.stock_quantity,
       in_stock: supabaseProduct.in_stock
@@ -705,7 +819,8 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('Error adding product:', error)
-      return NextResponse.json({ error: 'Failed to add product' }, { status: 500 })
+      // Return clearer error details to help diagnose 500s during creation (safe enough for dev)
+      return NextResponse.json({ error: 'Failed to add product', details: error.message }, { status: 500 })
     }
 
     // Calculate total stock from all primaryValues quantities

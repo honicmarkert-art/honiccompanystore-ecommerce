@@ -218,6 +218,7 @@ export function MediaUpload({
                   src={value}
                   alt="Current media"
                   fill
+                  sizes="128px"
                   className="object-contain"
                   style={{ objectFit: 'contain' }}
                 />
@@ -280,9 +281,14 @@ export function MediaUpload({
           <div className="flex flex-wrap gap-2">
             {/* Insert Button */}
             <Button
+              type="button"
               variant="outline"
               size="sm"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                fileInputRef.current?.click()
+              }}
               disabled={isUploading}
               className="text-xs"
             >
@@ -293,9 +299,12 @@ export function MediaUpload({
             {/* Edit Button - Only show if there's a value */}
             {value && (
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => {
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
                   const promptText = type === 'image' ? 'Enter new image URL:' : 
                                    type === 'video' ? 'Enter new video URL:' : 
                                    'Enter new 360° view URL:'
@@ -313,9 +322,12 @@ export function MediaUpload({
 
             {/* URLs Button */}
             <Button
+              type="button"
               variant="outline"
               size="sm"
-              onClick={() => {
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
                 const promptText = type === 'image' ? 'Enter image URL:' : 
                                  type === 'video' ? 'Enter video URL (YouTube or direct file):' : 
                                  'Enter 360° view URL (YouTube or 3D model):'
@@ -333,9 +345,14 @@ export function MediaUpload({
             {/* Delete Button - Only show if there's a value */}
             {value && onRemove && (
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
-                onClick={onRemove}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onRemove()
+                }}
                 className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
               >
                 <Trash2 className="w-3 h-3 mr-1" />
@@ -346,9 +363,14 @@ export function MediaUpload({
             {/* View Button - Only show if there's a value */}
             {value && (
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => window.open(value, '_blank')}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  window.open(value, '_blank')
+                }}
                 className="text-xs"
               >
                 <Eye className="w-3 h-3 mr-1" />
@@ -393,7 +415,10 @@ export function MediaUpload({
             {/* Action Buttons */}
             <div className="flex justify-center gap-3">
               <Button
-                onClick={async () => {
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
                   if (originalFile) {
                     await uploadFile(originalFile)
                     setShowPreview(false)
@@ -418,8 +443,11 @@ export function MediaUpload({
               </Button>
               
               <Button
+                type="button"
                 variant="outline"
-                onClick={() => {
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
                   setShowPreview(false)
                   setPendingImage(null)
                   setOriginalFile(null)

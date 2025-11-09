@@ -5,6 +5,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useMemo, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import {
   Plus,
@@ -43,7 +44,9 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { useProducts } from "@/hooks/use-products"
+import { useCategories } from "@/hooks/use-categories"
 import { useCurrency } from "@/contexts/currency-context"
+import { useToast } from "@/hooks/use-toast"
 import { ProductForm } from "./product-form"
 import { SecurityGuard } from "@/components/security-guard"
 
@@ -58,9 +61,14 @@ export default function AdminProducts() {
 function AdminProductsContent() {
   const { themeClasses } = useTheme()
   const { products, addProduct, updateProduct, deleteProduct, resetToDefault, isLoading, fetchFullProducts, fetchFullProductDetails } = useProducts()
+  const { mainCategories, subCategories } = useCategories()
   const { formatPrice } = useCurrency() // Use global currency context
+  const { toast } = useToast()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [searchTerm, setSearchTerm] = useState("")
-  const [selectedCategory, setSelectedCategory] = useState<string>("all")
+  const [selectedMainCategoryId, setSelectedMainCategoryId] = useState<string>("all")
+  const [selectedSubCategoryId, setSelectedSubCategoryId] = useState<string>("all")
   const [selectedBrand, setSelectedBrand] = useState<string>("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
@@ -70,11 +78,42 @@ function AdminProductsContent() {
     fetchFullProducts()
   }, [fetchFullProducts])
 
-  // Get unique categories and brands
-  const categories = useMemo(() => {
-    const cats = new Set(products.map(p => p.category))
-    return Array.from(cats).sort()
-  }, [products])
+  // Initialize filters from URL (persist across refresh)
+  useEffect(() => {
+    const q = searchParams.get('q') || ''
+    const main = searchParams.get('main') || 'all'
+    const sub = searchParams.get('sub') || 'all'
+    const brand = searchParams.get('brand') || 'all'
+    setSearchTerm(q)
+    setSelectedMainCategoryId(main)
+    setSelectedSubCategoryId(sub)
+    setSelectedBrand(brand)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const updateQuery = (next: { q?: string; main?: string; sub?: string; brand?: string }) => {
+    const q = new URLSearchParams(Array.from(searchParams.entries()))
+    if (next.q !== undefined) {
+      if (next.q) q.set('q', next.q); else q.delete('q')
+    }
+    if (next.main !== undefined) {
+      if (next.main && next.main !== 'all') q.set('main', next.main); else q.delete('main')
+    }
+    if (next.sub !== undefined) {
+      if (next.sub && next.sub !== 'all') q.set('sub', next.sub); else q.delete('sub')
+    }
+    if (next.brand !== undefined) {
+      if (next.brand && next.brand !== 'all') q.set('brand', next.brand); else q.delete('brand')
+    }
+    const query = q.toString()
+    router.replace(`/siem-dashboard/products${query ? `?${query}` : ''}`)
+  }
+
+  // Filter subcategories based on selected main
+  const filteredSubs = useMemo(() => {
+    if (selectedMainCategoryId === "all") return subCategories
+    return subCategories.filter(s => String((s as any).parent_id || s.parent_name) && s.parent_name === (mainCategories.find(m => String(m.id) === String(selectedMainCategoryId))?.name))
+  }, [subCategories, mainCategories, selectedMainCategoryId])
 
   const brands = useMemo(() => {
     const brs = new Set(products.map(p => p.brand))
@@ -85,11 +124,22 @@ function AdminProductsContent() {
   const filteredProducts = useMemo(() => {
     return products.filter(product => {
       const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesCategory = selectedCategory === "all" || product.category === selectedCategory
       const matchesBrand = selectedBrand === "all" || product.brand === selectedBrand
-      return matchesSearch && matchesCategory && matchesBrand
+
+      // Match by main category (parent) and/or subcategory (leaf) using IDs when available
+      const productCategoryId = String((product as any).category_id || "")
+      const productParentId = String((product as any).category_parent_id || "")
+
+      const matchesMain = selectedMainCategoryId === "all"
+        || productParentId === String(selectedMainCategoryId)
+        || productCategoryId === String(selectedMainCategoryId) // if product assigned directly to main
+
+      const matchesSub = selectedSubCategoryId === "all"
+        || productCategoryId === String(selectedSubCategoryId)
+
+      return matchesSearch && matchesBrand && matchesMain && matchesSub
     })
-  }, [products, searchTerm, selectedCategory, selectedBrand])
+  }, [products, searchTerm, selectedBrand, selectedMainCategoryId, selectedSubCategoryId])
 
   const handleEditProduct = async (product: any) => {
     // Refresh the product data from the database before opening the form
@@ -142,12 +192,17 @@ function AdminProductsContent() {
           <AuthStatusIndicator />
           <MaterializedViewRefreshButton onRefresh={fetchFullProducts} />
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="flex items-center gap-2">
-                <Plus className="h-4 w-4" />
-                Add Product
-              </Button>
-            </DialogTrigger>
+            <Button 
+              className="flex items-center gap-2"
+              onClick={() => {
+                // Ensure we start with a clean form when adding a new product
+                setEditingProduct(null)
+                setIsAddDialogOpen(true)
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Add Product
+            </Button>
             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>
@@ -155,6 +210,7 @@ function AdminProductsContent() {
                 </DialogTitle>
               </DialogHeader>
               <ProductForm 
+                key={editingProduct?.id || 'new'} // Force re-render when product changes
                 product={editingProduct}
                 autoCloseOnSave={false}
                 onClose={() => {
@@ -164,12 +220,32 @@ function AdminProductsContent() {
                 onSave={async (productData) => {
                   try {
                     if (editingProduct) {
+                      console.log('🔍 [DEBUG] About to update product:', editingProduct.id)
                       await updateProduct(editingProduct.id, productData)
+                      console.log('✅ [DEBUG] updateProduct completed')
+                      toast({ title: 'Product updated successfully' })
+                      
+                      // Small delay to ensure database has processed the update
+                      await new Promise(resolve => setTimeout(resolve, 100))
+                      
                       // Refresh the product data after update
+                      console.log('🔍 [DEBUG] Fetching refreshed product...')
                       const refreshedProduct = await fetchFullProductDetails(editingProduct.id)
-                      setEditingProduct(refreshedProduct)
+                      if (refreshedProduct) {
+                        console.log('✅ [DEBUG] Fetched refreshed product:', {
+                          id: refreshedProduct.id,
+                          name: refreshedProduct.name,
+                          image: refreshedProduct.image,
+                          freeDelivery: refreshedProduct.freeDelivery,
+                          sameDayDelivery: refreshedProduct.sameDayDelivery
+                        })
+                        setEditingProduct(refreshedProduct)
+                      } else {
+                        console.log('⚠️ [DEBUG] No refreshed product data received')
+                      }
                     } else {
                       await addProduct(productData)
+                      toast({ title: 'Product created successfully' })
                     }
                     
                     // Force refresh the products list to ensure UI is up to date
@@ -302,17 +378,27 @@ function AdminProductsContent() {
                 <Input
                   placeholder="Search products..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setSearchTerm(v)
+                    updateQuery({ q: v })
+                  }}
                   className="pl-9"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className={cn("text-sm font-medium", themeClasses.mainText)}>Category</label>
+              <label className={cn("text-sm font-medium", themeClasses.mainText)}>Main Category</label>
               <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
+                value={selectedMainCategoryId}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setSelectedMainCategoryId(v)
+                  // Reset sub when main changes
+                  setSelectedSubCategoryId("all")
+                  updateQuery({ main: v, sub: 'all' })
+                }}
                 className={cn(
                   "w-full rounded-md border px-3 py-2 text-sm",
                   themeClasses.cardBg,
@@ -321,9 +407,33 @@ function AdminProductsContent() {
                 )}
                 suppressHydrationWarning
               >
-                <option value="all">All Categories</option>
-                {categories.map(category => (
-                  <option key={category} value={category}>{category}</option>
+                <option value="all">All Main Categories</option>
+                {mainCategories.map((m) => (
+                  <option key={String(m.id)} value={String(m.id)}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className={cn("text-sm font-medium", themeClasses.mainText)}>Sub Category</label>
+              <select
+                value={selectedSubCategoryId}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setSelectedSubCategoryId(v)
+                  updateQuery({ sub: v })
+                }}
+                className={cn(
+                  "w-full rounded-md border px-3 py-2 text-sm",
+                  themeClasses.cardBg,
+                  themeClasses.borderNeutralSecondary,
+                  themeClasses.mainText
+                )}
+                suppressHydrationWarning
+              >
+                <option value="all">All Sub Categories</option>
+                {filteredSubs.map((s) => (
+                  <option key={String(s.id)} value={String(s.id)}>{s.name}</option>
                 ))}
               </select>
             </div>
@@ -332,7 +442,11 @@ function AdminProductsContent() {
               <label className={cn("text-sm font-medium", themeClasses.mainText)}>Brand</label>
               <select
                 value={selectedBrand}
-                onChange={(e) => setSelectedBrand(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setSelectedBrand(v)
+                  updateQuery({ brand: v })
+                }}
                 className={cn(
                   "w-full rounded-md border px-3 py-2 text-sm",
                   themeClasses.cardBg,
@@ -371,6 +485,7 @@ function AdminProductsContent() {
             <table className="w-full">
               <thead>
                 <tr className={cn("border-b", themeClasses.cardBorder)}>
+                  <th className={cn("text-left py-3 px-4 font-medium w-12", themeClasses.mainText)}>No.</th>
                   <th className={cn("text-left py-3 px-4 font-medium", themeClasses.mainText)}>Product</th>
                   <th className={cn("text-left py-3 px-4 font-medium", themeClasses.mainText)}>Category</th>
                   <th className={cn("text-left py-3 px-4 font-medium", themeClasses.mainText)}>Brand</th>
@@ -382,8 +497,9 @@ function AdminProductsContent() {
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((product) => (
+                {filteredProducts.map((product, idx) => (
                   <tr key={product.id} className={cn("border-b", themeClasses.cardBorder)}>
+                    <td className="py-3 px-4 align-top">{idx + 1}</td>
                     <td className="py-3 px-4">
                       <div className="flex items-center space-x-3">
                         {product.image ? (
@@ -393,6 +509,7 @@ function AdminProductsContent() {
                             width={40}
                             height={40}
                             className="rounded-md object-cover"
+                            style={{ width: 'auto', height: '40px' }}
                           />
                         ) : (
                           <div className="w-10 h-10 bg-gray-200 rounded-md flex items-center justify-center">

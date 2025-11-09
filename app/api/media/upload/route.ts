@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 // Use service role key for admin operations (bypasses RLS)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -14,6 +17,10 @@ const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, s
 
 export async function POST(request: NextRequest) {
   try {
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
+    }
+    
     logger.log('📤 Media upload API called (using service role key)')
     
     // Check for authentication header
@@ -102,10 +109,37 @@ export async function POST(request: NextRequest) {
       .from(bucketName)
       .getPublicUrl(fileName)
 
-    // If this is a product image upload, update the product's image field
+    // If this is a product image upload, delete old image and update the product's image field
     if (productId && context === 'product' && type === 'image') {
       logger.log(`🔄 Updating product ${productId} image field...`)
       
+      // First, get the old image URL from the product
+      const { data: oldProduct } = await supabase
+        .from('products')
+        .select('image')
+        .eq('id', parseInt(productId))
+        .single()
+      
+      // Delete old image if it exists
+      if (oldProduct?.image) {
+        logger.log('🗑️ Deleting old product image:', oldProduct.image)
+        
+        // Extract filename from URL
+        const oldFileName = oldProduct.image.split('/').pop()
+        if (oldFileName) {
+          const { error: deleteError } = await supabase.storage
+            .from(bucketName)
+            .remove([oldFileName])
+          
+          if (deleteError) {
+            logger.log('⚠️ Failed to delete old image:', deleteError.message)
+          } else {
+            logger.log('✅ Old image deleted successfully')
+          }
+        }
+      }
+      
+      // Update product with new image URL
       const { error: updateError } = await supabase
         .from('products')
         .update({ image: urlData.publicUrl })
@@ -116,6 +150,39 @@ export async function POST(request: NextRequest) {
         // Don't fail the upload, just log the error
       } else {
         logger.log('✅ Product image field updated successfully')
+      }
+    }
+
+    // If this is a variant image upload, append to products.variant_images immediately
+    if (productId && context === 'variant' && type === 'image') {
+      try {
+        const pid = parseInt(productId)
+        const { data: existing } = await supabase
+          .from('products')
+          .select('variant_images')
+          .eq('id', pid)
+          .single()
+
+        const current: any[] = Array.isArray(existing?.variant_images) ? existing.variant_images : []
+        // Normalize to array of objects: { imageUrl: string }
+        const normalized: Array<{ imageUrl: string }> = current.map((it: any) =>
+          typeof it === 'string' ? { imageUrl: it } : { imageUrl: String(it?.imageUrl || '') }
+        ).filter(it => !!it.imageUrl)
+
+        // Append if not already present
+        const exists = normalized.some(it => it.imageUrl === urlData.publicUrl)
+        const merged = exists ? normalized : [...normalized, { imageUrl: urlData.publicUrl }]
+
+        const { error: updErr } = await supabase
+          .from('products')
+          .update({ variant_images: merged })
+          .eq('id', pid)
+
+        if (updErr) {
+          console.error('❌ Error updating variant_images:', updErr)
+        }
+      } catch (e) {
+        console.error('❌ Variant image DB append error:', e)
       }
     }
 
@@ -171,6 +238,10 @@ function getBucketName(type: string, context: string = 'product'): string {
 // GET endpoint to list media files
 export async function GET(request: NextRequest) {
   try {
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
+    }
+    
     const { searchParams } = new URL(request.url)
     const type = searchParams.get('type')
     const bucket = searchParams.get('bucket')
@@ -237,6 +308,10 @@ function extractProductIdFromFilename(filename: string): string | null {
 // DELETE endpoint to remove media files
 export async function DELETE(request: NextRequest) {
   try {
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
+    }
+    
     const { searchParams } = new URL(request.url)
     const fileName = searchParams.get('fileName')
     const type = searchParams.get('type')

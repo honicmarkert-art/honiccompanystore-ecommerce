@@ -18,12 +18,12 @@ const nextConfig = {
     // Optimize for performance
     unoptimized: false,
     remotePatterns: [
-      {
+      ...(process.env.NEXT_PUBLIC_SUPABASE_URL ? [{
         protocol: 'https',
-        hostname: 'qobobocldfjhdkpjyuuq.supabase.co',
+        hostname: process.env.NEXT_PUBLIC_SUPABASE_URL.replace('https://', '').replace('http://', ''),
         port: '',
         pathname: '/storage/v1/object/public/**',
-      },
+      }] : []),
       {
         protocol: 'https',
         hostname: '*.supabase.co',
@@ -245,7 +245,7 @@ const nextConfig = {
           // Content Security Policy
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: https://qobobocldfjhdkpjyuuq.supabase.co https://*.supabase.co; connect-src 'self' https://api.clickpesa.com https://qobobocldfjhdkpjyuuq.supabase.co wss://qobobocldfjhdkpjyuuq.supabase.co https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';"
+            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} https://*.supabase.co; connect-src 'self' https://api.clickpesa.com ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} wss://${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('https://', '').replace('http://', '') || ''} https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';`
           },
           // Security Headers
           {

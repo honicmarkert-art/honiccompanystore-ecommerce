@@ -143,6 +143,10 @@ export default function Component() {
   const { navigateWithPrefetch } = useOptimizedNavigation() // Optimized navigation
   const [searchTerm, setSearchTerm] = useState("")
   const [activeBrand, setActiveBrand] = useState<string | null>(null)
+  // Categories scroll state
+  const categoriesScrollRef = useRef<HTMLDivElement>(null)
+  const [showLeftArrow, setShowLeftArrow] = useState(false)
+  const [showRightArrow, setShowRightArrow] = useState(true)
   // Initialize search state from URL query ?search= on mount and when URL changes
   const urlSearchParams = useSearchParams()
   
@@ -239,26 +243,45 @@ export default function Component() {
     rateLimitCooldown: 60000
   })
 
+  // Fallback categories in case API fails
+  const fallbackMainCategories = [
+    { id: 1, name: 'DIY Electronic Components', slug: 'diy-electronic-components', image_url: null, is_main: true },
+    { id: 2, name: 'Home Electronic Devices', slug: 'home-electronic-devices', image_url: null, is_main: true },
+    { id: 3, name: 'Computer & Office', slug: 'computer-office', image_url: null, is_main: true },
+    { id: 4, name: 'School Items', slug: 'school-items', image_url: null, is_main: true },
+    { id: 5, name: 'Clothes & Shoes', slug: 'clothes-and-shoes', image_url: null, is_main: true },
+    { id: 6, name: 'Sport & Entertainment', slug: 'sport-and-entertainment', image_url: null, is_main: true },
+    { id: 7, name: 'Games', slug: 'games', image_url: null, is_main: true },
+    { id: 8, name: 'Fashion & Jewelry', slug: 'fashion-and-jewelry', image_url: null, is_main: true },
+    { id: 9, name: 'Beauty & Health', slug: 'beauty-health', image_url: null, is_main: true },
+    { id: 10, name: 'Home & Garden', slug: 'home-garden', image_url: null, is_main: true },
+    { id: 11, name: 'Toys & Hobbies', slug: 'toys-hobbies', image_url: null, is_main: true },
+    { id: 12, name: 'Automotive', slug: 'automotive', image_url: null, is_main: true },
+  ]
+
   // Process categories data
   const categoriesData = useMemo(() => {
-    if (!categories || categoriesLoading || categoriesError) {
-      return { mainCategories: [], subCategories: [], allCategories: [] }
-    }
-
     // Handle different response formats
     let categoriesArray: any[] = []
-    if (Array.isArray(categories)) {
-      categoriesArray = categories
-    } else if (categories && typeof categories === 'object' && 'categories' in categories && Array.isArray((categories as any).categories)) {
-      categoriesArray = (categories as any).categories
-    } else if (categories && typeof categories === 'object' && 'success' in categories && Array.isArray((categories as any).categories)) {
-      // Handle API response format: { success: true, categories: [...] }
-      categoriesArray = (categories as any).categories
-    } else {
-      console.warn('Categories data format not recognized:', categories)
-      return { mainCategories: [], subCategories: [], allCategories: [] }
+    if (categories && !categoriesError) {
+      if (Array.isArray(categories)) {
+        categoriesArray = categories
+      } else if (categories && typeof categories === 'object' && 'categories' in categories && Array.isArray((categories as any).categories)) {
+        categoriesArray = (categories as any).categories
+      } else if (categories && typeof categories === 'object' && 'success' in categories && Array.isArray((categories as any).categories)) {
+        // Handle API response format: { success: true, categories: [...] }
+        categoriesArray = (categories as any).categories
+      }
     }
 
+    // Use fallback if API failed or returned empty
+    if (categoriesError || !categoriesArray || categoriesArray.length === 0) {
+      return {
+        mainCategories: fallbackMainCategories,
+        subCategories: [],
+        allCategories: fallbackMainCategories
+      }
+    }
 
     const allCategories = categoriesArray.map((cat: any) => ({
       id: cat.id,
@@ -268,14 +291,43 @@ export default function Component() {
       parent_name: cat.parent?.name,
       is_main: !cat.parent_id,
       is_sub: !!cat.parent_id,
-      product_count: cat.product_count || 0
+      product_count: cat.product_count || 0,
+      image_url: cat.image_url || null
     }))
 
     const mainCategories = allCategories.filter(cat => cat.is_main)
     const subCategories = allCategories.filter(cat => cat.is_sub)
 
+    // If no main categories found, use fallback
+    if (mainCategories.length === 0) {
+      return {
+        mainCategories: fallbackMainCategories,
+        subCategories: subCategories,
+        allCategories: [...fallbackMainCategories, ...subCategories]
+      }
+    }
+
     return { mainCategories, subCategories, allCategories }
   }, [categories, categoriesLoading, categoriesError])
+
+  // Check scroll position for categories arrows
+  useEffect(() => {
+    const checkScrollPosition = () => {
+      if (categoriesScrollRef.current) {
+        const { scrollLeft, scrollWidth, clientWidth } = categoriesScrollRef.current
+        setShowLeftArrow(scrollLeft > 0)
+        setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 10)
+      }
+    }
+
+    // Check on mount and after categories load
+    if (categoriesData.mainCategories.length > 0) {
+      setTimeout(checkScrollPosition, 100) // Small delay to ensure DOM is ready
+    }
+
+    window.addEventListener('resize', checkScrollPosition)
+    return () => window.removeEventListener('resize', checkScrollPosition)
+  }, [categoriesData.mainCategories.length])
 
 
 
@@ -296,6 +348,15 @@ export default function Component() {
   const [adsLoading, setAdsLoading] = useState(true)
   const [currentAdIndex, setCurrentAdIndex] = useState(0)
   const [adRotationTime, setAdRotationTime] = useState(10)
+  
+  // Rotating promotional text
+  const promotionalTexts = [
+    "More To Love",
+    "Mega Choice For You Up To 40% Off",
+    "What Are You Waiting For"
+  ]
+  const [currentPromoIndex, setCurrentPromoIndex] = useState(0)
+  const [isFading, setIsFading] = useState(false)
   
   // Touch swipe state for advertisements
   const [touchStart, setTouchStart] = useState<number | null>(null)
@@ -328,6 +389,19 @@ export default function Component() {
   const [showMoreCategories, setShowMoreCategories] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const moreButtonRef = useRef<HTMLDivElement>(null)
+  
+  // Dynamic overflow categories state
+  const [visibleCategories, setVisibleCategories] = useState<any[]>([])
+  const [overflowCategories, setOverflowCategories] = useState<any[]>([])
+  const mobileCategoriesContainerRef = useRef<HTMLDivElement>(null)
+  
+  // Desktop navigation overflow state
+  const [desktopVisibleCategories, setDesktopVisibleCategories] = useState<any[]>([])
+  const [desktopOverflowCategories, setDesktopOverflowCategories] = useState<any[]>([])
+  const [showDesktopMoreCategories, setShowDesktopMoreCategories] = useState(false)
+  const [desktopDropdownPosition, setDesktopDropdownPosition] = useState({ top: 0, left: 0 })
+  const desktopMoreButtonRef = useRef<HTMLDivElement>(null)
+  const desktopCategoriesContainerRef = useRef<HTMLDivElement>(null)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -362,6 +436,81 @@ export default function Component() {
       window.removeEventListener('resize', handleResize)
     }
   }, [showMoreCategories])
+  
+  // Calculate which categories fit in the mobile row
+  useEffect(() => {
+    const calculateVisibleCategories = () => {
+      if (!mobileCategoriesContainerRef.current || categoriesData.mainCategories.length === 0) {
+        return
+      }
+      
+      const container = mobileCategoriesContainerRef.current
+      const containerWidth = container.clientWidth
+      const gap = 12 // gap-3 = 12px
+      const moreButtonWidth = 70 // Approximate width of "More" button with icon
+      
+      // Get all main categories
+      const allCategories = categoriesData.mainCategories
+      let totalWidth = 0
+      const visible: any[] = []
+      const overflow: any[] = []
+      
+      // Reserve space for China button - measure if possible, otherwise estimate
+      const chinaButton = container.querySelector('a[href="/china"]')
+      const chinaButtonWidth = chinaButton ? (chinaButton as HTMLElement).offsetWidth : 50
+      totalWidth += chinaButtonWidth + gap
+      
+      // Create a temporary element to measure text width
+      const measureElement = document.createElement('span')
+      measureElement.style.position = 'absolute'
+      measureElement.style.visibility = 'hidden'
+      measureElement.style.whiteSpace = 'nowrap'
+      measureElement.style.fontSize = '0.875rem' // text-sm
+      measureElement.style.fontWeight = '500' // font-medium
+      measureElement.style.padding = '0'
+      document.body.appendChild(measureElement)
+      
+      // Calculate width for each category
+      for (let i = 0; i < allCategories.length; i++) {
+        const category = allCategories[i]
+        const firstWord = category.name.split(' ')[0]
+        
+        // Measure actual text width
+        measureElement.textContent = firstWord
+        const textWidth = measureElement.offsetWidth
+        const categoryWidth = textWidth + 8 // Add some padding
+        
+        // Check if this category fits (including More button space if needed)
+        const hasMoreCategories = i < allCategories.length - 1
+        const spaceNeeded = totalWidth + categoryWidth + gap + (hasMoreCategories ? moreButtonWidth + gap : 0)
+        
+        if (spaceNeeded <= containerWidth) {
+          visible.push(category)
+          totalWidth += categoryWidth + gap
+        } else {
+          // This and remaining categories go to overflow
+          overflow.push(...allCategories.slice(i))
+          break
+        }
+      }
+      
+      // Clean up
+      document.body.removeChild(measureElement)
+      
+      setVisibleCategories(visible)
+      setOverflowCategories(overflow)
+    }
+    
+    // Calculate on mount, when categories load, and on resize
+    const timeoutId = setTimeout(calculateVisibleCategories, 150)
+    window.addEventListener('resize', calculateVisibleCategories)
+    
+    return () => {
+      clearTimeout(timeoutId)
+      window.removeEventListener('resize', calculateVisibleCategories)
+    }
+  }, [categoriesData.mainCategories])
+  
   const [sortOrder, setSortOrder] = useState('price-low')
 
   // Pagination state - URL-based page number
@@ -375,6 +524,30 @@ export default function Component() {
     selectedSubCategories,
     categoriesData
   })
+
+  const selectedMainName = useMemo(() => {
+    if (!selectedMainCategory) return null
+    const m = categoriesData.mainCategories.find(c => c.slug === selectedMainCategory)
+    return m?.name || selectedMainCategory
+  }, [selectedMainCategory, categoriesData.mainCategories])
+
+  const selectedSubNames = useMemo(() => {
+    if (!selectedSubCategories?.length) return [] as string[]
+    const map = new Map(categoriesData.subCategories.map(s => [s.slug, s.name]))
+    return selectedSubCategories.map(s => map.get(s) || s)
+  }, [selectedSubCategories, categoriesData.subCategories])
+
+  const isCategoryFilterActive = !!selectedMainCategory || selectedSubCategories.length > 0
+  const noCategoryMatches = isCategoryFilterActive && allCategoryIds.length === 0
+
+  const noResultsReason = useMemo(() => {
+    if (searchTerm) return 'search'
+    if (selectedSubCategories.length > 0) return 'sub category'
+    if (selectedMainCategory) return 'category'
+    if (activeBrand) return 'brand'
+    if (priceRange[0] > 0 || priceRange[1] < 100000) return 'price range'
+    return 'filters'
+  }, [searchTerm, selectedSubCategories.length, selectedMainCategory, activeBrand, priceRange])
 
 
 
@@ -399,14 +572,14 @@ export default function Component() {
     // Server-side filtering with PostgreSQL full-text search
     brand: activeBrand || undefined,
     search: searchTerm || undefined,
-    categories: selectedMainCategory || selectedSubCategories.length > 0 ? allCategoryIds : undefined,
+    categories: isCategoryFilterActive ? allCategoryIds : undefined,
     sortBy: sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
     sortOrder: sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
     useOptimized: true,
     useMaterializedView: false,
-    enabled: !categoriesLoading // Only enable when categories are loaded
+    enabled: !categoriesLoading && !noCategoryMatches // Disable fetching if filter has no matching category IDs
   })
 
   // Force refetch when category parameters change
@@ -416,6 +589,11 @@ export default function Component() {
       infiniteReset()
     }
   }, [allCategoryIds, categoriesLoading, infiniteReset])
+
+  // Reset products immediately when any filter changes to prevent showing old products
+  useEffect(() => {
+    infiniteReset()
+  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, infiniteReset])
   
   // Get page from URL on mount
   useEffect(() => {
@@ -453,17 +631,20 @@ export default function Component() {
       try {
         setAdsLoading(true)
         
-        // Check cache for advertisements
-        const cachedAds = localStorage.getItem('ads_cache')
-        const cachedRotation = localStorage.getItem('ads_rotation_cache')
-        const cacheTimestamp = localStorage.getItem('ads_cache_timestamp')
+        // Check cache for advertisements (placement-specific)
+        const cachedAds = localStorage.getItem('ads_cache_products')
+        const cachedRotation = localStorage.getItem('ads_rotation_cache_products')
+        const cacheTimestamp = localStorage.getItem('ads_cache_timestamp_products')
         const now = Date.now()
         const cacheAge = cacheTimestamp ? now - parseInt(cacheTimestamp) : Infinity
         
         
         // Use cache if it's less than 2 minutes old
         if (cachedAds && cachedRotation && cacheAge < 2 * 60 * 1000) {
-          setAdvertisements(JSON.parse(cachedAds))
+          const cachedData = JSON.parse(cachedAds)
+          // Filter out China page ads from cache
+          const filteredCached = (cachedData || []).filter((ad: any) => ad.placement !== 'china')
+          setAdvertisements(filteredCached)
           setAdRotationTime(parseInt(cachedRotation))
           setAdsLoading(false)
           return
@@ -483,23 +664,31 @@ export default function Component() {
         
         if (adsResponse.ok && adsResponse instanceof Response) {
           const data = await adsResponse.json()
-          setAdvertisements(data || [])
-          localStorage.setItem('ads_cache', JSON.stringify(data || []))
+          // Filter out China page ads
+          const filteredData = (data || []).filter((ad: any) => ad.placement !== 'china')
+          setAdvertisements(filteredData)
+          localStorage.setItem('ads_cache_products', JSON.stringify(filteredData))
         } else if ('status' in adsResponse && adsResponse.status === 429) {
           if (cachedAds) {
-            setAdvertisements(JSON.parse(cachedAds))
+            const cachedData = JSON.parse(cachedAds)
+            // Filter out China page ads from cache
+            const filteredCached = (cachedData || []).filter((ad: any) => ad.placement !== 'china')
+            setAdvertisements(filteredCached)
           }
         } else {
           // Use cached data or empty array on error
           if (cachedAds) {
-            setAdvertisements(JSON.parse(cachedAds))
+            const cachedData = JSON.parse(cachedAds)
+            // Filter out China page ads from cache
+            const filteredCached = (cachedData || []).filter((ad: any) => ad.placement !== 'china')
+            setAdvertisements(filteredCached)
           }
         }
         
         if (rotationResponse.ok && rotationResponse instanceof Response) {
           const rotationData = await rotationResponse.json()
           setAdRotationTime(rotationData.rotationTime || 10)
-          localStorage.setItem('ads_rotation_cache', (rotationData.rotationTime || 10).toString())
+          localStorage.setItem('ads_rotation_cache_products', (rotationData.rotationTime || 10).toString())
         } else if ('status' in rotationResponse && rotationResponse.status === 429) {
           if (cachedRotation) {
             setAdRotationTime(parseInt(cachedRotation))
@@ -508,7 +697,7 @@ export default function Component() {
         }
         
         // Update cache timestamp
-        localStorage.setItem('ads_cache_timestamp', now.toString())
+        localStorage.setItem('ads_cache_timestamp_products', now.toString())
         
       } catch (error) {
       } finally {
@@ -528,6 +717,19 @@ export default function Component() {
     
     return () => clearInterval(interval)
   }, [advertisements.length, adRotationTime])
+
+  // Rotate promotional text with fade animation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIsFading(true)
+      setTimeout(() => {
+        setCurrentPromoIndex((prevIndex) => (prevIndex + 1) % promotionalTexts.length)
+        setIsFading(false)
+      }, 300) // Half of animation duration
+    }, 3000) // Change text every 3 seconds
+    
+    return () => clearInterval(interval)
+  }, [promotionalTexts.length])
 
 
   // Touch swipe handlers for advertisements
@@ -658,13 +860,33 @@ export default function Component() {
   // When filters/search/categories change, reset the shuffle buffer so we only show the new filtered list
   useEffect(() => {
     setShuffledProducts([])
-  }, [activeBrand, searchTerm, selectedMainCategory, selectedSubCategories])
+  }, [activeBrand, searchTerm, selectedMainCategory, selectedSubCategories, priceRange])
 
   // Server-side filtering is now handled by the API!
   // Build the list to display (uses shuffled order when active)
   const displayedProducts = useMemo(() => {
-    // Always prioritize the current products array from the API
-    // Only use shuffledProducts if it's more recent and products is empty
+    // If we're loading, return empty to show skeleton
+    if (infiniteLoading) {
+      return []
+    }
+    
+    // Always use the current products array from the API
+    // Never fall back to shuffledProducts when filters are active - always show what API returns
+    const hasActiveFilters = searchTerm || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000
+    
+    // If we have active filters, only use products from API (never shuffledProducts)
+    // This ensures we show "no products found" message when filters return no results
+    if (hasActiveFilters) {
+      const seen = new Set<number>()
+      const uniqueProducts = products.filter((product: any) => {
+        if (seen.has(product.id)) return false
+        seen.add(product.id)
+        return true
+      })
+      return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
+    }
+    
+    // No active filters - can use shuffledProducts as fallback for better UX
     const baseList = products.length > 0 ? products : shuffledProducts
 
     const seen = new Set<number>()
@@ -674,7 +896,7 @@ export default function Component() {
       return true
     })
     return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
-  }, [products, shuffledProducts, PRODUCTS_PER_PAGE])
+  }, [products, shuffledProducts, PRODUCTS_PER_PAGE, searchTerm, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, infiniteLoading])
 
   // Handle user activity detection
   const handleUserActivity = useCallback(() => {
@@ -1221,7 +1443,7 @@ export default function Component() {
         priority={true} 
       />
       {/* Welcome Message Bar - Mobile Only */}
-      <div className="fixed top-0 z-50 w-full bg-stone-100/90 dark:bg-gray-900/95 backdrop-blur-sm sm:hidden" suppressHydrationWarning>
+      <div className="fixed top-0 z-50 w-full bg-white dark:bg-gray-900/95 backdrop-blur-sm sm:hidden" suppressHydrationWarning>
         <div className="flex items-center justify-center h-6 px-4" suppressHydrationWarning>
           {isAuthenticated && user ? (
             <div className="text-xs text-green-600 dark:text-green-400 font-medium">
@@ -1239,7 +1461,7 @@ export default function Component() {
       </div>
 
       <header
-        className="fixed top-6 z-40 w-full bg-stone-200/60 dark:bg-black/50 backdrop-blur-sm border-b border-stone-300 dark:border-gray-800 sm:top-0"
+        className="fixed top-6 z-40 w-full bg-white dark:bg-black/50 backdrop-blur-sm border-b border-white dark:border-gray-800 sm:top-0 shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
           suppressHydrationWarning
         >
         <div className="flex items-center h-10 sm:h-16 px-2 sm:px-3 md:px-4 lg:px-6 xl:px-8 2xl:px-10 w-full max-w-full" suppressHydrationWarning>
@@ -1265,7 +1487,7 @@ export default function Component() {
               alt={`${companyName} Logo`}
               width={32}
               height={32}
-                className="w-8 h-8 rounded-md"
+                className="w-8 h-8 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
                 suppressHydrationWarning
             />
           </Link>
@@ -1281,7 +1503,7 @@ export default function Component() {
               alt={`${companyName} Logo`}
               width={48}
               height={48}
-                className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md"
+                className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
                 suppressHydrationWarning
             />
                               <div className="hidden sm:flex flex-col">
@@ -1468,14 +1690,14 @@ export default function Component() {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white mr-4",
+                    "flex items-center gap-1 border-2 border-white bg-black hover:bg-white hover:border-yellow-600 transition-colors text-xs text-white mr-4 group",
                     darkHeaderFooterClasses.buttonGhostText,
                   )}
                   style={{ borderRadius: '20px' }}
                   suppressHydrationWarning
                 >
-                  <Settings className="w-3 h-3 text-white" />
-                  <span className="text-sm font-medium text-white" suppressHydrationWarning>
+                  <Settings className="w-3 h-3 text-white group-hover:text-black transition-colors" />
+                  <span className="text-sm font-medium text-white group-hover:text-black transition-colors" suppressHydrationWarning>
                     Services
                   </span>
                   <span className="sr-only" suppressHydrationWarning>Services Menu</span>
@@ -1864,143 +2086,83 @@ export default function Component() {
         </div>
 
         {/* Second Row - Main Categories */}
-        <div className="hidden lg:flex items-center justify-start gap-4 xl:gap-6 py-3 px-[100px]">
-          {/* Super Deal Link */}
+        <div 
+          ref={desktopCategoriesContainerRef}
+          className="hidden lg:flex items-center justify-start gap-4 xl:gap-6 py-3 pl-[50px] pr-0 overflow-hidden"
+        >
+          {/* Import from China Link */}
           <Link 
-            href="/coming-soon" 
+            href="/china" 
             target="_blank"
             rel="noopener noreferrer"
             prefetch={false}
           >
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white",
-                darkHeaderFooterClasses.buttonGhostText,
-              )}
-              style={{ borderRadius: '20px' }}
-              suppressHydrationWarning
-            >
-              <span className="text-sm font-medium text-red-500" suppressHydrationWarning>
-            Super Offer
-              </span>
-              <span className="sr-only" suppressHydrationWarning>Super Offer</span>
-            </Button>
-          </Link>
+             <Button
+               variant="ghost"
+               size="sm"
+               className={cn(
+                 "flex items-center gap-1 border-2 border-white bg-black hover:border-yellow-600 transition-colors text-xs text-white",
+                 darkHeaderFooterClasses.buttonGhostText,
+               )}
+               style={{ borderRadius: '20px' }}
+               suppressHydrationWarning
+             >
+               <span className="text-sm font-medium text-red-400" suppressHydrationWarning>
+            From China
+               </span>
+               <span className="sr-only" suppressHydrationWarning>From China</span>
+             </Button>
+           </Link>
           
           {/* Main Categories */}
-          <Link 
-            href="/products?mainCategory=diy-electronic-components" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            DIY Electronic Components
-          </Link>
-          <Link 
-            href="/products?mainCategory=home-electronic-devices" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            Home Electronic Devices
-          </Link>
-          <Link 
-            href="/products?mainCategory=computer-office" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            Computer & Office
-          </Link>
-          <Link 
-            href="/products?mainCategory=school-items" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            School Items
-          </Link>
-          <Link 
-            href="/products?mainCategory=clothes-and-shoes" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            Clothes & Shoes
-          </Link>
-          <Link 
-            href="/products?mainCategory=sport-and-entertainment" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            Sport & Entertainment
-          </Link>
-          <Link 
-            href="/products?mainCategory=games" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            Games
-          </Link>
-          <Link 
-            href="/products?mainCategory=fashion-and-jewelry" 
-            className={cn(
-              "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-              themeClasses.mainText
-            )}
-            prefetch={false}
-          >
-            Fashion & Jewelry
-          </Link>
+          {categoriesData.mainCategories.map((cat: any) => (
+            <Link 
+              key={cat.id}
+              href={`/products?mainCategory=${cat.slug}`} 
+              className={cn(
+                "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
+                selectedMainCategory === cat.slug ? 'text-yellow-500' : themeClasses.mainText
+              )}
+              prefetch={false}
+              scroll={false}
+            >
+              {cat.name}
+            </Link>
+          ))}
         </div>
 
         {/* Mobile Categories Row */}
-        <div className="lg:hidden flex items-center justify-start gap-2 py-3 px-2 overflow-x-auto overflow-y-visible" suppressHydrationWarning>
-          {/* Super Deal Link */}
+        <div 
+          ref={mobileCategoriesContainerRef}
+          className="lg:hidden flex items-center justify-start gap-2 py-3 px-2 overflow-x-hidden overflow-y-visible" 
+          suppressHydrationWarning
+        >
+          {/* Import from China Link */}
           <Link 
-            href="/coming-soon" 
+            href="/china" 
             target="_blank"
             rel="noopener noreferrer"
             prefetch={false}
           >
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "flex items-center gap-1 border-2 border-white bg-black hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs text-white flex-shrink-0 h-7 px-3",
-                darkHeaderFooterClasses.buttonGhostText,
-              )}
-              style={{ borderRadius: '20px' }}
-              suppressHydrationWarning
-            >
-              <span className="text-[10px] font-medium text-red-500 whitespace-nowrap" suppressHydrationWarning>
-            Super Offer
-              </span>
-              <span className="sr-only" suppressHydrationWarning>Super Offer</span>
-            </Button>
-          </Link>
+             <Button
+               variant="ghost"
+               size="sm"
+               className={cn(
+                 "flex items-center gap-1 border border-white bg-black hover:border-yellow-600 transition-colors text-[10px] text-white flex-shrink-0 h-6 px-2 py-1",
+                 darkHeaderFooterClasses.buttonGhostText,
+               )}
+               style={{ borderRadius: '12px' }}
+               suppressHydrationWarning
+             >
+               <span className="text-[10px] font-medium text-red-400 whitespace-nowrap" suppressHydrationWarning>
+            China
+               </span>
+               <span className="sr-only" suppressHydrationWarning>China</span>
+             </Button>
+           </Link>
           
-          {/* Main Categories - Show first 4 categories */}
-          {categoriesData.mainCategories.slice(0, 4).map((category: any) => {
-            // Get first word of category name for mobile
+          {/* Visible Categories */}
+          {visibleCategories.map((category) => {
             const firstWord = category.name.split(' ')[0]
             return (
               <Link 
@@ -2008,45 +2170,48 @@ export default function Component() {
                 href={`/products?mainCategory=${category.slug}`} 
                 className={cn(
                   "text-xs font-medium transition-colors hover:text-yellow-500 whitespace-nowrap flex-shrink-0",
-                  themeClasses.mainText
+                  selectedMainCategory === category.slug ? 'text-yellow-500' : themeClasses.mainText
                 )}
                 prefetch={false}
+                scroll={false}
               >
                 {firstWord}
               </Link>
             )
           })}
           
-          {/* More Button */}
-          <div ref={moreButtonRef} className="relative flex-shrink-0 more-categories-dropdown">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                
-                if (moreButtonRef.current) {
-                  const rect = moreButtonRef.current.getBoundingClientRect()
-                  const dropdownWidth = 280 // match max-w-[280px]
-                  const pageMargin = 5 // requested 5px right margin
+          {/* More Button - Only show if there are overflow categories */}
+          {overflowCategories.length > 0 && (
+            <div ref={moreButtonRef} className="relative flex-shrink-0 more-categories-dropdown">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
                   
-                  setDropdownPosition({
-                    top: rect.bottom + 8,
-                    left: Math.min(rect.left, window.innerWidth - dropdownWidth - pageMargin)
+                  if (moreButtonRef.current) {
+                    const rect = moreButtonRef.current.getBoundingClientRect()
+                    const dropdownWidth = 280 // match max-w-[280px]
+                    const pageMargin = 5 // requested 5px right margin
+                    
+                    setDropdownPosition({
+                      top: rect.bottom + 8,
+                      left: Math.min(rect.left, window.innerWidth - dropdownWidth - pageMargin)
+                    })
+                  }
+                  
+                  setShowMoreCategories(prev => {
+                    return !prev
                   })
-                }
-                
-                setShowMoreCategories(prev => {
-                  return !prev
-                })
-              }}
-              className="flex items-center gap-1 text-sm font-medium hover:text-yellow-500 px-2 py-1 h-auto"
-            >
-              More
-              <MoreHorizontal className="w-3 h-3" />
-            </Button>
-          </div>
+                }}
+                className="flex items-center gap-1 text-sm font-medium hover:text-yellow-500 px-2 py-1 h-auto"
+              >
+                More
+                <MoreHorizontal className="w-3 h-3" />
+              </Button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -2055,9 +2220,14 @@ export default function Component() {
 
         {/* Ads Container - Above filter buttons */}
         {!adsLoading && advertisements.length > 0 && (
-          <div className="px-1 sm:px-2 lg:px-3 mb-4 mt-10">
+          <div className="w-full overflow-x-hidden mt-8" style={{ minHeight: '1px' }}>
             <div 
-              className="w-full relative overflow-hidden rounded-lg"
+              className="relative overflow-hidden rounded-none"
+              style={{ 
+                width: '100vw', 
+                marginLeft: 'calc(50% - 50vw)', 
+                marginRight: 'calc(50% - 50vw)'
+              }}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
@@ -2093,11 +2263,11 @@ export default function Component() {
               {advertisements[currentAdIndex] && (
                 <Link 
                   href={advertisements[currentAdIndex].link_url || "/products"}
-                  className="block cursor-pointer h-32 sm:h-48 relative z-0"
+                  className="block cursor-pointer h-48 sm:h-64 md:h-80 relative z-0"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <div className="relative overflow-hidden hover:scale-105 transition-all duration-500 rounded-sm h-full bg-gray-100 dark:bg-gray-800">
+                  <div className="relative overflow-hidden rounded-none h-full bg-gray-100 dark:bg-gray-800">
                     {advertisements[currentAdIndex].media_type === 'image' ? (
                       <LazyImage
                         src={advertisements[currentAdIndex].media_url}
@@ -2151,7 +2321,7 @@ export default function Component() {
             ))}
           </div>
               )}
-        </div>
+            </div>
           </div>
         )}
 
@@ -2312,16 +2482,122 @@ export default function Component() {
           </div>
         </div>
 
+        {/* Main Categories Thumbnails (images only) */}
+        {categoriesData.mainCategories.length > 0 && (
+          <div className="px-1 sm:px-2 lg:px-3 mt-2 mb-4 relative">
+            <div className={cn("text-lg sm:text-xl font-bold mb-2 text-center", themeClasses.mainText)}>
+              Shop by Categories
+            </div>
+            <div className="relative">
+              {/* Left Arrow Button */}
+              {showLeftArrow && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/90 dark:bg-neutral-800/90 hover:bg-white dark:hover:bg-neutral-800 shadow-md"
+                  onClick={() => {
+                    if (categoriesScrollRef.current) {
+                      const scrollAmount = 200
+                      categoriesScrollRef.current.scrollTo({
+                        left: categoriesScrollRef.current.scrollLeft - scrollAmount,
+                        behavior: 'smooth'
+                      })
+                    }
+                  }}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+              )}
+              
+              {/* Right Arrow Button */}
+              {showRightArrow && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white/90 dark:bg-neutral-800/90 hover:bg-white dark:hover:bg-neutral-800 shadow-md"
+                  onClick={() => {
+                    if (categoriesScrollRef.current) {
+                      const scrollAmount = 200
+                      categoriesScrollRef.current.scrollTo({
+                        left: categoriesScrollRef.current.scrollLeft + scrollAmount,
+                        behavior: 'smooth'
+                      })
+                    }
+                  }}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              )}
+
+              <div 
+                ref={categoriesScrollRef}
+                className="flex items-center gap-3 overflow-x-auto py-2 scrollbar-hide"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                onScroll={() => {
+                  if (categoriesScrollRef.current) {
+                    const { scrollLeft, scrollWidth, clientWidth } = categoriesScrollRef.current
+                    setShowLeftArrow(scrollLeft > 0)
+                    setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 10)
+                  }
+                }}
+              >
+                {categoriesData.mainCategories
+                  .slice(0, 12)
+                  .map((cat: any) => (
+                    <Link
+                      key={cat.id}
+                      href={`/products?mainCategory=${cat.slug}`}
+                      className="flex flex-col items-center flex-shrink-0 w-20 sm:w-40"
+                      prefetch={false}
+                      scroll={false}
+                    >
+                      {cat.image_url ? (
+                        <div className="w-16 h-16 sm:w-[136px] sm:h-[136px] rounded-full overflow-hidden border-2 border-white bg-white">
+                          <Image
+                            src={cat.image_url}
+                            alt={cat.name}
+                            width={136}
+                            height={136}
+                            className="w-16 h-16 sm:w-[136px] sm:h-[136px] object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 sm:w-[136px] sm:h-[136px] rounded-full overflow-hidden border-2 border-white bg-gradient-to-br from-yellow-100 to-yellow-300 dark:from-neutral-800 dark:to-neutral-700 flex items-center justify-center text-sm sm:text-base font-semibold">
+                          {cat.name?.slice(0, 2) || 'NA'}
+                        </div>
+                      )}
+                      <span className="mt-2 text-xs text-center line-clamp-2" title={cat.name}>
+                        <span className="sm:hidden">{cat.name?.split(' ')[0] || cat.name}</span>
+                        <span className="hidden sm:inline">{cat.name}</span>
+                      </span>
+                    </Link>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Promotional Text Below Advertisement */}
         <div className="px-1 sm:px-2 lg:px-3 mb-6">
           <div className="text-center">
-            <h2 className="text-sm sm:text-lg md:text-xl lg:text-2xl font-bold text-black dark:text-white mb-1 font-serif whitespace-nowrap overflow-hidden text-ellipsis">
-              Quality-Trusted Component Store
+            <h2 
+              className={`text-base sm:text-xl md:text-2xl lg:text-3xl xl:text-4xl font-bold text-black dark:text-white mb-1 font-sans transition-opacity duration-500 ease-in-out ${
+                isFading ? 'opacity-0' : 'opacity-100'
+              }`}
+              style={{ minHeight: '1.5em' }}
+            >
+              {currentPromoIndex === 1 ? (
+                <>
+                  Mega Choice For You Up To <span className="text-blue-500 dark:text-blue-400" style={{ fontFamily: "'Times New Roman', serif" }}>40%</span> Off
+                </>
+              ) : (
+                promotionalTexts[currentPromoIndex]
+              )}
             </h2>
-            {/* Removed promotional subheading per request */}
-            </div>
-                  </div>
+          </div>
+        </div>
 
         {/* Loading State */}
         {isLoading && (
@@ -2365,11 +2641,40 @@ export default function Component() {
           <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
             <Package className="w-16 h-16 text-gray-400 mb-4" />
             <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
-              No Products Found
+              No products found
             </h3>
-            <p className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
-              We couldn't find any products matching your filters. Try adjusting your search, categories, or price range.
-            </p>
+            {(searchTerm || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
+              <div className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
+                <p className="mb-2">Selected filters:</p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {searchTerm && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs font-medium">
+                      Search: "{searchTerm}"
+                    </span>
+                  )}
+                  {selectedMainCategory && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-xs font-medium">
+                      Category: {selectedMainName}
+                    </span>
+                  )}
+                  {selectedSubCategories.length > 0 && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs font-medium">
+                      Sub: {selectedSubNames.join(', ')}
+                    </span>
+                  )}
+                  {activeBrand && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 text-xs font-medium">
+                      Brand: {activeBrand}
+                    </span>
+                  )}
+                  {(priceRange[0] > 0 || priceRange[1] < 100000) && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs font-medium">
+                      Price: {priceRange[0]} - {priceRange[1]} TZS
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             <Button
               onClick={handleClearAllFilters}
               className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
@@ -2493,20 +2798,15 @@ export default function Component() {
                   {/* Corner decoration */}
                   <div className="absolute top-0 right-0 w-0 h-0 border-l-[20px] border-l-transparent border-t-[20px] border-t-orange-500 z-20"></div>
                   
-                  {/* Origin Badge - Bottom Left if imported from China */}
-              {(product.importChina || product.import_china) && (
-                    <div className="absolute bottom-1 left-1 sm:bottom-2 sm:left-2 z-20" suppressHydrationWarning>
-                      <span className="inline-flex items-center justify-center bg-red-600 text-white text-[10px] sm:text-[12px] font-semibold px-2 sm:px-2 py-1 rounded-md shadow-sm sm:shadow-md" suppressHydrationWarning>
-                        i - China
-                      </span>
-                    </div>
-                  )}
-
                   {/* Badges - Separate left and right badge systems */}
                   {(() => {
                     const leftBadge = getLeftBadge(product)
                     const rightBadge = getRightBadge(product)
+                    const hasChinaBadge = product.importChina || product.import_china
+                    const hasRightBadge = rightBadge.type !== 'none'
                     
+                    // Calculate top position for China badge (below New/Discount badge if it exists)
+                    const chinaBadgeTop = hasRightBadge ? 'top-6 sm:top-7' : 'top-0'
                     
                     return (
                       <>
@@ -2531,6 +2831,18 @@ export default function Component() {
                             </span>
                   </div>
                         )}
+                        
+                        {/* China badge - Right side, below New/Discount badge */}
+                        {hasChinaBadge && (
+                          <div className={`absolute ${chinaBadgeTop} right-0 sm:right-1.5 z-10`} suppressHydrationWarning>
+                            <span 
+                              className="bg-red-600 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md"
+                              suppressHydrationWarning
+                            >
+                              China
+                            </span>
+                          </div>
+                        )}
                       </>
                     )
                   })()}
@@ -2551,6 +2863,17 @@ export default function Component() {
                     )}
                         suppressHydrationWarning
                   >
+                    {/* Sold count - displayed before ratings */}
+                    {product.sold_count && (
+                      <span className="text-[10px] sm:text-xs" suppressHydrationWarning>
+                        {product.sold_count >= 1000 
+                          ? `${(product.sold_count / 1000).toFixed(1)}k+` 
+                          : `${product.sold_count}+`} sold
+                      </span>
+                    )}
+                    {product.sold_count && (
+                      <span className="mx-0.5" suppressHydrationWarning>•</span>
+                    )}
                     {Array.from({ length: 5 }).map((_, i) => (
                       <Star
                         key={i}
@@ -2587,7 +2910,12 @@ export default function Component() {
                 </CardContent>
                     <CardFooter className="px-1 pb-1 pt-0 flex flex-col gap-1" suppressHydrationWarning>
                   <Button
-                    className="w-full text-xs py-1 h-auto sm:text-sm lg:text-base bg-yellow-500 text-neutral-950 hover:bg-yellow-600 rounded-b-sm rounded-t-none transform transition-all duration-200 hover:scale-105 hover:shadow-md"
+                    className={cn(
+                      "w-full text-xs py-1 h-auto sm:text-sm lg:text-base rounded-b-sm rounded-t-none transform transition-all duration-200 hover:scale-105 hover:shadow-md",
+                      (product.importChina || product.import_china) 
+                        ? "bg-red-800 text-white hover:bg-red-900" 
+                        : "bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                    )}
                     onClick={() => handleAddToCart(product.id, product.name, product.price, product.variants, product.variantConfig)}
                         suppressHydrationWarning
                   >
@@ -2614,7 +2942,7 @@ export default function Component() {
                   : 'More products available'}
               </p>
             </div>
-            <Link href={buildNextPageUrl()}>
+            <Link href={buildNextPageUrl()} target="_blank" rel="noopener noreferrer">
               <Button
                 size="lg"
                 className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600 px-8 py-4 text-base font-semibold"
@@ -3184,48 +3512,17 @@ export default function Component() {
             }}
           ></div>
           <div className="p-2">
-            <Link
-              href="/products?mainCategory=computer-office"
-              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-              onClick={() => setShowMoreCategories(false)}
-            >
-              Computer & Office
-            </Link>
-            <Link
-              href="/products?mainCategory=school-items"
-              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-              onClick={() => setShowMoreCategories(false)}
-            >
-              School Items
-            </Link>
-            <Link
-              href="/products?mainCategory=clothes-and-shoes"
-              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-              onClick={() => setShowMoreCategories(false)}
-            >
-              Clothes & Shoes
-            </Link>
-            <Link
-              href="/products?mainCategory=sport-and-entertainment"
-              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-              onClick={() => setShowMoreCategories(false)}
-            >
-              Sport & Entertainment
-            </Link>
-            <Link
-              href="/products?mainCategory=games"
-              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-              onClick={() => setShowMoreCategories(false)}
-            >
-              Games
-            </Link>
-            <Link
-              href="/products?mainCategory=fashion-and-jewelry"
-              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-              onClick={() => setShowMoreCategories(false)}
-            >
-              Fashion & Jewelry
-            </Link>
+            {overflowCategories.map((category) => (
+              <Link
+                key={category.id}
+                href={`/products?mainCategory=${category.slug}`}
+                className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
+                onClick={() => setShowMoreCategories(false)}
+                scroll={false}
+              >
+                {category.name}
+              </Link>
+            ))}
           </div>
         </div>
       )}

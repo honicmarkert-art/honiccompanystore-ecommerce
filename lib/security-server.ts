@@ -54,7 +54,11 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 		
 			// If not found, try extracting from the full auth token cookie
 			if (!accessToken) {
-				const authTokenCookie = cookieStore.get('sb-qobobocldfjhdkpjyuuq-auth-token')?.value
+				// Derive cookie name from Supabase URL
+				const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+				const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
+				const authCookieName = projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
+				const authTokenCookie = cookieStore.get(authCookieName)?.value
 				
 				if (authTokenCookie) {
 					try {
@@ -135,7 +139,7 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 			fullProfile: profileData
 		})
 
-		const result = {
+		const result: UserSession = {
 			id: user.id,
 			email: user.email || '',
 			role: profileData?.is_admin ? 'admin' : 'user',

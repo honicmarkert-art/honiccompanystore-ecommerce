@@ -286,7 +286,7 @@ function CheckoutPageContent() {
       
       // Prepare order data (reuse selectedIds from validation above)
       const selectedItems = selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
-      
+
       const orderData = {
         orderNumber: orderId,
         userId: user?.id || null, // null for guest users

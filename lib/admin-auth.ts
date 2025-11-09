@@ -10,6 +10,9 @@ export interface AdminUser {
   isAdmin: boolean
 }
 
+// Toggle verbose debug logs for admin access flow
+const DEBUG = false
+
 export async function validateAdminAccess(): Promise<{ user: AdminUser | null; error: NextResponse | null }> {
   try {
     // Check environment variables
@@ -48,17 +51,18 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
 
     // Debug cookies
     const allCookies = cookieStore.getAll()
-    console.log('🔍 [DEBUG] validateAdminAccess: Available cookies:', allCookies.map(c => ({ name: c.name, hasValue: !!c.value, valueLength: c.value?.length || 0 })))
+    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Available cookies:', allCookies.map(c => ({ name: c.name, hasValue: !!c.value, valueLength: c.value?.length || 0 })))
     
     // Check for specific Supabase session cookies
     const sessionCookies = allCookies.filter(c => c.name.includes('sb-') || c.name.includes('supabase'))
-    console.log('🔍 [DEBUG] validateAdminAccess: Supabase cookies:', sessionCookies.map(c => ({ name: c.name, hasValue: !!c.value })))
+    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Supabase cookies:', sessionCookies.map(c => ({ name: c.name, hasValue: !!c.value })))
     
     // Get current session
-    console.log('🔍 [DEBUG] validateAdminAccess: Getting session...')
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Getting session...')
+    const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession()
+    let session = initialSession
     
-    console.log('🔍 [DEBUG] validateAdminAccess: Session result:', {
+    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Session result:', {
       hasSession: !!session,
       hasError: !!sessionError,
       errorMessage: sessionError?.message,
@@ -67,17 +71,17 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
     })
     
     if (sessionError || !session) {
-      console.log('❌ [DEBUG] validateAdminAccess: No session found')
-      console.log('❌ [DEBUG] validateAdminAccess: Session error details:', {
+      if (DEBUG) console.log('❌ [DEBUG] validateAdminAccess: No session found')
+      if (DEBUG) console.log('❌ [DEBUG] validateAdminAccess: Session error details:', {
         error: sessionError?.message,
         code: sessionError?.code,
         status: sessionError?.status
       })
       
       // Try alternative session retrieval
-      console.log('🔄 [DEBUG] validateAdminAccess: Trying alternative session retrieval...')
+      if (DEBUG) console.log('🔄 [DEBUG] validateAdminAccess: Trying alternative session retrieval...')
       const { data: { user }, error: userError } = await supabase.auth.getUser()
-      console.log('🔄 [DEBUG] validateAdminAccess: Alternative user check:', {
+      if (DEBUG) console.log('🔄 [DEBUG] validateAdminAccess: Alternative user check:', {
         hasUser: !!user,
         userError: userError?.message
       })
@@ -102,19 +106,31 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
         token_type: 'bearer'
       }
       
-      console.log('✅ [DEBUG] validateAdminAccess: Using minimal session for user:', user.email)
+      if (DEBUG) console.log('✅ [DEBUG] validateAdminAccess: Using minimal session for user:', user.email)
       // Continue with the minimal session
       session = minimalSession as any
     }
 
+    // Ensure session is not null at this point
+    if (!session) {
+      return {
+        user: null,
+        error: NextResponse.json(
+          { error: 'Authentication required', message: 'Please log in to access admin features' },
+          { status: 401 }
+        )
+      }
+    }
+
     // Get user profile with role information
-    const { data: profile, error: profileError } = await supabase
+    const { data: initialProfile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', session.user.id)
       .single()
+    let profile = initialProfile
 
-    console.log('🔍 Profile lookup result:', {
+    if (DEBUG) console.log('🔍 Profile lookup result:', {
       userId: session.user.id,
       profileError,
       profile,
@@ -199,7 +215,7 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
           return {
             user: null,
             error: NextResponse.json(
-              { error: 'Profile creation failed', message: `Network error: ${createError.message}` },
+              { error: 'Profile creation failed', message: `Network error: ${createError instanceof Error ? createError.message : 'Unknown error'}` },
               { status: 500 }
             )
           }
@@ -244,7 +260,7 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
     return {
       user: null,
       error: NextResponse.json(
-        { error: 'Authentication failed', message: 'Unable to verify admin access', details: error.message },
+        { error: 'Authentication failed', message: 'Unable to verify admin access', details: error instanceof Error ? error.message : 'Unknown error' },
         { status: 500 }
       )
     }

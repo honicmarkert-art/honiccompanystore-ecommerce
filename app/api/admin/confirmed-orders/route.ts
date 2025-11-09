@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform the data to include order items in a more accessible format
-    const transformedOrders = (orders || []).map(order => ({
+    const transformedOrders = (orders || []).map((order: any) => ({
       ...order,
       order_items: order.confirmed_order_items || [],
       // Calculate total items count from confirmed_order_items
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
-    
+
     // Only include shipping/billing if they exist as JSONB columns
     // Try adding them as JSON strings if needed
     if (orderData.shippingAddress && typeof orderData.shippingAddress === 'object') {
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
       .insert(confirmedOrderData)
       .select()
       .single()
-    
+
     if (orderError) {
       logger.error('❌ Failed to create confirmed order:', {
         error: orderError,
@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
         total_price: item.total_price,
         created_at: new Date().toISOString()
       }))
-      
+
       const { error: orderItemsError } = await supabase
         .from('confirmed_order_items')
         .insert(orderItems)

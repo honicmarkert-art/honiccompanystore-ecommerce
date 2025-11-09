@@ -195,7 +195,7 @@ export function useProducts(): UseProductsReturn {
       if (preloadPromise) {
         const data = await preloadPromise
         // Handle both old (array) and new (object with products array) API response formats
-        const productsArray = Array.isArray(data) ? data : (data?.products || [])
+        const productsArray = Array.isArray(data) ? data : ((data as any)?.products || [])
         setProducts(productsArray)
         setIsLoading(false)
         return
@@ -261,7 +261,7 @@ export function useProducts(): UseProductsReturn {
       const data = await preloadPromise
       if (data !== null) {
         // Handle both old (array) and new (object with products array) API response formats
-        const productsArray = Array.isArray(data) ? data : (data?.products || [])
+        const productsArray = Array.isArray(data) ? data : ((data as any)?.products || [])
         
         
         setProducts(productsArray)
@@ -329,11 +329,11 @@ export function useProducts(): UseProductsReturn {
             isInitialized = true
             return productsArray
           })
-          .catch(err => {
-            preloadPromise = null
-            // Don't throw error for preload failures - just log them
-            return null
-          })
+        .catch((err: any) => {
+          preloadPromise = null
+          // Don't throw error for preload failures - just log them
+          return null
+        })
       }
     }
   }, [])
@@ -371,13 +371,15 @@ export function useProducts(): UseProductsReturn {
     setProducts(prev => [...prev, tempProduct])
 
     try {
+      // Never send client-side id to server when creating
+      const { id: _omitId, ...createPayload } = productData as any
       const response = await fetch('/api/products', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify(productData),
+        body: JSON.stringify(createPayload),
       })
 
       if (!response.ok) {
@@ -526,7 +528,8 @@ export function useProducts(): UseProductsReturn {
 
       setLastFetchTime(now)
 
-      const response = await fetch(`/api/products/${productId}`)
+      // Add cache-busting timestamp to get fresh data
+      const response = await fetch(`/api/products/${productId}?fresh=${Date.now()}`)
       
       if (response.status === 429) {
         // Handle rate limiting
@@ -594,7 +597,6 @@ export function useProducts(): UseProductsReturn {
     getProductsByBrand,
     fetchFullProductDetails,
     fetchFullProducts,
-    fetchProductsOptimized,
     addProduct,
     updateProduct,
     deleteProduct,

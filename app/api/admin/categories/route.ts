@@ -119,8 +119,8 @@ export async function PUT(request: NextRequest) {
 
     // Check if another category with same name or slug exists
     if (name || slug) {
-      const sanitizedName = sanitizeInput(name)
-      const sanitizedSlug = sanitizeInput(slug)
+      const sanitizedName = name !== undefined ? sanitizeInput(name) : ''
+      const sanitizedSlug = slug !== undefined ? sanitizeInput(slug) : ''
       const { data: duplicateCategory } = await supabase
         .from('categories')
         .select('id')
@@ -135,9 +135,9 @@ export async function PUT(request: NextRequest) {
 
     // Update category
     const updateData: any = {}
-    if (name !== undefined) updateData.name = sanitizedName
+    if (name !== undefined) updateData.name = sanitizeInput(name)
     if (description !== undefined) updateData.description = description
-    if (slug !== undefined) updateData.slug = sanitizedSlug
+    if (slug !== undefined) updateData.slug = sanitizeInput(slug)
     if (image_url !== undefined) updateData.image_url = image_url
     if (is_active !== undefined) updateData.is_active = is_active
     if (display_order !== undefined) updateData.display_order = display_order

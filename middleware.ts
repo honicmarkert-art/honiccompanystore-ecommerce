@@ -144,16 +144,40 @@ export function middleware(request: NextRequest) {
 
   // Admin route protection - Only protect /siem-dashboard routes
   if (isAdminRoute(pathname)) {
-    // Check for Supabase session cookies
-    const sessionCookie = request.cookies.get('sb-session-active')
-    const authToken = request.cookies.get('supabase-auth-token')
+    // Debug: trace auth state for admin routes
+    try {
+      const rawCookieHeader = request.headers.get('cookie') || ''
+      console.log('[MW][Admin] Path:', pathname)
+      console.log('[MW][Admin] Cookie header length:', rawCookieHeader.length)
+    } catch {}
+
+    // Check for Supabase session cookies (derive cookie name from env)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+    const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
+    const fullAuthCookieName = projectRef ? `sb-${projectRef}-auth-token` : undefined
+    
+    const accessToken = request.cookies.get('sb-access-token')
+    const fullAuthToken = fullAuthCookieName ? request.cookies.get(fullAuthCookieName) : undefined
+    
+    console.log('[MW][Admin] Supabase config:', {
+      supabaseUrl: supabaseUrl.substring(0, 30) + '...',
+      projectRef,
+      fullAuthCookieName
+    })
+    console.log('[MW][Admin] Cookies present:', {
+      hasAccessToken: !!accessToken?.value,
+      hasFullAuthToken: !!fullAuthToken?.value
+    })
     
     // If no session indicators found, redirect to login
-    if (!sessionCookie && !authToken) {
+    if (!accessToken && !fullAuthToken) {
       const loginUrl = new URL('/auth/login', request.url)
       loginUrl.searchParams.set('redirect', pathname)
+      console.log('[MW][Admin] Redirecting to login with redirect param:', pathname)
       return NextResponse.redirect(loginUrl)
     }
+
+    console.log('[MW][Admin] Access allowed to admin route:', pathname)
 
     // CSRF protection for state-changing operations
     if (request.method !== 'GET' && !validateCSRFToken(request)) {

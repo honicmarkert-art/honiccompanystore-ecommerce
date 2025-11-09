@@ -87,8 +87,12 @@ export default function RootLayout({
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/site.webmanifest" />
-        <link rel="preconnect" href="https://qobobocldfjhdkpjyuuq.supabase.co" crossOrigin="anonymous" />
-        <link rel="dns-prefetch" href="https://qobobocldfjhdkpjyuuq.supabase.co" />
+        {process.env.NEXT_PUBLIC_SUPABASE_URL && (
+          <>
+            <link rel="preconnect" href={process.env.NEXT_PUBLIC_SUPABASE_URL} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_SUPABASE_URL} />
+          </>
+        )}
         <link rel="preconnect" href="https://api.clickpesa.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://api.clickpesa.com" />
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
@@ -149,8 +153,44 @@ export default function RootLayout({
                   removeExtensionAttributes();
                 }
                 
-                // Run periodically to catch dynamically added attributes
-                setInterval(removeExtensionAttributes, 50);
+                // Run more frequently to catch dynamically added attributes
+                setInterval(removeExtensionAttributes, 10);
+                
+                // Also run on any DOM mutations
+                if (typeof MutationObserver !== 'undefined') {
+                  function startObserver() {
+                    try {
+                      if (!document.body) return false
+                      const observer = new MutationObserver(function(mutations) {
+                        mutations.forEach(function(mutation) {
+                          if (mutation.type === 'attributes') {
+                            extensionAttributes.forEach(attr => {
+                              if ((mutation.target && mutation.target.hasAttribute) && mutation.target.hasAttribute(attr)) {
+                                mutation.target.removeAttribute(attr);
+                              }
+                            });
+                          }
+                        });
+                      });
+                      observer.observe(document.body, {
+                        attributes: true,
+                        subtree: true,
+                        attributeFilter: extensionAttributes
+                      });
+                      return true
+                    } catch {}
+                    return false
+                  }
+                  
+                  if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', () => { startObserver() })
+                  } else if (!startObserver()) {
+                    // Retry shortly if body not ready yet
+                    const obsInterval = setInterval(() => {
+                      if (startObserver()) clearInterval(obsInterval)
+                    }, 50)
+                  }
+                }
               })();
             `,
           }}
@@ -185,7 +225,9 @@ export default function RootLayout({
                           {children}
                         </OptimizedPageWrapper>
                         <HydrationFix />
-                        <Toaster />
+                        <div suppressHydrationWarning>
+                          <Toaster />
+                        </div>
                       </PublicCompanyProvider>
                     </CompanyProvider>
                   </CurrencyProvider>

@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
 
     logger.log('Login successful for user:', data.user.id)
     logger.log('User role determined as:', userRole)
-    
+
     // Create response with user data
     const response = NextResponse.json({
       success: true,

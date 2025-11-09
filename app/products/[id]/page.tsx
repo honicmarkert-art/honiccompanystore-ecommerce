@@ -132,6 +132,8 @@ export default function ProductDetailPage() {
   // Get return URL from search params to preserve search state
   const returnTo = searchParams?.get('returnTo') || '/products'
   
+  // Check if user came from China page
+  const fromChina = searchParams?.get('from') === 'china'
   
   // Validate product ID (but don't return early - violates Rules of Hooks!)
   const isValidProductId = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
@@ -1763,8 +1765,8 @@ export default function ProductDetailPage() {
       }
     }
     
-    // Check if this is a China import item first
-    if (displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
+    // Check if this is a China import item first (skip modal if from China page)
+    if (!fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
       const currentPrice = getCurrentUnitPrice
       setPendingCartAction({
         type: 'add',
@@ -2547,8 +2549,8 @@ export default function ProductDetailPage() {
         </div>
       </header>
 
-      {/* China Import Notice - Fixed during scroll */}
-      {displayProduct && (displayProduct.importChina || displayProduct.import_china) && (
+      {/* China Import Notice - Fixed during scroll (only show if not from China page) */}
+      {!fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) && (
         <div className="fixed top-16 sm:top-16 z-30 w-full bg-red-50 dark:bg-red-900/20 px-4 py-1.5 shadow-sm">
           <div className="max-w-7xl mx-auto">
             <div className="flex items-center justify-center text-center">
@@ -2564,7 +2566,7 @@ export default function ProductDetailPage() {
         </div>
       )}
 
-      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8", themeClasses.mainBg, displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
+      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8", themeClasses.mainBg, !fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
         {/* Skeleton Loading State */}
         {isLoading || isOptimizedLoading ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
@@ -2833,8 +2835,8 @@ export default function ProductDetailPage() {
                 )}
                 
 
-                {/* China Import Badge */}
-                {mainViewMode === 'image' && (displayProduct?.importChina || displayProduct?.import_china) && (
+                {/* China Import Badge (only show if not from China page) */}
+                {!fromChina && mainViewMode === 'image' && (displayProduct?.importChina || displayProduct?.import_china) && (
                   <div className="absolute bottom-2 left-2 z-30">
                     <span className="inline-flex items-center justify-center bg-red-600 text-white text-[10px] sm:text-[12px] font-semibold px-2 py-1 rounded shadow-sm">
                       i - China
@@ -3768,8 +3770,8 @@ export default function ProductDetailPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  // Check if this is a China import item first
-                  if (displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
+                  // Check if this is a China import item first (skip modal if from China page)
+                  if (!fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
                     const currentPrice = getCurrentUnitPrice
                     setPendingCartAction({
                       type: 'buy',
@@ -5006,117 +5008,7 @@ export default function ProductDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Enhanced Admin Controls Panel */}
-      {user && (user.role === 'admin' || user.profile?.is_admin) && (
-        <div className="fixed bottom-4 right-4 z-50">
-          <div className={cn(
-            "rounded-lg shadow-lg p-4 border min-w-[280px]",
-            backgroundColor === "white" ? "bg-white border-gray-200" : "bg-gray-800 border-gray-700"
-          )}>
-            <h3 className={cn(
-              "text-sm font-semibold mb-3",
-              backgroundColor === "white" ? "text-gray-900" : "text-white"
-            )}>Admin Controls</h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className={cn(
-                  "text-xs",
-                  backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                )}>Stock Quantity:</span>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min="0"
-                    value={adminProductState.stockQuantity}
-                    onChange={(e) => updateAdminProductState('stockQuantity', parseInt(e.target.value) || 0)}
-                    className="w-16 h-6 text-xs p-1"
-                  />
-                  <span className={`text-xs px-2 py-1 rounded ${adminProductState.inStock && adminProductState.stockQuantity > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {adminProductState.inStock && adminProductState.stockQuantity > 0 ? 'In Stock' : 'Out of Stock'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className={cn(
-                  "text-xs",
-                  backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                )}>Free Delivery:</span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant={adminProductState.freeDelivery ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => updateAdminProductState('freeDelivery', !adminProductState.freeDelivery)}
-                    className="h-6 px-2 text-xs"
-                  >
-                    {adminProductState.freeDelivery ? 'ON' : 'OFF'}
-                  </Button>
-                  <span className={`text-xs px-2 py-1 rounded ${adminProductState.freeDelivery ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                    {adminProductState.freeDelivery ? 'Enabled' : 'Disabled'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className={cn(
-                  "text-xs",
-                  backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                )}>Same Day Delivery:</span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant={adminProductState.sameDayDelivery ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => updateAdminProductState('sameDayDelivery', !adminProductState.sameDayDelivery)}
-                    className="h-6 px-2 text-xs"
-                  >
-                    {adminProductState.sameDayDelivery ? 'ON' : 'OFF'}
-                  </Button>
-                  <span className={`text-xs px-2 py-1 rounded ${adminProductState.sameDayDelivery ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
-                    {adminProductState.sameDayDelivery ? 'Enabled' : 'Disabled'}
-                  </span>
-                </div>
-              </div>
-              
-              {/* Return Time Controls */}
-              <div className="border-t pt-3 mt-3">
-                <span className={cn(
-                  "text-xs font-medium mb-2 block",
-                  backgroundColor === "white" ? "text-gray-700" : "text-gray-300"
-                )}>Return Time Settings</span>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className={cn(
-                      "text-xs",
-                      backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                    )}>Time Value:</span>
-                    <Input
-                      type="number"
-                      min="1"
-                      max="365"
-                      value={adminProductState.returnTimeValue}
-                      onChange={(e) => updateAdminProductState('returnTimeValue', parseInt(e.target.value) || 1)}
-                      className="w-16 h-6 text-xs p-1"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-600 dark:text-gray-300">Time Unit:</span>
-                    <select
-                      value={adminProductState.returnTimeType}
-                      onChange={(e) => updateAdminProductState('returnTimeType', e.target.value)}
-                      className="w-20 h-6 text-xs p-1 border rounded bg-white dark:bg-gray-700"
-                    >
-                      <option value="minutes">Minutes</option>
-                      <option value="hours">Hours</option>
-                      <option value="days">Days</option>
-                    </select>
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
-                    Message: "Please return in {adminProductState.returnTimeValue} {adminProductState.returnTimeType}"
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Admin Controls removed */}
       
       {/* Search Modal */}
       <SearchModal

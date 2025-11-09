@@ -47,6 +47,7 @@ interface InfiniteProductsOptions {
   maxPrice?: number
   categories?: string[] // Multiple categories
   inStock?: boolean
+  isChina?: boolean // Filter by import_china
 }
 
 interface InfiniteProductsReturn {
@@ -77,7 +78,8 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     minPrice,
     maxPrice,
     categories,
-    inStock
+    inStock,
+    isChina
   } = options
 
   const [products, setProducts] = useState<Product[]>([])
@@ -171,6 +173,9 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       }
       if (inStock !== undefined) {
         params.append('inStock', inStock.toString())
+      }
+      if (isChina !== undefined) {
+        params.append('isChina', isChina.toString())
       }
       
       if (useOptimized && !useMaterializedView) {

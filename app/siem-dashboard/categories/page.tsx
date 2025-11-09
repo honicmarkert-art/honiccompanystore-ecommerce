@@ -3,7 +3,7 @@
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
 
-import { useState, useMemo, useEffect } from "react"
+import React, { useState, useMemo, useEffect } from "react"
 import {
   Plus,
   Search,
@@ -155,7 +155,7 @@ export default function SiemCategories() {
   }
 
   // Render category tree recursively
-  const renderCategoryTree = (categories: (Category & { children: Category[] })[], level = 0): JSX.Element[] => {
+  const renderCategoryTree = (categories: (Category & { children: Category[] })[], level = 0): React.JSX.Element[] => {
     return categories.map((category) => (
       <div key={category.id}>
         <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder, `ml-${level * 4}`)}>
@@ -252,7 +252,7 @@ export default function SiemCategories() {
         {/* Render children if expanded */}
         {category.children.length > 0 && expandedCategories.has(category.id) && (
           <div className="mt-2">
-            {renderCategoryTree(category.children, level + 1)}
+            {renderCategoryTree(category.children as (Category & { children: Category[] })[], level + 1)}
           </div>
         )}
       </div>
@@ -260,8 +260,11 @@ export default function SiemCategories() {
   }
 
   const handleEditCategory = (category: Category) => {
+    // Prevent navigation when editing
     setEditingCategory(category)
     setIsAddDialogOpen(true)
+    // Ensure we stay in the current view mode when editing
+    // Don't change viewMode here - keep it as is
   }
 
   const handleDeleteCategory = async (categoryId: number) => {
@@ -508,7 +511,18 @@ export default function SiemCategories() {
                     themeClasses.cardBg, 
                     themeClasses.cardBorder
                   )}
-                  onClick={() => handleMainCategorySelect(category)}
+                  onClick={(e) => {
+                    // Don't navigate if clicking on dropdown, menu items, or buttons
+                    const target = e.target as HTMLElement
+                    if (
+                      target.closest('[role="menu"], [role="menuitem"], button, [role="button"]') ||
+                      target.tagName === 'BUTTON' ||
+                      isAddDialogOpen
+                    ) {
+                      return
+                    }
+                    handleMainCategorySelect(category)
+                  }}
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -518,22 +532,29 @@ export default function SiemCategories() {
                           {category.name}
                         </CardTitle>
                       </div>
-                      <DropdownMenu onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenuTrigger asChild>
+                      <div onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8">
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
                           <DropdownMenuItem
-                            onClick={() => handleEditCategory(category)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleEditCategory(category)
+                            }}
                             className={themeClasses.buttonGhostHoverBg}
                           >
                             <Edit className="h-4 w-4 mr-2" />
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => handleDeleteCategory(category.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteCategory(category.id)
+                            }}
                             className="text-red-600 hover:text-red-700"
                           >
                             <Trash2 className="h-4 w-4 mr-2" />
@@ -541,6 +562,7 @@ export default function SiemCategories() {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">

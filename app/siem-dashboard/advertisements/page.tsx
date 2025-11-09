@@ -463,6 +463,7 @@ export default function AdvertisementsPage() {
                     className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="products">Products Page</option>
+                    <option value="china">China Page</option>
                     <option value="features">Features Section (Landing Page)</option>
                     <option value="hero">Hero Section</option>
                     <option value="sidebar">Sidebar</option>

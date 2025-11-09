@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useCategories } from "@/hooks/use-categories"
 import { useBrands } from "@/hooks/use-brands"
 import { SelectWithAddOption } from "@/components/select-with-add-option"
+import { HierarchicalCategorySelector } from "@/components/hierarchical-category-selector"
 import { X, Plus, Upload, Image as ImageIcon, Eye, Trash2, Link } from "lucide-react"
 import { MediaUpload } from "@/components/media/media-upload"
 import { logger } from '@/lib/logger'
@@ -259,6 +260,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
     const refreshProductData = async () => {
       try {
+        if (!product?.id) return
         const response = await fetch(`/api/products/${product.id}`)
         if (response.ok) {
           const freshProduct = await response.json()
@@ -497,7 +499,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          productId: product.id,
+          productId: product?.id,
           imageUrl: variantImage.imageUrl
         })
       })
@@ -772,6 +774,12 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         return
       }
 
+      // Enforce category_id on create (new product has no id)
+      if (!product && !(formData as any).category_id) {
+        toast({ title: "Validation Error", description: "Please select a sub category (it assigns the UUID).", variant: "destructive" })
+        return
+      }
+
       if (isBrandInvalid) {
         toast({ title: "Validation Error", description: "Please select a brand.", variant: "destructive" })
         return
@@ -1025,18 +1033,26 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
             <div className="space-y-2">
               <Label htmlFor="category">Category *</Label>
-              <SelectWithAddOption
+              <HierarchicalCategorySelector
                 value={formData.category}
                 onValueChange={(value) => {
-                  if (value !== "__add_new__" && 
+                  if (value !== "__add_new_main__" && 
+                      value !== "__add_new_sub__" &&
                       value !== "__loading__" && 
                       value !== "__error__" && 
-                      value !== "__empty__") {
+                      value !== "__empty__" &&
+                      value !== "__no_subs__") {
                     handleInputChange("category", value)
                   }
                 }}
+                onSelect={(selection) => {
+                  // Persist the leaf (subcategory) UUID as category_id; fallback to main if no sub
+                  const target = selection.sub || selection.main
+                  if (target) {
+                    handleInputChange("category_id", target.id)
+                  }
+                }}
                 placeholder="Select a category"
-                options={categories}
                 isLoading={categoriesLoading}
                 error={categoriesError}
                 emptyMessage="No categories found"
@@ -1796,7 +1812,23 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
             type="image"
               value={formData.image}
             onChange={(url) => handleInputChange("image", url)}
-            onRemove={() => handleInputChange("image", "")}
+            onRemove={async () => {
+              try {
+                const currentUrl = formData.image || product?.image
+                if (currentUrl) {
+                  const fileName = (currentUrl.split('/').pop() || '').trim()
+                  if (fileName) {
+                  await fetch(`/api/media/delete?fileName=${encodeURIComponent(fileName)}&type=image&context=product${product?.id ? `&productId=${product.id}` : ''}`, {
+                      method: 'DELETE'
+                    })
+                  }
+                }
+              } catch (e) {
+                // Ignore delete failures; user can re-upload
+              } finally {
+                handleInputChange("image", "")
+              }
+            }}
             maxSize={10}
             aspectRatio={1}
             context="product"
@@ -1815,7 +1847,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                   const response = await fetch('/api/media/delete', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ productId: product.id, type: 'video', url: formData.video })
+                  body: JSON.stringify({ productId: product?.id, type: 'video', url: formData.video })
                   })
                   
                   if (!response.ok) {
@@ -1860,7 +1892,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                   const response = await fetch('/api/media/delete', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ productId: product.id, type: 'model3d', url: formData.view360 })
+                  body: JSON.stringify({ productId: product?.id, type: 'model3d', url: formData.view360 })
                   })
                   
                   if (!response.ok) {

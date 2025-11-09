@@ -32,7 +32,7 @@ export function PerformanceOptimizer() {
     // Add resource hints for external domains
     const addResourceHints = () => {
       const hints = [
-        { rel: 'dns-prefetch', href: 'https://qobobocldfjhdkpjyuuq.supabase.co' },
+        ...(process.env.NEXT_PUBLIC_SUPABASE_URL ? [{ rel: 'dns-prefetch', href: process.env.NEXT_PUBLIC_SUPABASE_URL }] : []),
         { rel: 'preconnect', href: 'https://api.clickpesa.com' },
         { rel: 'preconnect', href: 'https://www.google.com' },
       ]
