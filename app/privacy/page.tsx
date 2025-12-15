@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -21,12 +22,67 @@ import {
   AlertTriangle,
   ArrowLeft
 } from 'lucide-react'
-import Link from 'next/link'
 
-export default function PrivacyPolicyPage() {
+function PrivacyPolicyPageContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const { companyName, companyColor, settings: adminSettings } = useCompanyContext()
   const { theme } = useTheme()
   const [activeSection, setActiveSection] = useState('overview')
+  const [returnUrl, setReturnUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Get return URL from query params or sessionStorage
+    const urlParam = searchParams.get('return')
+    if (urlParam) {
+      setReturnUrl(urlParam)
+      // Also store in sessionStorage as backup
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('privacy_return_url', urlParam)
+      }
+    } else if (typeof window !== 'undefined') {
+      // Check sessionStorage for stored return URL
+      const stored = sessionStorage.getItem('privacy_return_url')
+      if (stored) {
+        setReturnUrl(stored)
+      }
+    }
+  }, [searchParams])
+
+  const handleBack = () => {
+    if (typeof window !== 'undefined') {
+      // First priority: Use return URL from params or sessionStorage
+      if (returnUrl) {
+        sessionStorage.removeItem('privacy_return_url')
+        router.push(returnUrl)
+        return
+      }
+      
+      // Second priority: Check referrer
+      const referrer = document.referrer
+      if (referrer && referrer !== window.location.href) {
+        // Extract pathname from referrer
+        try {
+          const referrerUrl = new URL(referrer)
+          const referrerPath = referrerUrl.pathname
+          // Only go back if referrer is from same origin
+          if (referrerUrl.origin === window.location.origin && referrerPath !== '/privacy') {
+            window.history.back()
+            return
+          }
+        } catch (e) {
+          // If URL parsing fails, try history.back()
+          window.history.back()
+          return
+        }
+      }
+      
+      // Fallback: Go to home
+      router.push('/')
+    } else {
+      router.push('/')
+    }
+  }
 
   const sections = [
     { id: 'overview', title: 'Overview', icon: Shield },
@@ -53,12 +109,10 @@ export default function PrivacyPolicyPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <Link href="/home">
-                <Button variant="ghost" size="sm" className="flex items-center space-x-2">
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Back to Home</span>
-                </Button>
-              </Link>
+              <Button variant="ghost" size="sm" className="flex items-center space-x-2" onClick={handleBack}>
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back</span>
+              </Button>
               <div>
                 <h1 className={cn("text-3xl font-bold", themeClasses.mainText)}>
                   Privacy Policy
@@ -534,5 +588,13 @@ export default function PrivacyPolicyPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function PrivacyPolicyPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <PrivacyPolicyPageContent />
+    </Suspense>
   )
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { z } from 'zod'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { logAuthFailure } from '@/lib/security-monitor'
@@ -39,7 +40,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
+    // Parse request body with error handling
+    let body
+    try {
+      const text = await request.text()
+      if (!text || text.trim() === '') {
+        return NextResponse.json(
+          { 
+            success: false,
+            error: 'Request body is required',
+            type: 'VALIDATION_ERROR'
+          },
+          { status: 400 }
+        )
+      }
+      body = JSON.parse(text)
+    } catch (parseError) {
+      logger.error('Failed to parse login request body:', parseError)
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Invalid request format. Please check your input and try again.',
+          type: 'VALIDATION_ERROR'
+        },
+        { status: 400 }
+      )
+    }
     
     // Validate input
     const validatedData = loginSchema.parse(body)
@@ -83,6 +109,55 @@ export async function POST(request: NextRequest) {
         endpoint: '/api/auth/login'
       }, request.headers.get('x-forwarded-for') || 'unknown', request.headers.get('user-agent'))
       
+      // Check if error is related to email verification
+      const errorMessage = error.message?.toLowerCase() || ''
+      const errorCode = (error as any).code || ''
+      const isEmailNotVerified = 
+        errorMessage.includes('email not confirmed') ||
+        errorMessage.includes('email_not_confirmed') ||
+        errorMessage.includes('email not verified') ||
+        errorMessage.includes('verification') ||
+        errorCode === 'email_not_confirmed' ||
+        errorCode === 'email_not_verified' ||
+        (error.status === 400 && errorMessage.includes('confirm'))
+      
+      // If error message suggests email verification issue, check the user in database
+      // Supabase might return "Invalid login credentials" even when email is not verified
+      if (isEmailNotVerified || errorMessage.includes('invalid login credentials') || errorMessage.includes('invalid login')) {
+        try {
+          // Use admin client to check if user exists and email is not verified
+          const adminSupabase = createAdminSupabaseClient()
+          const { data: authUser } = await adminSupabase.auth.admin.getUserByEmail(validatedData.email.toLowerCase())
+          
+          if (authUser?.user && !authUser.user.email_confirmed_at && !authUser.user.confirmed_at) {
+            // User exists but email is not verified
+            return NextResponse.json(
+              { 
+                success: false,
+                error: 'Your email address has not been verified yet. Please check your inbox for the verification email and click the verification link before logging in. If you didn\'t receive the email, you can request a new one.',
+                type: 'EMAIL_NOT_VERIFIED'
+              },
+              { status: 403 }
+            )
+          }
+        } catch (checkError) {
+          // If we can't check, fall through to generic error
+          logger.warn('Could not check user verification status:', checkError)
+        }
+      }
+      
+      // Return specific error if we detected email verification issue
+      if (isEmailNotVerified) {
+        return NextResponse.json(
+          { 
+            success: false,
+            error: 'Your email address has not been verified yet. Please check your inbox for the verification email and click the verification link before logging in. If you didn\'t receive the email, you can request a new one.',
+            type: 'EMAIL_NOT_VERIFIED'
+          },
+          { status: 403 }
+        )
+      }
+      
       return NextResponse.json(
         { 
           success: false,
@@ -104,6 +179,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check if email is verified - REQUIRED for email/password login (not for OAuth)
+    if (!data.user.email_confirmed_at && !data.user.confirmed_at) {
+      // Sign out the user since they can't login without verification
+      await supabase.auth.signOut()
+      
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Your email address has not been verified. Please check your inbox for the verification link and click it before logging in. If you didn\'t receive the email, you can resend it.',
+          type: 'EMAIL_NOT_VERIFIED'
+        },
+        { status: 403 }
+      )
+    }
+
     // Get user profile to determine role from database and remember me setting
     const { data: profile } = await supabase
       .from('profiles')
@@ -112,12 +202,27 @@ export async function POST(request: NextRequest) {
       .single()
 
     const userRole = profile?.role === 'admin' || profile?.is_admin === true ? 'admin' : 'user'
+    const isSupplier = profile?.is_supplier === true
     
     // Check user's remember me setting from profile, fallback to request parameter
     const userRememberMe = profile?.settings?.rememberMe ?? remember
 
     logger.log('Login successful for user:', data.user.id)
     logger.log('User role determined as:', userRole)
+    logger.log('User is supplier:', isSupplier)
+
+    // Determine redirect based on user role
+    let redirectTo: string | null = null
+    if (userRole === 'admin') {
+      // Admin can access admin pages - no forced redirect
+      redirectTo = null
+    } else if (isSupplier) {
+      // Supplier should go to supplier dashboard
+      redirectTo = '/supplier/dashboard'
+    } else {
+      // Regular buyer should go to buyer pages (home/products)
+      redirectTo = '/'
+    }
 
     // Create response with user data
     const response = NextResponse.json({
@@ -129,9 +234,10 @@ export async function POST(request: NextRequest) {
         name: data.user.user_metadata?.name || profile?.full_name || data.user.email,
         role: userRole,
         isVerified: data.user.email_confirmed_at !== null,
-        profile: profile
+        profile: profile,
+        isSupplier: isSupplier
       },
-      redirectTo: null // Don't force redirects, let the client decide
+      redirectTo: redirectTo
     }, { status: 200 })
 
     // Set the cookies that Supabase wanted to set

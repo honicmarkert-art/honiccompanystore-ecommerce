@@ -1,5 +1,6 @@
 "use client"
 
+import { BuyerRouteGuard } from '@/components/buyer-route-guard'
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 
 import { useState, useEffect, useMemo, useRef, useCallback, startTransition } from "react"
@@ -18,7 +19,6 @@ import {
   Landmark,
   MessageSquareText,
   Facebook,
-  Twitter,
   Instagram,
   Youtube,
   Mail,
@@ -39,6 +39,8 @@ import {
   MessageSquare,
   Ticket,
   Settings,
+  Moon,
+  Sun,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -65,7 +67,11 @@ import { CartSelectionPreview } from "@/components/cart-selection-preview"
 import { Footer } from "@/components/footer"
 
 export default function CartPage() {
-  return <CartPageContent />
+  return (
+    <BuyerRouteGuard>
+      <CartPageContent />
+    </BuyerRouteGuard>
+  )
 }
 
 function CartPageContent() {
@@ -96,6 +102,14 @@ function CartPageContent() {
   const [isQuantityWarningModalOpen, setIsQuantityWarningModalOpen] = useState(false)
   const [quantityWarningItem, setQuantityWarningItem] = useState<{productId: number, variantId?: string, productName: string} | null>(null)
   const { showCheckoutValidation, hideModal, isOpen: isModalOpen, modalProps} = useValidationModal()
+  const [promoCode, setPromoCode] = useState('')
+  const [appliedPromotion, setAppliedPromotion] = useState<{
+    code: string
+    name: string
+    discountAmount: number
+  } | null>(null)
+  const [promoError, setPromoError] = useState('')
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false)
   
   // Fetch stock data for all cart items (debounced + only when product set changes)
   const stockDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -379,7 +393,62 @@ function CartPageContent() {
   }
   
   const shippingCost = calculateShippingFee(selectedSubtotal)
-  const total = selectedSubtotal + shippingCost
+  const discountAmount = appliedPromotion ? appliedPromotion.discountAmount : 0
+  const total = selectedSubtotal + shippingCost - discountAmount
+
+  const handleApplyPromo = useCallback(async () => {
+    if (!promoCode.trim()) return
+
+    setIsApplyingPromo(true)
+    setPromoError('')
+
+    try {
+      const cartItemsForPromo = cart.map(item => ({
+        productId: item.productId,
+        product_id: item.productId,
+        price: item.totalPrice / (item.totalQuantity || 1), // Average price per unit
+        quantity: item.totalQuantity || 1
+      }))
+
+      // Calculate current subtotal
+      const currentSelectedItems = cart.filter(i => selected[i.productId])
+      const currentSubtotal = currentSelectedItems.length > 0 
+        ? currentSelectedItems.reduce((s,i)=>s+i.totalPrice,0) 
+        : cartSubtotal
+
+      const response = await fetch('/api/promotions/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: promoCode.trim(),
+          cartItems: cartItemsForPromo,
+          subtotal: currentSubtotal
+        })
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setAppliedPromotion({
+          code: result.promotion.code,
+          name: result.promotion.name,
+          discountAmount: result.promotion.discountAmount
+        })
+        toast({
+          title: 'Promotion Applied',
+          description: `${result.promotion.name} - ${formatPrice(result.promotion.discountAmount)} discount applied!`,
+        })
+      } else {
+        setPromoError(result.error || 'Invalid promotion code')
+      }
+    } catch (error) {
+      setPromoError('Failed to apply promotion code. Please try again.')
+    } finally {
+      setIsApplyingPromo(false)
+    }
+  }, [promoCode, cart, cartSubtotal, toast, formatPrice])
 
   const toggleSelected = useCallback((productId: number) => {
     setSelected(prev => ({ ...prev, [productId]: !prev[productId] }))
@@ -414,10 +483,21 @@ function CartPageContent() {
     }
     try { 
       sessionStorage.setItem('selected_cart_items', JSON.stringify(selectedIds))
+      // Store applied promotion if any
+      if (appliedPromotion) {
+        sessionStorage.setItem('applied_promotion', JSON.stringify({
+          code: appliedPromotion.code,
+          discountAmount: appliedPromotion.discountAmount
+        }))
+      } else {
+        sessionStorage.removeItem('applied_promotion')
+      }
       // Clear "Buy Now" mode when proceeding from cart
       sessionStorage.removeItem('buy_now_mode')
       sessionStorage.removeItem('buy_now_item_data')
-    } catch {}
+    } catch (error) {
+      // Silently handle storage errors
+    }
     router.push('/checkout')
   }
 
@@ -506,49 +586,33 @@ function CartPageContent() {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-2 lg:gap-4 ml-auto flex-shrink-0">
-            {/* Theme Switcher Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "flex items-center gap-1 px-3 py-2",
-                    darkHeaderFooterClasses.buttonGhostText,
-                    darkHeaderFooterClasses.buttonGhostHoverBg,
-                  )}
-                >
-                  <span className="text-sm font-medium">Theme</span>
-                  <span className="sr-only">Change Theme</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className={cn(
-                  // Force solid backgrounds in both themes
-                  "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
-                )}
-              >
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("dark")}
-                  className={cn(darkHeaderFooterClasses.dropdownItemHoverBg, backgroundColor === "dark" && "bg-yellow-500 text-white")}
-                >
-                  Dark {backgroundColor === "dark" && "✓"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("gray")}
-                  className={cn(darkHeaderFooterClasses.dropdownItemHoverBg, backgroundColor === "gray" && "bg-yellow-500 text-white")}
-                >
-                  Gray {backgroundColor === "gray" && "✓"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("white")}
-                  className={cn(darkHeaderFooterClasses.dropdownItemHoverBg, backgroundColor === "white" && "bg-yellow-500 text-white")}
-                >
-                  White {backgroundColor === "white" && "✓"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Theme Toggle Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                const newTheme = (backgroundColor === 'white' || backgroundColor === 'gray') ? 'dark' : 'white'
+                setBackgroundColor(newTheme)
+              }}
+              className={cn(
+                "flex items-center gap-1",
+                darkHeaderFooterClasses.buttonGhostText,
+              )}
+              title={(backgroundColor === 'white' || backgroundColor === 'gray') ? 'Switch to dark theme' : 'Switch to light theme'}
+              suppressHydrationWarning
+            >
+              {(backgroundColor === 'white' || backgroundColor === 'gray') ? (
+                <>
+                  <Moon className="w-5 h-5" />
+                  <span className="hidden sm:inline hover:opacity-80 transition-opacity" suppressHydrationWarning>Dark</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-5 h-5" />
+                  <span className="hidden sm:inline hover:opacity-80 transition-opacity" suppressHydrationWarning>Light</span>
+                </>
+              )}
+            </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -1296,6 +1360,15 @@ function CartPageContent() {
                         <span className={cn("font-medium", themeClasses.mainText)}>{formatPrice(selectedSubtotal)}</span>
                       </div>
                       
+                      {discountAmount > 0 && (
+                        <div className="flex justify-between">
+                          <span className={cn("text-sm text-green-600 dark:text-green-400", themeClasses.textNeutralSecondary)}>Discount:</span>
+                          <span className={cn("font-medium text-green-600 dark:text-green-400", themeClasses.mainText)}>
+                            -{formatPrice(discountAmount)}
+                          </span>
+                        </div>
+                      )}
+                      
                       <div className="flex justify-between">
                         <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>Shipping:</span>
                         <span className={cn("font-medium", shippingCost === 0 ? "text-green-500" : themeClasses.mainText)}>
@@ -1307,7 +1380,7 @@ function CartPageContent() {
                         <div className="flex justify-between">
                           <span className={cn("text-lg font-bold", themeClasses.mainText)}>Total:</span>
                           <span className={cn("text-lg font-bold", themeClasses.mainText)}>
-                            {formatPrice(selectedSubtotal + shippingCost)}
+                            {formatPrice(total)}
                           </span>
                         </div>
                       </div>
@@ -1315,21 +1388,72 @@ function CartPageContent() {
 
                     {/* Promo Code */}
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Enter promo code"
-                          className={cn(
-                            "flex-1 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border rounded-md",
-                            // Use explicit classes for consistent dark/light appearance
-                            "bg-white text-neutral-900 placeholder:text-neutral-400 border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400 dark:border-neutral-800",
+                      {appliedPromotion ? (
+                        <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Ticket className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                              <span className="text-xs sm:text-sm font-semibold text-green-800 dark:text-green-200">
+                                {appliedPromotion.code}
+                              </span>
+                            </div>
+                            <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
+                              {appliedPromotion.name} • {formatPrice(appliedPromotion.discountAmount)} discount applied
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setAppliedPromotion(null)
+                              setPromoCode('')
+                              setPromoError('')
+                            }}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 h-6 w-6 p-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="text"
+                              placeholder="Enter promo code"
+                              value={promoCode}
+                              onChange={(e) => {
+                                setPromoCode(e.target.value.toUpperCase())
+                                setPromoError('')
+                              }}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleApplyPromo()
+                                }
+                              }}
+                              className={cn(
+                                "flex-1 text-xs sm:text-sm",
+                                promoError ? "border-red-500" : "",
+                                themeClasses.cardBg,
+                                themeClasses.borderNeutralSecondary
+                              )}
+                            />
+                            <Button 
+                              size="sm" 
+                              className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600 text-xs sm:text-sm px-2 sm:px-3"
+                              onClick={handleApplyPromo}
+                              disabled={isApplyingPromo || !promoCode.trim()}
+                            >
+                              {isApplyingPromo ? '...' : 'Apply'}
+                            </Button>
+                          </div>
+                          {promoError && (
+                            <p className="text-[10px] sm:text-xs text-red-600 dark:text-red-400">
+                              {promoError}
+                            </p>
                           )}
-                        />
-                        <Button size="sm" className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600 text-xs sm:text-sm px-2 sm:px-3">
-                          Apply
-                        </Button>
-                      </div>
-                </div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Action Buttons */}
                     <div className="space-y-2">
@@ -1412,7 +1536,7 @@ function CartPageContent() {
                       </div>
                     </div>
                   </CardContent>
-            </Card>
+                </Card>
               </div>
           </div>
         )}

@@ -1,0 +1,511 @@
+"use client"
+
+import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useAuth } from '@/contexts/auth-context'
+import { useTheme } from '@/hooks/use-theme'
+import { useCurrency } from '@/contexts/currency-context'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Loader2, CreditCard, CheckCircle, XCircle, AlertCircle, RefreshCw } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
+
+interface PremiumPlan {
+  id: string
+  name: string
+  slug: string
+  price: number
+  currency: string
+  description: string
+}
+
+export default function SupplierPaymentPage() {
+  return <SupplierPaymentPageContent />
+}
+
+function SupplierPaymentPageContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { user, isAuthenticated, loading: authLoading } = useAuth()
+  const { themeClasses } = useTheme()
+  const { formatPrice } = useCurrency()
+  const { toast } = useToast()
+  
+  const planId = searchParams.get('planId')
+  const [plan, setPlan] = useState<PremiumPlan | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [processing, setProcessing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'failed' | null>(null)
+  const [paymentReferenceId, setPaymentReferenceId] = useState<string | null>(null)
+  const [paymentFailureReason, setPaymentFailureReason] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Wait a bit for auth check to complete before redirecting
+    if (authLoading) {
+      return // Still checking auth, wait
+    }
+
+    if (!isAuthenticated) {
+      // Add small delay to ensure auth check has fully completed
+      const redirectTimer = setTimeout(() => {
+        // Only redirect if still not authenticated after delay
+        if (!isAuthenticated) {
+          const redirectUrl = `/supplier/payment${planId ? `?planId=${planId}` : ''}`
+          router.push(`/auth/login?redirect=${encodeURIComponent(redirectUrl)}`)
+        }
+      }, 1000) // Wait 1 second for auth to stabilize
+      
+      return () => clearTimeout(redirectTimer)
+    }
+
+    // User is authenticated, fetch plan details if planId is present
+    if (isAuthenticated && planId) {
+      fetchPlanDetails()
+    }
+  }, [authLoading, isAuthenticated, planId, router])
+
+  const fetchPlanDetails = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // First check if user has pending premium plan and payment status
+      const profileResponse = await fetch('/api/user/profile', { credentials: 'include' })
+      const profileData = await profileResponse.json()
+
+      if (!profileData.profile?.pending_plan_id) {
+        // Check if planId matches pending plan or fetch it
+        if (planId !== profileData.profile?.pending_plan_id) {
+          setError('No pending premium plan found. Please select a premium plan first.')
+          setLoading(false)
+          return
+        }
+      }
+
+      const targetPlanId = planId || profileData.profile?.pending_plan_id
+
+      // Check payment status if there's a payment reference
+      if (profileData.profile?.payment_reference_id) {
+        setPaymentReferenceId(profileData.profile.payment_reference_id)
+        
+        // Fetch current payment status
+        try {
+          const statusResponse = await fetch(`/api/supplier/payment/status?referenceId=${profileData.profile.payment_reference_id}`, {
+            credentials: 'include'
+          })
+          const statusData = await statusResponse.json()
+          
+          if (statusData.success && statusData.payment) {
+            const status = statusData.payment.payment_status?.toLowerCase() || 'pending'
+            setPaymentStatus(status as 'pending' | 'paid' | 'failed')
+            setPaymentFailureReason(statusData.payment.payment_failure_reason || null)
+            
+            // Show appropriate messages
+            if (status === 'paid' || status === 'success') {
+              toast({
+                title: 'Payment Successful!',
+                description: 'Your premium plan has been activated. Enjoy unlimited features!',
+                duration: 5000
+              })
+              // Redirect to dashboard after a delay
+              setTimeout(() => {
+                router.push('/supplier/dashboard')
+              }, 3000)
+            } else if (status === 'failed' || status === 'cancelled') {
+              toast({
+                title: 'Payment Failed',
+                description: statusData.payment.payment_failure_reason || 'Payment could not be processed. Please try again.',
+                variant: 'destructive',
+                duration: 5000
+              })
+            }
+          }
+        } catch (statusError) {
+          console.error('Error checking payment status:', statusError)
+          // Continue loading plan even if status check fails
+        }
+      }
+
+      // Fetch plan details
+      const plansResponse = await fetch('/api/supplier-plans')
+      const plansData = await plansResponse.json()
+
+      if (plansData.success && plansData.plans) {
+        const premiumPlan = plansData.plans.find((p: any) => p.id === targetPlanId && (p.slug === 'premium' || p.price > 0))
+        
+        if (!premiumPlan) {
+          setError('Premium plan not found or invalid.')
+          setLoading(false)
+          return
+        }
+
+        setPlan({
+          id: premiumPlan.id,
+          name: premiumPlan.name,
+          slug: premiumPlan.slug,
+          price: premiumPlan.price,
+          currency: premiumPlan.currency || 'TZS',
+          description: premiumPlan.description || 'Premium plan features'
+        })
+      } else {
+        setError('Failed to load plan details. Please try again.')
+      }
+    } catch (err) {
+      console.error('Error fetching plan details:', err)
+      setError('An error occurred while loading plan details. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  const checkPaymentStatus = async () => {
+    if (!paymentReferenceId) return
+    
+    try {
+      setProcessing(true)
+      const response = await fetch(`/api/supplier/payment/status?referenceId=${paymentReferenceId}`, {
+        credentials: 'include'
+      })
+      const data = await response.json()
+
+      if (data.success && data.payment) {
+        const status = data.payment.payment_status?.toLowerCase() || 'pending'
+        setPaymentStatus(status as 'pending' | 'paid' | 'failed')
+        setPaymentFailureReason(data.payment.payment_failure_reason || null)
+        
+        if (status === 'paid' || status === 'success') {
+          toast({
+            title: 'Payment Successful!',
+            description: 'Your premium plan has been activated. Enjoy unlimited features!',
+            duration: 5000
+          })
+          setTimeout(() => {
+            router.push('/supplier/dashboard')
+          }, 2000)
+        } else if (status === 'failed' || status === 'cancelled') {
+          toast({
+            title: 'Payment Failed',
+            description: data.payment.payment_failure_reason || 'Payment could not be processed. Please try again.',
+            variant: 'destructive',
+            duration: 5000
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Error checking payment status:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to check payment status. Please try again.',
+        variant: 'destructive'
+      })
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const handlePayment = async () => {
+    if (!plan || !user) return
+
+    try {
+      setProcessing(true)
+      setError(null)
+
+      // Create payment transaction
+      const response = await fetch('/api/supplier/payment/premium', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          planId: plan.id,
+          amount: plan.price
+        })
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to initiate payment')
+      }
+
+      if (result.checkoutUrl) {
+        // Store the new reference ID for status checking
+        if (result.referenceId) {
+          setPaymentReferenceId(result.referenceId)
+          setPaymentStatus('pending') // Set to pending since payment was just initiated
+        }
+        
+        // Open ClickPesa checkout in new tab
+        window.open(result.checkoutUrl, '_blank', 'noopener,noreferrer')
+        
+        // Show success message
+        toast({
+          title: 'Payment Page Opened',
+          description: 'Please complete your payment in the new tab. You will be redirected back after payment.',
+          duration: 5000
+        })
+        
+        // Reset processing state after opening payment page
+        setProcessing(false)
+      } else {
+        throw new Error('Payment gateway did not return a checkout URL')
+      }
+    } catch (err: any) {
+      console.error('Payment initiation error:', err)
+      setError(err.message || 'Failed to initiate payment. Please try again.')
+      setProcessing(false)
+      toast({
+        title: 'Payment Error',
+        description: err.message || 'Failed to initiate payment. Please try again.',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  if (authLoading || loading) {
+    return (
+      <div className={cn("min-h-screen flex items-center justify-center", themeClasses.bg)}>
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-orange-500" />
+          <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Loading payment page...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return null // Will redirect
+  }
+
+  if (error && !plan) {
+    return (
+      <div className={cn("min-h-screen flex items-center justify-center p-4", themeClasses.bg)}>
+        <Card className={cn("max-w-md w-full", themeClasses.cardBg, themeClasses.cardBorder)}>
+          <CardHeader>
+            <CardTitle className={cn(themeClasses.mainText)}>Payment Error</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+            <Button onClick={() => router.push('/supplier/upgrade')} className="w-full">
+              Go to Upgrade Page
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!plan) {
+    return (
+      <div className={cn("min-h-screen flex items-center justify-center p-4", themeClasses.bg)}>
+        <Card className={cn("max-w-md w-full", themeClasses.cardBg, themeClasses.cardBorder)}>
+          <CardHeader>
+            <CardTitle className={cn(themeClasses.mainText)}>No Plan Selected</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className={cn("mb-4", themeClasses.textNeutralSecondary)}>
+              Please select a premium plan to proceed with payment.
+            </p>
+            <Button onClick={() => router.push('/supplier/upgrade')} className="w-full">
+              Select Premium Plan
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className={cn("min-h-screen p-4 md:p-8", themeClasses.bg)}>
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div>
+          <h1 className={cn("text-3xl font-bold mb-2", themeClasses.mainText)}>Complete Your Premium Plan Payment</h1>
+          <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+            Complete your payment to activate your premium plan features
+          </p>
+        </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Payment Status Alerts */}
+        {paymentStatus === 'paid' && (
+          <Alert className="border-green-500 bg-green-50 dark:bg-green-950/20">
+            <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+            <AlertDescription className="text-green-800 dark:text-green-200">
+              <strong>Payment Successful!</strong> Your premium plan has been activated. You will be redirected to your dashboard shortly.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {paymentStatus === 'failed' && (
+          <Alert variant="destructive">
+            <XCircle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Payment Failed</strong>
+              {paymentFailureReason && (
+                <p className="mt-2">{paymentFailureReason}</p>
+              )}
+              <p className="mt-2">You can try again by clicking the button below.</p>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {paymentStatus === 'pending' && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Payment Pending</strong> Your payment is being processed. Please wait a moment and refresh the status.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+          <CardHeader>
+            <CardTitle className={cn(themeClasses.mainText)}>Premium Plan Details</CardTitle>
+            <CardDescription className={cn(themeClasses.textNeutralSecondary)}>
+              Review your plan details before proceeding
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className={cn("font-medium", themeClasses.mainText)}>Plan Name:</span>
+                <span className={cn("font-semibold", themeClasses.mainText)}>{plan.name}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className={cn("font-medium", themeClasses.mainText)}>Price:</span>
+                <span className={cn("text-2xl font-bold text-orange-500", themeClasses.mainText)}>
+                  {formatPrice(plan.price, plan.currency)}
+                </span>
+              </div>
+            </div>
+
+            <div className={cn("border-t pt-4", themeClasses.border)}>
+              <h3 className={cn("font-semibold mb-2", themeClasses.mainText)}>Premium Features Include:</h3>
+              <ul className={cn("space-y-2 text-sm", themeClasses.textNeutralSecondary)}>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Unlimited product listings
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Advanced analytics and reporting
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Priority customer support
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Featured product listings
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Custom branding options
+                </li>
+              </ul>
+            </div>
+
+            {paymentStatus === 'paid' ? (
+              <Button
+                onClick={() => router.push('/supplier/dashboard')}
+                className="w-full bg-green-500 hover:bg-green-600 text-white"
+                size="lg"
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                Go to Dashboard
+              </Button>
+            ) : paymentStatus === 'failed' ? (
+              <Button
+                onClick={handlePayment}
+                disabled={processing}
+                className="w-full bg-orange-500 hover:bg-orange-600 text-white"
+                size="lg"
+              >
+                {processing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="mr-2 h-4 w-4" />
+                    Try Payment Again
+                  </>
+                )}
+              </Button>
+            ) : paymentStatus === 'pending' ? (
+              <div className="space-y-2">
+                <Button
+                  onClick={checkPaymentStatus}
+                  disabled={processing}
+                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
+                  size="lg"
+                >
+                  {processing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Check Payment Status
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={handlePayment}
+                  disabled={processing}
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                >
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Create New Payment
+                </Button>
+              </div>
+            ) : (
+            <Button
+              onClick={handlePayment}
+              disabled={processing}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white"
+              size="lg"
+            >
+              {processing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Proceed to Payment
+                </>
+              )}
+            </Button>
+            )}
+
+            <p className={cn("text-xs text-center", themeClasses.textNeutralSecondary)}>
+              You will be redirected to our secure payment gateway to complete your purchase
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function cn(...classes: (string | undefined | null | false)[]): string {
+  return classes.filter(Boolean).join(' ')
+}
+

@@ -191,6 +191,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Product not found' }, { status: 404 })
   }
 
+  // Server-side quantity validation based on product price
+  // Products under 500 TZS require minimum quantity of 5
+  const productPrice = parseFloat(product.price) || 0
+  if (productPrice < 500 && quantity < 5) {
+    return NextResponse.json({ 
+      error: 'Minimum order quantity is 5 for products under 500 TZS',
+      minQuantity: 5,
+      requestedQuantity: quantity,
+      productPrice: productPrice
+    }, { status: 400 })
+  }
+
   // Optimized stock calculation
   const stockQuantity = product.stock_quantity
   const availableStock = stockQuantity === null ? Infinity : (Number.isFinite(stockQuantity) ? stockQuantity : 0)

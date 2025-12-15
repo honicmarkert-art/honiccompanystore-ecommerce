@@ -21,6 +21,9 @@ interface Order {
   deliveryOption: 'shipping' | 'pickup'
   trackingNumber?: string
   estimatedDelivery?: string
+  isReceived?: boolean
+  receivedAt?: string | null
+  confirmedAt?: string | null
   shippingAddress: {
     fullName: string
     address: string

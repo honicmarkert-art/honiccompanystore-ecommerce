@@ -1,19 +1,33 @@
 "use client"
 
+import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { User, LogOut, Settings, ShoppingBag, Heart, CreditCard } from 'lucide-react'
+import { User, LogOut, Settings, ShoppingBag, Heart, CreditCard, Crown, ArrowUp } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
+
+interface CurrentPlan {
+  id: string
+  name: string
+  slug: string
+  price: number
+  currency: string
+  term: string | null
+}
 
 export function UserProfile() {
   const { user, signOut } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
   const router = useRouter()
   const { toast } = useToast()
+  const [currentPlan, setCurrentPlan] = useState<CurrentPlan | null>(null)
+  const [isSupplier, setIsSupplier] = useState(false)
+  const [loadingPlan, setLoadingPlan] = useState(true)
 
   const handleSignOut = async () => {
     try {
@@ -33,11 +47,67 @@ export function UserProfile() {
   }
 
   const getUserName = () => {
-    if (user?.user_metadata?.full_name) {
-      return user.user_metadata.full_name
+    // Handle different user object structures
+    if (user?.name) {
+      return user.name
+    }
+    if ((user as any)?.user_metadata?.full_name) {
+      return (user as any).user_metadata.full_name
+    }
+    if ((user as any)?.user_metadata?.name) {
+      return (user as any).user_metadata.name
     }
     return user?.email?.split('@')[0] || 'User'
   }
+  
+  const getUserAvatar = () => {
+    // Handle different avatar sources
+    if (user?.profile?.avatar) {
+      return user.profile.avatar
+    }
+    if ((user as any)?.user_metadata?.avatar_url) {
+      return (user as any).user_metadata.avatar_url
+    }
+    if ((user as any)?.user_metadata?.picture) {
+      return (user as any).user_metadata.picture
+    }
+    return undefined
+  }
+  
+  const getUserEmail = () => {
+    return user?.email || ''
+  }
+
+  // Fetch current plan for suppliers
+  useEffect(() => {
+    const fetchCurrentPlan = async () => {
+      if (!user) {
+        setLoadingPlan(false)
+        return
+      }
+
+      try {
+        const response = await fetch('/api/user/current-plan', {
+          credentials: 'include'
+        })
+        const data = await response.json()
+        
+        if (data.success) {
+          setIsSupplier(data.isSupplier || false)
+          setCurrentPlan(data.plan)
+        }
+      } catch (error) {
+        console.error('Error fetching current plan:', error)
+      } finally {
+        setLoadingPlan(false)
+      }
+    }
+
+    fetchCurrentPlan()
+  }, [user])
+
+  const isFreePlan = currentPlan?.slug === 'free'
+  const isPremiumPlan = currentPlan?.slug === 'premium'
 
   if (!user) {
     return (
@@ -138,18 +208,47 @@ export function UserProfile() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-8 w-8 sm:h-8 sm:w-8 rounded-full bg-gradient-to-br from-green-400 via-blue-500 to-indigo-600 hover:from-green-500 hover:via-blue-600 hover:to-indigo-700 transition-all duration-300 shadow-lg hover:shadow-xl">
           <Avatar className="h-8 w-8">
-            <AvatarImage src={user.user_metadata?.avatar_url} alt={getUserName()} />
-            <AvatarFallback className="bg-transparent text-white font-semibold text-sm">{getUserInitials(user.email || '')}</AvatarFallback>
+            <AvatarImage src={getUserAvatar()} alt={getUserName()} />
+            <AvatarFallback className="bg-transparent text-white font-semibold text-sm">{getUserInitials(getUserEmail())}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="end" forceMount>
+      <DropdownMenuContent className="w-64" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
             <p className="text-sm font-medium leading-none">{getUserName()}</p>
             <p className="text-xs leading-none text-muted-foreground">
-              {user.email}
+              {getUserEmail()}
             </p>
+            {/* Show current plan for suppliers */}
+            {isSupplier && !loadingPlan && currentPlan && (
+              <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Crown className={cn(
+                      "h-3 w-3",
+                      isPremiumPlan ? "text-yellow-500" : "text-gray-400"
+                    )} />
+                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                      {currentPlan.name}
+                    </span>
+                  </div>
+                  {isFreePlan && (
+                    <Button
+                      size="sm"
+                      className="h-6 px-2 text-xs bg-yellow-500 hover:bg-yellow-600 text-black"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        window.open('/become-supplier', '_blank', 'noopener,noreferrer')
+                      }}
+                    >
+                      <ArrowUp className="h-3 w-3 mr-1" />
+                      Upgrade
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

@@ -1,7 +1,9 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
-import { Star } from 'lucide-react'
+import { redirect } from 'next/navigation'
 
 export default function FeaturedPage() {
+  redirect('/')
+}
+
   return (
     <ComingSoonPage
       title="Featured Selections"

@@ -66,16 +66,16 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
       // Only initialize if this is a different category
       if (currentCategoryId !== categoryId) {
         setCurrentCategoryId(categoryId)
-        setFormData({
-          name: category.name || "",
-          description: category.description || "",
-          slug: category.slug || "",
-          image_url: category.image_url || "",
-          is_active: category.is_active ?? true,
-          display_order: category.display_order ?? 0,
-          parent_id: category.parent_id || null,
-        })
-      }
+      setFormData({
+        name: category.name || "",
+        description: category.description || "",
+        slug: category.slug || "",
+        image_url: category.image_url || "",
+        is_active: category.is_active ?? true,
+        display_order: category.display_order ?? 0,
+        parent_id: category.parent_id || null,
+      })
+    }
     } else {
       // Reset form when category is null (new category)
       if (currentCategoryId !== null) {

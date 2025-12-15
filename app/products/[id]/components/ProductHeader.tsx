@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronLeft, Share2, Facebook, Twitter, Instagram } from 'lucide-react'
+import { ChevronLeft, Share2, Facebook, Instagram } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -27,8 +27,6 @@ export function ProductHeader({ productName, category, productUrl }: ProductHead
 
     if (platform === 'facebook') {
       window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, '_blank')
-    } else if (platform === 'twitter') {
-      window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank')
     } else if (platform === 'copy') {
       navigator.clipboard.writeText(url)
       toast({
@@ -107,10 +105,6 @@ export function ProductHeader({ productName, category, productUrl }: ProductHead
               <DropdownMenuItem onClick={() => handleShare('facebook')}>
                 <Facebook className="w-4 h-4 mr-2" />
                 Share on Facebook
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleShare('twitter')}>
-                <Twitter className="w-4 h-4 mr-2" />
-                Share on Twitter
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleShare('copy')}>
                 <Share2 className="w-4 h-4 mr-2" />

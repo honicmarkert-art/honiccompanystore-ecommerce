@@ -16,10 +16,16 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
   const [currency, setCurrency] = useState<Currency>('TZS') // Default to TZS
 
   // Load currency preference from localStorage on mount
+  // Default to TZS even if USD was previously saved
   useEffect(() => {
     const savedCurrency = localStorage.getItem('preferred-currency') as Currency
-    if (savedCurrency && (savedCurrency === 'USD' || savedCurrency === 'TZS')) {
-      setCurrency(savedCurrency)
+    // Only use saved currency if it's TZS, otherwise default to TZS
+    if (savedCurrency === 'TZS') {
+      setCurrency('TZS')
+    } else {
+      // Default to TZS and update localStorage
+      setCurrency('TZS')
+      localStorage.setItem('preferred-currency', 'TZS')
     }
   }, [])
 

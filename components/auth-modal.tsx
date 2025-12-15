@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { CheckCircle } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
-import { Eye, EyeOff, Mail, Lock, User, Phone } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, User, Phone, Store } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
@@ -28,16 +28,139 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
   const [isLoading, setIsLoading] = useState(false)
   const [currentTab, setCurrentTab] = useState<'login' | 'register'>(defaultTab)
   const { toast } = useToast()
-  const { signIn, signUp } = useAuth()
+  const { signIn, signUp, signInWithGoogle } = useAuth()
   const router = useRouter()
   const [authError, setAuthError] = useState<string>("")
   const [authSuccess, setAuthSuccess] = useState<string>("")
   const [rememberMe, setRememberMe] = useState(false)
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false)
+  const [registeredEmail, setRegisteredEmail] = useState<string>("") // Store email from registration
+  const [showVerificationMessage, setShowVerificationMessage] = useState(false)
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string>("")
+  const [isResendingVerification, setIsResendingVerification] = useState(false)
+  
+  // Check if this is a supplier flow (hide Google sign-in for suppliers)
+  const isSupplierFlow = redirectUrl?.startsWith('/supplier') || 
+                         (typeof window !== 'undefined' && sessionStorage.getItem('supplier_registration') === 'true')
 
-  // Update current tab when defaultTab prop changes
+  // Update current tab when defaultTab prop changes or modal opens
+  // For supplier flow, always force login tab (no registration)
   useEffect(() => {
-    setCurrentTab(defaultTab)
-  }, [defaultTab])
+    if (isOpen) {
+      if (isSupplierFlow) {
+        setCurrentTab('login') // Force login tab for supplier flow
+      } else {
+        setCurrentTab(defaultTab)
+      }
+    }
+  }, [defaultTab, isOpen, isSupplierFlow])
+
+  // Check for pending verification email when modal opens on login tab
+  useEffect(() => {
+    if (isOpen && currentTab === 'login') {
+      const pendingEmail = typeof window !== 'undefined' ? sessionStorage.getItem('pending_verification_email') : null
+      if (pendingEmail) {
+        // Check if email is already verified before showing message
+        const checkVerificationStatus = async () => {
+          try {
+            const response = await fetch('/api/auth/check-verification-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: pendingEmail })
+            })
+            
+            const result = await response.json()
+            
+            if (result.isVerified) {
+              // Email is already verified - don't show verification message
+              // Clear the pending email and allow login
+              if (typeof window !== 'undefined') {
+                sessionStorage.removeItem('pending_verification_email')
+              }
+              setShowVerificationMessage(false)
+              setPendingVerificationEmail("")
+              setLoginForm(prev => ({ ...prev, email: pendingEmail }))
+            } else {
+              // Email not verified - show verification message
+              setPendingVerificationEmail(pendingEmail)
+              setShowVerificationMessage(true)
+              setLoginForm(prev => ({ ...prev, email: pendingEmail }))
+            }
+          } catch (error) {
+            // If check fails, show verification message (safer default)
+            console.error('Error checking verification status:', error)
+            setPendingVerificationEmail(pendingEmail)
+            setShowVerificationMessage(true)
+            setLoginForm(prev => ({ ...prev, email: pendingEmail }))
+          }
+        }
+        
+        checkVerificationStatus()
+      }
+    }
+  }, [isOpen, currentTab])
+
+  // Clear registered email when switching away from login tab
+  useEffect(() => {
+    if (currentTab !== 'login') {
+      setRegisteredEmail("")
+      setShowVerificationMessage(false)
+      setPendingVerificationEmail("")
+    }
+  }, [currentTab])
+
+  // Clear all messages and form state when modal closes or opens
+  useEffect(() => {
+    if (!isOpen) {
+      // Clear all messages and state when modal closes
+      setAuthError("")
+      setAuthSuccess("")
+      setRegisteredEmail("")
+      setIsLoading(false)
+      setIsGoogleLoading(false)
+      // Clear login form
+      setLoginForm({
+        email: '',
+        password: ''
+      })
+      // Clear register form
+      setRegisterForm({
+        fullName: '',
+        email: '',
+        phone: '',
+        password: '',
+        confirmPassword: ''
+      })
+      setAgreeToTerms(false)
+    } else {
+      // When modal opens, ensure tab matches defaultTab
+      setCurrentTab(defaultTab)
+      // Clear messages when modal opens (in case they were set before)
+      setAuthError("")
+      setAuthSuccess("")
+      setIsLoading(false)
+      setIsGoogleLoading(false)
+    }
+  }, [isOpen, defaultTab])
+
+  // Listen for close-auth-modal event (for auto-login after registration)
+  useEffect(() => {
+    const handleCloseModal = () => {
+      if (isOpen) {
+        console.log('📢 Received close-auth-modal event')
+        setTimeout(() => {
+          onClose()
+        }, 500)
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('close-auth-modal', handleCloseModal)
+      return () => {
+        window.removeEventListener('close-auth-modal', handleCloseModal)
+      }
+    }
+  }, [isOpen, onClose])
 
   // Login form state
   const [loginForm, setLoginForm] = useState({
@@ -53,6 +176,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     password: '',
     confirmPassword: ''
   })
+  const [agreeToTerms, setAgreeToTerms] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -72,9 +196,27 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     try {
       const result = await signIn(loginForm.email, loginForm.password, rememberMe, true)
       if (!result.success) {
-        // Show inline error and let AuthContext toast as well
-        setAuthError(result.error || "Login failed. Please try again.")
+        // Check if error is due to email not verified
+        const errorType = (result as any).type
+        if (errorType === 'EMAIL_NOT_VERIFIED' || result.error?.toLowerCase().includes('verify') || result.error?.toLowerCase().includes('verification')) {
+          // Show verification message card
+          setPendingVerificationEmail(loginForm.email)
+          setShowVerificationMessage(true)
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('pending_verification_email', loginForm.email)
+          }
+          setAuthError("")
+        } else {
+          // Show inline error for other errors
+          setAuthError(result.error || "Login failed. Please try again.")
+        }
       } else {
+        // Login successful - hide verification message if shown
+        setShowVerificationMessage(false)
+        setPendingVerificationEmail("")
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('pending_verification_email')
+        }
         setAuthSuccess("Login successful! Welcome back.")
         // Auto-close after successful login (short delay for UX)
         // Let AuthContext handle the redirect to ensure consistent behavior
@@ -90,6 +232,26 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
       })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleGoogleSignIn = async () => {
+    setIsGoogleLoading(true)
+    setAuthError("")
+    try {
+      // Store redirect destination if provided (for supplier pages)
+      const redirectDestination = redirectUrl || (typeof window !== 'undefined' ? sessionStorage.getItem('oauth_redirect') : null)
+      const result = await signInWithGoogle(redirectDestination || undefined)
+      if (!result.success) {
+        setAuthError(result.error || "Google sign-in failed. Please try again.")
+      } else {
+        // Google sign-in will redirect, so we don't need to close modal here
+        setAuthSuccess("Redirecting to Google...")
+      }
+    } catch (error) {
+      setAuthError("Network error. Please check your connection and try again.")
+    } finally {
+      setIsGoogleLoading(false)
     }
   }
 
@@ -132,6 +294,13 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
       return
     }
 
+    // Check if terms are agreed to
+    if (!agreeToTerms) {
+      setAuthError("You must agree to the Terms and Privacy Policy to create an account")
+      setIsLoading(false)
+      return
+    }
+
     try {
       const result = await signUp(
         registerForm.fullName,
@@ -142,18 +311,45 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
       )
       
       if (result.success) {
-        // Show success inline only (no toast, no auto-close)
-        setAuthSuccess(result.message || "Account created successfully! Please check your email to verify your account.")
-        setAuthError("")
-
-        // Clear form
-        setRegisterForm({
-          fullName: '',
-          email: '',
-          phone: '',
-          password: '',
-          confirmPassword: ''
-        })
+        // Check if auto-logged in (session was created)
+        const autoLoggedIn = (result as any).autoLoggedIn
+        
+        if (autoLoggedIn) {
+          setAuthSuccess(result.message || "Account created successfully! You're now logged in.")
+          setAuthError("")
+          
+          // Clear form
+          setRegisterForm({
+            fullName: '',
+            email: '',
+            phone: '',
+            password: '',
+            confirmPassword: ''
+          })
+          
+          // Close modal after short delay to show success message
+          setTimeout(() => {
+            onClose()
+            // Refresh the page to ensure auth state is updated everywhere
+            router.refresh()
+          }, 1500)
+        } else {
+          // No auto-login - show success message, clear form, but stay on register tab
+          setAuthError("")
+          
+          // Clear registration form
+          setRegisterForm({
+            fullName: '',
+            email: '',
+            phone: '',
+            password: '',
+            confirmPassword: ''
+          })
+          setAgreeToTerms(false)
+          
+          // Stay on register tab and show success message (don't switch to login, don't close)
+          setAuthSuccess("Account created! Please verify your email to use account features. Check your inbox for the verification link.")
+        }
       } else {
         // Show specific error message
         setAuthError(result.error || "Registration failed. Please try again.")
@@ -179,7 +375,15 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
       open={isOpen}
       onOpenChange={(open) => {
         // Only close when explicitly requested
-        if (!open) onClose()
+        if (!open) {
+          // Clear all messages and state when closing
+          setAuthError("")
+          setAuthSuccess("")
+          setRegisteredEmail("")
+          setIsLoading(false)
+          setIsGoogleLoading(false)
+          onClose()
+        }
       }}
     >
       <DialogContent 
@@ -215,6 +419,145 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                   <AlertDescription>{authError}</AlertDescription>
                 </Alert>
               )}
+              
+              {/* Email Verification Message Card - Shows in front of login form */}
+              {showVerificationMessage && pendingVerificationEmail && (
+                <Card className="mb-4 border-orange-500 bg-orange-50 dark:bg-orange-950/20 shadow-lg">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <Mail className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-100 mb-1">
+                          Verify Your Email Address
+                        </h3>
+                        <p className="text-xs text-orange-800 dark:text-orange-200 mb-3">
+                          We've sent a verification email to <strong>{pendingVerificationEmail}</strong>. Please check your inbox and click the verification link to activate your account.
+                        </p>
+                        <div className="flex flex-wrap gap-2 mb-4 justify-center">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              setIsResendingVerification(true)
+                              try {
+                                const response = await fetch('/api/auth/resend-verification', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ email: pendingVerificationEmail })
+                                })
+                                const result = await response.json()
+                                if (result.success) {
+                                  toast({
+                                    title: 'Verification Email Sent',
+                                    description: 'Please check your inbox and spam folder.',
+                                    duration: 5000
+                                  })
+                                } else {
+                                  // Check if email is already verified
+                                  if (result.type === 'ALREADY_VERIFIED') {
+                                    toast({
+                                      title: 'Email Already Verified',
+                                      description: 'Your email is already verified! You can log in now.',
+                                      duration: 5000
+                                    })
+                                    // Close verification message and allow login
+                                    setShowVerificationMessage(false)
+                                    setPendingVerificationEmail("")
+                                    if (typeof window !== 'undefined') {
+                                      sessionStorage.removeItem('pending_verification_email')
+                                    }
+                                  } else {
+                                    toast({
+                                      title: 'Error',
+                                      description: result.error || 'Failed to resend verification email',
+                                      variant: 'destructive'
+                                    })
+                                  }
+                                }
+                              } catch (error) {
+                                toast({
+                                  title: 'Error',
+                                  description: 'Network error. Please try again.',
+                                  variant: 'destructive'
+                                })
+                              } finally {
+                                setIsResendingVerification(false)
+                              }
+                            }}
+                            disabled={isResendingVerification}
+                            className="border-orange-600 text-orange-700 hover:bg-orange-100 dark:border-orange-400 dark:text-orange-300 dark:hover:bg-orange-900/30 text-xs h-7"
+                          >
+                            {isResendingVerification ? 'Sending...' : 'Resend Email'}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              // Close modal and redirect to supplier registration page
+                              setShowVerificationMessage(false)
+                              setPendingVerificationEmail("")
+                              setLoginForm({ email: '', password: '' })
+                              if (typeof window !== 'undefined') {
+                                sessionStorage.removeItem('pending_verification_email')
+                              }
+                              onClose()
+                              router.push('/become-supplier')
+                            }}
+                            className="border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 text-xs h-7"
+                          >
+                            Create Different Account
+                          </Button>
+                        </div>
+                        <div className="flex justify-center pt-2 border-t border-orange-200 dark:border-orange-800">
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={async () => {
+                              // Check if email is already verified
+                              try {
+                                const response = await fetch('/api/auth/check-verification-status', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ email: pendingVerificationEmail })
+                                })
+                                
+                                const result = await response.json()
+                                
+                                if (result.isVerified) {
+                                  // Email is verified - close message and allow login
+                                  toast({
+                                    title: 'Email Verified',
+                                    description: 'Your email has been verified! You can now log in.',
+                                    duration: 3000
+                                  })
+                                  setShowVerificationMessage(false)
+                                  setPendingVerificationEmail("")
+                                  if (typeof window !== 'undefined') {
+                                    sessionStorage.removeItem('pending_verification_email')
+                                  }
+                                } else {
+                                  // Email not verified yet - just close message to allow login attempt
+                                  setShowVerificationMessage(false)
+                                }
+                              } catch (error) {
+                                // If check fails, just close message to allow login attempt
+                                console.error('Error checking verification status:', error)
+                                setShowVerificationMessage(false)
+                              }
+                            }}
+                            className="bg-orange-500 hover:bg-orange-600 text-white text-xs h-7"
+                          >
+                            Already verified? Proceed to login
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               <form onSubmit={handleLogin} className="space-y-2">
                 <div className="space-y-1">
                   <Label htmlFor="login-email" className="text-xs text-gray-900 dark:text-gray-100">Email</Label>
@@ -233,6 +576,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                         }
                       }}
                       className="pl-10 h-8 text-sm"
+                      disabled={showVerificationMessage}
                       required
                     />
                   </div>
@@ -256,6 +600,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       }}
                       className="pl-10 pr-10 h-8 text-sm"
                       autoComplete="current-password"
+                      disabled={showVerificationMessage}
                       required
                     />
                     <Button
@@ -287,41 +632,118 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       Remember me
                     </Label>
                   </div>
-                  <Button type="button" variant="link" className="text-xs text-orange-500 hover:text-orange-600">
+                  <Button 
+                    type="button" 
+                    variant="link" 
+                    className="text-xs text-orange-500 hover:text-orange-600"
+                    onClick={() => {
+                      onClose()
+                      router.push('/auth/forgot-password')
+                    }}
+                  >
                     Forgot password?
                   </Button>
                 </div>
 
-                <Button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 h-8 text-sm" disabled={isLoading}>
+                <Button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 h-8 text-sm" disabled={isLoading || showVerificationMessage}>
                   {isLoading ? 'Signing In...' : 'Sign In'}
                 </Button>
               </form>
 
-              <div className="mt-2">
-                <Separator className="my-2" />
-                <div className="text-center">
-                  <p className="text-xs text-gray-600 dark:text-gray-400">
-                    Don't have an account?{' '}
-                    <Button
-                      type="button"
-                      variant="link"
-                      className="text-orange-500 hover:text-orange-600 p-0 h-auto text-xs"
-                      onClick={() => setCurrentTab('register')}
-                    >
-                      Create one here
-                    </Button>
-                  </p>
+              {/* Google Sign-In Button - Hidden for supplier flow */}
+              {!isSupplierFlow && (
+                <div className="mt-3">
+                  <div className="relative mb-3">
+                    <div className="absolute inset-0 flex items-center">
+                      <Separator />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-white dark:bg-gray-900 px-2 text-gray-500 dark:text-gray-400">Or</span>
+                    </div>
+                  </div>
+                  
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full h-11 text-base flex items-center justify-center gap-3 border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
+                    onClick={handleGoogleSignIn}
+                    disabled={isLoading || isGoogleLoading}
+                  >
+                    {isGoogleLoading ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                        <span className="text-gray-700 dark:text-gray-300">Connecting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        <span className="text-gray-700 dark:text-gray-300 font-medium">Continue with Google</span>
+                      </>
+                    )}
+                  </Button>
                 </div>
-              </div>
+              )}
+
+              {/* Hide registration link for supplier flow - registration is only in plan selection */}
+              {!isSupplierFlow && (
+                <div className="mt-2">
+                  <Separator className="my-2" />
+                  <div className="text-center">
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Don't have an account?{' '}
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="text-orange-500 hover:text-orange-600 p-0 h-auto text-xs"
+                        onClick={() => {
+                          // Clear all messages when switching tabs
+                          setAuthError("")
+                          setAuthSuccess("")
+                          setRegisteredEmail("")
+                          setCurrentTab('register')
+                        }}
+                      >
+                        Create one here
+                      </Button>
+                    </p>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : (
           <Card className="border-0 shadow-none mt-4 bg-white dark:bg-gray-900">
             <CardHeader className="px-4 pb-1">
-              <CardTitle className="text-sm text-gray-900 dark:text-gray-100">Create Your Account</CardTitle>
-              <CardDescription className="text-xs text-gray-600 dark:text-gray-400">
-                Join Honic Co. and start your journey
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <CardTitle className="text-sm text-gray-900 dark:text-gray-100">Create Your Account</CardTitle>
+                  <CardDescription className="text-xs text-gray-600 dark:text-gray-400">
+                    Join Honic Co. and start your journey
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-1.5 ml-2">
+                  <div className="text-right hidden sm:block">
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">Want to sell?</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">Join as supplier</p>
+                  </div>
+                  <Link href="/become-supplier" onClick={onClose}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black h-7 text-[10px] px-2 whitespace-nowrap"
+                    >
+                      <Store className="mr-1 h-2.5 w-2.5" />
+                      Supplier
+                    </Button>
+                  </Link>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="px-4 pb-3">
               {authSuccess && (
@@ -335,6 +757,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                   <AlertDescription>{authError}</AlertDescription>
                 </Alert>
               )}
+
               <form onSubmit={handleRegister} className="space-y-1.5">
                 <div className="space-y-1">
                   <Label htmlFor="register-fullname" className="text-xs text-gray-900 dark:text-gray-100">Full Name *</Label>
@@ -492,6 +915,8 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                     type="checkbox"
                     id="terms"
                     className="rounded border-gray-300"
+                    checked={agreeToTerms}
+                    onChange={(e) => setAgreeToTerms(e.target.checked)}
                     required
                   />
                   <Label htmlFor="terms" className="text-xs text-gray-900 dark:text-gray-100">
@@ -511,6 +936,45 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                 </Button>
               </form>
 
+              {/* Google Sign-In Button - Hidden for supplier flow */}
+              {!isSupplierFlow && (
+                <div className="mt-3">
+                  <div className="relative mb-3">
+                    <div className="absolute inset-0 flex items-center">
+                      <Separator />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-white dark:bg-gray-900 px-2 text-gray-500 dark:text-gray-400">Or</span>
+                    </div>
+                  </div>
+                  
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full h-11 text-base flex items-center justify-center gap-3 border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
+                    onClick={handleGoogleSignIn}
+                    disabled={isLoading || isGoogleLoading}
+                  >
+                    {isGoogleLoading ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                        <span className="text-gray-700 dark:text-gray-300">Connecting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        <span className="text-gray-700 dark:text-gray-300 font-medium">Continue with Google</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+
               <div className="mt-1.5">
                 <Separator className="my-1.5" />
                 <div className="text-center">
@@ -520,7 +984,13 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       type="button"
                       variant="link"
                       className="text-orange-500 hover:text-orange-600 p-0 h-auto text-xs"
-                      onClick={() => setCurrentTab('login')}
+                      onClick={() => {
+                        // Clear all messages when switching tabs
+                        setAuthError("")
+                        setAuthSuccess("")
+                        setRegisteredEmail("")
+                        setCurrentTab('login')
+                      }}
                     >
                       Sign in here
                     </Button>

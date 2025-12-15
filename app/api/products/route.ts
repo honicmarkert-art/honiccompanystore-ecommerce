@@ -6,10 +6,24 @@ import { enhancedCache, performanceMonitor, performanceUtils } from '@/lib/perfo
 import { createSecureApiHandler, createSecureResponse, createErrorResponse } from '@/lib/secure-api'
 import { securityUtils } from '@/lib/secure-config'
 import { logger } from '@/lib/logger'
+import { enhancedRateLimit } from '@/lib/enhanced-rate-limit'
 
 // Simple security functions
 const logSecurityEvent = (action: string, userId?: string, details?: any) => {
   logger.security(`${action} by user ${userId}`, userId, details)
+}
+
+// Rate limit logging helper
+const logRateLimitEvent = (endpoint: string, reason: string | undefined, request: NextRequest) => {
+  const clientIP = request.headers.get('x-forwarded-for') || 
+                   request.headers.get('x-real-ip') || 
+                   request.headers.get('cf-connecting-ip') || 
+                   'unknown'
+  logger.security(`Rate limit exceeded on ${endpoint}`, undefined, {
+    ip: clientIP,
+    reason,
+    path: request.nextUrl.pathname
+  })
 }
 
 const requireAdmin = (session: any) => {
@@ -27,6 +41,22 @@ const escapeSqlWildcards = (input: string): string => {
 
 // GET - Fetch all products with optimized caching and minimal payload support
 export async function GET(request: NextRequest) {
+  // Rate limiting
+  const rateLimitResult = enhancedRateLimit(request)
+  if (!rateLimitResult.allowed) {
+    logRateLimitEvent('/api/products', rateLimitResult.reason, request)
+    
+    return NextResponse.json(
+      { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+      { 
+        status: 429,
+        headers: {
+          'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+        }
+      }
+    )
+  }
+
   const startTime = Date.now()
   
   try {
@@ -45,6 +75,7 @@ export async function GET(request: NextRequest) {
     const inStock = searchParams.get('inStock')
     const categories = searchParams.get('categories') // Comma-separated list
     const isChina = searchParams.get('isChina') // Filter by import_china
+    const supplier = searchParams.get('supplier') // Filter by supplier_id or user_id
     
     // Sorting parameters
     const sortBy = searchParams.get('sortBy') || 'created_at'
@@ -68,7 +99,8 @@ export async function GET(request: NextRequest) {
       categories,
       sortBy,
       sortOrder,
-      isChina
+      isChina,
+      supplier
     })
 
     // Check enhanced cache first
@@ -103,7 +135,8 @@ export async function GET(request: NextRequest) {
     
     let queryBuilder: any = publicClient.from('products')
     
-    // Select fields based on request type
+    // Select fields based on request type first
+    // Note: is_featured may not exist if migration hasn't run yet - handle gracefully
     if (minimal) {
       queryBuilder = queryBuilder.select(`
         id, name, price, original_price, image, category, brand, 
@@ -120,12 +153,15 @@ export async function GET(request: NextRequest) {
         product_variants (*)
       `)
     } else {
-      queryBuilder = queryBuilder      .select(`
+      queryBuilder = queryBuilder.select(`
         *,
         product_variants (*),
         categories!category_id (id, name, slug, parent_id)
       `)
     }
+    
+    // Filter out hidden products (from deactivated suppliers) - after select
+    queryBuilder = queryBuilder.eq('is_hidden', false)
 
     // Apply filters
     // Handle batch IDs for prefetching
@@ -168,6 +204,11 @@ export async function GET(request: NextRequest) {
       queryBuilder = queryBuilder.eq('import_china', true)
     }
     
+    // Supplier filtering (by supplier_id or user_id)
+    if (supplier) {
+      queryBuilder = queryBuilder.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
+    }
+    
     // Multiple categories filtering (comma-separated)
     if (categories !== undefined && categories !== null) {
       const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
@@ -203,20 +244,29 @@ export async function GET(request: NextRequest) {
     // Server-side sorting (database is much faster than JavaScript!)
     // Note: If searching, we'll re-sort by relevance score after fuzzy search
     const validSortFields = ['created_at', 'price', 'rating', 'name', 'reviews']
-    const sortField = validSortFields.includes(sortBy) ? sortBy : 'created_at'
-    const ascending = sortOrder.toLowerCase() === 'asc'
     
-    if (!performSearch) {
-      queryBuilder = queryBuilder.order(sortField, { ascending })
+    // Handle featured sort option (only if is_featured column exists)
+    // For now, treat 'featured' sort same as 'created_at' to avoid errors if column doesn't exist
+    if (sortBy === 'featured') {
+      // When sorting by featured, sort by created_at (featured will be handled in transformation if column exists)
+      queryBuilder = queryBuilder.order('created_at', { ascending: false })
     } else {
-      // When searching, order by created_at first (we'll re-sort by relevance)
-    queryBuilder = queryBuilder.order('created_at', { ascending: false })
+      const sortField = validSortFields.includes(sortBy) ? sortBy : 'created_at'
+      const ascending = sortOrder.toLowerCase() === 'asc'
+      
+      // Sort by selected field (featured prioritization handled in transformation if column exists)
+      queryBuilder = queryBuilder.order(sortField, { ascending })
     }
 
     const { data: products, error } = await queryBuilder
 
     if (error) {
       console.error('Error fetching products:', error)
+      // Check if error is due to missing is_featured column
+      if (error.message && (error.message.includes('is_featured') || error.message.includes('column') && error.message.includes('does not exist'))) {
+        console.error('Database schema error detected. Please ensure migration 20250127_add_is_featured_to_products.sql has been run.')
+        return createErrorResponse('Database schema mismatch. Please contact administrator.', 500)
+      }
       return createErrorResponse('Failed to fetch products from database', 500)
     }
 
@@ -227,6 +277,9 @@ export async function GET(request: NextRequest) {
     
     // Build count query with same filters
     let countQuery = publicClient.from('products').select('id', { count: 'exact', head: true })
+    
+    // Filter out hidden products (from deactivated suppliers)
+    countQuery = countQuery.eq('is_hidden', false)
     
     // Apply same filters as main query
     if (category) countQuery = countQuery.eq('category_id', category)
@@ -241,6 +294,7 @@ export async function GET(request: NextRequest) {
     }
     if (inStock === 'true') countQuery = countQuery.eq('in_stock', true)
     if (isChina === 'true') countQuery = countQuery.eq('import_china', true)
+    if (supplier) countQuery = countQuery.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
     if (categories !== undefined && categories !== null) {
       const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
       
@@ -306,18 +360,48 @@ export async function GET(request: NextRequest) {
       const searchKeywords = keywords.length > 0 ? keywords : [sanitized.toLowerCase()]
       
       try {
-        // Build OR query for keyword matching
+        // First, search for matching suppliers by name
+        const supplierNameConditions = searchKeywords.map(keyword => {
+          const escapedKeyword = escapeSqlWildcards(keyword)
+          return `company_name.ilike.%${escapedKeyword}%,full_name.ilike.%${escapedKeyword}%`
+        }).join(',')
+
+        let matchingSupplierIds: string[] = []
+        if (supplierNameConditions) {
+          const { data: matchingSuppliers, error: supplierError } = await publicClient
+            .from('profiles')
+            .select('id')
+            .eq('is_supplier', true)
+            .or(supplierNameConditions)
+            .limit(100)
+
+          if (!supplierError && matchingSuppliers) {
+            matchingSupplierIds = matchingSuppliers.map((s: any) => s.id)
+          }
+        }
+
+        // Build OR query for keyword matching (including supplier IDs if found)
         const keywordConditions = searchKeywords.map(keyword => {
           const escapedKeyword = escapeSqlWildcards(keyword)
           return `name.ilike.%${escapedKeyword}%,description.ilike.%${escapedKeyword}%,category.ilike.%${escapedKeyword}%,brand.ilike.%${escapedKeyword}%`
         }).join(',')
 
-        // Search products using keyword OR logic
-        const { data: keywordResults, error: keywordError } = await publicClient
+        // Build query with supplier ID matching
+        let productQuery = publicClient
           .from('products')
-          .select('id, name, description, category, brand')
-          .or(keywordConditions)
+          .select('id, name, description, category, brand, supplier_id, user_id')
           .limit(limit ? parseInt(limit) : 500)
+
+        // If we found matching suppliers, include their products
+        if (matchingSupplierIds.length > 0) {
+          const supplierIdConditions = matchingSupplierIds.map(id => `supplier_id.eq.${id},user_id.eq.${id}`).join(',')
+          productQuery = productQuery.or(`${keywordConditions},${supplierIdConditions}`)
+        } else {
+          productQuery = productQuery.or(keywordConditions)
+        }
+
+        // Search products using keyword OR logic (including supplier matches)
+        const { data: keywordResults, error: keywordError } = await productQuery
 
         if (keywordError) {
           logger.error('Keyword search error:', keywordError)
@@ -326,16 +410,16 @@ export async function GET(request: NextRequest) {
         // Also try full-text search as a secondary method
         let fullTextResults: any[] = []
         try {
-          const { data: searchResults, error: searchError } = await publicClient
-            .from('products')
-            .select(`
-              id, name, description, category, brand, price, image,
-              product_variants (
-                sku, model, attributes, primary_values
-              )
-            `)
-            .textSearch('search_vector', sanitized, { type: 'websearch' })
-            .limit(limit ? parseInt(limit) : 100)
+        const { data: searchResults, error: searchError } = await publicClient
+          .from('products')
+          .select(`
+            id, name, description, category, brand, price, image,
+            product_variants (
+              sku, model, attributes, primary_values
+            )
+          `)
+          .textSearch('search_vector', sanitized, { type: 'websearch' })
+          .limit(limit ? parseInt(limit) : 100)
 
           if (!searchError && searchResults) {
             fullTextResults = searchResults
@@ -376,14 +460,46 @@ export async function GET(request: NextRequest) {
           })
         })
         
-        // Simple substring search across product core fields
+        // Simple substring search across product core fields (including supplier matching)
+        // Fetch supplier names for products that weren't matched yet
+        const unmatchedProducts = products.filter((p: any) => !allMatchedIds.has(p.id))
+        const supplierIdsToCheck = [...new Set(unmatchedProducts.map((p: any) => p.supplier_id || p.user_id).filter(Boolean))]
+        
+        let supplierNamesMap: Map<string, string> = new Map()
+        if (supplierIdsToCheck.length > 0) {
+          const { data: suppliersData } = await publicClient
+            .from('profiles')
+            .select('id, company_name, full_name')
+            .in('id', supplierIdsToCheck)
+          
+          if (suppliersData) {
+            suppliersData.forEach((s: any) => {
+              const supplierName = (s.company_name || s.full_name || '').toLowerCase()
+              supplierNamesMap.set(s.id, supplierName)
+            })
+          }
+        }
+
         const simpleMatches = products.filter((p: any) => {
           if (allMatchedIds.has(p.id)) return false // Already matched
           
           const text = `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.brand || ''}`.toLowerCase()
           
-          // Check if any keyword matches
-          return searchKeywords.some(keyword => text.includes(keyword))
+          // Check product fields
+          if (searchKeywords.some(keyword => text.includes(keyword))) {
+            return true
+          }
+          
+          // Check supplier name
+          const supplierId = p.supplier_id || p.user_id
+          if (supplierId && supplierNamesMap.has(supplierId)) {
+            const supplierName = supplierNamesMap.get(supplierId) || ''
+            if (searchKeywords.some(keyword => supplierName.includes(keyword))) {
+              return true
+            }
+          }
+          
+          return false
         })
 
         // Combine all matches and score by relevance (more keyword matches = higher score)
@@ -393,10 +509,21 @@ export async function GET(request: NextRequest) {
           ...simpleMatches
         ]
         
-        // Score products by number of keyword matches
+        // Score products by number of keyword matches (including supplier name matches)
         const scoredProducts = allMatches.map((p: any) => {
           const productText = `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.brand || ''}`.toLowerCase()
-          const matchCount = searchKeywords.filter(keyword => productText.includes(keyword)).length
+          let matchCount = searchKeywords.filter(keyword => productText.includes(keyword)).length
+          
+          // Boost score if supplier name matches
+          const supplierId = p.supplier_id || p.user_id
+          if (supplierId && supplierNamesMap.has(supplierId)) {
+            const supplierName = supplierNamesMap.get(supplierId) || ''
+            const supplierMatches = searchKeywords.filter(keyword => supplierName.includes(keyword)).length
+            if (supplierMatches > 0) {
+              matchCount += supplierMatches // Add supplier matches to score
+            }
+          }
+          
           return { product: p, score: matchCount }
         })
         
@@ -407,8 +534,8 @@ export async function GET(request: NextRequest) {
           .filter(({ product }) => {
             if (seenIds.has(product.id)) return false
             seenIds.add(product.id)
-            return true
-          })
+          return true
+        })
           .map(({ product }) => product)
         
         logger.log(`Keyword search: "${search}" (keywords: ${searchKeywords.join(', ')}) matched ${filteredProducts.length}/${products.length} products`)
@@ -425,17 +552,46 @@ export async function GET(request: NextRequest) {
         
         const searchKeywords = keywords.length > 0 ? keywords : [sanitized.toLowerCase()]
         
-        // Build keyword-based OR query
+        // First, search for matching suppliers by name
+        const supplierNameConditions = searchKeywords.map(keyword => {
+          const escapedKeyword = escapeSqlWildcards(keyword)
+          return `company_name.ilike.%${escapedKeyword}%,full_name.ilike.%${escapedKeyword}%`
+        }).join(',')
+
+        let matchingSupplierIds: string[] = []
+        if (supplierNameConditions) {
+          const { data: matchingSuppliers, error: supplierError } = await publicClient
+            .from('profiles')
+            .select('id')
+            .eq('is_supplier', true)
+            .or(supplierNameConditions)
+            .limit(100)
+
+          if (!supplierError && matchingSuppliers) {
+            matchingSupplierIds = matchingSuppliers.map((s: any) => s.id)
+          }
+        }
+
+        // Build keyword-based OR query (including supplier IDs if found)
         const keywordConditions = searchKeywords.map(keyword => {
           const escapedKeyword = escapeSqlWildcards(keyword)
           return `name.ilike.%${escapedKeyword}%,description.ilike.%${escapedKeyword}%,category.ilike.%${escapedKeyword}%,brand.ilike.%${escapedKeyword}%`
         }).join(',')
-        
-        const { data: fallbackResults, error: fallbackError } = await publicClient
+
+        let fallbackQuery = publicClient
           .from('products')
           .select('id')
-          .or(keywordConditions)
           .limit(limit ? parseInt(limit) : 500)
+
+        // If we found matching suppliers, include their products
+        if (matchingSupplierIds.length > 0) {
+          const supplierIdConditions = matchingSupplierIds.map(id => `supplier_id.eq.${id},user_id.eq.${id}`).join(',')
+          fallbackQuery = fallbackQuery.or(`${keywordConditions},${supplierIdConditions}`)
+        } else {
+          fallbackQuery = fallbackQuery.or(keywordConditions)
+        }
+
+        const { data: fallbackResults, error: fallbackError } = await fallbackQuery
 
         if (fallbackError) {
           logger.error('Fallback search error:', fallbackError)
@@ -444,15 +600,49 @@ export async function GET(request: NextRequest) {
           const fallbackIds = new Set(fallbackResults?.map(r => r.id) || [])
           
           // Score and sort by keyword matches
-          const scoredProducts = products
+          interface ScoredProduct {
+            product: any
+            score: number
+          }
+          // Fetch supplier names for fallback products
+          const fallbackProducts = products.filter((p: any) => fallbackIds.has(p.id))
+          const fallbackSupplierIds = [...new Set(fallbackProducts.map((p: any) => p.supplier_id || p.user_id).filter(Boolean))]
+          
+          let fallbackSupplierNamesMap: Map<string, string> = new Map()
+          if (fallbackSupplierIds.length > 0) {
+            const { data: fallbackSuppliersData } = await publicClient
+              .from('profiles')
+              .select('id, company_name, full_name')
+              .in('id', fallbackSupplierIds)
+            
+            if (fallbackSuppliersData) {
+              fallbackSuppliersData.forEach((s: any) => {
+                const supplierName = (s.company_name || s.full_name || '').toLowerCase()
+                fallbackSupplierNamesMap.set(s.id, supplierName)
+              })
+            }
+          }
+
+          const scoredProducts: any[] = products
             .filter((p: any) => fallbackIds.has(p.id))
-            .map((p: any) => {
+            .map((p: any): ScoredProduct => {
               const productText = `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.brand || ''}`.toLowerCase()
-              const matchCount = searchKeywords.filter(keyword => productText.includes(keyword)).length
+              let matchCount = searchKeywords.filter(keyword => productText.includes(keyword)).length
+              
+              // Boost score if supplier name matches
+              const supplierId = p.supplier_id || p.user_id
+              if (supplierId && fallbackSupplierNamesMap.has(supplierId)) {
+                const supplierName = fallbackSupplierNamesMap.get(supplierId) || ''
+                const supplierMatches = searchKeywords.filter(keyword => supplierName.includes(keyword)).length
+                if (supplierMatches > 0) {
+                  matchCount += supplierMatches // Add supplier matches to score
+                }
+              }
+              
               return { product: p, score: matchCount }
             })
-            .sort((a, b) => b.score - a.score)
-            .map(({ product }) => product)
+            .sort((a: ScoredProduct, b: ScoredProduct) => b.score - a.score)
+            .map((item: ScoredProduct) => item.product)
           
           filteredProducts = scoredProducts
         }
@@ -464,6 +654,23 @@ export async function GET(request: NextRequest) {
       const queryLower = search.toLowerCase()
       const words = queryLower.split(/\s+/).filter(Boolean)
       const firstWord = words[0] || queryLower
+
+      // Fetch supplier names for all products being scored
+      const supplierIdsForScoring = [...new Set(filteredProducts.map((p: any) => p.supplier_id || p.user_id).filter(Boolean))]
+      let supplierNamesForScoring: Map<string, string> = new Map()
+      if (supplierIdsForScoring.length > 0) {
+        const { data: suppliersForScoring } = await publicClient
+          .from('profiles')
+          .select('id, company_name, full_name')
+          .in('id', supplierIdsForScoring)
+        
+        if (suppliersForScoring) {
+          suppliersForScoring.forEach((s: any) => {
+            const supplierName = (s.company_name || s.full_name || '').toLowerCase()
+            supplierNamesForScoring.set(s.id, supplierName)
+          })
+        }
+      }
 
       const wordBoundary = (text: string, word: string) => {
         try {
@@ -493,6 +700,15 @@ export async function GET(request: NextRequest) {
         if (brand.startsWith(firstWord) || categoryText.startsWith(firstWord)) score += 30
         if (brand.includes(queryLower) || categoryText.includes(queryLower)) score += 20
         if (description.includes(queryLower)) score += 10
+
+        // Check supplier name matches
+        const supplierId = p.supplier_id || p.user_id
+        if (supplierId && supplierNamesForScoring.has(supplierId)) {
+          const supplierName = supplierNamesForScoring.get(supplierId) || ''
+          if (supplierName.startsWith(firstWord)) score += 50 // Boost for supplier name starting with search term
+          if (wordBoundary(supplierName, firstWord)) score += 35 // Boost for supplier name containing whole word
+          if (supplierName.includes(queryLower)) score += 25 // Boost for supplier name containing search term
+        }
 
         // Check variants
         const variants = Array.isArray(p.product_variants) ? p.product_variants : []
@@ -563,6 +779,7 @@ export async function GET(request: NextRequest) {
         same_day_delivery: product.same_day_delivery, // Keep raw field for badge calculation
         importChina: !!(product as any).import_china,
         is_new: product.is_new, // For "New" badge calculation
+        is_featured: product.is_featured || false, // For "Featured" badge (may not exist if migration hasn't run)
         updated_at: product.updated_at, // For "New" badge calculation
         // Generate deterministic random sold_count if not present (for now)
         // Uses product ID as seed for consistency
@@ -576,31 +793,50 @@ export async function GET(request: NextRequest) {
 
       // Always include variant data for auto-selection functionality
       const variantData = {
-        variants: product.product_variants?.map((variant: any) => ({
-          id: variant.id,
-          price: variant.price,
-          image: variant.image,
-          sku: variant.sku,
-          model: variant.model,
-          variantType: variant.variant_type,
-          attributes: (() => {
-            const attrs = variant.attributes || {}
-            const displayAttrs = { ...attrs }
-            Object.keys(displayAttrs).forEach(key => {
-              if (Array.isArray(displayAttrs[key])) {
-                displayAttrs[key] = displayAttrs[key].map(item => 
-                  typeof item === 'object' && item.value ? item.value : item
-                ).join(', ')
-              }
-            })
-            return displayAttrs
-          })(),
-          primaryAttribute: variant.primary_attribute,
-          dependencies: variant.dependencies || {},
-          primaryValues: variant.primary_values || [],
-          stockQuantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
-          inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true
-        })) || [],
+        variants: product.product_variants?.map((variant: any) => {
+          // Parse primary_values if it's a JSON string
+          let primaryValues = variant.primary_values || variant.primaryValues || []
+          if (typeof primaryValues === 'string') {
+            try {
+              primaryValues = JSON.parse(primaryValues)
+            } catch (e) {
+              console.error('Error parsing primary_values:', e)
+              primaryValues = []
+            }
+          }
+          // Ensure it's an array
+          if (!Array.isArray(primaryValues)) {
+            primaryValues = []
+          }
+
+          return {
+            id: variant.id,
+            price: variant.price,
+            image: variant.image,
+            sku: variant.sku,
+            model: variant.model,
+            variantType: variant.variant_type,
+            attributes: (() => {
+              const attrs = variant.attributes || {}
+              const displayAttrs = { ...attrs }
+              Object.keys(displayAttrs).forEach(key => {
+                if (Array.isArray(displayAttrs[key])) {
+                  displayAttrs[key] = displayAttrs[key].map(item => 
+                    typeof item === 'object' && item.value ? item.value : item
+                  ).join(', ')
+                }
+              })
+              return displayAttrs
+            })(),
+            primaryAttribute: variant.primary_attribute,
+            dependencies: variant.dependencies || {},
+            primaryValues: primaryValues,
+            // Also preserve snake_case for compatibility
+            primary_values: primaryValues,
+            stockQuantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
+            inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true
+          }
+        }) || [],
         variantConfig: product.variant_config || null
       }
 
@@ -659,7 +895,7 @@ export async function GET(request: NextRequest) {
     // Check if this is a fresh request (has cache-busting parameter)
     const url = new URL(request.url)
     const isFreshRequest = url.searchParams.has('t') || url.searchParams.has('fresh')
-    
+
     // Cache the result using enhanced cache
     enhancedCache.set(cacheKey, responseData, CACHE_TTL.PRODUCTS)
     

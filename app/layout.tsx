@@ -3,11 +3,14 @@ import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
+import { WebThemeProvider } from '@/contexts/theme-context'
 import { CompanyProvider } from '@/components/company-provider'
 import { PublicCompanyProvider } from '@/contexts/public-company-context'
 import { AuthProvider } from '@/contexts/auth-context'
 import { GlobalAuthModalProvider } from '@/contexts/global-auth-modal'
 import { CurrencyProvider } from '@/contexts/currency-context'
+import { LanguageProvider } from '@/contexts/language-context'
+import { NextIntlProvider } from '@/components/next-intl-provider'
 import { RoutePrefetcher } from '@/components/route-prefetcher'
 import { PerformanceOptimizer } from '@/components/performance-optimizer'
 import { AdvancedRoutePrefetcher } from '@/components/advanced-route-prefetcher'
@@ -209,13 +212,16 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <WebThemeProvider>
           <SharedDataCacheProvider>
             <SWRProvider>
               <AuthProvider>
                 <GlobalAuthModalProvider>
                   <CurrencyProvider>
-                    <CompanyProvider>
-                      <PublicCompanyProvider>
+                    <LanguageProvider>
+                      <NextIntlProvider>
+                      <CompanyProvider>
+                        <PublicCompanyProvider>
                         <RoutePrefetcher />
                         <AdvancedRoutePrefetcher />
                         <PerformanceOptimizer />
@@ -226,15 +232,18 @@ export default function RootLayout({
                         </OptimizedPageWrapper>
                         <HydrationFix />
                         <div suppressHydrationWarning>
-                          <Toaster />
+                        <Toaster />
                         </div>
-                      </PublicCompanyProvider>
-                    </CompanyProvider>
+                        </PublicCompanyProvider>
+                      </CompanyProvider>
+                      </NextIntlProvider>
+                    </LanguageProvider>
                   </CurrencyProvider>
                 </GlobalAuthModalProvider>
               </AuthProvider>
             </SWRProvider>
           </SharedDataCacheProvider>
+          </WebThemeProvider>
         </ThemeProvider>
         <SpeedInsights />
         <Analytics />

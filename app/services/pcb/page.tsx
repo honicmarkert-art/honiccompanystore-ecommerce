@@ -1,5 +1,8 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
-import { CircuitBoard } from 'lucide-react'
+import { redirect } from 'next/navigation'
+
+export default function PCBServicePage() {
+  redirect('/')
+}
 
 export default function PcbPage() {
   return (

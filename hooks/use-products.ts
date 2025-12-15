@@ -330,10 +330,10 @@ export function useProducts(): UseProductsReturn {
             return productsArray
           })
         .catch((err: any) => {
-          preloadPromise = null
-          // Don't throw error for preload failures - just log them
-          return null
-        })
+            preloadPromise = null
+            // Don't throw error for preload failures - just log them
+            return null
+          })
       }
     }
   }, [])

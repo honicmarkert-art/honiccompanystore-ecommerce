@@ -119,9 +119,7 @@ const adminSettingsSchema = z.object({
   
   socialLinks: z.object({
     facebook: z.string(),
-    twitter: z.string(),
     instagram: z.string(),
-    linkedin: z.string(),
     youtube: z.string()
   }).optional(),
   
@@ -255,9 +253,7 @@ export async function GET(request: NextRequest) {
         },
         socialLinks: {
           facebook: '',
-          twitter: '',
           instagram: '',
-          linkedin: '',
           youtube: ''
         },
         paymentSettings: {
@@ -368,9 +364,7 @@ export async function GET(request: NextRequest) {
       },
       socialLinks: settings.social_links || {
         facebook: '',
-        twitter: '',
         instagram: '',
-        linkedin: '',
         youtube: ''
       },
       paymentSettings: settings.payment_settings || {
@@ -483,9 +477,7 @@ export async function GET(request: NextRequest) {
         },
         socialLinks: {
           facebook: '',
-          twitter: '',
           instagram: '',
-          linkedin: '',
           youtube: ''
         },
         paymentSettings: {

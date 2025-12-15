@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
+import { useTheme as useThemeContext } from "@/contexts/theme-context"
 
 type BackgroundColor = "white" | "gray" | "dark"
 
@@ -95,135 +96,8 @@ const getHeaderFooterClasses = (backgroundColor: BackgroundColor) => {
   }
 }
 
+// Re-export the useTheme hook from the context
+// This maintains backward compatibility with existing components
 export function useTheme() {
-  const [backgroundColor, setBackgroundColor] = useState<BackgroundColor>("white")
-  const [isLoaded, setIsLoaded] = useState(false)
-
-  // Load background color from localStorage on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedColor = localStorage.getItem('backgroundColor') as BackgroundColor
-      if (savedColor && ["white", "gray", "dark"].includes(savedColor)) {
-        setBackgroundColor(savedColor)
-      }
-      setIsLoaded(true)
-    }
-  }, [])
-
-  // Save background color changes to localStorage
-  const updateBackgroundColor = (newColor: BackgroundColor) => {
-    setBackgroundColor(newColor)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('backgroundColor', newColor)
-      
-      // Update HTML element class and color-scheme
-      const htmlElement = document.documentElement
-      if (newColor === 'dark') {
-        htmlElement.className = 'dark'
-        htmlElement.style.colorScheme = 'dark'
-      } else if (newColor === 'gray') {
-        htmlElement.className = 'gray'
-        htmlElement.style.colorScheme = 'dark'
-      } else {
-        htmlElement.className = 'light'
-        htmlElement.style.colorScheme = 'light'
-      }
-    }
-  }
-
-  // Initialize HTML element class and color-scheme on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const htmlElement = document.documentElement
-      if (backgroundColor === 'dark') {
-        htmlElement.className = 'dark'
-        htmlElement.style.colorScheme = 'dark'
-      } else if (backgroundColor === 'gray') {
-        htmlElement.className = 'gray'
-        htmlElement.style.colorScheme = 'dark'
-      } else {
-        htmlElement.className = 'light'
-        htmlElement.style.colorScheme = 'light'
-      }
-    }
-  }, [backgroundColor])
-
-  // Get theme classes based on background color
-  const getThemeClasses = (): ThemeClasses => {
-    switch (backgroundColor) {
-      case "white":
-        return {
-          mainBg: "bg-white min-h-screen",
-          mainText: "text-neutral-950",
-          cardBg: "bg-white",
-          cardBorder: "border-neutral-200",
-          checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
-          checkboxCheckedText: "data-[state=checked]:text-white",
-          sliderTrack: "[&>span:first-child]:bg-yellow-500",
-          textNeutralSecondary: "text-neutral-500",
-          borderNeutralSecondary: "border-neutral-300",
-          buttonGhostHoverBg: "hover:bg-neutral-800",
-        }
-      case "gray":
-        return {
-          mainBg: "bg-gray-800 min-h-screen",
-          mainText: "text-white",
-          cardBg: "bg-gray-700",
-          cardBorder: "border-gray-600",
-          checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
-          checkboxCheckedText: "data-[state=checked]:text-white",
-          sliderTrack: "[&>span:first-child]:bg-yellow-500",
-          textNeutralSecondary: "text-gray-400",
-          borderNeutralSecondary: "border-gray-600",
-          buttonGhostHoverBg: "hover:bg-neutral-800",
-        }
-      case "dark":
-        return {
-          mainBg: "bg-neutral-950 min-h-screen",
-          mainText: "text-white",
-          cardBg: "bg-neutral-800",
-          cardBorder: "border-neutral-700",
-          checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
-          checkboxCheckedText: "data-[state=checked]:text-white",
-          sliderTrack: "[&>span:first-child]:bg-yellow-500",
-          textNeutralSecondary: "text-neutral-400",
-          borderNeutralSecondary: "border-neutral-700",
-          buttonGhostHoverBg: "hover:bg-neutral-800",
-        }
-      default:
-        return {
-          mainBg: "bg-white min-h-screen",
-          mainText: "text-neutral-950",
-          cardBg: "bg-white",
-          cardBorder: "border-neutral-200",
-          checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
-          checkboxCheckedText: "data-[state=checked]:text-white",
-          sliderTrack: "[&>span:first-child]:bg-yellow-500",
-          textNeutralSecondary: "text-neutral-500",
-          borderNeutralSecondary: "border-neutral-300",
-          buttonGhostHoverBg: "hover:bg-neutral-800",
-        }
-    }
-  }
-
-  const themeClasses = useMemo(() => getThemeClasses(), [backgroundColor])
-  const headerFooterClasses = useMemo(() => getHeaderFooterClasses(backgroundColor), [backgroundColor])
-
-  return { 
-    backgroundColor, 
-    setBackgroundColor: updateBackgroundColor, 
-    themeClasses: isLoaded ? themeClasses : {
-      mainBg: "bg-white min-h-screen",
-      mainText: "text-neutral-950",
-      cardBg: "bg-white",
-      cardBorder: "border-neutral-200",
-      checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
-      checkboxCheckedText: "data-[state=checked]:text-white",
-      sliderTrack: "[&>span:first-child]:bg-yellow-500",
-      textNeutralSecondary: "text-neutral-500",
-      borderNeutralSecondary: "border-neutral-300",
-      buttonGhostHoverBg: "hover:bg-neutral-800",
-    }, 
-    darkHeaderFooterClasses: isLoaded ? headerFooterClasses : getHeaderFooterClasses("white")
-  }
+  return useThemeContext()
 }

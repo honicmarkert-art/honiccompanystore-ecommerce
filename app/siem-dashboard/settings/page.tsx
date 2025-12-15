@@ -152,9 +152,7 @@ interface SettingsData {
   }
   socialLinks: {
     facebook: string
-    twitter: string
     instagram: string
-    linkedin: string
     youtube: string
   }
   paymentSettings: {
@@ -307,9 +305,7 @@ export default function SettingsPage() {
     },
     socialLinks: adminSettings?.socialLinks || {
       facebook: "",
-      twitter: "",
       instagram: "",
-      linkedin: "",
       youtube: ""
     },
     paymentSettings: adminSettings?.paymentSettings || {

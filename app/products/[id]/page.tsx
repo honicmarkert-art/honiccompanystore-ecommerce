@@ -1,5 +1,6 @@
 "use client"
 
+import { BuyerRouteGuard } from '@/components/buyer-route-guard'
 import { DialogTrigger } from "@/components/ui/dialog"
 import { SearchSuggestions } from "@/components/search-suggestions"
 import { SearchModal } from "@/components/search-modal"
@@ -9,7 +10,7 @@ import type React from "react"
 
 import { Label } from "@/components/ui/label"
 
-import { useState, useMemo, useEffect, useCallback } from "react" // Added useCallback
+import { useState, useMemo, useEffect, useCallback, useRef } from "react" // Added useCallback
 import Image from "next/image"
 import { LazyImage } from "@/components/lazy-image"
 import Link from "next/link"
@@ -38,7 +39,6 @@ import {
   ShieldCheck,
   BellDot,
   Facebook,
-  Twitter,
   Instagram,
   Youtube,
   CreditCard,
@@ -58,12 +58,21 @@ import {
     RotateCcw,
     Edit,
     Eye,
+  Settings,
+  Moon,
+  Sun,
+  UserPlus,
+  Sparkles,
+  Compass,
+  Laptop,
+  TrendingUp,
+  MapPin,
   } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import {
@@ -105,7 +114,7 @@ import {
 } from "@/components/ui/skeleton"
 
 
-export default function ProductDetailPage() {
+function ProductDetailPageContent() {
   const params = useParams()
   const router = useRouter()
   const pathname = usePathname()
@@ -121,6 +130,17 @@ export default function ProductDetailPage() {
   const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { user, isAuthenticated } = useAuth() // Add auth context
   const { openAuthModal } = useGlobalAuthModal()
+  
+  // State for reviews
+  const [reviews, setReviews] = useState<any[]>([])
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false)
+  const [reviewFormData, setReviewFormData] = useState({
+    rating: 0,
+    comment: '',
+    images: [] as string[]
+  })
+  const [submittingReview, setSubmittingReview] = useState(false)
   const { formatPrice, currency, setCurrency } = useCurrency()
   
   // Optimized API for product details with input validation
@@ -141,14 +161,13 @@ export default function ProductDetailPage() {
   const { 
     data: optimizedProduct, 
     isLoading: isOptimizedLoading, 
-    error: optimizedError,
-    refetch: refetchProduct
+    error: optimizedError
   } = useOptimizedApi({
     endpoint: `/api/products/${productId}`,
     params: { minimal: false, t: Date.now() }, // Cache busting
     ttl: 0, // No cache to force fresh data
     staleWhileRevalidate: false,
-    refetchOnWindowFocus: true
+    refetchOnWindowFocus: false
   })
   
   // Shared data cache for cross-page data
@@ -179,6 +198,60 @@ export default function ProductDetailPage() {
     }
   }, [currency, setCurrency])
 
+  // Optimized product finding with early return and memoization
+  // Must be defined before useEffect that uses it
+  const product = useMemo(() => {
+    // First try to use optimized product data (from prefetching)
+    if (optimizedProduct && typeof optimizedProduct === 'object' && 'id' in optimizedProduct && optimizedProduct.id) {
+      return optimizedProduct as any // Type assertion for now
+    }
+    
+    // Fallback to products array if optimized data not available
+    // Safety check: ensure products is an array before using it
+    if (!Array.isArray(products) || !products.length || !productIdNumber) return undefined
+    return products.find((p) => p.id === productIdNumber)
+  }, [optimizedProduct, products, productIdNumber])
+
+  // Track product view - use ref to prevent multiple tracking calls
+  const viewTrackingRef = useRef<Set<string>>(new Set())
+  
+  useEffect(() => {
+    if (!isValidProductId || !productId) return
+    
+    // Use ref-based tracking only (more reliable than sessionStorage)
+    // Check if we've already tracked this view in this session
+    if (viewTrackingRef.current.has(productId)) return
+    
+    // Mark as tracking immediately to prevent race conditions
+    viewTrackingRef.current.add(productId)
+    
+    // Track view
+    fetch(`/api/products/${productId}/view`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.views !== undefined) {
+          // Update local product views count silently without triggering re-renders
+          setFullProduct((prev: any) => {
+            if (prev?.views === data.views) return prev // Prevent unnecessary updates
+            return {
+              ...prev,
+              views: data.views
+            }
+          })
+        }
+      })
+      .catch(error => {
+        console.error('Error tracking product view:', error)
+        // Remove from ref on error so it can retry if needed
+        viewTrackingRef.current.delete(productId)
+      })
+  }, [productId, isValidProductId]) // Only depend on productId, removed product to prevent re-runs
+
   // Autoplay controller for video view
   const [shouldAutoplayVideo, setShouldAutoplayVideo] = useState(false)
   
@@ -194,6 +267,119 @@ export default function ProductDetailPage() {
     attributes?: Array<{name: string, value: string}>
   }>>([])
   const [isLoadingVariantImages, setIsLoadingVariantImages] = useState(false)
+  
+  // State for supplier/company name
+  const [supplierCompanyName, setSupplierCompanyName] = useState<string | null>(null)
+  
+  // State for supplier info
+  const [supplierInfo, setSupplierInfo] = useState<{
+    companyName: string | null
+    companyLogo: string | null
+    isVerified: boolean
+    detailSentence: string | null
+    rating: number | null
+    reviewCount: number | null
+    supplierId: string | null
+    productCount: number | null
+    totalViews: number | null
+    region: string | null
+  } | null>(null)
+  
+  // State for sold count
+  const [soldCount, setSoldCount] = useState<{
+    soldCount: number
+    buyersCount: number | null
+  } | null>(null)
+  const [soldCountLoading, setSoldCountLoading] = useState(false)
+
+  // Fetch reviews when product is loaded
+  useEffect(() => {
+    const fetchReviews = async () => {
+      if (!product?.id) return
+      
+      setReviewsLoading(true)
+      try {
+        const response = await fetch(`/api/products/${product.id}/reviews`)
+        if (response.ok) {
+          const data = await response.json()
+          setReviews(data.reviews || [])
+        }
+      } catch (error) {
+        console.error('Error fetching reviews:', error)
+      } finally {
+        setReviewsLoading(false)
+      }
+    }
+    
+    fetchReviews()
+  }, [product?.id])
+
+  // Fetch sold count when product is loaded
+  useEffect(() => {
+    const fetchSoldCount = async () => {
+      if (!product?.id) return
+      
+      setSoldCountLoading(true)
+      try {
+        const response = await fetch(`/api/products/${product.id}/sold-count`)
+        if (response.ok) {
+          const data = await response.json()
+          setSoldCount({
+            soldCount: data.soldCount || 0,
+            buyersCount: data.buyersCount || null
+          })
+        }
+      } catch (error) {
+        console.error('Error fetching sold count:', error)
+      } finally {
+        setSoldCountLoading(false)
+      }
+    }
+    
+    fetchSoldCount()
+  }, [product?.id])
+
+  // Fetch supplier information when product is loaded
+  useEffect(() => {
+    const fetchSupplierInfo = async () => {
+      if (!product?.id) return
+      
+      try {
+        // Use API route instead of direct Supabase client
+        const response = await fetch(`/api/products/${product.id}/supplier-info`)
+        
+        if (!response.ok) {
+          console.error('Failed to fetch supplier info:', response.statusText)
+          return
+        }
+        
+        const data = await response.json()
+        
+        if (data.error) {
+          console.error('Error fetching supplier info:', data.error)
+          return
+        }
+        
+        setSupplierInfo({
+          companyName: data.companyName || null,
+          companyLogo: data.companyLogo || null,
+          isVerified: data.isVerified || false,
+          detailSentence: data.detailSentence || null,
+          rating: data.rating || null,
+          reviewCount: data.reviewCount || null,
+          supplierId: data.supplierId || null,
+          productCount: data.productCount || null,
+          totalViews: data.totalViews || null,
+          region: data.region || null
+        })
+        setSupplierCompanyName(data.companyName || null)
+      } catch (error) {
+        console.error('Error fetching supplier info:', error)
+      }
+    }
+    
+    fetchSupplierInfo()
+  }, [product?.id])
   
   // Search state
   const [searchTerm, setSearchTerm] = useState("")
@@ -268,19 +454,6 @@ export default function ProductDetailPage() {
     
     return () => clearInterval(interval)
   }, [])
-  
-  // Optimized product finding with early return and memoization
-  const product = useMemo(() => {
-    // First try to use optimized product data (from prefetching)
-    if (optimizedProduct && typeof optimizedProduct === 'object' && 'id' in optimizedProduct && optimizedProduct.id) {
-      return optimizedProduct as any // Type assertion for now
-    }
-    
-    // Fallback to products array if optimized data not available
-    // Safety check: ensure products is an array before using it
-    if (!Array.isArray(products) || !products.length || !productIdNumber) return undefined
-    return products.find((p) => p.id === productIdNumber)
-  }, [optimizedProduct, products, productIdNumber])
 
   // Prefer server-fetched full details when available
   const currentVideo = fullProduct?.video ?? product?.video
@@ -489,18 +662,32 @@ export default function ProductDetailPage() {
     const normalizedVariants = Array.isArray(base.variants) && base.variants.length > 0
       ? base.variants
       : (Array.isArray(base.product_variants)
-          ? base.product_variants.map((variant: any) => ({
-              id: variant.id,
-              price: variant.price,
-              image: variant.image,
-              sku: variant.sku,
-              model: variant.model,
-              variantType: variant.variant_type,
-              attributes: variant.attributes || {},
-              primaryAttribute: variant.primary_attribute,
-              dependencies: variant.dependencies || {},
-              primaryValues: variant.primary_values || [],
-            }))
+          ? base.product_variants.map((variant: any) => {
+              // Parse primary_values if it's a JSON string
+              let primaryValues = variant.primary_values || variant.primaryValues || []
+              if (typeof primaryValues === 'string') {
+                try {
+                  primaryValues = JSON.parse(primaryValues)
+                } catch (e) {
+                  primaryValues = []
+                }
+              }
+              
+              return {
+                id: variant.id,
+                price: variant.price,
+                image: variant.image,
+                sku: variant.sku,
+                model: variant.model,
+                variantType: variant.variant_type,
+                attributes: variant.attributes || {},
+                primaryAttribute: variant.primary_attribute,
+                dependencies: variant.dependencies || {},
+                primaryValues: Array.isArray(primaryValues) ? primaryValues : [],
+                // Also preserve snake_case for compatibility
+                primary_values: Array.isArray(primaryValues) ? primaryValues : [],
+              }
+            })
           : [])
 
     // Normalize/derive variantConfig
@@ -610,6 +797,7 @@ export default function ProductDetailPage() {
 
   const [quantity, setQuantity] = useState(1)
   const [mainImage, setMainImage] = useState<string | null>(null)
+  const [selectedThumbnailIndex, setSelectedThumbnailIndex] = useState<number | null>(null)
   const [isManualImageSelection, setIsManualImageSelection] = useState(false)
   const [isQuantityLimitModalOpen, setIsQuantityLimitModalOpen] = useState(false)
   
@@ -670,10 +858,6 @@ export default function ProductDetailPage() {
   // New state for main container view mode
   const [mainViewMode, setMainViewMode] = useState<'image' | 'video' | '360'>('image')
   
-  // Admin edit dialog states
-  const [isStockEditDialogOpen, setIsStockEditDialogOpen] = useState(false)
-  const [isFreeDeliveryEditDialogOpen, setIsFreeDeliveryEditDialogOpen] = useState(false)
-  const [isSameDayDeliveryEditDialogOpen, setIsSameDayDeliveryEditDialogOpen] = useState(false)
   
   // Selection preview dialog state
   const [isSelectionPreviewOpen, setIsSelectionPreviewOpen] = useState(false)
@@ -703,15 +887,18 @@ export default function ProductDetailPage() {
     return total
   }, [displayProduct])
 
-  // Admin editable product states
-  const [adminProductState, setAdminProductState] = useState({
-    inStock: calculateTotalStock() > 0,
-    stockQuantity: calculateTotalStock(),
-    freeDelivery: (displayProduct as any)?.freeDelivery ?? false,
-    sameDayDelivery: (displayProduct as any)?.sameDayDelivery ?? false,
-    returnTimeType: (displayProduct as any)?.return_time_type ?? 'days',
-    returnTimeValue: (displayProduct as any)?.return_time_value ?? 3,
-  })
+  // Product display state (derived from product data)
+  const productDisplayState = useMemo(() => {
+    const totalStock = calculateTotalStock()
+    return {
+      inStock: totalStock > 0,
+      stockQuantity: totalStock,
+      freeDelivery: (displayProduct as any)?.freeDelivery ?? false,
+      sameDayDelivery: (displayProduct as any)?.sameDayDelivery ?? false,
+      returnTimeType: (displayProduct as any)?.return_time_type ?? 'days',
+      returnTimeValue: (displayProduct as any)?.return_time_value ?? 3,
+    }
+  }, [displayProduct, calculateTotalStock])
   
   // Missing state variables that were removed during optimization
   const [isCustomizeDialogOpen, setIsCustomizeDialogOpen] = useState(false)
@@ -805,39 +992,6 @@ export default function ProductDetailPage() {
     setPendingCartAction(null)
   }
 
-  // Update admin product state when product changes
-  useEffect(() => {
-    if (displayProduct) {
-      const totalStock = calculateTotalStock()
-      setAdminProductState({
-        inStock: totalStock > 0,
-        stockQuantity: totalStock,
-        freeDelivery: (displayProduct as any).freeDelivery ?? false,
-        sameDayDelivery: (displayProduct as any).sameDayDelivery ?? false,
-        returnTimeType: (displayProduct as any).return_time_type ?? 'days',
-        returnTimeValue: (displayProduct as any).return_time_value ?? 3,
-      })
-    }
-  }, [displayProduct, calculateTotalStock])
-
-  // Function to update admin product state
-  const updateAdminProductState = (field: keyof typeof adminProductState, value: any) => {
-    setAdminProductState(prev => {
-      const newState = { ...prev, [field]: value }
-      
-      // Auto-update stock status based on quantity
-      if (field === 'stockQuantity') {
-        newState.inStock = value > 0
-      }
-      
-      return newState
-    })
-    
-    toast({
-      title: "Product Updated",
-      description: `${field} has been updated successfully.`,
-    })
-  }
 
   // Variant selection logic
   const attributeTypes = useMemo(() => {
@@ -879,16 +1033,36 @@ export default function ProductDetailPage() {
     const values = new Set<string>()
     
     // Check if this is a primary attribute with multiple values
-    if ((displayProduct.variantConfig?.type === 'primary-dependent' && type === displayProduct.variantConfig.primaryAttribute) ||
-        (displayProduct.variantConfig?.type === 'multi-dependent' && displayProduct.variantConfig.primaryAttributes?.includes(type)) ||
-        (displayProduct.variantConfig?.type === 'simple' && type === displayProduct.variantConfig.primaryAttribute)) {
+    const primaryAttribute = displayProduct.variantConfig?.primaryAttribute
+    const primaryAttributes = displayProduct.variantConfig?.primaryAttributes || []
+    const isPrimary = type === primaryAttribute || primaryAttributes.includes(type)
+    const isPrimaryDependent = displayProduct.variantConfig?.type === 'primary-dependent'
+    const isMultiDependent = displayProduct.variantConfig?.type === 'multi-dependent'
+    const isSimple = displayProduct.variantConfig?.type === 'simple'
+    
+    if (isPrimary && (isPrimaryDependent || isMultiDependent || isSimple)) {
       displayProduct.variants.forEach((variant: any) => {
-        if (variant.primaryValues) {
+        // Check primaryValues (camelCase)
+        if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
           variant.primaryValues.forEach((primaryValue: any) => {
-            if (primaryValue.value && (displayProduct.variantConfig?.type === 'primary-dependent' || 
-                (displayProduct.variantConfig?.type === 'multi-dependent' && primaryValue.attribute === type) ||
-                (displayProduct.variantConfig?.type === 'simple' && primaryValue.attribute === type))) {
+            // IMPORTANT: Filter by attribute type to avoid mixing values from different attributes
+            const valAttribute = primaryValue.attribute || primaryValue.attributeName
+            if (primaryValue.value && valAttribute === type) {
               values.add(primaryValue.value)
+            }
+          })
+        }
+        // Also check primary_values (snake_case)
+        if (variant.primary_values && Array.isArray(variant.primary_values)) {
+          variant.primary_values.forEach((primaryValue: any) => {
+            if (typeof primaryValue === 'string') {
+              // For string values, we can't determine attribute, so skip or handle differently
+              // But since we're filtering by type, we should only add if we can verify the attribute
+            } else if (primaryValue && primaryValue.value) {
+              const valAttribute = primaryValue.attribute || primaryValue.attributeName
+              if (valAttribute === type) {
+                values.add(primaryValue.value)
+              }
             }
           })
         }
@@ -959,23 +1133,58 @@ export default function ProductDetailPage() {
     // For primary-dependent logic
     if (displayProduct.variantConfig?.type === 'primary-dependent') {
       const primaryAttribute = displayProduct.variantConfig.primaryAttribute
-      if (attributeType === primaryAttribute) {
+      const primaryAttributes = displayProduct.variantConfig.primaryAttributes || []
+      // Check if this is a primary attribute (either single primaryAttribute or in primaryAttributes array)
+      const isPrimary = attributeType === primaryAttribute || primaryAttributes.includes(attributeType)
+      
+      if (isPrimary) {
         // For primary attributes, check if the value exists in any variant's primaryValues
+        // IMPORTANT: Filter by attribute type to avoid matching values from other attributes
         return displayProduct.variants.some((variant: any) => {
-          const hasVal = variant.primaryValues?.some((primaryValue: any) => primaryValue.value === value)
+          // Check primaryValues (camelCase)
+          let hasVal = false
+          let pv: any = null
+          
+          if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
+            pv = variant.primaryValues.find((pv: any) => 
+              pv.value === value && (pv.attribute === attributeType || pv.attributeName === attributeType)
+            )
+            hasVal = !!pv
+          }
+          
+          // Also check primary_values (snake_case)
+          if (!hasVal && variant.primary_values && Array.isArray(variant.primary_values)) {
+            pv = variant.primary_values.find((pv: any) => {
+              if (typeof pv === 'string') return pv === value
+              return pv.value === value && (pv.attribute === attributeType || pv.attributeName === attributeType)
+            })
+            hasVal = !!pv
+          }
+          
           if (!hasVal) return false
+          
           // If this value has quantity on primaryValues, respect it
-          const pv = variant.primaryValues?.find((primaryValue: any) => primaryValue.value === value)
-          if (pv && typeof pv.quantity === 'number') {
-            return pv.quantity > 0
+          // If quantity is missing, null, undefined, or 0, the value is unavailable
+          if (pv) {
+            if (typeof pv.quantity === 'number') {
+              return pv.quantity > 0
+            }
+            if (typeof pv.quantity === 'string') {
+              const qty = parseInt(pv.quantity)
+              return !isNaN(qty) && qty > 0
+            }
+            // If quantity field exists but is null/undefined, check if it's explicitly set
+            // If quantity is missing entirely, check variant stock as fallback
+            if (pv.hasOwnProperty('quantity') && (pv.quantity === null || pv.quantity === undefined || pv.quantity === '')) {
+              return false // Explicitly no quantity = unavailable
+            }
           }
-          if (pv && typeof pv.quantity === 'string') {
-            const qty = parseInt(pv.quantity)
-            return qty > 0
+          // If no quantity field at all, check variant stock as fallback
+          if (typeof variant.stockQuantity === 'number') {
+            return variant.stockQuantity > 0
           }
-          // Else fallback to variant stock if present
-          if (typeof variant.stockQuantity === 'number') return variant.stockQuantity > 0
-          return true
+          // If no quantity info at all, consider it unavailable
+          return false
         })
       }
       
@@ -1006,18 +1215,32 @@ export default function ProductDetailPage() {
       if (attributeType === primaryAttribute) {
         // For primary attributes, check if the value exists in any variant's primaryValues
         return displayProduct.variants.some((variant: any) => {
-          const hasVal = variant.primaryValues?.some((primaryValue: any) => primaryValue.value === value)
+          const hasVal = variant.primaryValues?.some((primaryValue: any) => 
+            primaryValue.value === value && (primaryValue.attribute === attributeType || primaryValue.attributeName === attributeType)
+          )
           if (!hasVal) return false
-          const pv = variant.primaryValues?.find((primaryValue: any) => primaryValue.value === value)
-          if (pv && typeof pv.quantity === 'number') {
-            return pv.quantity > 0
+          const pv = variant.primaryValues?.find((primaryValue: any) => 
+            primaryValue.value === value && (primaryValue.attribute === attributeType || primaryValue.attributeName === attributeType)
+          )
+          if (pv) {
+            if (typeof pv.quantity === 'number') {
+              return pv.quantity > 0
+            }
+            if (typeof pv.quantity === 'string') {
+              const qty = parseInt(pv.quantity)
+              return !isNaN(qty) && qty > 0
+            }
+            // If quantity field exists but is null/undefined, it's unavailable
+            if (pv.hasOwnProperty('quantity') && (pv.quantity === null || pv.quantity === undefined || pv.quantity === '')) {
+              return false
+            }
           }
-          if (pv && typeof pv.quantity === 'string') {
-            const qty = parseInt(pv.quantity)
-            return qty > 0
+          // If no quantity field at all, check variant stock as fallback
+          if (typeof variant.stockQuantity === 'number') {
+            return variant.stockQuantity > 0
           }
-          if (typeof variant.stockQuantity === 'number') return variant.stockQuantity > 0
-          return true
+          // If no quantity info at all, consider it unavailable
+          return false
         })
       }
       
@@ -1037,18 +1260,47 @@ export default function ProductDetailPage() {
       if (primaryAttributes.includes(attributeType)) {
         // Check quantity for primary attributes
         return displayProduct.variants.some((variant: any) => {
-          const hasVal = variant.primaryValues?.some((pv: any) => pv.attribute === attributeType && pv.value === value)
+          // Check primaryValues (camelCase)
+          let hasVal = false
+          let pv: any = null
+          
+          if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
+            pv = variant.primaryValues.find((pv: any) => 
+              pv.attribute === attributeType && pv.value === value
+            )
+            hasVal = !!pv
+          }
+          
+          // Also check primary_values (snake_case)
+          if (!hasVal && variant.primary_values && Array.isArray(variant.primary_values)) {
+            pv = variant.primary_values.find((pv: any) => {
+              if (typeof pv === 'string') return false
+              return pv.attribute === attributeType && pv.value === value
+            })
+            hasVal = !!pv
+          }
+          
           if (!hasVal) return false
-          const pv = variant.primaryValues?.find((pv: any) => pv.attribute === attributeType && pv.value === value)
-          if (pv && typeof pv.quantity === 'number') {
-            return pv.quantity > 0
+          
+          if (pv) {
+            if (typeof pv.quantity === 'number') {
+              return pv.quantity > 0
+            }
+            if (typeof pv.quantity === 'string') {
+              const qty = parseInt(pv.quantity)
+              return !isNaN(qty) && qty > 0
+            }
+            // If quantity field exists but is null/undefined, it's unavailable
+            if (pv.hasOwnProperty('quantity') && (pv.quantity === null || pv.quantity === undefined || pv.quantity === '')) {
+              return false
+            }
           }
-          if (pv && typeof pv.quantity === 'string') {
-            const qty = parseInt(pv.quantity)
-            return qty > 0
+          // If no quantity field at all, check variant stock as fallback
+          if (typeof variant.stockQuantity === 'number') {
+            return variant.stockQuantity > 0
           }
-          if (typeof variant.stockQuantity === 'number') return variant.stockQuantity > 0
-          return true
+          // If no quantity info at all, consider it unavailable
+          return false
         })
       }
       
@@ -1072,17 +1324,73 @@ export default function ProductDetailPage() {
     
     if (displayProduct.variantConfig?.type === 'primary-dependent') {
       const primaryAttribute = displayProduct.variantConfig.primaryAttribute
+      const primaryAttributes = displayProduct.variantConfig.primaryAttributes || []
+      
+      // For primary-dependent with multiple primary attributes (suppliers),
+      // filter variants based on ALL selected primary attributes
+      if (primaryAttributes.length > 0) {
+        // Check if any primary attributes are selected
+        const selectedPrimaryAttrs = primaryAttributes.filter((attr: string) => selectedAttributes[attr])
+        if (selectedPrimaryAttrs.length === 0) {
+          return displayProduct.variants
+        }
+        
+        // Return variants that match ALL selected primary attribute values
+        return displayProduct.variants.filter((variant: any) => {
+          return selectedPrimaryAttrs.every((attr: string) => {
+            const selectedValue = selectedAttributes[attr]
+            if (!selectedValue) return true
+            
+            // Check primaryValues (camelCase)
+            if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
+              const hasMatch = variant.primaryValues.some((pv: any) => 
+                pv.value === selectedValue && (pv.attribute === attr || pv.attributeName === attr)
+              )
+              if (hasMatch) return true
+            }
+            
+            // Check primary_values (snake_case)
+            if (variant.primary_values && Array.isArray(variant.primary_values)) {
+              const hasMatch = variant.primary_values.some((pv: any) => {
+                if (typeof pv === 'string') return pv === selectedValue
+                return pv.value === selectedValue && (pv.attribute === attr || pv.attributeName === attr)
+              })
+              if (hasMatch) return true
+            }
+            
+            // Fallback to attributes object
+            return variant.attributes && variant.attributes[attr] === selectedValue
+          })
+        })
+      }
+      
+      // Original logic for single primary attribute
       if (!primaryAttribute || !selectedAttributes[primaryAttribute]) {
         return displayProduct.variants
       }
       
       // For primary-dependent logic, return variants that have the selected primary value
       return displayProduct.variants.filter((variant: any) => {
-        if (variant.primaryValues) {
-          return variant.primaryValues.some((primaryValue: any) => 
-            primaryValue.value === selectedAttributes[primaryAttribute]
+        // Check primaryValues (camelCase)
+        if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
+          const hasMatch = variant.primaryValues.some((pv: any) => 
+            pv.value === selectedAttributes[primaryAttribute] && 
+            (pv.attribute === primaryAttribute || pv.attributeName === primaryAttribute)
           )
+          if (hasMatch) return true
         }
+        
+        // Check primary_values (snake_case)
+        if (variant.primary_values && Array.isArray(variant.primary_values)) {
+          const hasMatch = variant.primary_values.some((pv: any) => {
+            if (typeof pv === 'string') return pv === selectedAttributes[primaryAttribute]
+            return pv.value === selectedAttributes[primaryAttribute] && 
+                   (pv.attribute === primaryAttribute || pv.attributeName === primaryAttribute)
+          })
+          if (hasMatch) return true
+        }
+        
+        // Fallback to attributes object
         return variant.attributes && variant.attributes[primaryAttribute] === selectedAttributes[primaryAttribute]
       })
     }
@@ -1459,19 +1767,39 @@ export default function ProductDetailPage() {
   // Find matching variant image for the selected attributes
   const matchingVariantImage = findMatchingVariantImage(selectedAttributes)
   
-  // Get only variant images for thumbnail gallery (no main product image)
+  // Get thumbnail images: use variant images if available, fill remaining with main product image
   const getAllThumbnailImages = useCallback(() => {
     const images: string[] = []
-    // Add only variant images (no main product image in thumbnails)
+    const mainProductImage = product?.image?.trim() || ''
+    
+    // Collect variant images
     variantImages.forEach((variantImg) => {
       if (variantImg.imageUrl && variantImg.imageUrl.trim() !== '') {
         images.push(variantImg.imageUrl)
       }
     })
+    
     // Remove duplicates
-    const uniqueImages = [...new Set(images)]
-    return uniqueImages
-  }, [variantImages])
+    const uniqueVariantImages = [...new Set(images)]
+    
+    // If no variant images exist, use main product image for all thumbnails (create 8 thumbnails)
+    if (uniqueVariantImages.length === 0 && mainProductImage) {
+      return Array(8).fill(mainProductImage)
+    }
+    
+    // If some variant images exist, fill remaining slots with main product image (up to 8 total)
+    const targetThumbnailCount = 8
+    const remainingSlots = Math.max(0, targetThumbnailCount - uniqueVariantImages.length)
+    
+    if (remainingSlots > 0 && mainProductImage) {
+      // Add main product image to fill remaining slots
+      const filledImages = [...uniqueVariantImages, ...Array(remainingSlots).fill(mainProductImage)]
+      return filledImages
+    }
+    
+    // If we have more than 8 variant images, limit to 8
+    return uniqueVariantImages.slice(0, targetThumbnailCount)
+  }, [variantImages, product?.image])
 
   const thumbnailImages = useMemo(() => getAllThumbnailImages(), [getAllThumbnailImages])
   
@@ -1507,6 +1835,7 @@ export default function ProductDetailPage() {
   // Reset manual selection when attributes change (allow auto-update again)
   useEffect(() => {
     setIsManualImageSelection(false)
+    setSelectedThumbnailIndex(null)
   }, [selectedAttributes])
 
   // Auto-update main image when attributes or thumbnails change (but not when user manually selects a thumbnail)
@@ -1521,16 +1850,22 @@ export default function ProductDetailPage() {
       if (matchingVariantImage) {
         // Auto-update to matching variant image
         setMainImage(matchingVariantImage)
+        // Find the index of the matching variant image in thumbnails
+        const matchingIndex = thumbnailImages.findIndex(img => img === matchingVariantImage)
+        setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : null)
       }
       // If no matching variant image found, keep current image (don't reset to main)
     } else {
       // No attributes selected: prefer first thumbnail, else main product image
       if (thumbnailImages.length > 0) {
         setMainImage(thumbnailImages[0])
+        setSelectedThumbnailIndex(0)
     } else if (product?.image) {
       setMainImage(product.image)
+      setSelectedThumbnailIndex(null)
       } else {
         setMainImage(null)
+        setSelectedThumbnailIndex(null)
     }
     }
   }, [selectedAttributes, matchingVariantImage, product?.image, thumbnailImages, isManualImageSelection])
@@ -2069,7 +2404,7 @@ export default function ProductDetailPage() {
     setIsPriceAlertDialogOpen(true)
   }
 
-  const handleSetPriceAlert = () => {
+  const handleSetPriceAlert = async () => {
     if (priceAlertTarget <= 0) {
       toast({
         title: "Invalid Price",
@@ -2078,15 +2413,49 @@ export default function ProductDetailPage() {
       return
     }
 
-    // Here you would typically save to database
-    // For now, we'll just show a success message
-    setHasPriceAlert(true)
-    setIsPriceAlertDialogOpen(false)
-    
-    toast({
-      title: "Price Alert Set!",
-      description: `You'll be notified when ${product?.name} drops to ${formatPrice(priceAlertTarget)}`,
-    })
+    if (!product?.id) {
+      toast({
+        title: "Error",
+        description: "Product information is missing.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    try {
+      const response = await fetch('/api/user/price-alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          targetPrice: priceAlertTarget
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setHasPriceAlert(true)
+        setIsPriceAlertDialogOpen(false)
+        toast({
+          title: "Price Alert Set!",
+          description: `You'll be notified when ${product?.name} drops to ${formatPrice(priceAlertTarget)}`,
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to set price alert",
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      console.error('Error setting price alert:', error)
+      toast({
+        title: "Error",
+        description: "Failed to set price alert. Please try again.",
+        variant: "destructive"
+      })
+    }
   }
 
   // Handle invalid product ID (after all hooks - respects Rules of Hooks)
@@ -2391,28 +2760,208 @@ export default function ProductDetailPage() {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0 ml-auto">
+            {/* AI Sourcing */}
+            <OptimizedLink 
+              href="/"
+              prefetch="hover"
+              priority="low"
+              className={cn(
+                "hidden sm:flex items-center gap-1",
+                darkHeaderFooterClasses.buttonGhostText,
+              )}
+            >
+              <Sparkles className="w-5 h-5" />
+              <span className="hidden sm:inline hover:opacity-80 transition-opacity">AI Sourcing</span>
+            </OptimizedLink>
+            
+            {/* Discovery */}
+            <OptimizedLink 
+              href="/discover"
+              prefetch="hover"
+              priority="low"
+              className={cn(
+                "hidden sm:flex items-center gap-1",
+                darkHeaderFooterClasses.buttonGhostText,
+              )}
+            >
+              <Compass className="w-5 h-5" />
+              <span className="hidden sm:inline hover:opacity-80 transition-opacity">Discovery</span>
+            </OptimizedLink>
+            
+            {/* Become Supplier */}
+            <OptimizedLink 
+              href="/become-supplier"
+              prefetch="hover"
+              priority="low"
+              className={cn(
+                "hidden sm:flex items-center gap-1",
+                darkHeaderFooterClasses.buttonGhostText,
+              )}
+            >
+              <UserPlus className="w-5 h-5" />
+              <span className="hidden sm:inline hover:opacity-80 transition-opacity">Become Supplier</span>
+            </OptimizedLink>
+            
+            {/* Service Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className={cn(
+                    "hidden sm:flex items-center gap-1",
+                    darkHeaderFooterClasses.buttonGhostText,
+                    darkHeaderFooterClasses.buttonGhostHoverBg,
+                  )}
+                >
+                  <Settings className="w-5 h-5" />
+                  <span className="hidden sm:inline">Service</span>
+                  <span className="sr-only">Service Menu</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className={cn(
+                  "w-56",
+                  "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
+                )}
+              >
+                <DropdownMenuLabel className="text-base font-semibold px-3 py-2">
+                  Other Service
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
+                >
+                  <Settings className="w-4 h-4 mr-2" /> Education Tools
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
+                >
+                  <Package className="w-4 h-4 mr-2" /> Electronic Manufacturing
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
+                >
+                  <Laptop className="w-4 h-4 mr-2" /> PCB Printing
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
+                >
+                  <TrendingUp className="w-4 h-4 mr-2" /> Project Development
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  asChild
+                >
+                  <Link href="/become-supplier" className="flex items-center">
+                    <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
+            {/* Dark Theme Toggle */}
             <Button
               variant="ghost"
+              size="icon"
+              onClick={() => {
+                const newTheme = (backgroundColor === 'white' || backgroundColor === 'gray') ? 'dark' : 'white'
+                setBackgroundColor(newTheme)
+              }}
               className={cn(
                 "hidden sm:flex items-center gap-1",
                 darkHeaderFooterClasses.buttonGhostText,
                 darkHeaderFooterClasses.buttonGhostHoverBg,
               )}
+              title={(backgroundColor === 'white' || backgroundColor === 'gray') ? 'Switch to dark theme' : 'Switch to light theme'}
+              suppressHydrationWarning
             >
-              <Headphones className="w-5 h-5" />
-              <span className="hidden sm:inline">Support</span>
-            </Button>
-            <Button
-              variant="ghost"
-              className={cn(
-                "hidden sm:flex items-center gap-1",
-                darkHeaderFooterClasses.buttonGhostText,
-                darkHeaderFooterClasses.buttonGhostHoverBg,
+              {(backgroundColor === 'white' || backgroundColor === 'gray') ? (
+                <>
+                  <Moon className="w-5 h-5" />
+                  <span className="hidden sm:inline" suppressHydrationWarning>Dark</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-5 h-5" />
+                  <span className="hidden sm:inline" suppressHydrationWarning>Light</span>
+                </>
               )}
-            >
-              <MessageSquareText className="w-5 h-5" />
-              <span className="hidden sm:inline">Live Chat</span>
             </Button>
+            
             <Button
               variant="ghost"
               size="icon"
@@ -2566,10 +3115,10 @@ export default function ProductDetailPage() {
         </div>
       )}
 
-      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-6 xl:px-8", themeClasses.mainBg, !fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
+      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-12 xl:px-16 2xl:px-20", themeClasses.mainBg, !fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
         {/* Skeleton Loading State */}
         {isLoading || isOptimizedLoading ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-12 xl:gap-16">
             {/* Product Image Gallery Skeleton */}
             <ProductImageSkeleton />
             
@@ -2585,66 +3134,190 @@ export default function ProductDetailPage() {
           </div>
         ) : (
           <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 xl:gap-12">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-4 lg:gap-4 xl:gap-6">
           {/* Product Image Gallery */}
           <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:gap-6">
-            {/* Thumbnail Gallery (Left on LG screens, Top on SM screens) */}
-            <div className="flex flex-col gap-2">
-              
-            <div
-              className={cn(
-                "flex flex-row lg:flex-col gap-2 lg:max-h-[500px] lg:w-24 xl:w-28 pb-2 lg:pb-0",
-                "transition-all duration-300 ease-in-out", // Add transition
-                isMainImageFocused
-                  ? "opacity-20 scale-90 pointer-events-none"
-                  : "opacity-100 scale-100 pointer-events-auto",
-              )}
-            >
-              {thumbnailImages.map((imgUrl, index) => (
-                <Button
-                  key={index}
-                  variant="outline"
-                  size="icon"
-                  className={cn(
-                    "relative flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 lg:w-full lg:h-auto aspect-square overflow-hidden rounded-md border",
-                    mainImage === imgUrl ? "border-blue-500 ring-2 ring-blue-500" : themeClasses.cardBorder,
-                    cn(themeClasses.cardBg, "hover:bg-opacity-80"),
-                  )}
-                  onClick={() => {
-                    setMainImage(imgUrl)
-                    setIsManualImageSelection(true)
-                    setMainViewMode('image') // Reset to image view when thumbnail is clicked
-                    setShouldAutoplayVideo(false)
-                  }}
-                >
-                  {imgUrl && (
-                    <>
-                    <LazyImage
-                      src={imgUrl}
-                      alt={`Thumbnail ${index + 1}`}
-                      fill
-                      sizes="(max-width: 640px) 64px, (max-width: 768px) 80px, 100px"
-                      className="object-contain"
-                      priority={index === 0} // Priority for first thumbnail
-                      quality={80}
-                    />
-                    </>
-                  )}
-                  <span className="sr-only">
-                    {`Variant image ${index + 1} of ${product.name}`}
-                  </span>
-                </Button>
-              ))}
+            {/* Mobile: Horizontal Thumbnails (Top on SM screens) */}
+            <div className="flex flex-col gap-2 lg:hidden">
+              <div
+                className={cn(
+                  "flex flex-row gap-2 pb-2 overflow-x-auto",
+                  "scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]",
+                  "transition-all duration-300 ease-in-out",
+                  isMainImageFocused
+                    ? "opacity-20 scale-90 pointer-events-none"
+                    : "opacity-100 scale-100 pointer-events-auto",
+                )}
+              >
+                {thumbnailImages.map((imgUrl, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    size="icon"
+                    className={cn(
+                      "relative flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 aspect-square overflow-hidden rounded-md border",
+                      selectedThumbnailIndex === index ? "border-black ring-1 ring-blue-500" : "border-black/30",
+                      cn(themeClasses.cardBg, "hover:bg-opacity-80"),
+                    )}
+                    onClick={() => {
+                      setMainImage(imgUrl)
+                      setSelectedThumbnailIndex(index)
+                      setIsManualImageSelection(true)
+                      setMainViewMode('image')
+                      setShouldAutoplayVideo(false)
+                    }}
+                  >
+                    {imgUrl && (
+                      <LazyImage
+                        src={imgUrl}
+                        alt={`Thumbnail ${index + 1}`}
+                        fill
+                        sizes="(max-width: 640px) 64px, (max-width: 768px) 80px, 100px"
+                        className="object-contain"
+                        priority={index === 0}
+                        quality={80}
+                      />
+                    )}
+                    <span className="sr-only">
+                      {`Variant image ${index + 1} of ${product.name}`}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Desktop: Blue Background Container with Thumbnails (Left on LG screens) */}
+            <div className="hidden lg:flex flex-col gap-2">
+              <div
+                className={cn(
+                  "bg-transparent rounded-lg flex-shrink-0 relative",
+                  "lg:w-24 xl:w-28 lg:h-[550px]",
+                  "flex flex-col gap-2 p-2",
+                  "overflow-y-auto",
+                  "scrollbar-hide",
+                  "[&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]",
+                  "shadow-[inset_0_0_20px_rgba(0,0,0,0.3),0_20px_20px_-10px_rgba(0,0,0,0.4)] dark:shadow-[inset_0_0_20px_rgba(255,255,255,0.3),0_20px_20px_-10px_rgba(255,255,255,0.4)]",
+                  "transition-all duration-300 ease-in-out",
+                  isMainImageFocused
+                    ? "opacity-20 scale-90 pointer-events-none"
+                    : "opacity-100 scale-100 pointer-events-auto",
+                )}
+                style={{
+                  maskImage: 'linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%)',
+                  WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%)',
+                }}
+              >
+                {thumbnailImages.map((imgUrl, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    size="icon"
+                    className={cn(
+                      "relative flex-shrink-0 w-full lg:h-auto aspect-square overflow-hidden rounded-md border",
+                      selectedThumbnailIndex === index ? "border-black ring-1 ring-black" : "border-black/30",
+                      "bg-white/10 hover:bg-white/20 transition-colors",
+                    )}
+                    onClick={() => {
+                      setMainImage(imgUrl)
+                      setSelectedThumbnailIndex(index)
+                      setIsManualImageSelection(true)
+                      setMainViewMode('image')
+                      setShouldAutoplayVideo(false)
+                    }}
+                  >
+                    {imgUrl && (
+                      <LazyImage
+                        src={imgUrl}
+                        alt={`Thumbnail ${index + 1}`}
+                        fill
+                        sizes="(max-width: 640px) 64px, (max-width: 768px) 80px, 100px"
+                        className="object-contain"
+                        priority={index === 0}
+                        quality={80}
+                      />
+                    )}
+                    <span className="sr-only">
+                      {`Variant image ${index + 1} of ${product.name}`}
+                    </span>
+                  </Button>
+                ))}
               </div>
             </div>
 
             {/* Main Product Image (Right on LG screens, Bottom on SM screens) */}
-            <div className="flex-1 flex flex-col gap-3 sm:gap-4">
+            <div className="flex-1 flex flex-col gap-3 sm:gap-4 items-center lg:items-start">
+              {/* Supplier Company Name with Logo */}
+              <div className="flex flex-col gap-1 mb-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {(supplierInfo?.companyLogo || displayLogo) && (
+                    <Image
+                      src={supplierInfo?.companyLogo || displayLogo}
+                      alt={`${supplierInfo?.companyName || 'Honic Company Limited'} Logo`}
+                      width={20}
+                      height={20}
+                      className="w-5 h-5 object-contain flex-shrink-0"
+                    />
+                  )}
+                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                    {supplierInfo?.companyName || 'Honic Company Limited'}
+                  </span>
+                  {/* Verified Badge - Show if verified */}
+                  {supplierInfo?.isVerified && (
+                    <div className="flex items-center gap-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 rounded">
+                      <CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" />
+                      <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Verified</span>
+                    </div>
+                  )}
+                  {/* View Seller Products - Mobile: Inline, Desktop: Link */}
+                  {supplierInfo?.supplierId && (
+                    <>
+                      <span className="text-xs text-gray-600 dark:text-gray-400 sm:hidden">
+                        ({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'}) view
+                      </span>
+                      <Link
+                        href={`/products?supplier=${supplierInfo.supplierId}`}
+                        className="hidden sm:inline-flex text-xs text-blue-600 dark:text-blue-400 hover:underline items-center gap-1 ml-1"
+                      >
+                        <span>({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'})</span>
+                        <span>view seller products</span>
+                      </Link>
+                    </>
+                  )}
+                </div>
+                {/* Always show rating and detail sentence section if supplier info exists */}
+                {supplierInfo && (
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    {/* Company Rating - Show even if 0 or null */}
+                    <div className="flex items-center gap-0.5">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star
+                          key={i}
+                          className={`w-3 h-3 ${
+                            supplierInfo.rating && supplierInfo.rating > 0 && i < Math.floor(supplierInfo.rating)
+                              ? "fill-yellow-400 text-yellow-400"
+                              : "text-gray-300 dark:text-gray-600"
+                          }`}
+                        />
+                      ))}
+                      <span className="font-medium ml-0.5">{supplierInfo.rating || 0}</span>
+                      {supplierInfo.reviewCount && supplierInfo.reviewCount > 0 && (
+                        <span className="text-gray-400">({supplierInfo.reviewCount >= 1000 ? `${(supplierInfo.reviewCount / 1000).toFixed(1)}k` : supplierInfo.reviewCount})</span>
+                      )}
+                    </div>
+                    <span>|</span>
+                    {/* Small Detail Sentence - Show default if empty */}
+                    <span>{supplierInfo.detailSentence || "Shop quality products with confidence"}</span>
+                  </div>
+                )}
+              </div>
+              
               <div
                 className={cn(
                   "relative aspect-square overflow-hidden rounded-lg border",
                   themeClasses.cardBorder,
                   themeClasses.cardBg,
+                  "max-w-[calc(100%-20px)] max-h-[calc(100%-20px)]",
+                  "w-full mx-auto lg:mx-0",
                 )}
               >
                 {/* Main Image View */}
@@ -2940,8 +3613,8 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* Product Details */}
-          <div className="flex flex-col gap-4">
+          {/* Product Details Container */}
+          <div className="flex flex-col gap-4 h-[650px] overflow-y-scroll scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] rounded-lg p-4">
             <div className="flex items-center gap-2">
               <span className={cn(
                 "text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1",
@@ -2949,12 +3622,22 @@ export default function ProductDetailPage() {
               )}>
                 <Info className="w-3 h-3" /> Generic
               </span>
-              <span className={cn(
-                "text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1",
-                backgroundColor === "white" ? "bg-green-100 text-green-700" : "bg-green-900/50 text-green-300"
-              )}>
-                <CheckCircle className="w-3 h-3" /> Verified Seller
-              </span>
+              {supplierInfo?.isVerified && (
+                <span className={cn(
+                  "text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1",
+                  backgroundColor === "white" ? "bg-green-100 text-green-700" : "bg-green-900/50 text-green-300"
+                )}>
+                  <CheckCircle className="w-3 h-3" /> Verified Seller
+                </span>
+              )}
+              {supplierInfo?.isVerified && supplierInfo.region && (
+                <span className={cn(
+                  "text-xs text-gray-600 dark:text-gray-400 flex items-center gap-1"
+                )}>
+                  <MapPin className="w-3 h-3" />
+                  {supplierInfo.region}
+                </span>
+              )}
             </div>
             <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold", themeClasses.mainText)}>{product.name}</h1>
             
@@ -2983,9 +3666,15 @@ export default function ProductDetailPage() {
               </div>
               <span className={themeClasses.textNeutralSecondary}>{product.rating}</span>
               <span className={cn("hidden sm:inline", themeClasses.textNeutralSecondary)}>|</span>
-              <span className="text-blue-600 hover:underline cursor-pointer">({product.reviews} reviews)</span>
+              <span className="text-blue-600 hover:underline cursor-pointer" onClick={() => setActiveTab("reviews")}>({product.reviews} reviews)</span>
               <span className={cn("hidden sm:inline", themeClasses.textNeutralSecondary)}>|</span>
-              <span className="text-blue-600 hover:underline cursor-pointer">Write a review</span>
+              <span className="text-blue-600 hover:underline cursor-pointer" onClick={() => {
+                if (!isAuthenticated) {
+                  openAuthModal()
+                } else {
+                  setIsReviewModalOpen(true)
+                }
+              }}>Write a review</span>
             </div>
             <div className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
               <span className={themeClasses.textNeutralSecondary}>SKU: {currentSKU}</span>
@@ -2993,8 +3682,19 @@ export default function ProductDetailPage() {
               <span className={themeClasses.textNeutralSecondary}>Model: {currentModel}</span>
               <span className={cn("mx-1 sm:mx-2", themeClasses.textNeutralSecondary)}>|</span>
               <span className={cn("hidden sm:inline", themeClasses.textNeutralSecondary)}>
-                {product.views ? product.views.toLocaleString() : '0'} engineers viewed this today
+                {product.views ? product.views.toLocaleString() : '0'} people viewed this product
               </span>
+              {soldCount && soldCount.soldCount > 0 && (
+                <>
+                  <span className={cn("mx-1 sm:mx-2", themeClasses.textNeutralSecondary)}>|</span>
+                  <span className={cn("hidden sm:inline", themeClasses.textNeutralSecondary)}>
+                    {soldCount.soldCount.toLocaleString()} {soldCount.soldCount === 1 ? 'item' : 'items'} sold
+                    {soldCount.buyersCount !== null && soldCount.buyersCount > 0 && (
+                      <span> to {soldCount.buyersCount.toLocaleString()} {soldCount.buyersCount === 1 ? 'person' : 'people'}</span>
+                    )}
+                  </span>
+                </>
+              )}
             </div>
 
             <div className="mt-4">
@@ -3094,31 +3794,20 @@ export default function ProductDetailPage() {
                     <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
                     Loading stock status...
                   </span>
-                ) : adminProductState.inStock && adminProductState.stockQuantity > 0 ? (
+                ) : productDisplayState.inStock && productDisplayState.stockQuantity > 0 ? (
               <span className="flex items-center gap-1 text-green-600 font-medium">
-                    <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4" /> In Stock ({adminProductState.stockQuantity} available)
+                    <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4" /> In Stock ({productDisplayState.stockQuantity} available)
               </span>
                 ) : (
                   <span className="flex items-center gap-1 text-red-600 font-medium">
                     <X className="w-3 h-3 sm:w-4 sm:h-4" /> Out of Stock
                   </span>
                 )}
-                {/* Admin Edit Button for Stock Status */}
-                {user && (user.role === 'admin' || user.profile?.is_admin) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsStockEditDialogOpen(true)}
-                    className="ml-1 h-6 w-6 p-0 text-gray-400 hover:text-blue-600"
-                  >
-                    <Edit className="w-3 h-3" />
-                  </Button>
-                )}
               </div>
 
               {/* Dynamic Free Delivery Status */}
               <div className="flex items-center gap-1">
-                {adminProductState.freeDelivery ? (
+                {productDisplayState.freeDelivery ? (
                   <span className={cn("flex items-center gap-1 text-green-600 font-medium", themeClasses.textNeutralSecondary)}>
                 <Truck className="w-3 h-3 sm:w-4 sm:h-4" /> Free delivery
               </span>
@@ -3127,22 +3816,11 @@ export default function ProductDetailPage() {
                     <Truck className="w-3 h-3 sm:w-4 sm:h-4" /> Delivery fee applies
                   </span>
                 )}
-                {/* Admin Edit Button for Free Delivery */}
-                {user && (user.role === 'admin' || user.profile?.is_admin) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsFreeDeliveryEditDialogOpen(true)}
-                    className="ml-1 h-6 w-6 p-0 text-gray-400 hover:text-blue-600"
-                  >
-                    <Edit className="w-3 h-3" />
-                  </Button>
-                )}
               </div>
 
               {/* Dynamic Same Day Delivery Status */}
               <div className="flex items-center gap-1">
-                {adminProductState.sameDayDelivery ? (
+                {productDisplayState.sameDayDelivery ? (
                   <span className={cn("flex items-center gap-1 text-blue-600 font-medium", themeClasses.textNeutralSecondary)}>
                 <CalendarClock className="w-3 h-3 sm:w-4 sm:h-4" /> Same day delivery available
               </span>
@@ -3150,17 +3828,6 @@ export default function ProductDetailPage() {
                   <span className={cn("flex items-center gap-1 text-gray-500", themeClasses.textNeutralSecondary)}>
                     <CalendarClock className="w-3 h-3 sm:w-4 sm:h-4" /> Standard delivery
                   </span>
-                )}
-                {/* Admin Edit Button for Same Day Delivery */}
-                {user && (user.role === 'admin' || user.profile?.is_admin) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsSameDayDeliveryEditDialogOpen(true)}
-                    className="ml-1 h-6 w-6 p-0 text-gray-400 hover:text-blue-600"
-                  >
-                    <Edit className="w-3 h-3" />
-                  </Button>
                 )}
               </div>
             </div>
@@ -3192,6 +3859,26 @@ export default function ProductDetailPage() {
                   types.push(variant.primary_attribute)
                 }
                 
+                // Extract ALL attributes from primary_values (for suppliers with multiple primary attributes)
+                if (variant.primary_values && Array.isArray(variant.primary_values)) {
+                  variant.primary_values.forEach((pv: any) => {
+                    const attr = pv.attribute || pv.attributeName
+                    if (attr && typeof attr === 'string' && !types.includes(attr)) {
+                      types.push(attr)
+                    }
+                  })
+                }
+                
+                // Also check primaryValues (camelCase format)
+                if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
+                  variant.primaryValues.forEach((pv: any) => {
+                    const attr = pv.attribute || pv.attributeName
+                    if (attr && typeof attr === 'string' && !types.includes(attr)) {
+                      types.push(attr)
+                    }
+                  })
+                }
+                
                 return types
               }, []) || []
 
@@ -3214,13 +3901,31 @@ export default function ProductDetailPage() {
                   if (variant.attributes && variant.attributes[type]) {
                     values.add(variant.attributes[type])
                   }
-                  // Also check primary_values and multi_values
+                  // Also check primary_values - filter by attribute type
                   if (variant.primary_values && Array.isArray(variant.primary_values)) {
                     variant.primary_values.forEach((val: any) => {
-                      if (typeof val === 'string') {
-                        values.add(val)
-                      } else if (val && val.value) {
-                        values.add(val.value)
+                      // Check if this primary_value belongs to the current attribute type
+                      const valAttribute = val.attribute || val.attributeName
+                      if (valAttribute === type) {
+                        if (typeof val === 'string') {
+                          values.add(val)
+                        } else if (val && val.value) {
+                          values.add(val.value)
+                        }
+                      }
+                    })
+                  }
+                  // Also check primaryValues (camelCase format)
+                  if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
+                    variant.primaryValues.forEach((val: any) => {
+                      // Check if this primaryValue belongs to the current attribute type
+                      const valAttribute = val.attribute || val.attributeName
+                      if (valAttribute === type) {
+                        if (typeof val === 'string') {
+                          values.add(val)
+                        } else if (val && val.value) {
+                          values.add(val.value)
+                        }
                       }
                     })
                   }
@@ -3291,16 +3996,35 @@ export default function ProductDetailPage() {
                               const isAvailable = isAttributeValueAvailable(type, value)
                               
                               // Check if this is a primary attribute with price
-                              const isPrimary = displayProduct.variantConfig?.primaryAttribute === type
+                              const isPrimary = displayProduct.variantConfig?.primaryAttribute === type ||
+                                displayProduct.variantConfig?.primaryAttributes?.includes(type)
                               let actualPrice = null
                               let hasPrice = false
                               
                               if (isPrimary) {
-                                const variantWithThisValue = displayProduct.variants?.find((v: any) => 
-                                  v.primaryValues?.some((pv: any) => pv.value === value)
-                                )
+                                const variantWithThisValue = displayProduct.variants?.find((v: any) => {
+                                  // Check primaryValues (camelCase)
+                                  if (v.primaryValues && Array.isArray(v.primaryValues)) {
+                                    return v.primaryValues.some((pv: any) => 
+                                      pv.value === value && (pv.attribute === type || pv.attributeName === type)
+                                    )
+                                  }
+                                  // Check primary_values (snake_case)
+                                  if (v.primary_values && Array.isArray(v.primary_values)) {
+                                    return v.primary_values.some((pv: any) => 
+                                      (typeof pv === 'object' && pv.value === value && (pv.attribute === type || pv.attributeName === type)) ||
+                                      (typeof pv === 'string' && pv === value)
+                                    )
+                                  }
+                                  return false
+                                })
                                 if (variantWithThisValue) {
-                                  const primaryValue = variantWithThisValue.primaryValues?.find((pv: any) => pv.value === value) as { attribute: string; value: string; price?: string } | undefined
+                                  // Find the matching primaryValue for this attribute type
+                                  const primaryValue = (variantWithThisValue.primaryValues || variantWithThisValue.primary_values || [])
+                                    .find((pv: any) => {
+                                      if (typeof pv === 'string') return pv === value
+                                      return pv.value === value && (pv.attribute === type || pv.attributeName === type)
+                                    }) as { attribute: string; value: string; price?: string } | undefined
                                   if (primaryValue && primaryValue.price) {
                                     actualPrice = parseFloat(primaryValue.price)
                                     hasPrice = true
@@ -3351,7 +4075,8 @@ export default function ProductDetailPage() {
                 {displayProduct.variantConfig?.type === 'primary-dependent' && (
                   <div className="space-y-2">
                     {attributeTypes.map((type) => {
-                      const isPrimary = type === displayProduct.variantConfig?.primaryAttribute
+                      const isPrimary = type === displayProduct.variantConfig?.primaryAttribute ||
+                        displayProduct.variantConfig?.primaryAttributes?.includes(type)
                       
                       return (
                         <div key={type} className="space-y-2">
@@ -3363,7 +4088,8 @@ export default function ProductDetailPage() {
                           </Label>
                           <div className="flex items-center gap-1 sm:gap-2 mt-2 flex-wrap">
                                                       {getAttributeValues(type).map((value) => {
-                            const isPrimary = type === displayProduct.variantConfig?.primaryAttribute
+                            const isPrimary = type === displayProduct.variantConfig?.primaryAttribute ||
+                              displayProduct.variantConfig?.primaryAttributes?.includes(type)
                             // SINGLE SELECTION ONLY: Check if this value is selected
                             const isSelected = selectedAttributes[type] === value
                             const isAvailable = isAttributeValueAvailable(type, value)
@@ -3373,17 +4099,33 @@ export default function ProductDetailPage() {
                             let hasPrice = false
                               
                               if (isPrimary) {
-                                const variantWithThisValue = displayProduct.variants?.find((v: any) => 
-                                  v.primaryValues?.some((pv: any) => pv.value === value)
-                                )
+                                const variantWithThisValue = displayProduct.variants?.find((v: any) => {
+                                  // Check primaryValues (camelCase)
+                                  if (v.primaryValues && Array.isArray(v.primaryValues)) {
+                                    return v.primaryValues.some((pv: any) => 
+                                      pv.value === value && (pv.attribute === type || pv.attributeName === type)
+                                    )
+                                  }
+                                  // Check primary_values (snake_case)
+                                  if (v.primary_values && Array.isArray(v.primary_values)) {
+                                    return v.primary_values.some((pv: any) => 
+                                      (typeof pv === 'object' && pv.value === value && (pv.attribute === type || pv.attributeName === type)) ||
+                                      (typeof pv === 'string' && pv === value)
+                                    )
+                                  }
+                                  return false
+                                })
                                 if (variantWithThisValue) {
-                                  const primaryValue = variantWithThisValue.primaryValues?.find((pv: any) => pv.value === value) as { attribute: string; value: string; price?: string } | undefined
+                                  // Find the matching primaryValue for this attribute type
+                                  const primaryValue = (variantWithThisValue.primaryValues || variantWithThisValue.primary_values || [])
+                                    .find((pv: any) => {
+                                      if (typeof pv === 'string') return pv === value
+                                      return pv.value === value && (pv.attribute === type || pv.attributeName === type)
+                                    }) as { attribute: string; value: string; price?: string } | undefined
                                   if (primaryValue && primaryValue.price) {
                                     actualPrice = parseFloat(primaryValue.price)
                                     hasPrice = true
-                                  } else {
                                   }
-                                } else {
                                 }
                               }
                               
@@ -3449,18 +4191,37 @@ export default function ProductDetailPage() {
                               // SINGLE SELECTION ONLY: Check if this value is selected
                               const isSelected = selectedAttributes[type] === value
                               const isAvailable = isAttributeValueAvailable(type, value)
-                              const isPrimary = displayProduct.variantConfig?.primaryAttributes?.includes(type)
+                              const isPrimary = displayProduct.variantConfig?.primaryAttribute === type ||
+                                displayProduct.variantConfig?.primaryAttributes?.includes(type)
                               
                               // For primary attributes, find the price from primaryValues
                               let actualPrice = null
                               let hasPrice = false
                               
                               if (isPrimary) {
-                                const variantWithThisValue = displayProduct.variants?.find((v: any) => 
-                                  v.primaryValues?.some((pv: any) => pv.value === value)
-                                )
+                                const variantWithThisValue = displayProduct.variants?.find((v: any) => {
+                                  // Check primaryValues (camelCase)
+                                  if (v.primaryValues && Array.isArray(v.primaryValues)) {
+                                    return v.primaryValues.some((pv: any) => 
+                                      pv.value === value && (pv.attribute === type || pv.attributeName === type)
+                                    )
+                                  }
+                                  // Check primary_values (snake_case)
+                                  if (v.primary_values && Array.isArray(v.primary_values)) {
+                                    return v.primary_values.some((pv: any) => 
+                                      (typeof pv === 'object' && pv.value === value && (pv.attribute === type || pv.attributeName === type)) ||
+                                      (typeof pv === 'string' && pv === value)
+                                    )
+                                  }
+                                  return false
+                                })
                                 if (variantWithThisValue) {
-                                  const primaryValue = variantWithThisValue.primaryValues?.find((pv: any) => pv.value === value) as { attribute: string; value: string; price?: string } | undefined
+                                  // Find the matching primaryValue for this attribute type
+                                  const primaryValue = (variantWithThisValue.primaryValues || variantWithThisValue.primary_values || [])
+                                    .find((pv: any) => {
+                                      if (typeof pv === 'string') return pv === value
+                                      return pv.value === value && (pv.attribute === type || pv.attributeName === type)
+                                    }) as { attribute: string; value: string; price?: string } | undefined
                                   if (primaryValue && primaryValue.price) {
                                     actualPrice = parseFloat(primaryValue.price)
                                     hasPrice = true
@@ -3820,7 +4581,9 @@ export default function ProductDetailPage() {
               <Button
                 variant="outline"
                 className={cn(
-                  "flex items-center gap-2 group border hover:border-white/20 hover:bg-transparent",
+                  "flex items-center justify-center gap-1 sm:gap-2 group border hover:border-white/20 hover:bg-transparent",
+                  "min-w-0 px-1 sm:px-2 py-2 text-[10px] sm:text-xs",
+                  "whitespace-normal break-words",
                   backgroundColor === "dark" 
                     ? "text-neutral-400 hover:text-yellow-500 border-neutral-600" 
                     : "hover:bg-neutral-100 bg-transparent text-neutral-600 border-neutral-300",
@@ -3829,21 +4592,25 @@ export default function ProductDetailPage() {
                 onClick={handleAddToWishlist}
               >
                 <Heart className={cn(
-                  "w-4 h-4 group-hover:text-yellow-500 transition-colors",
+                  "w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0 group-hover:text-yellow-500 transition-colors",
                   backgroundColor === "dark" && "group-hover:text-yellow-500",
                   isProductInWishlist && "fill-red-500 text-red-500"
                 )} /> 
                 <span className={cn(
-                  "group-hover:text-yellow-500 transition-colors",
+                  "group-hover:text-yellow-500 transition-colors text-center leading-tight",
                   backgroundColor === "dark" && "group-hover:text-yellow-500"
                 )}>
-                  {isProductInWishlist ? "Remove from Wishlist" : "Add to Wishlist"} ({wishlistItems.length})
+                  <span className="hidden sm:inline">{isProductInWishlist ? "Remove from Wishlist" : "Add to Wishlist"}</span>
+                  <span className="sm:hidden">{isProductInWishlist ? "Remove" : "Wishlist"}</span>
+                  <span className="whitespace-nowrap"> ({wishlistItems.length})</span>
                 </span>
               </Button>
               <Button
                 variant="outline"
                 className={cn(
-                  "flex items-center gap-2 group border hover:border-white/20 hover:bg-transparent",
+                  "flex items-center justify-center gap-1 sm:gap-2 group border hover:border-white/20 hover:bg-transparent",
+                  "min-w-0 px-1 sm:px-2 py-2 text-[10px] sm:text-xs",
+                  "whitespace-normal break-words",
                   backgroundColor === "dark" 
                     ? "text-neutral-400 hover:text-yellow-500 border-neutral-600" 
                     : "hover:bg-neutral-100 bg-transparent text-neutral-600 border-neutral-300",
@@ -3852,15 +4619,17 @@ export default function ProductDetailPage() {
                 onClick={handleSaveForLater}
               >
                 <Clock className={cn(
-                  "w-4 h-4 group-hover:text-yellow-500 transition-colors",
+                  "w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0 group-hover:text-yellow-500 transition-colors",
                   backgroundColor === "dark" && "group-hover:text-yellow-500",
                   isProductInSavedLater && "fill-blue-500 text-blue-500"
                 )} /> 
                 <span className={cn(
-                  "group-hover:text-yellow-500 transition-colors",
+                  "group-hover:text-yellow-500 transition-colors text-center leading-tight",
                   backgroundColor === "dark" && "group-hover:text-yellow-500"
                 )}>
-                  {isProductInSavedLater ? "Remove from Saved" : "Save for Later"} ({savedLaterItems.length})
+                  <span className="hidden sm:inline">{isProductInSavedLater ? "Remove from Saved" : "Save for Later"}</span>
+                  <span className="sm:hidden">{isProductInSavedLater ? "Remove" : "Save"}</span>
+                  <span className="whitespace-nowrap"> ({savedLaterItems.length})</span>
                 </span>
               </Button>
               <Dialog open={isGiftWrapDialogOpen} onOpenChange={setIsGiftWrapDialogOpen}>
@@ -3868,18 +4637,20 @@ export default function ProductDetailPage() {
                   <Button
                     variant="outline"
                     className={cn(
-                      "flex items-center gap-2 group border hover:border-white/20 hover:bg-transparent",
+                      "flex items-center justify-center gap-1 sm:gap-2 group border hover:border-white/20 hover:bg-transparent",
+                      "min-w-0 px-1 sm:px-2 py-2 text-[10px] sm:text-xs",
+                      "whitespace-normal",
                       backgroundColor === "dark" 
                         ? "text-neutral-400 hover:text-yellow-500 border-neutral-600" 
                         : "hover:bg-neutral-100 bg-transparent text-neutral-600 border-neutral-300"
                     )}
                   >
                     <GiftIcon className={cn(
-                      "w-4 h-4 group-hover:text-yellow-500 transition-colors",
+                      "w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0 group-hover:text-yellow-500 transition-colors",
                       backgroundColor === "dark" && "group-hover:text-yellow-500"
                     )} /> 
                     <span className={cn(
-                      "group-hover:text-yellow-500 transition-colors",
+                      "group-hover:text-yellow-500 transition-colors text-center leading-tight",
                       backgroundColor === "dark" && "group-hover:text-yellow-500"
                     )}>
                       Gift Wrap
@@ -3933,18 +4704,20 @@ export default function ProductDetailPage() {
                   <Button
                     variant="outline"
                     className={cn(
-                      "flex items-center gap-2 group border hover:border-white/20 hover:bg-transparent",
+                      "flex items-center justify-center gap-1 sm:gap-2 group border hover:border-white/20 hover:bg-transparent",
+                      "min-w-0 px-1 sm:px-2 py-2 text-[10px] sm:text-xs",
+                      "whitespace-normal",
                       backgroundColor === "dark" 
                         ? "text-neutral-400 hover:text-yellow-500 border-neutral-600" 
                         : "hover:bg-neutral-100 bg-transparent text-neutral-600 border-neutral-300"
                     )}
                   >
                     <SettingsIcon className={cn(
-                      "w-4 h-4 group-hover:text-yellow-500 transition-colors",
+                      "w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0 group-hover:text-yellow-500 transition-colors",
                       backgroundColor === "dark" && "group-hover:text-yellow-500"
                     )} /> 
                     <span className={cn(
-                      "group-hover:text-yellow-500 transition-colors",
+                      "group-hover:text-yellow-500 transition-colors text-center leading-tight",
                       backgroundColor === "dark" && "group-hover:text-yellow-500"
                     )}>
                       Customize
@@ -4103,12 +4876,143 @@ export default function ProductDetailPage() {
 
           {activeTab === "reviews" && (
             <div className="bg-transparent p-4 sm:p-6">
-              <h2 className={cn("text-xl font-bold mb-4", themeClasses.mainText)}>
-                Customer Reviews ({product.reviews})
-              </h2>
-              <p className={cn("text-sm leading-relaxed", themeClasses.textNeutralSecondary)}>
-                No reviews yet. Be the first to write a review!
-              </p>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className={cn("text-xl font-bold", themeClasses.mainText)}>
+                  Customer Reviews ({product.reviews})
+                </h2>
+                {isAuthenticated && (
+                  <Button
+                    onClick={() => setIsReviewModalOpen(true)}
+                    className="text-sm"
+                    size="sm"
+                  >
+                    Write a Review
+                  </Button>
+                )}
+              </div>
+              
+              {reviewsLoading ? (
+                <div className="text-center py-8">
+                  <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Loading reviews...</p>
+                </div>
+              ) : reviews.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className={cn("text-sm leading-relaxed mb-4", themeClasses.textNeutralSecondary)}>
+                    No reviews yet. Be the first to write a review!
+                  </p>
+                  {!isAuthenticated && (
+                    <Button
+                      onClick={() => openAuthModal()}
+                      className="text-sm"
+                      size="sm"
+                    >
+                      Sign in to Write a Review
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {reviews.map((review) => (
+                    <div key={review.id} className={cn("border-b pb-6 last:border-b-0", themeClasses.cardBorder)}>
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                            {review.userAvatar ? (
+                              <Image src={review.userAvatar} alt={review.userName} width={40} height={40} className="w-10 h-10 rounded-full" />
+                            ) : (
+                              <User className="w-5 h-5 text-gray-500" />
+                            )}
+                          </div>
+                          <div>
+                            <p className={cn("font-medium text-sm", themeClasses.mainText)}>{review.userName}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex items-center gap-0.5">
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                  <Star
+                                    key={i}
+                                    className={`w-3 h-3 ${
+                                      i < review.rating
+                                        ? "fill-yellow-400 text-yellow-400"
+                                        : "text-gray-300 dark:text-gray-600"
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                              <span className={cn("text-xs", themeClasses.textNeutralSecondary)}>
+                                {new Date(review.date).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      {review.comment && (
+                        <p className={cn("text-sm leading-relaxed mb-3", themeClasses.mainText)}>
+                          {review.comment}
+                        </p>
+                      )}
+                      {review.images && review.images.length > 0 && (
+                        <div className="flex gap-2 mb-3 flex-wrap">
+                          {review.images.map((img: string, idx: number) => (
+                            <Image
+                              key={idx}
+                              src={img}
+                              alt={`Review image ${idx + 1}`}
+                              width={80}
+                              height={80}
+                              className="w-20 h-20 object-cover rounded"
+                            />
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-4">
+                        <button
+                          className={cn("text-xs flex items-center gap-1 hover:text-blue-600 transition-colors", themeClasses.textNeutralSecondary)}
+                          onClick={async () => {
+                            if (!isAuthenticated) {
+                              openAuthModal()
+                              return
+                            }
+                            // Toggle helpful vote
+                            try {
+                              const { createClient } = await import('@supabase/supabase-js')
+                              const supabase = createClient(
+                                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                                process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+                              )
+                              const { data: { session } } = await supabase.auth.getSession()
+                              
+                              if (!session) {
+                                openAuthModal()
+                                return
+                              }
+                              
+                              const response = await fetch(`/api/products/${product.id}/reviews/${review.id}/helpful`, {
+                                method: 'POST',
+                                headers: {
+                                  'Authorization': `Bearer ${session.access_token}`
+                                }
+                              })
+                              if (response.ok) {
+                                // Refetch reviews
+                                const reviewsResponse = await fetch(`/api/products/${product.id}/reviews`)
+                                if (reviewsResponse.ok) {
+                                  const data = await reviewsResponse.json()
+                                  setReviews(data.reviews || [])
+                                }
+                              }
+                            } catch (error) {
+                              console.error('Error toggling helpful:', error)
+                            }
+                          }}
+                        >
+                          <HelpCircle className="w-3 h-3" />
+                          Helpful ({review.helpful})
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -4883,132 +5787,6 @@ export default function ProductDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Admin Edit Dialogs */}
-      
-      {/* Stock Edit Dialog */}
-      <Dialog open={isStockEditDialogOpen} onOpenChange={setIsStockEditDialogOpen}>
-        <DialogContent className={cn("sm:max-w-md", backgroundColor === "dark" ? "bg-gray-900 border-gray-700" : "bg-white border-gray-200")}>
-          <DialogHeader>
-            <DialogTitle className={themeClasses.mainText}>Edit Stock Status</DialogTitle>
-            <DialogDescription className={themeClasses.textNeutralSecondary}>
-              Manage stock quantity and availability for this product.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="stock-quantity" className={cn("text-sm font-medium", themeClasses.mainText)}>
-                Stock Quantity
-              </Label>
-              <Input
-                id="stock-quantity"
-                type="number"
-                min="0"
-                value={adminProductState.stockQuantity}
-                onChange={(e) => updateAdminProductState('stockQuantity', parseInt(e.target.value) || 0)}
-                className={cn("focus:border-blue-500 focus:ring-blue-500", themeClasses.cardBg, themeClasses.cardBorder, themeClasses.mainText)}
-                placeholder="Enter stock quantity"
-              />
-              <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                Current status: {adminProductState.inStock && adminProductState.stockQuantity > 0 ? 
-                  `In Stock (${adminProductState.stockQuantity} available)` : 'Out of Stock'}
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsStockEditDialogOpen(false)}
-              className="mr-2"
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Free Delivery Edit Dialog */}
-      <Dialog open={isFreeDeliveryEditDialogOpen} onOpenChange={setIsFreeDeliveryEditDialogOpen}>
-        <DialogContent className={cn("sm:max-w-md", backgroundColor === "dark" ? "bg-gray-900 border-gray-700" : "bg-white border-gray-200")}>
-          <DialogHeader>
-            <DialogTitle className={themeClasses.mainText}>Edit Free Delivery</DialogTitle>
-            <DialogDescription className={themeClasses.textNeutralSecondary}>
-              Enable or disable free delivery for this product.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="flex items-center space-x-3">
-              <Checkbox
-                id="free-delivery"
-                checked={adminProductState.freeDelivery}
-                onCheckedChange={(checked) => updateAdminProductState('freeDelivery', checked)}
-              />
-              <Label htmlFor="free-delivery" className={cn("text-sm font-medium", themeClasses.mainText)}>
-                Enable Free Delivery
-              </Label>
-            </div>
-            <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-              {adminProductState.freeDelivery ? 
-                'Free delivery is enabled for this product.' : 
-                'Standard delivery fees will apply to this product.'}
-            </p>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsFreeDeliveryEditDialogOpen(false)}
-              className="mr-2"
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Same Day Delivery Edit Dialog */}
-      <Dialog open={isSameDayDeliveryEditDialogOpen} onOpenChange={setIsSameDayDeliveryEditDialogOpen}>
-        <DialogContent className={cn("sm:max-w-md", backgroundColor === "dark" ? "bg-gray-900 border-gray-700" : "bg-white border-gray-200")}>
-          <DialogHeader>
-            <DialogTitle className={themeClasses.mainText}>Edit Same Day Delivery</DialogTitle>
-            <DialogDescription className={themeClasses.textNeutralSecondary}>
-              Enable or disable same day delivery for this product.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="flex items-center space-x-3">
-              <Checkbox
-                id="same-day-delivery"
-                checked={adminProductState.sameDayDelivery}
-                onCheckedChange={(checked) => updateAdminProductState('sameDayDelivery', checked)}
-              />
-              <Label htmlFor="same-day-delivery" className={cn("text-sm font-medium", themeClasses.mainText)}>
-                Enable Same Day Delivery
-              </Label>
-            </div>
-            <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-              {adminProductState.sameDayDelivery ? 
-                'Same day delivery is available for this product.' : 
-                'Same day delivery is not available for this product.'}
-            </p>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsSameDayDeliveryEditDialogOpen(false)}
-              className="mr-2"
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Admin Controls removed */}
       
       {/* Search Modal */}
       <SearchModal
@@ -5027,6 +5805,136 @@ export default function ProductDetailPage() {
         onClose={() => setIsQuantityLimitModalOpen(false)}
         productName={product?.name}
       />
+
+      {/* Review Modal */}
+      <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Write a Review</DialogTitle>
+            <DialogDescription>
+              Share your experience with {product?.name}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div>
+              <Label>Rating</Label>
+              <div className="flex items-center gap-2 mt-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setReviewFormData({ ...reviewFormData, rating: i + 1 })}
+                    className="focus:outline-none"
+                  >
+                    <Star
+                      className={`w-8 h-8 ${
+                        i < reviewFormData.rating
+                          ? "fill-yellow-400 text-yellow-400"
+                          : "text-gray-300 dark:text-gray-600"
+                      }`}
+                    />
+                  </button>
+                ))}
+                {reviewFormData.rating > 0 && (
+                  <span className="ml-2 text-sm text-gray-500">
+                    {reviewFormData.rating} {reviewFormData.rating === 1 ? 'star' : 'stars'}
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            <div>
+              <Label htmlFor="review-comment">Your Review</Label>
+              <textarea
+                id="review-comment"
+                className={cn(
+                  "mt-2 w-full min-h-[120px] px-3 py-2 rounded-md border",
+                  themeClasses.cardBorder,
+                  themeClasses.mainText,
+                  "bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                )}
+                placeholder="Share your thoughts about this product..."
+                value={reviewFormData.comment}
+                onChange={(e) => setReviewFormData({ ...reviewFormData, comment: e.target.value })}
+              />
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsReviewModalOpen(false)
+                  setReviewFormData({ rating: 0, comment: '', images: [] })
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (reviewFormData.rating === 0) {
+                    alert('Please select a rating')
+                    return
+                  }
+                  
+                  setSubmittingReview(true)
+                  try {
+                    const { createClient } = await import('@supabase/supabase-js')
+                    const supabase = createClient(
+                      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+                    )
+                    const { data: { session } } = await supabase.auth.getSession()
+                    
+                    if (!session) {
+                      openAuthModal()
+                      return
+                    }
+                    
+                    const response = await fetch(`/api/products/${product?.id}/reviews`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                      },
+                      body: JSON.stringify({
+                        rating: reviewFormData.rating,
+                        comment: reviewFormData.comment,
+                        images: reviewFormData.images
+                      })
+                    })
+                    
+                    if (response.ok) {
+                      // Refetch reviews
+                      const reviewsResponse = await fetch(`/api/products/${product?.id}/reviews`)
+                      if (reviewsResponse.ok) {
+                        const data = await reviewsResponse.json()
+                        setReviews(data.reviews || [])
+                      }
+                      
+                      // Product rating/reviews count will be updated on next page load
+                      
+                      setIsReviewModalOpen(false)
+                      setReviewFormData({ rating: 0, comment: '', images: [] })
+                    } else {
+                      const error = await response.json()
+                      alert(error.message || 'Failed to submit review')
+                    }
+                  } catch (error) {
+                    console.error('Error submitting review:', error)
+                    alert('Failed to submit review. Please try again.')
+                  } finally {
+                    setSubmittingReview(false)
+                  }
+                }}
+                disabled={submittingReview || reviewFormData.rating === 0}
+              >
+                {submittingReview ? 'Submitting...' : 'Submit Review'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* China Import Modal */}
       {showChinaImportModal && (
@@ -5064,6 +5972,14 @@ export default function ProductDetailPage() {
       )}
       
     </div>
+  )
+}
+
+export default function ProductDetailPage() {
+  return (
+    <BuyerRouteGuard>
+      <ProductDetailPageContent />
+    </BuyerRouteGuard>
   )
 }
 

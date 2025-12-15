@@ -294,6 +294,18 @@ export const OTPUtils = {
       maxAttempts: 1,
       type: 'alphanumeric'
     })
+  },
+
+  /**
+   * Generate OTP for password change verification
+   */
+  generatePasswordChangeOTP: (email: string) => {
+    return otpManager.generateOTP(email, 'password-change', {
+      length: 6,
+      expiresIn: 15,
+      maxAttempts: 3,
+      type: 'numeric'
+    })
   }
 } 
  

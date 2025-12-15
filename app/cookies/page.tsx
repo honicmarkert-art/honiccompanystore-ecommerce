@@ -590,9 +590,7 @@ export default function CookiePolicyPage() {
                             <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>Social Media</h5>
                             <ul className={cn("text-sm space-y-1 mb-2", themeClasses.textNeutralSecondary)}>
                               <li>• Facebook - Social sharing and advertising</li>
-                              <li>• Twitter - Social sharing and analytics</li>
                               <li>• Instagram - Social content integration</li>
-                              <li>• LinkedIn - Professional networking features</li>
                             </ul>
                             <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
                               <strong>Opt-out:</strong> Check individual social media platform settings

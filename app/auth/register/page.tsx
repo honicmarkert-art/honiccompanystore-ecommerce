@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/contexts/auth-context"
 import { useTheme } from "@/hooks/use-theme"
-import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, Loader2, CheckCircle, XCircle } from "lucide-react"
+import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, Loader2, CheckCircle, XCircle, Store } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export default function RegisterPage() {
@@ -26,6 +26,18 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [emailExists, setEmailExists] = useState(false)
+  const [checkingEmail, setCheckingEmail] = useState(false)
+  const [emailCheckTimeout, setEmailCheckTimeout] = useState<NodeJS.Timeout | null>(null)
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (emailCheckTimeout) {
+        clearTimeout(emailCheckTimeout)
+      }
+    }
+  }, [emailCheckTimeout])
 
   const { signUp } = useAuth()
   const { themeClasses } = useTheme()
@@ -86,6 +98,27 @@ export default function RegisterPage() {
     
     if (!validateForm()) return
 
+    // Check if email exists before submitting
+    if (emailExists) {
+      setErrors(prev => ({ ...prev, email: 'An account with this email address already exists. Please use a different email or try logging in.' }))
+      return
+    }
+
+    // Final email check before submission
+    try {
+      const emailCheckResponse = await fetch(`/api/auth/check-email?email=${encodeURIComponent(formData.email.toLowerCase().trim())}`)
+      const emailCheckData = await emailCheckResponse.json()
+      
+      if (emailCheckData.exists) {
+        setEmailExists(true)
+        setErrors(prev => ({ ...prev, email: 'An account with this email address already exists. Please use a different email or try logging in.' }))
+        return
+      }
+    } catch (error) {
+      console.error('Error checking email before submission:', error)
+      // Continue with submission if check fails (server will validate)
+    }
+
     setIsSubmitting(true)
     setErrors({})
     
@@ -143,17 +176,38 @@ export default function RegisterPage() {
         </Link>
 
         <Card className="w-full shadow-xl border-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
-          <CardHeader className="text-center space-y-1">
-            <CardTitle className="text-2xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
-              Create Account
-            </CardTitle>
-            <CardDescription className="text-muted-foreground">
-              Join us and start shopping today
-            </CardDescription>
+          <CardHeader className="space-y-1">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <CardTitle className="text-2xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
+                  Create Account
+                </CardTitle>
+                <CardDescription className="text-muted-foreground">
+                  Join us and start shopping today
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2 ml-4">
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs text-muted-foreground">Want to sell?</p>
+                  <p className="text-xs text-muted-foreground">Join as supplier</p>
+                </div>
+                <Link href="/become-supplier">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black whitespace-nowrap"
+                  >
+                    <Store className="mr-1.5 h-3.5 w-3.5" />
+                    Become Supplier
+                  </Button>
+                </Link>
+              </div>
+            </div>
           </CardHeader>
           
           <CardContent className="space-y-4">
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
               {/* Name Field */}
               <div className="space-y-2">
                 <Label htmlFor="name" className="text-sm font-medium">
@@ -163,6 +217,7 @@ export default function RegisterPage() {
                   <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="name"
+                    name="name"
                     type="text"
                     placeholder="Enter your full name"
                     value={formData.name}
@@ -171,6 +226,7 @@ export default function RegisterPage() {
                       "pl-10",
                       errors.name && "border-red-500 focus:border-red-500 focus:ring-red-500"
                     )}
+                    autoComplete="name"
                     disabled={isSubmitting}
                   />
                 </div>
@@ -188,17 +244,66 @@ export default function RegisterPage() {
                   <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="email"
+                    name="email"
                     type="email"
                     placeholder="Enter your email"
                     value={formData.email}
-                    onChange={(e) => handleInputChange("email", e.target.value)}
+                    onChange={async (e) => {
+                      const email = e.target.value
+                      handleInputChange("email", email)
+                      setEmailExists(false)
+                      
+                      // Clear previous timeout
+                      if (emailCheckTimeout) {
+                        clearTimeout(emailCheckTimeout)
+                      }
+                      
+                      // Validate email format first
+                      if (!email || !/\S+@\S+\.\S+/.test(email)) {
+                        return
+                      }
+                      
+                      // Debounce email check (wait 500ms after user stops typing)
+                      const timeout = setTimeout(async () => {
+                        setCheckingEmail(true)
+                        try {
+                          const response = await fetch(`/api/auth/check-email?email=${encodeURIComponent(email.toLowerCase().trim())}`)
+                          const data = await response.json()
+                          
+                          if (data.exists) {
+                            setEmailExists(true)
+                            setErrors(prev => ({ ...prev, email: 'An account with this email address already exists. Please use a different email or try logging in.' }))
+                          } else {
+                            setEmailExists(false)
+                            if (errors.email === 'An account with this email address already exists. Please use a different email or try logging in.') {
+                              setErrors(prev => {
+                                const newErrors = { ...prev }
+                                delete newErrors.email
+                                return newErrors
+                              })
+                            }
+                          }
+                        } catch (error) {
+                          console.error('Error checking email:', error)
+                          // Don't block user if check fails
+                        } finally {
+                          setCheckingEmail(false)
+                        }
+                      }, 500)
+                      
+                      setEmailCheckTimeout(timeout)
+                    }}
                     className={cn(
                       "pl-10",
-                      errors.email && "border-red-500 focus:border-red-500 focus:ring-red-500"
+                      (errors.email || emailExists) && "border-red-500 focus:border-red-500 focus:ring-red-500"
                     )}
+                    autoComplete="email"
                     disabled={isSubmitting}
                   />
                 </div>
+                {checkingEmail && (
+                  <p className="text-xs mt-1 text-muted-foreground">Checking email availability...</p>
+                )}
                 {errors.email && (
                   <p className="text-sm text-red-500">{errors.email}</p>
                 )}
@@ -213,6 +318,7 @@ export default function RegisterPage() {
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="password"
+                    name="new-password"
                     type={showPassword ? "text" : "password"}
                     placeholder="Create a strong password"
                     value={formData.password}
@@ -221,6 +327,8 @@ export default function RegisterPage() {
                       "pl-10 pr-10",
                       errors.password && "border-red-500 focus:border-red-500 focus:ring-red-500"
                     )}
+                    autoComplete="new-password"
+                    data-1p-ignore
                     disabled={isSubmitting}
                   />
                   <Button
@@ -275,6 +383,7 @@ export default function RegisterPage() {
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="confirmPassword"
+                    name="confirm-password"
                     type={showConfirmPassword ? "text" : "password"}
                     placeholder="Confirm your password"
                     value={formData.confirmPassword}
@@ -283,6 +392,8 @@ export default function RegisterPage() {
                       "pl-10 pr-10",
                       errors.confirmPassword && "border-red-500 focus:border-red-500 focus:ring-red-500"
                     )}
+                    autoComplete="new-password"
+                    data-1p-ignore
                     disabled={isSubmitting}
                   />
                   <Button
@@ -321,7 +432,7 @@ export default function RegisterPage() {
                       Terms of Service
                     </Link>{" "}
                     and{" "}
-                    <Link href="/privacy" className="text-blue-600 hover:underline">
+                    <Link href={`/privacy?return=${encodeURIComponent('/auth/register')}`} className="text-blue-600 hover:underline">
                       Privacy Policy
                     </Link>
                   </Label>
@@ -347,8 +458,6 @@ export default function RegisterPage() {
                 )}
               </Button>
             </form>
-
-            <Separator />
 
             {/* Sign In Link */}
             <div className="text-center">

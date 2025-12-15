@@ -23,9 +23,7 @@ import {
   Mail,
   MapPin,
   Facebook,
-  Twitter,
   Instagram,
-  Linkedin,
   Youtube,
   ArrowLeft
 } from 'lucide-react'
@@ -357,18 +355,16 @@ export default function AboutPage() {
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Follow Us</h3>
               <div className="flex justify-center gap-4">
+                <Link href={process.env.NEXT_PUBLIC_FACEBOOK_URL || '/social/facebook'} target="_blank" rel="noopener noreferrer">
                 <Button variant="ghost" size="icon" className="text-gray-600 hover:text-orange-500">
                   <Facebook className="w-5 h-5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-orange-500">
-                  <Twitter className="w-5 h-5" />
-                </Button>
+                </Link>
+                <Link href={process.env.NEXT_PUBLIC_INSTAGRAM_URL || '/social/instagram'} target="_blank" rel="noopener noreferrer">
                 <Button variant="ghost" size="icon" className="text-gray-600 hover:text-orange-500">
                   <Instagram className="w-5 h-5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-orange-500">
-                  <Linkedin className="w-5 h-5" />
-                </Button>
+                </Link>
               </div>
             </div>
             

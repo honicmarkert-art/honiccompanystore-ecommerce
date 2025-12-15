@@ -3,7 +3,7 @@
  */
 
 export interface ProductBadge {
-  type: 'popular' | 'new' | 'discount' | 'free-shipping' | 'none'
+  type: 'popular' | 'new' | 'discount' | 'free-shipping' | 'featured' | 'none'
   text: string
   className: string
   customStyle?: React.CSSProperties
@@ -13,6 +13,7 @@ export interface Product {
   id: number
   reviews?: number
   is_new?: boolean
+  is_featured?: boolean
   updated_at?: string | Date
   price?: number
   originalPrice?: number
@@ -72,8 +73,17 @@ export const isProductPopular = (product: Product, reviewThreshold: number = 100
 /**
  * Get the appropriate badge for a product
  */
-// Get left side badge (Popular vs Free Shipping)
+// Get left side badge (Featured vs Popular vs Free Shipping)
 export const getLeftBadge = (product: Product): ProductBadge => {
+  // Featured has highest priority on left side
+  if (product.is_featured) {
+    return {
+      type: 'featured',
+      text: 'Featured',
+      className: 'bg-yellow-500 text-black text-[8px] sm:text-[9px] font-bold px-1 sm:px-1.5 py-0.5 rounded-tl-sm shadow-sm'
+    }
+  }
+  
   // Free Shipping has priority over Popular on left side
   if (product.free_delivery || product.same_day_delivery || product.freeDelivery || product.sameDayDelivery) {
     return {

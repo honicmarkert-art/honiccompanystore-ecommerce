@@ -210,10 +210,31 @@ export default function LandingPage() {
     }
   }
 
-  const handleNewsletterSubmit = (e: React.FormEvent) => {
+  const handleNewsletterSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Handle newsletter subscription
-    setEmail('')
+    
+    if (!email || !email.includes('@')) {
+      return
+    }
+
+    try {
+      const response = await fetch('/api/newsletter/subscribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setEmail('')
+        // You can add a toast notification here if needed
+      }
+    } catch (error) {
+      console.error('Newsletter subscription error:', error)
+    }
   }
 
 
@@ -286,7 +307,7 @@ export default function LandingPage() {
       </div>
 
       {/* Header */}
-      <header className="bg-black/50 backdrop-blur-sm fixed top-6 left-0 right-0 z-40">
+      <header className="bg-black/50 backdrop-blur-sm fixed top-0 left-0 right-0 z-40">
         <div className="bg-gradient-to-b from-black/70 via-black/50 to-black/30">
         <div className="px-4 py-2">
           {/* Mobile Navigation */}
@@ -361,11 +382,11 @@ export default function LandingPage() {
 
             {/* Mobile Navigation Menu - Single Row */}
             <div className="flex items-center justify-between text-xs mt-2">
-              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/ai-agent')}>
+              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/')}>
                 <Bot className="w-3 h-3" />
                 <span className="text-[10px]">AI Sourcing</span>
               </div>
-              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/discover')}>
+              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/')}>
                 <Eye className="w-3 h-3" />
                 <span className="text-[10px]">Discovery</span>
               </div>
@@ -373,7 +394,7 @@ export default function LandingPage() {
                 <Layers className="w-3 h-3" />
                 <span className="text-[10px]">Our Service</span>
               </div>
-              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/become-supplier')}>
+              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => window.open('/become-supplier', '_blank', 'noopener,noreferrer')}>
                 <Building2 className="w-3 h-3" />
                 <span className="text-[10px]">Become Supplier</span>
               </div>
@@ -677,7 +698,7 @@ export default function LandingPage() {
                   if (feature.title === 'Logistics Solutions') {
                     router.push('/logistics')
                   } else if (feature.title === 'Become Supplier') {
-                    router.push('/become-supplier')
+                    window.open('/become-supplier', '_blank', 'noopener,noreferrer')
                   }
                 }}
               >
@@ -896,7 +917,7 @@ export default function LandingPage() {
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-4 text-xs sm:text-sm">
-                <span>Made with ❤️ in Tanzania</span>
+                <span>Made with Honic Company Limited in Tanzania</span>
                 <div className="flex items-center space-x-2">
                   <Flag className="w-3 h-3 sm:w-4 sm:h-4" />
                   <span>TZ</span>

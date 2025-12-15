@@ -1,5 +1,9 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
+'use client'
+
+'use client'
+
 import { ShoppingBag } from 'lucide-react'
+import { ComingSoonPage } from '@/components/coming-soon-page'
 
 export default function BuyerCentralPage() {
   return (

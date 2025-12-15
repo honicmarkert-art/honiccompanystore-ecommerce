@@ -1,5 +1,6 @@
 "use client"
 
+import { BuyerRouteGuard } from '@/components/buyer-route-guard'
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -36,6 +37,15 @@ import { useCurrency } from "@/contexts/currency-context"
 import { useComingSoonModal } from "@/components/coming-soon-modal"
 import { useToast } from "@/hooks/use-toast"
 import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
+import { 
+  getSiteUrl, 
+  buildReturnUrl, 
+  buildCancelUrl, 
+  sessionStorage as safeSessionStorage,
+  clearCheckoutSessionStorage,
+  getSecureErrorMessage,
+  fetchWithRetry
+} from "@/lib/checkout-utils"
 
 interface ShippingAddress {
   fullName: string
@@ -70,7 +80,11 @@ interface FormData {
 }
 
 export default function CheckoutPage() {
-  return <CheckoutPageContent />
+  return (
+    <BuyerRouteGuard>
+      <CheckoutPageContent />
+    </BuyerRouteGuard>
+  )
 }
 
 function CheckoutPageContent() {
@@ -95,13 +109,13 @@ function CheckoutPageContent() {
     let buyNowItemData: any = null
     
     try { 
-      const raw = sessionStorage.getItem('selected_cart_items')
+      const raw = safeSessionStorage.getItem('selected_cart_items')
       if (raw) selectedIds = JSON.parse(raw) 
       
-      const buyNowModeRaw = sessionStorage.getItem('buy_now_mode')
+      const buyNowModeRaw = safeSessionStorage.getItem('buy_now_mode')
       if (buyNowModeRaw === 'true') buyNowMode = true
       
-      const buyNowDataRaw = sessionStorage.getItem('buy_now_item_data')
+      const buyNowDataRaw = safeSessionStorage.getItem('buy_now_item_data')
       if (buyNowDataRaw) buyNowItemData = JSON.parse(buyNowDataRaw)
     } catch {}
     
@@ -128,7 +142,7 @@ function CheckoutPageContent() {
   const [currentStep, setCurrentStep] = useState(0)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
-  const [orderPlaced, setOrderPlaced] = useState(false)
+  const [paymentError, setPaymentError] = useState<string | null>(null)
   const [orderId, setOrderId] = useState<string>("")
   const [orderReferenceId, setOrderReferenceId] = useState<string | null>(null)
   const [orderPickupId, setOrderPickupId] = useState<string | null>(null)
@@ -153,7 +167,25 @@ function CheckoutPageContent() {
   }
   
   const shippingFee = calculateShippingFee()
-  const orderTotal = selectedSubtotal + shippingFee
+  
+  // Get applied promotion from sessionStorage
+  const [appliedPromotion, setAppliedPromotion] = useState<{
+    code: string
+    discountAmount: number
+  } | null>(null)
+  
+  useEffect(() => {
+    try {
+      const promoData = safeSessionStorage.getItem('applied_promotion')
+      if (promoData) {
+        setAppliedPromotion(JSON.parse(promoData))
+      }
+    } catch {}
+  }, [])
+  
+  const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
+  const orderTotal = selectedSubtotal + shippingFee - promotionDiscount
+  
   const [isClient, setIsClient] = useState(false)
   const [showMapContainer, setShowMapContainer] = useState(false)
 
@@ -238,9 +270,6 @@ function CheckoutPageContent() {
   }
 
   const handlePlaceOrder = async () => {
-    setIsProcessingPayment(true)
-    try {
-      // Guard: prevent placing order with empty cart
       if (!cart || cart.length === 0) {
         toast({
           title: "Empty Cart",
@@ -250,12 +279,17 @@ function CheckoutPageContent() {
         return
       }
 
+    setIsProcessingPayment(true)
+    setPaymentError(null)
+
+    try {
       // For pickup orders, validate billing address; for shipping, validate shipping address
       const customerInfo = deliveryOption === 'pickup' ? formData.billingAddress : formData.shippingAddress
 
       // Validate phone number
       const phoneValidation = validateTanzaniaPhone(customerInfo.phone)
       if (!phoneValidation.valid) {
+        setIsProcessingPayment(false)
         toast({
           title: "Invalid Phone Number",
           description: phoneValidation.error,
@@ -267,6 +301,7 @@ function CheckoutPageContent() {
       // Validate email
       const emailValidation = validateEmail(customerInfo.email)
       if (!emailValidation.valid) {
+        setIsProcessingPayment(false)
         toast({
           title: "Invalid Email Address",
           description: emailValidation.error,
@@ -311,6 +346,8 @@ function CheckoutPageContent() {
         billingAddress: formData.sameAsShipping ? formData.shippingAddress : formData.billingAddress,
         deliveryOption,
         shippingFee: shippingFee,
+        promotionCode: appliedPromotion?.code || null,
+        promotionDiscount: promotionDiscount,
         totalAmount: orderTotal,
         timestamp: new Date().toISOString(),
       }
@@ -322,41 +359,13 @@ function CheckoutPageContent() {
       setOrderReferenceId(result.order.referenceId)
       setOrderPickupId(result.order.pickupId)
       setPaymentStatus(result.order.paymentStatus)
-      setOrderPlaced(true) // Mark order as placed to prevent order review from showing again
       
       // DON'T remove items from cart yet - wait until payment is confirmed
       // Items will be removed after successful payment via webhook or return page
 
-      // Generate ClickPesa checkout link and redirect user
-      let clickpesaRedirectSuccess = false
-      try {
+      // Generate ClickPesa checkout link
         const reference = result.order.referenceId || orderId
-        let resp = await fetch('/api/payment/clickpesa', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'create-checkout-link',
-            amount: String(orderData.totalAmount),
-            currency: 'TZS',
-            orderId: reference,
-            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
-            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
-            customerDetails: {
-              fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
-              email: formData.billingAddress.email || formData.shippingAddress.email,
-              phone: formData.billingAddress.phone || formData.shippingAddress.phone,
-              // Additional billing information for better ClickPesa experience
-              firstName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ')[0] || '',
-              lastName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ').slice(1).join(' ') || '',
-              address: formData.billingAddress.address1 || formData.shippingAddress.address1 || '',
-              city: formData.billingAddress.city || formData.shippingAddress.city || '',
-              country: formData.billingAddress.country || formData.shippingAddress.country || 'Tanzania',
-            },
-          }),
-        })
-        if (resp.status === 429) {
-          // Rate limited - retry without delay
-          resp = await fetch('/api/payment/clickpesa', {
+      const response = await fetch('/api/payment/clickpesa', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -364,12 +373,13 @@ function CheckoutPageContent() {
               amount: String(orderData.totalAmount),
               currency: 'TZS',
               orderId: reference,
-              returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
-              cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${reference}`,
+              returnUrl: buildReturnUrl(reference),
+              cancelUrl: buildCancelUrl(reference),
               customerDetails: {
                 fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
                 email: formData.billingAddress.email || formData.shippingAddress.email,
                 phone: formData.billingAddress.phone || formData.shippingAddress.phone,
+                // Additional billing information for better ClickPesa experience
                 firstName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ')[0] || '',
                 lastName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ').slice(1).join(' ') || '',
                 address: formData.billingAddress.address1 || formData.shippingAddress.address1 || '',
@@ -377,62 +387,37 @@ function CheckoutPageContent() {
                 country: formData.billingAddress.country || formData.shippingAddress.country || 'Tanzania',
               },
             }),
-          })
-        }
-        if (resp.ok) {
-          const data = await resp.json()
-          try { sessionStorage.setItem('last_order_reference', reference) } catch {}
-          if (data.checkoutLink) {
-            // Don't clear cart immediately - wait for payment success
-            // Cart will be cleared by webhook when payment is successful
-            try { 
-              sessionStorage.setItem('last_order_reference', reference) 
-            } catch {}
-            
-            // Redirect to ClickPesa
-            router.push(data.checkoutLink)
-            clickpesaRedirectSuccess = true
-            return // This will exit the function and prevent showing success page
-          } else {
-          }
-        } else {
-          const errorData = await resp.json().catch(() => ({}))
-          
-          // Show the specific error to user
-          if (errorData.error) {
-            toast({
-              title: "Payment Gateway Error",
-              description: errorData.error || "Unable to create payment link. Please try again.",
-              variant: "destructive",
-              duration: 5000
-            })
-          }
-        }
-      } catch (e) {
-        logger.error('ClickPesa redirect error:', e)
+      })
+
+      const data = await response.json()
+
+      if (!response.ok || !data.checkoutLink) {
+        throw new Error(data.error || 'Payment gateway did not return a checkout URL')
       }
 
-      // If ClickPesa redirect failed, show error and don't proceed
-      if (!clickpesaRedirectSuccess) {
+      // Store reference for later use
+      safeSessionStorage.setItem('last_order_reference', reference)
+
+      // Open ClickPesa checkout in new tab
+      window.open(data.checkoutLink, '_blank', 'noopener,noreferrer')
+      
+      // Show success message
         toast({
-          title: "Payment Error",
-          description: "Unable to redirect to payment page. Please check your details and try again.",
-          variant: "destructive",
+        title: 'Payment Page Opened',
+        description: 'Please complete your payment in the new tab. You will be redirected back after payment.',
           duration: 5000
         })
-        
-        // Don't proceed to success page - keep user on checkout to retry
-        // The order was already created in database, but payment is pending
-        return
-      }
-    } catch (error) {
-      toast({
-        title: "Order Failed",
-        description: "Failed to place order. Please try again.",
-        variant: "destructive"
-      })
-    } finally {
+
+    } catch (error: any) {
+      console.error('Payment initiation error:', error)
+      const errorMessage = error.message || 'Failed to initiate payment. Please try again.'
+      setPaymentError(errorMessage)
       setIsProcessingPayment(false)
+      toast({
+        title: 'Payment Error',
+        description: errorMessage,
+        variant: 'destructive'
+      })
     }
   }
 
@@ -440,28 +425,26 @@ function CheckoutPageContent() {
   const submitOrder = async (orderData: any) => {
     try {
       
-      // Submit order to public API
-      let response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(orderData),
-      })
-      if (response.status === 429) {
-        // Rate limited - retry without delay
-        response = await fetch('/api/orders', {
+      // Submit order to public API with retry logic
+      const response = await fetchWithRetry(
+        '/api/orders',
+        {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(orderData),
-        })
-      }
+        },
+        2 // Max 2 retries with exponential backoff
+      )
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to submit order to admin')
+        const errorData = await response.json().catch(() => ({}))
+        const errorMessage = getSecureErrorMessage(
+          errorData.error || new Error('Order submission failed'),
+          'Failed to submit order. Please try again.'
+        )
+        throw new Error(errorMessage)
       }
 
       const result = await response.json()
@@ -1513,7 +1496,7 @@ function CheckoutPageContent() {
         )
         } else {
           // For pickup, case 2 is order review
-          if (orderPlaced || isProcessingPayment) {
+          if (isProcessingPayment) {
             // Show loading message when order is placed or processing payment
             return (
               <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
@@ -1604,6 +1587,14 @@ function CheckoutPageContent() {
                       <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
                       <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
                     </div>
+                    {promotionDiscount > 0 && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          -{formatPrice(promotionDiscount)}
+                        </span>
+                      </div>
+                    )}
                     {(deliveryOption as string) === 'shipping' && (
                       <div className="flex justify-between items-center text-sm">
                         <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
@@ -1627,7 +1618,7 @@ function CheckoutPageContent() {
       case 3:
         if ((deliveryOption as string) === 'shipping') {
           // For shipping, case 3 is order review
-          if (orderPlaced || isProcessingPayment) {
+          if (isProcessingPayment) {
             // Show loading message when order is placed or processing payment
             return (
               <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
@@ -1723,6 +1714,14 @@ function CheckoutPageContent() {
                       <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
                       <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
                     </div>
+                    {promotionDiscount > 0 && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          -{formatPrice(promotionDiscount)}
+                        </span>
+                      </div>
+                    )}
                     {(deliveryOption as string) === 'shipping' && (
                       <div className="flex justify-between items-center text-sm">
                         <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
@@ -1995,13 +1994,20 @@ function CheckoutPageContent() {
               
               {/* Show Place Order button on order review step, Continue button on other steps */}
               {((deliveryOption === 'pickup' && currentStep === 2) || ((deliveryOption as string) === 'shipping' && currentStep === 3)) ? (
-                <Button
-                  onClick={handlePlaceOrder}
-                  disabled={isProcessingPayment}
-                  className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                >
-                  {isProcessingPayment ? "Processing..." : "Place Order"}
-                </Button>
+                <div className="flex flex-col items-end">
+                  <Button
+                    onClick={handlePlaceOrder}
+                    disabled={isProcessingPayment}
+                    className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                  >
+                    {isProcessingPayment ? "Processing..." : paymentError ? "Try Again" : "Place Order"}
+                  </Button>
+                  {paymentError && !isProcessingPayment && (
+                    <p className="mt-3 text-sm text-red-600 dark:text-red-400 text-right max-w-md">
+                      {paymentError}
+                    </p>
+                  )}
+                </div>
               ) : (
               <Button
                 onClick={handleNext}

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { AuthModal } from '@/components/auth-modal'
+import { useAuth } from '@/contexts/auth-context'
 
 interface GlobalAuthModalContextType {
   openAuthModal: (tab?: 'login' | 'register', redirectUrl?: string) => void
@@ -15,21 +16,54 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false)
   const [defaultTab, setDefaultTab] = useState<'login' | 'register'>('login')
   const [redirectUrl, setRedirectUrl] = useState<string | undefined>(undefined)
+  const { isAuthenticated, user } = useAuth()
 
   // Restore persisted state to avoid disappearing on re-renders/refreshes
+  // But only if user is not authenticated and not on callback page
   useEffect(() => {
     if (typeof window === 'undefined') return
+    
+    // Don't open modal if we're on the auth callback page
+    if (window.location.pathname === '/auth/callback') {
+      setIsOpen(false)
+      try {
+        sessionStorage.removeItem('auth-modal-open')
+        sessionStorage.removeItem('auth-modal-tab')
+      } catch {}
+      return
+    }
+    
+    if (isAuthenticated && user) {
+      // Clear persisted state if user is authenticated
+      try {
+        sessionStorage.removeItem('auth-modal-open')
+        sessionStorage.removeItem('auth-modal-tab')
+      } catch {}
+      return
+    }
+    
     try {
       const persisted = sessionStorage.getItem('auth-modal-open')
       const tab = sessionStorage.getItem('auth-modal-tab') as 'login' | 'register' | null
       if (persisted === 'true') {
         setIsOpen(true)
-        if (tab === 'login' || tab === 'register') setDefaultTab(tab)
+        // Only restore tab if it's valid, otherwise default to login
+        if (tab === 'login' || tab === 'register') {
+          setDefaultTab(tab)
+        } else {
+          setDefaultTab('login') // Default to login if invalid tab
+        }
       }
     } catch {}
-  }, [])
+  }, [isAuthenticated, user])
 
   const openAuthModal = (tab: 'login' | 'register' = 'login', redirectUrl?: string) => {
+    // Don't open modal if user is already authenticated
+    if (isAuthenticated && user) {
+      console.log('User is already authenticated, skipping auth modal')
+      return
+    }
+    
     setDefaultTab(tab)
     setRedirectUrl(redirectUrl)
     setIsOpen(true)
@@ -40,6 +74,21 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
       } catch {}
     }
   }
+  
+  // Close modal automatically if user becomes authenticated
+  useEffect(() => {
+    if (isAuthenticated && user && isOpen) {
+      console.log('User authenticated, closing auth modal')
+      setIsOpen(false)
+      setRedirectUrl(undefined)
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('auth-modal-open')
+          sessionStorage.removeItem('auth-modal-tab')
+        } catch {}
+      }
+    }
+  }, [isAuthenticated, user, isOpen])
 
   const closeAuthModal = () => {
     setIsOpen(false)

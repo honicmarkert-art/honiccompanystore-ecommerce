@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { createPortal } from 'react-dom'
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { logger } from '@/lib/logger'
+import { BuyerRouteGuard } from '@/components/buyer-route-guard'
 
 // Extend window object for search timeout
 declare global {
@@ -54,7 +55,6 @@ import {
   Filter,
   SlidersHorizontal,
   Facebook,
-  Twitter,
   Instagram,
   Youtube,
   HelpCircle,
@@ -98,6 +98,7 @@ import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { ProductGridSkeleton } from "@/components/ui/skeleton"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 // import { useProducts } from "@/hooks/use-products" // Removed - using useProductsOptimized instead
@@ -114,7 +115,7 @@ import { UserProfile } from "@/components/user-profile"
 
 // Category icons mapping - simplified
 
-export default function Component() {
+function ProductsPageContent() {
   const router = useRouter()
   const pathname = usePathname()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
@@ -143,6 +144,7 @@ export default function Component() {
   const { navigateWithPrefetch } = useOptimizedNavigation() // Optimized navigation
   const [searchTerm, setSearchTerm] = useState("")
   const [activeBrand, setActiveBrand] = useState<string | null>(null)
+  const [urlSupplier, setUrlSupplier] = useState<string | null>(null)
   // Categories scroll state
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
   const [showLeftArrow, setShowLeftArrow] = useState(false)
@@ -166,6 +168,8 @@ export default function Component() {
     // Initialize category state from URL
     const urlMainCategory = urlSearchParams?.get('mainCategory') || null
     const urlSubCategories = urlSearchParams?.get('subCategories')?.split(',') || []
+    const supplierParam = urlSearchParams?.get('supplier') || null
+    setUrlSupplier(supplierParam)
     
     // Only set selectedMainCategory if it's different AND we're not in the middle of a checkbox operation
     // The checkbox should only set selectedSubCategories, not selectedMainCategory
@@ -191,6 +195,8 @@ export default function Component() {
   // Submit search (updates URL and triggers server-side filtering)
   const submitSearch = useCallback(() => {
     const query = (searchTerm || '').trim()
+    setShowSuggestions(false)
+    setIsSearchFocused(false)
     const params = new URLSearchParams(urlSearchParams?.toString() || '')
     if (query) {
       params.set('search', query)
@@ -245,18 +251,18 @@ export default function Component() {
 
   // Fallback categories in case API fails
   const fallbackMainCategories = [
-    { id: 1, name: 'DIY Electronic Components', slug: 'diy-electronic-components', image_url: null, is_main: true },
-    { id: 2, name: 'Home Electronic Devices', slug: 'home-electronic-devices', image_url: null, is_main: true },
-    { id: 3, name: 'Computer & Office', slug: 'computer-office', image_url: null, is_main: true },
-    { id: 4, name: 'School Items', slug: 'school-items', image_url: null, is_main: true },
-    { id: 5, name: 'Clothes & Shoes', slug: 'clothes-and-shoes', image_url: null, is_main: true },
-    { id: 6, name: 'Sport & Entertainment', slug: 'sport-and-entertainment', image_url: null, is_main: true },
-    { id: 7, name: 'Games', slug: 'games', image_url: null, is_main: true },
-    { id: 8, name: 'Fashion & Jewelry', slug: 'fashion-and-jewelry', image_url: null, is_main: true },
-    { id: 9, name: 'Beauty & Health', slug: 'beauty-health', image_url: null, is_main: true },
-    { id: 10, name: 'Home & Garden', slug: 'home-garden', image_url: null, is_main: true },
-    { id: 11, name: 'Toys & Hobbies', slug: 'toys-hobbies', image_url: null, is_main: true },
-    { id: 12, name: 'Automotive', slug: 'automotive', image_url: null, is_main: true },
+    { id: 'diy-electronic-components', name: 'DIY Electronic Components', slug: 'diy-electronic-components', image_url: null, is_main: true },
+    { id: 'home-electronic-devices', name: 'Home Electronic Devices', slug: 'home-electronic-devices', image_url: null, is_main: true },
+    { id: 'home-office-furnitures', name: 'Home & Office furnitures', slug: 'home-office-furnitures', image_url: null, is_main: true },
+    { id: 'training-kits-school-items', name: 'Training kits & School Items', slug: 'training-kits-school-items', image_url: null, is_main: true },
+    { id: 'phones-telecom-devices', name: 'Phones & Telecom Devices', slug: 'phones-telecom-devices', image_url: null, is_main: true },
+    { id: 'fashion-jewelry', name: 'Fashion and Jewelry', slug: 'fashion-jewelry', image_url: null, is_main: true },
+    { id: 'computer-accessories', name: 'Computer & Accessories', slug: 'computer-accessories', image_url: null, is_main: true },
+    { id: 'automotive-parts', name: 'Automotive Parts', slug: 'automotive-parts', image_url: null, is_main: true },
+    { id: 'sports-outdoors', name: 'Sports & Outdoors', slug: 'sports-outdoors', image_url: null, is_main: true },
+    { id: 'beauty-health', name: 'Beauty & Health', slug: 'beauty-health', image_url: null, is_main: true },
+    { id: 'toys-games', name: 'Toys & Games', slug: 'toys-games', image_url: null, is_main: true },
+    { id: 'home-appliances', name: 'Home Appliances', slug: 'home-appliances', image_url: null, is_main: true },
   ]
 
   // Process categories data
@@ -577,6 +583,7 @@ export default function Component() {
     sortOrder: sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
+    supplier: urlSupplier || undefined,
     useOptimized: true,
     useMaterializedView: false,
     enabled: !categoriesLoading && !noCategoryMatches // Disable fetching if filter has no matching category IDs
@@ -593,7 +600,7 @@ export default function Component() {
   // Reset products immediately when any filter changes to prevent showing old products
   useEffect(() => {
     infiniteReset()
-  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, infiniteReset])
+  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, urlSupplier, infiniteReset])
   
   // Get page from URL on mount
   useEffect(() => {
@@ -1461,7 +1468,7 @@ export default function Component() {
       </div>
 
       <header
-        className="fixed top-6 z-40 w-full bg-white dark:bg-black/50 backdrop-blur-sm border-b border-white dark:border-gray-800 sm:top-0 shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
+        className="fixed top-0 z-40 w-full bg-white dark:bg-black/50 backdrop-blur-sm border-b border-white dark:border-gray-800 shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
           suppressHydrationWarning
         >
         <div className="flex items-center h-10 sm:h-16 px-2 sm:px-3 md:px-4 lg:px-6 xl:px-8 2xl:px-10 w-full max-w-full" suppressHydrationWarning>
@@ -1551,10 +1558,10 @@ export default function Component() {
                   suppressHydrationWarning
               />
               <Input
-                type="search"
+                type="text"
                 placeholder="Search for products..."
                 className={cn(
-                    "w-full pl-8 sm:pl-10 pr-20 sm:pr-28 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
+                    "w-full pl-8 sm:pl-10 pr-32 sm:pr-40 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
                     darkHeaderFooterClasses.inputBg,
                     darkHeaderFooterClasses.inputBorder,
                     darkHeaderFooterClasses.textNeutralPrimary,
@@ -1610,23 +1617,24 @@ export default function Component() {
               />
               
               {/* Search Loading Indicator - removed since we're using client-side filtering */}
-              {/* Search Button */}
+              
+              {/* Search Submit Button */}
               <button
                 type="submit"
                 onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                   e.preventDefault()
                   if (searchTerm.trim()) {
-                    handleModalTextSearch(searchTerm.trim())
+                    submitSearch()
                   }
                 }}
                 disabled={!searchTerm.trim()}
                 className={cn(
-                  "absolute right-12 sm:right-16 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors",
+                  "absolute right-6 sm:right-8 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors",
                   searchTerm.trim() 
                     ? cn(darkHeaderFooterClasses.textNeutralSecondaryFixed, "hover:bg-neutral-200 dark:hover:bg-neutral-700")
                     : "text-gray-400 dark:text-gray-600 cursor-not-allowed"
                 )}
-                title={searchTerm.trim() ? "Search products" : "Enter search term"}
+                title="Search"
               >
                 <Search className="w-3 h-3 sm:w-4 sm:h-4" />
               </button>
@@ -1638,13 +1646,13 @@ export default function Component() {
                   setIsSearchModalOpen(true)
                 }}
                 className={cn(
-                  "absolute right-6 sm:right-8 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center",
-                  darkHeaderFooterClasses.textNeutralSecondaryFixed,
-                  "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
+                  "absolute right-12 sm:right-16 top-1/2 -translate-y-1/2 px-2 py-1 rounded flex items-center justify-center text-xs sm:text-sm text-yellow-500 hover:text-yellow-600",
+                  "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors whitespace-nowrap"
                 )}
                 title="Search by image"
               >
-                <Camera className="w-3 h-3 sm:w-4 sm:h-4" />
+                <Camera className="w-4 h-4 sm:hidden" />
+                <span className="hidden sm:inline">Search by image</span>
               </button>
               
               {/* Clear Search Button */}
@@ -1675,13 +1683,13 @@ export default function Component() {
 
           {/* Navigation Links - Near Search Bar */}
           <div className="hidden lg:flex items-center gap-2 xl:gap-3 ml-2 xl:ml-3">
-            <Link href="/ai-agent" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
               AI Sourcing
             </Link>
-            <Link href="/discover" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
               Discovery
             </Link>
-            <Link href="/become-supplier" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+            <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm")}>
               Become Supplier
             </Link>
             <DropdownMenu>
@@ -1759,102 +1767,6 @@ export default function Component() {
               </Button>
             </Link>
 
-            {/* Mobile Profile Button */}
-            <div className="sm:hidden mt-2">
-              {isAuthenticated ? (
-                <div className="flex flex-col items-center gap-0.5">
-                  <div className="rounded-full overflow-hidden">
-                    <UserProfile />
-                  </div>
-                  <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px]">
-                    {(() => {
-                      const name = (user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User';
-                      return name.length > 5 ? name.substring(0, 5) + '...' : name;
-                    })()}
-                  </span>
-                </div>
-              ) : (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className={cn(
-                        "flex items-center gap-1 h-8 w-8 p-0 ml-1 cursor-pointer",
-                        "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
-                        darkHeaderFooterClasses.buttonGhostText,
-                        darkHeaderFooterClasses.buttonGhostHoverBg,
-                      )}
-                    >
-                      <User className="w-4 h-4" />
-                      <span className="sr-only">User Menu</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className={cn(
-                      "w-56",
-                      // Force solid backgrounds in both themes
-                      "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
-                    )}
-                  >
-                    <div className="p-2 flex flex-col gap-2">
-                      <Button 
-                        onClick={() => openAuthModal('login')}
-                        className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                      >
-                        Sign in
-                      </Button>
-                      <button
-                        onClick={() => openAuthModal('register')}
-                        className={cn(
-                          "text-center text-sm hover:underline",
-                          darkHeaderFooterClasses.textNeutralSecondaryFixed,
-                        )}
-                      >
-                        Register
-                      </button>
-                    </div>
-                    <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <Package className="w-4 h-4 mr-2" /> My Orders
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <Coins className="w-4 h-4 mr-2" /> My Coins
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <MessageSquare className="w-4 h-4 mr-2" /> Message Center
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <CreditCard className="w-4 h-4 mr-2" /> Payment
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <Heart className="w-4 h-4 mr-2" /> Wish List
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <Ticket className="w-4 h-4 mr-2" /> My Coupons
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
 
 
             {/* Theme Switcher Dropdown - Hidden on Mobile */}
@@ -1966,13 +1878,123 @@ export default function Component() {
               </Button>
             </Link>
 
-            {/* User Profile - Hidden on Mobile */}
+            {/* Mobile Profile Button */}
+            <div className="sm:hidden">
+              {isAuthenticated ? (
+                <div className="flex flex-col items-center">
+                  <div className="h-8 w-8 flex items-center justify-center">
+                    <UserProfile />
+                  </div>
+                  <span className="text-xs font-medium text-black dark:text-white truncate max-w-[80px] mt-0.5 text-center">
+                    {(() => {
+                      // Extract name from various sources (handles Google OAuth users)
+                      const name = user?.name?.trim() || 
+                                   (user as any)?.user_metadata?.full_name?.trim() || 
+                                   (user as any)?.user_metadata?.name?.trim() ||
+                                   user?.email?.split('@')[0] || 
+                                   'User';
+                      if (!name || name === '') return 'User';
+                      return name.length > 5 ? name.substring(0, 5) + '...' : name;
+                    })()}
+                  </span>
+                </div>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "flex items-center gap-1 h-8 w-8 p-0 ml-1 cursor-pointer",
+                        "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
+                        darkHeaderFooterClasses.buttonGhostText,
+                        darkHeaderFooterClasses.buttonGhostHoverBg,
+                      )}
+                    >
+                      <User className="w-4 h-4" />
+                      <span className="sr-only">User Menu</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className={cn(
+                      "w-56",
+                      "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
+                    )}
+                  >
+                    <div className="p-2 flex flex-col gap-2">
+                      <Button 
+                        onClick={() => openAuthModal('login')}
+                        className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                      >
+                        Sign in
+                      </Button>
+                      <button
+                        onClick={() => openAuthModal('register')}
+                        className={cn(
+                          "text-center text-sm hover:underline",
+                          darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                        )}
+                      >
+                        Register
+                      </button>
+                    </div>
+                    <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Package className="w-4 h-4 mr-2" /> My Orders
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Coins className="w-4 h-4 mr-2" /> My Coins
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <MessageSquare className="w-4 h-4 mr-2" /> Message Center
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <CreditCard className="w-4 h-4 mr-2" /> Payment
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Heart className="w-4 h-4 mr-2" /> Wish List
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                      onClick={() => openAuthModal('login')}
+                    >
+                      <Ticket className="w-4 h-4 mr-2" /> My Coupons
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+
+            {/* User Profile - Desktop */}
             <div className="hidden sm:block">
               {isAuthenticated ? (
                 <div className="flex flex-col items-center">
                 <UserProfile />
-                  <span className="text-xs text-white mt-1">
-                    {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                  <span className="text-xs text-black dark:text-white mt-1">
+                    {(() => {
+                      // Extract name from various sources (handles Google OAuth users)
+                      const name = user?.name?.trim() || 
+                                   (user as any)?.user_metadata?.full_name?.trim() || 
+                                   (user as any)?.user_metadata?.name?.trim() ||
+                                   user?.email?.split('@')[0] || 
+                                   'User';
+                      return name;
+                    })()}
                   </span>
                 </div>
               ) : (
@@ -2082,6 +2104,7 @@ export default function Component() {
                 </DropdownMenu>
               )}
             </div>
+
           </div>
         </div>
 
@@ -2091,28 +2114,35 @@ export default function Component() {
           className="hidden lg:flex items-center justify-start gap-4 xl:gap-6 py-3 pl-[50px] pr-0 overflow-hidden"
         >
           {/* Import from China Link */}
-          <Link 
-            href="/china" 
-            target="_blank"
-            rel="noopener noreferrer"
-            prefetch={false}
-          >
-             <Button
-               variant="ghost"
-               size="sm"
-               className={cn(
-                 "flex items-center gap-1 border-2 border-white bg-black hover:border-yellow-600 transition-colors text-xs text-white",
-                 darkHeaderFooterClasses.buttonGhostText,
-               )}
-               style={{ borderRadius: '20px' }}
-               suppressHydrationWarning
-             >
-               <span className="text-sm font-medium text-red-400" suppressHydrationWarning>
-            From China
-               </span>
-               <span className="sr-only" suppressHydrationWarning>From China</span>
-             </Button>
-           </Link>
+          <div style={{ marginLeft: '30px', marginRight: '10px' }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault()
+                toast({
+                  title: "Coming Soon",
+                  description: "This feature is coming soon. Stay tuned!",
+                  duration: 3000,
+                })
+              }}
+              className={cn(
+                "flex items-center gap-1 border-2 border-white bg-black hover:border-yellow-600 transition-colors text-xs text-white relative",
+                darkHeaderFooterClasses.buttonGhostText,
+                "cursor-pointer"
+              )}
+              style={{ borderRadius: '20px' }}
+              suppressHydrationWarning
+            >
+              <span className="text-sm font-medium text-yellow-500 flex items-center gap-1.5" suppressHydrationWarning>
+                From China
+                <Badge className="bg-yellow-500 text-black text-[8px] px-1 py-0 h-3 leading-none font-semibold" suppressHydrationWarning>
+                  Soon
+                </Badge>
+              </span>
+              <span className="sr-only" suppressHydrationWarning>From China</span>
+            </Button>
+          </div>
           
           {/* Main Categories */}
           {categoriesData.mainCategories.map((cat: any) => (
@@ -2134,32 +2164,39 @@ export default function Component() {
         {/* Mobile Categories Row */}
         <div 
           ref={mobileCategoriesContainerRef}
-          className="lg:hidden flex items-center justify-start gap-2 py-3 px-2 overflow-x-hidden overflow-y-visible" 
+          className="lg:hidden flex items-center justify-start gap-1 py-3 px-2 overflow-x-hidden overflow-y-visible" 
           suppressHydrationWarning
         >
           {/* Import from China Link */}
-          <Link 
-            href="/china" 
-            target="_blank"
-            rel="noopener noreferrer"
-            prefetch={false}
-          >
-             <Button
-               variant="ghost"
-               size="sm"
-               className={cn(
-                 "flex items-center gap-1 border border-white bg-black hover:border-yellow-600 transition-colors text-[10px] text-white flex-shrink-0 h-6 px-2 py-1",
-                 darkHeaderFooterClasses.buttonGhostText,
-               )}
-               style={{ borderRadius: '12px' }}
-               suppressHydrationWarning
-             >
-               <span className="text-[10px] font-medium text-red-400 whitespace-nowrap" suppressHydrationWarning>
-            China
-               </span>
-               <span className="sr-only" suppressHydrationWarning>China</span>
-             </Button>
-           </Link>
+          <div style={{ marginLeft: '30px', marginRight: '10px' }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault()
+                toast({
+                  title: "Coming Soon",
+                  description: "This feature is coming soon. Stay tuned!",
+                  duration: 3000,
+                })
+              }}
+              className={cn(
+                "flex items-center gap-1 border border-white bg-black hover:border-yellow-600 transition-colors text-[10px] text-white flex-shrink-0 h-6 px-2 py-1 relative",
+                darkHeaderFooterClasses.buttonGhostText,
+                "cursor-pointer"
+              )}
+              style={{ borderRadius: '12px' }}
+              suppressHydrationWarning
+            >
+              <span className="text-[10px] font-medium text-red-400 whitespace-nowrap flex items-center gap-1" suppressHydrationWarning>
+                China
+                <Badge className="bg-yellow-500 text-black text-[7px] px-0.5 py-0 h-2.5 leading-none font-semibold" suppressHydrationWarning>
+                  Soon
+                </Badge>
+              </span>
+              <span className="sr-only" suppressHydrationWarning>China</span>
+            </Button>
+          </div>
           
           {/* Visible Categories */}
           {visibleCategories.map((category) => {
@@ -2723,7 +2760,7 @@ export default function Component() {
             loading={infiniteLoadingMore}
             error={infiniteError}
           >
-            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-8 3xl:grid-cols-12 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
               <>
                 
                 {/* All Product Cards */}
@@ -2759,6 +2796,10 @@ export default function Component() {
             const discountPercentage = ((testOriginalPrice - effectivePrice) / testOriginalPrice) * 100
             
             const productInCart = isInCart(product.id, product.variants?.[0]?.id) // Check if product or its default variant is in cart
+            const hasFreeShipping = product.free_delivery === true ||
+              product.freeDelivery === true ||
+              (product as any)?.free_shipping === true ||
+              (product as any)?.freeShipping === true
             
             return (
               <Card
@@ -2854,8 +2895,18 @@ export default function Component() {
                         prefetch={false}
                         priority="low"
                       >
-                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 transition-colors line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
+                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 transition-all duration-300 line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
                       </OptimizedLink>
+                  {/* Sold count - on new line above ratings on mobile */}
+                  {product.sold_count && (
+                    <div className="sm:hidden text-[10px] mt-0.5" suppressHydrationWarning>
+                      <span className={themeClasses.textNeutralSecondary} suppressHydrationWarning>
+                        {product.sold_count >= 1000 
+                          ? `${(product.sold_count / 1000).toFixed(1)}k+` 
+                          : `${product.sold_count}+`} sold out
+                      </span>
+                    </div>
+                  )}
                   <div
                     className={cn(
                       "flex items-center gap-1 text-[10px] mt-0.5 sm:text-xs",
@@ -2863,16 +2914,16 @@ export default function Component() {
                     )}
                         suppressHydrationWarning
                   >
-                    {/* Sold count - displayed before ratings */}
+                    {/* Sold count - inline on desktop */}
                     {product.sold_count && (
-                      <span className="text-[10px] sm:text-xs" suppressHydrationWarning>
+                      <span className="hidden sm:inline text-xs" suppressHydrationWarning>
                         {product.sold_count >= 1000 
                           ? `${(product.sold_count / 1000).toFixed(1)}k+` 
                           : `${product.sold_count}+`} sold
                       </span>
                     )}
                     {product.sold_count && (
-                      <span className="mx-0.5" suppressHydrationWarning>•</span>
+                      <span className="hidden sm:inline mx-0.5" suppressHydrationWarning>•</span>
                     )}
                     {Array.from({ length: 5 }).map((_, i) => (
                       <Star
@@ -2882,11 +2933,20 @@ export default function Component() {
                             ? "fill-yellow-400 text-yellow-400"
                             : themeClasses.textNeutralSecondary
                         }`}
-                            suppressHydrationWarning
+                        suppressHydrationWarning
                       />
                     ))}
-                        <span suppressHydrationWarning>({product.reviews})</span>
+                    <span suppressHydrationWarning>({product.reviews})</span>
                   </div>
+                  {hasFreeShipping && (
+                    <div
+                      className="text-[10px] sm:text-xs font-semibold text-red-600 uppercase tracking-wide mt-1 flex items-center gap-1"
+                      suppressHydrationWarning
+                    >
+                      <span aria-hidden="true">•</span>
+                      <span>Free Shipping</span>
+                    </div>
+                  )}
                       <div className="flex flex-wrap items-baseline gap-x-2 mt-0.5" suppressHydrationWarning>
                         {/* Main Price */}
                         <div className="text-sm font-bold sm:text-base lg:text-lg" suppressHydrationWarning>
@@ -2962,7 +3022,7 @@ export default function Component() {
       </main>
 
 
-      <Footer />
+      {!infiniteLoading && !infiniteLoadingMore && !(categoriesLoading && infiniteProducts.length === 0) && <Footer />}
 
       {/* Category Navigation Modal */}
       <Sheet open={isCategoryNavOpen} onOpenChange={setIsCategoryNavOpen}>
@@ -3562,5 +3622,13 @@ export default function Component() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function ProductsPage() {
+  return (
+    <BuyerRouteGuard>
+      <ProductsPageContent />
+    </BuyerRouteGuard>
   )
 }

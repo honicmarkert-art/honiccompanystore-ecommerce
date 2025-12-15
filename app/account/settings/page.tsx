@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
-import { supabase } from '@/lib/supabase-auth'
+import { getAuthToken } from '@/lib/auth-utils'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Settings as SettingsIcon } from 'lucide-react'
@@ -28,8 +28,7 @@ export default function AccountSettingsPage() {
     const load = async () => {
       setLoading(true)
       try {
-        const { data: session } = await supabase.auth.getSession()
-        const token = session.session?.access_token
+        const token = await getAuthToken()
         if (!token) { setLoading(false); return }
         const res = await fetch('/api/user/profile', { headers: { Authorization: `Bearer ${token}` } })
         const json = await res.json()
@@ -46,8 +45,7 @@ export default function AccountSettingsPage() {
   const saveProfile = async () => {
     try {
       setSaving(true)
-      const { data: session } = await supabase.auth.getSession()
-      const token = session.session?.access_token
+      const token = await getAuthToken()
       if (!token) { setSaving(false); return }
       const res = await fetch('/api/user/profile', {
         method: 'PUT',
@@ -56,7 +54,6 @@ export default function AccountSettingsPage() {
       })
       const json = await res.json()
       if (res.ok) {
-        await supabase.auth.updateUser({ data: { full_name: fullName, phone } })
         toast({ title: 'Saved', description: 'Profile updated.' })
       } else {
         toast({ title: 'Failed', description: json?.error || 'Try again', variant: 'destructive' })

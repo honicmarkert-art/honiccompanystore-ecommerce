@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 
 
@@ -17,6 +18,19 @@ const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, s
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/media/upload',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
     if (!supabase) {
       return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
     }
@@ -47,28 +61,80 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
+    // Validate file type
     if (!type || !['image', 'video', 'model3d'].includes(type)) {
       logger.log('❌ Invalid media type:', type)
-      return NextResponse.json({ error: 'Invalid media type' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid media type. Allowed types: image, video, model3d' }, { status: 400 })
     }
 
-    // Validate file size (10MB max)
-    const maxSize = 10 * 1024 * 1024 // 10MB
+    // Validate file MIME type based on declared type
+    const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']
+    const allowedVideoTypes = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime']
+    const allowedModelTypes = ['model/gltf-binary', 'model/gltf+json', 'application/octet-stream']
+    
+    let allowedTypes: string[] = []
+    if (type === 'image') {
+      allowedTypes = allowedImageTypes
+    } else if (type === 'video') {
+      allowedTypes = allowedVideoTypes
+    } else if (type === 'model3d') {
+      allowedTypes = allowedModelTypes
+    }
+
+    if (!allowedTypes.includes(file.type)) {
+      logger.log('❌ Invalid file MIME type:', file.type, 'for type:', type)
+      return NextResponse.json({ 
+        error: `Invalid file type. Expected ${type} file but got ${file.type}`,
+        allowedTypes: allowedTypes
+      }, { status: 400 })
+    }
+
+    // Validate file size based on type
+    let maxSize: number
+    if (type === 'image') {
+      maxSize = 5 * 1024 * 1024 // 5MB for images
+    } else if (type === 'video') {
+      maxSize = 50 * 1024 * 1024 // 50MB for videos
+    } else {
+      maxSize = 10 * 1024 * 1024 // 10MB for 3D models
+    }
+
     if (file.size > maxSize) {
-      return NextResponse.json({ error: 'File too large' }, { status: 400 })
+      const maxSizeMB = Math.round(maxSize / (1024 * 1024))
+      return NextResponse.json({ 
+        error: `File too large. Maximum size for ${type} files is ${maxSizeMB}MB`,
+        maxSize: maxSize,
+        fileSize: file.size
+      }, { status: 400 })
+    }
+
+    // Validate file extension matches MIME type
+    const fileExtension = file.name.split('.').pop()?.toLowerCase()
+    const extensionMap: Record<string, string[]> = {
+      'image': ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'],
+      'video': ['mp4', 'webm', 'ogg', 'mov'],
+      'model3d': ['glb', 'gltf', 'obj']
+    }
+    
+    if (fileExtension && extensionMap[type] && !extensionMap[type].includes(fileExtension)) {
+      logger.log('❌ Invalid file extension:', fileExtension, 'for type:', type)
+      return NextResponse.json({ 
+        error: `Invalid file extension. Expected one of: ${extensionMap[type].join(', ')}`,
+        receivedExtension: fileExtension
+      }, { status: 400 })
     }
 
     // Generate unique filename
     const timestamp = Date.now()
     const randomString = Math.random().toString(36).substring(2, 15)
-    const fileExtension = file.name.split('.').pop()
+    const fileExt = fileExtension || file.name.split('.').pop() || 'file'
     
     // Generate product-specific filename if productId is provided
     let fileName: string
     if (productId && (context === 'product' || context === 'variant')) {
-      fileName = `product_${productId}_${type}_${timestamp}.${fileExtension}`
+      fileName = `product_${productId}_${type}_${timestamp}.${fileExt}`
     } else {
-      fileName = `${type}_${timestamp}_${randomString}.${fileExtension}`
+      fileName = `${type}_${timestamp}_${randomString}.${fileExt}`
     }
     
     logger.log('📝 Generated filename:', fileName)

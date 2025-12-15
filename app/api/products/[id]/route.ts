@@ -80,6 +80,7 @@ export async function GET(
         product_variants (*)
       `)
       .eq('id', productId)
+      .eq('is_hidden', false)
       .single()
 
     if (error) {
@@ -130,6 +131,21 @@ export async function GET(
         // Keep arrays as arrays for product detail page - don't convert to comma-separated
         const displayAttributes = { ...cleanAttributes }
 
+        // Parse primary_values if it's a JSON string
+        let primaryValues = variant.primary_values || variant.primaryValues || []
+        if (typeof primaryValues === 'string') {
+          try {
+            primaryValues = JSON.parse(primaryValues)
+          } catch (e) {
+            console.error('Error parsing primary_values:', e)
+            primaryValues = []
+          }
+        }
+        // Ensure it's an array
+        if (!Array.isArray(primaryValues)) {
+          primaryValues = []
+        }
+
         return {
           id: variant.id,
           price: variant.price,
@@ -141,7 +157,9 @@ export async function GET(
           quantities: quantities,
           primaryAttribute: variant.primary_attribute,
           dependencies: variant.dependencies || {},
-          primaryValues: variant.primary_values || [],
+          primaryValues: primaryValues,
+          // Also preserve snake_case for compatibility
+          primary_values: primaryValues,
           stockQuantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
           inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true
         }

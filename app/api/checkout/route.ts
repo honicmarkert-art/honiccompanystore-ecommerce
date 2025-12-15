@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAuth, copyCookies } from '@/lib/auth-server'
 import { rateLimit } from '@/lib/rate-limit'
-import { sanitizeInput, validateAddress, validatePaymentMethod, validateCartItems, validateOrderAmount } from '@/lib/validation-utils'
+import { sanitizeInput, validateAddress, validatePaymentMethod, validateCartItems, validateOrderAmount, validateQuantityForPrice } from '@/lib/validation-utils'
 import { 
   handleApiError, 
   createValidationError, 
@@ -100,6 +100,39 @@ export async function POST(request: NextRequest) {
         ip: clientIP,
         errors: cartValidation.errors 
       })
+    }
+
+    // Additional server-side validation: Validate quantities against actual product prices from database
+    // This prevents tampering with prices in cart items
+    const productIds = cartItems.map(item => item.product_id)
+    const { data: products, error: productsError } = await supabase
+      .from('products')
+      .select('id, price')
+      .in('id', productIds)
+
+    if (!productsError && products) {
+      const productPriceMap = new Map(products.map((p: any) => [p.id, parseFloat(p.price) || 0]))
+      
+      for (const item of cartItems) {
+        const actualProductPrice = productPriceMap.get(item.product_id)
+        if (actualProductPrice !== undefined) {
+          const quantityValidation = validateQuantityForPrice(item.quantity, actualProductPrice)
+          if (!quantityValidation.isValid) {
+            const productName = item.product_name || item.products?.name || 'Unknown Product'
+            throw createValidationError(
+              `${productName}: ${quantityValidation.errors.join(', ')}`,
+              'quantity',
+              { 
+                userId: user.id, 
+                ip: clientIP,
+                productId: item.product_id,
+                quantity: item.quantity,
+                productPrice: actualProductPrice
+              }
+            )
+          }
+        }
+      }
     }
 
     // Optimized batch stock validation
@@ -251,6 +284,7 @@ export async function POST(request: NextRequest) {
     for (const item of cartItems) {
       cacheInvalidator.invalidateProduct(item.product_id)
     }
+
 
     // Log successful order creation
     logger.info(`Order created successfully: ${order.id} for user: ${user.id}`, { 

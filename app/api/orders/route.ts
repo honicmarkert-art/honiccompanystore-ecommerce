@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { generateOrderIds, formatPickupId } from '@/lib/order-ids'
 import { logger } from '@/lib/logger'
 import { secureOrderCreation, ReferenceIdSecurity } from '@/lib/reference-id-security'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 
 
@@ -30,6 +31,19 @@ function getSupabaseClient() {
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/orders',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
     const supabase = getSupabaseClient()
     
     // Parse order data
@@ -112,6 +126,7 @@ export async function POST(request: NextRequest) {
       }
 
     }
+
 
     // Return order data with stored IDs
     const responseData = {

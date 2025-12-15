@@ -14,6 +14,7 @@ import { CheckCircle, Clock, ArrowLeft, Home, Package, XCircle, RefreshCw } from
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { Footer } from "@/components/footer"
+import { clearCheckoutSessionStorage } from "@/lib/checkout-utils"
 
 function CheckoutReturnContent() {
   const searchParams = useSearchParams()
@@ -337,19 +338,22 @@ function CheckoutReturnContent() {
         }
         
         // Poll regardless of current status to catch webhook updates
-        fetchOrderData(normalizedReference)
+          fetchOrderData(normalizedReference)
       }, 1000)
       
       return () => clearInterval(pollInterval)
     }
   }, [normalizedReference])
 
-  // Hybrid approach: Use return URL as backup for retry payments
-  // Webhooks handle initial payments, return URL handles retry payments
+  // Return URL is ONLY a backup for retry payments when webhook fails
+  // Webhooks are the PRIMARY mechanism for updating payment status
+  // Only update via return URL if this is clearly a retry payment (webhook already failed)
   useEffect(() => {
     if (isPaymentSuccessful && normalizedReference && orderData) {
       // Only update if this appears to be a retry payment (webhook didn't work)
-      if (orderData.paymentStatus === 'failed' || orderData.paymentStatus === 'pending') {
+      // Don't update initial payments - wait for webhook to process
+      if (orderData.paymentStatus === 'failed' || 
+          (orderData.paymentStatus === 'pending' && orderData.retryAttempts > 0)) {
         updateOrderStatusViaReturnUrl(normalizedReference, 'paid')
       }
     }
@@ -420,16 +424,22 @@ function CheckoutReturnContent() {
     }
   }, [finalIsPaymentSuccessful, normalizedReference, orderReference])
 
-  // Clear guest cart from localStorage after successful payment
+  // Clear checkout session storage after successful payment
   useEffect(() => {
-    if (finalIsPaymentSuccessful && !user && typeof window !== 'undefined') {
-      // Clear guest cart data from localStorage
-      localStorage.removeItem('guest_cart')
-      sessionStorage.removeItem('selected_cart_items')
-      sessionStorage.removeItem('buy_now_mode')
-      sessionStorage.removeItem('buy_now_item_data')
+    if (finalIsPaymentSuccessful) {
+      // Clear all checkout-related session storage
+      clearCheckoutSessionStorage()
       
-      // Optionally clear the cart hook (this will trigger a re-render)
+      // Clear guest cart data from localStorage
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('guest_cart')
+        } catch (error) {
+          console.error('Error clearing guest cart:', error)
+        }
+      }
+      
+      // Clear authenticated user's cart
       if (clearCart) {
         clearCart()
       }

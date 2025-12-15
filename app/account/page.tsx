@@ -39,7 +39,7 @@ import { useToast } from '@/hooks/use-toast'
 import { ProtectedRoute } from '@/components/protected-route'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { supabase } from '@/lib/supabase-auth'
+import { getAuthToken } from '@/lib/auth-utils'
 
 // Remove local Order mock interface; we use real orders from useOrders
 
@@ -87,8 +87,7 @@ function AccountPageContent() {
       if (!user) return
       setProfileLoading(true)
       try {
-        const { data: sessionData } = await supabase.auth.getSession()
-        const token = sessionData.session?.access_token
+        const token = await getAuthToken()
         if (!token) { setProfileLoading(false); return }
         const res = await fetch('/api/user/profile', {
           headers: { Authorization: `Bearer ${token}` }
@@ -112,8 +111,7 @@ function AccountPageContent() {
   const saveProfile = async () => {
     try {
       setProfileSaving(true)
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
+      const token = await getAuthToken()
       if (!token) {
         toast({ title: 'Not authenticated', description: 'Please login again', variant: 'destructive' })
         setProfileSaving(false)
@@ -122,12 +120,10 @@ function AccountPageContent() {
       const res = await fetch('/api/user/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ full_name: fullName, phone })
+        body: JSON.stringify({ full_name: fullName, phone, avatar_url: avatarUrl })
       })
       const json = await res.json()
       if (res.ok) {
-        // Save avatar to auth metadata
-        await supabase.auth.updateUser({ data: { full_name: fullName, phone, avatar_url: avatarUrl } })
         toast({ title: 'Profile saved', description: 'Your details were updated.' })
       } else {
         toast({ title: 'Failed to save', description: json?.error || 'Try again', variant: 'destructive' })
@@ -641,11 +637,16 @@ function AccountPageContent() {
   )
 }
 
+import { BuyerRouteGuard } from '@/components/buyer-route-guard'
+import { ProtectedRoute } from '@/components/protected-route'
+
 export default function AccountPage() {
   return (
-    <ProtectedRoute>
-      <AccountPageContent />
-    </ProtectedRoute>
+    <BuyerRouteGuard>
+      <ProtectedRoute>
+        <AccountPageContent />
+      </ProtectedRoute>
+    </BuyerRouteGuard>
   )
 } 
  

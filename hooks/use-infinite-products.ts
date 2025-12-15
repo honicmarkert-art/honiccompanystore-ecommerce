@@ -20,6 +20,7 @@ interface Product {
   same_day_delivery?: boolean
   import_china?: boolean
   is_new?: boolean
+  is_featured?: boolean
   created_at: string
   updated_at: string
   product_variants?: Array<{
@@ -48,6 +49,7 @@ interface InfiniteProductsOptions {
   categories?: string[] // Multiple categories
   inStock?: boolean
   isChina?: boolean // Filter by import_china
+  supplier?: string // Filter by supplier_id or user_id
 }
 
 interface InfiniteProductsReturn {
@@ -79,7 +81,8 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     maxPrice,
     categories,
     inStock,
-    isChina
+    isChina,
+    supplier
   } = options
 
   const [products, setProducts] = useState<Product[]>([])
@@ -177,6 +180,9 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       if (isChina !== undefined) {
         params.append('isChina', isChina.toString())
       }
+      if (supplier) {
+        params.append('supplier', supplier)
+      }
       
       if (useOptimized && !useMaterializedView) {
         params.append('enriched', 'true')
@@ -259,7 +265,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       loadingRef.current = false
       abortControllerRef.current = null
     }
-  }, [enabled, limit, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock])
+  }, [enabled, limit, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier])
 
   // Load more function
   const loadMore = useCallback(async () => {
@@ -308,7 +314,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
         cooldownTimeoutRef.current = null
       }
     }
-  }, [enabled, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, initialOffset])
+  }, [enabled, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier, initialOffset])
 
   return {
     products,

@@ -123,9 +123,7 @@ const DEFAULT_ADMIN_SETTINGS = {
   // Social Media Links
   socialLinks: {
     facebook: "",
-    twitter: "",
     instagram: "",
-    linkedin: "",
     youtube: ""
   },
   

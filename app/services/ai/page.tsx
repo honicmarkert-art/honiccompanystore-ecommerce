@@ -1,5 +1,8 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
-import { Bot } from 'lucide-react'
+import { redirect } from 'next/navigation'
+
+export default function AIServicePage() {
+  redirect('/')
+}
 
 export default function AiPage() {
   return (

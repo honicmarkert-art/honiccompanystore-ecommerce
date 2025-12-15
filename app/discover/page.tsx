@@ -1,7 +1,9 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
-import { Eye } from 'lucide-react'
+import { redirect } from 'next/navigation'
 
 export default function DiscoverPage() {
+  redirect('/')
+}
+
   return (
     <ComingSoonPage
       title="Discovery"

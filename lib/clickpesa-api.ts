@@ -47,9 +47,15 @@ const CLICKPESA_CONFIG: ClickPesaConfig = {
   isLive: process.env.NODE_ENV === "production"
 }
 
-// ClickPesa API Key (for reference, but Client ID is used for auth)
+// ClickPesa API Keys - Regular checkout
 export const CLICKPESA_API_KEY = process.env.CLICKPESA_API_KEY || ""
 export const CLICKPESA_CLIENT_ID = process.env.CLICKPESA_CLIENT_ID || ""
+
+// ClickPesa API Keys - Supplier upgrades
+export const CLICKPESA_API_SUPPLIER_KEY = process.env.CLICKPESA_API_SUPPLIER_KEY || ""
+export const CLICKPESA_CLIENT_SUPPLIER_ID = process.env.CLICKPESA_CLIENT_SUPPLIER_ID || ""
+
+// Shared keys (used by both)
 export const CLICKPESA_CHECKSUM_KEY = process.env.CLICKPESA_CHECKSUM_KEY || ""
 
 // Generate unique order reference for ClickPesa
@@ -102,19 +108,30 @@ export const formatPhoneForClickPesa = (phone: string): string => {
 }
 
 // Generate ClickPesa access token
-export const generateAccessToken = async (): Promise<string> => {
+// useSupplierCredentials: true = use supplier credentials, false = use regular checkout credentials
+export const generateAccessToken = async (useSupplierCredentials: boolean = false): Promise<string> => {
   try {
-    logger.log("ClickPesa: Generating access token...", {
+    // Select credentials based on useSupplierCredentials flag
+    const apiKey = useSupplierCredentials ? CLICKPESA_API_SUPPLIER_KEY : CLICKPESA_API_KEY
+    const clientId = useSupplierCredentials ? CLICKPESA_CLIENT_SUPPLIER_ID : CLICKPESA_CLIENT_ID
+    const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
+    
+    logger.log(`ClickPesa: Generating access token (${credentialType})...`, {
       baseUrl: CLICKPESA_CONFIG.baseUrl,
-      hasApiKey: Boolean(CLICKPESA_API_KEY),
-      hasClientId: Boolean(CLICKPESA_CLIENT_ID)
+      hasApiKey: Boolean(apiKey),
+      hasClientId: Boolean(clientId),
+      credentialType: credentialType
     })
+
+    if (!apiKey || !clientId) {
+      throw new Error(`Missing ClickPesa credentials for ${credentialType} checkout. Please configure ${useSupplierCredentials ? 'CLICKPESA_API_SUPPLIER_KEY and CLICKPESA_CLIENT_SUPPLIER_ID' : 'CLICKPESA_API_KEY and CLICKPESA_CLIENT_ID'}`)
+    }
 
     const response = await fetch(`${CLICKPESA_CONFIG.baseUrl}/third-parties/generate-token`, {
       method: "POST",
       headers: {
-        "api-key": CLICKPESA_API_KEY,
-        "client-id": CLICKPESA_CLIENT_ID,
+        "api-key": apiKey,
+        "client-id": clientId,
         "Content-Type": "application/json"
       },
     })
@@ -234,12 +251,17 @@ export const generateChecksum = (payload: CheckoutLinkRequest): string => {
 }
 
 // Create ClickPesa checkout link
-export const createCheckoutLink = async (request: CheckoutLinkRequest): Promise<CheckoutLinkResponse> => {
+// useSupplierCredentials: true = use supplier credentials, false = use regular checkout credentials
+export const createCheckoutLink = async (
+  request: CheckoutLinkRequest,
+  useSupplierCredentials: boolean = false
+): Promise<CheckoutLinkResponse> => {
   try {
-    // Step 1: Generate access token
-    logger.log("Generating ClickPesa access token...")
-    const accessToken = await generateAccessToken()
-    logger.log("Access token generated successfully")
+    // Step 1: Generate access token with appropriate credentials
+    const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
+    logger.log(`Generating ClickPesa access token (${credentialType})...`)
+    const accessToken = await generateAccessToken(useSupplierCredentials)
+    logger.log(`Access token generated successfully (${credentialType})`)
 
     // Step 2: Generate checksum if not provided
     if (!request.checksum) {
@@ -374,8 +396,14 @@ export const parseWebhookPayload = (payload: any) => {
 }
 
 // Utility function to check if ClickPesa is properly configured
+// Checks both regular and supplier credentials
 export const isClickPesaConfigured = (): boolean => {
-  return Boolean(CLICKPESA_CONFIG.accessToken)
+  const hasRegularCredentials = Boolean(CLICKPESA_CLIENT_ID && CLICKPESA_API_KEY)
+  const hasSupplierCredentials = Boolean(CLICKPESA_CLIENT_SUPPLIER_ID && CLICKPESA_API_SUPPLIER_KEY)
+  const hasSharedKeys = Boolean(CLICKPESA_CHECKSUM_KEY)
+  
+  // At least one set of credentials should be configured
+  return (hasRegularCredentials || hasSupplierCredentials) && hasSharedKeys
 }
 
 // Test checksum generation with example data
@@ -422,18 +450,122 @@ export const testChecksumGeneration = () => {
   }
 }
 
+// Verify transaction status via ClickPesa API
+// This is a critical security step - always verify transactions with ClickPesa before marking as confirmed
+export interface TransactionVerificationResult {
+  verified: boolean
+  status: string
+  transactionId?: string
+  amount?: number
+  currency?: string
+  message?: string
+  error?: string
+}
+
+export const verifyTransactionWithClickPesa = async (
+  orderReference: string,
+  useSupplierCredentials: boolean = false
+): Promise<TransactionVerificationResult> => {
+  try {
+    const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
+    logger.log(`🔍 Verifying transaction with ClickPesa API (${credentialType}):`, {
+      orderReference,
+      baseUrl: CLICKPESA_CONFIG.baseUrl,
+      credentialType: credentialType
+    })
+
+    // Step 1: Generate access token with appropriate credentials
+    const accessToken = await generateAccessToken(useSupplierCredentials)
+    
+    // Step 2: Query payment status from ClickPesa API
+    const response = await fetch(
+      `${CLICKPESA_CONFIG.baseUrl}/third-parties/payments/${orderReference}`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      logger.error('❌ ClickPesa API verification failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+        orderReference
+      })
+      
+      return {
+        verified: false,
+        status: 'UNKNOWN',
+        error: `ClickPesa API error: ${response.status} ${response.statusText}`
+      }
+    }
+
+    const transactionData = await response.json()
+    
+    logger.log('✅ ClickPesa API verification response:', {
+      orderReference,
+      status: transactionData.status,
+      transactionId: transactionData.id,
+      amount: transactionData.collectedAmount,
+      currency: transactionData.collectedCurrency
+    })
+
+    // Step 3: Verify transaction status
+    const status = transactionData.status?.toUpperCase() || 'UNKNOWN'
+    const isSuccess = status === 'SUCCESS' || status === 'SETTLED'
+    const isFailed = status === 'FAILED' || status === 'ERROR' || status === 'CANCELLED' || status === 'DECLINED'
+    
+    return {
+      verified: true,
+      status: status,
+      transactionId: transactionData.id,
+      amount: transactionData.collectedAmount,
+      currency: transactionData.collectedCurrency,
+      message: transactionData.message
+    }
+  } catch (error) {
+    logger.error('❌ Error verifying transaction with ClickPesa API:', {
+      orderReference,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    
+    return {
+      verified: false,
+      status: 'ERROR',
+      error: error instanceof Error ? error.message : 'Unknown error during verification'
+    }
+  }
+}
+
 // Get configuration status for debugging
 export const getConfigStatus = () => {
   return {
-    hasAccessToken: Boolean(CLICKPESA_CONFIG.accessToken),
-    hasClientId: Boolean(CLICKPESA_CLIENT_ID),
-    hasApiKey: Boolean(CLICKPESA_API_KEY),
-    hasChecksumKey: Boolean(CLICKPESA_CHECKSUM_KEY),
     baseUrl: CLICKPESA_CONFIG.baseUrl,
     isLive: CLICKPESA_CONFIG.isLive,
     environment: process.env.NODE_ENV,
+    // Regular checkout credentials
+    regular: {
+      hasClientId: Boolean(CLICKPESA_CLIENT_ID),
+      hasApiKey: Boolean(CLICKPESA_API_KEY),
     clientId: CLICKPESA_CLIENT_ID ? `${CLICKPESA_CLIENT_ID.substring(0, 8)}...` : "Not configured",
-    apiKey: CLICKPESA_API_KEY ? `${CLICKPESA_API_KEY.substring(0, 8)}...` : "Not configured",
+      apiKey: CLICKPESA_API_KEY ? `${CLICKPESA_API_KEY.substring(0, 8)}...` : "Not configured"
+    },
+    // Supplier upgrade credentials
+    supplier: {
+      hasClientId: Boolean(CLICKPESA_CLIENT_SUPPLIER_ID),
+      hasApiKey: Boolean(CLICKPESA_API_SUPPLIER_KEY),
+      clientId: CLICKPESA_CLIENT_SUPPLIER_ID ? `${CLICKPESA_CLIENT_SUPPLIER_ID.substring(0, 8)}...` : "Not configured",
+      apiKey: CLICKPESA_API_SUPPLIER_KEY ? `${CLICKPESA_API_SUPPLIER_KEY.substring(0, 8)}...` : "Not configured"
+    },
+    // Shared credentials
+    shared: {
+      hasChecksumKey: Boolean(CLICKPESA_CHECKSUM_KEY),
     checksumKey: CLICKPESA_CHECKSUM_KEY ? `${CLICKPESA_CHECKSUM_KEY.substring(0, 8)}...` : "Not configured"
+    }
   }
 }

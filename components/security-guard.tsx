@@ -44,6 +44,16 @@ export function SecurityGuard({
         return
       }
       
+      // Check email verification - block access to protected routes if not verified
+      // OAuth users (like Google) are automatically verified, so skip check for them
+      const isOAuthUser = user && ((user as any)?.profile?.provider === 'google' || 
+                                    (user as any)?.app_metadata?.provider === 'google')
+      if (requireAuth && isAuthenticated && user && !user.isVerified && !isOAuthUser) {
+        // Redirect to home with verification message
+        router.push('/?verify_email=true')
+        return
+      }
+      
       // Check admin requirement
       if (requireAdmin && (!isAuthenticated || user?.role !== 'admin')) {
         router.push('/unauthorized')

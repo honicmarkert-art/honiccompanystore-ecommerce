@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { createServerClient } from '@supabase/ssr'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 
@@ -95,6 +97,8 @@ export async function GET(
 }
 
 // PATCH /api/orders/[referenceId] - Update order status
+// SECURITY: This endpoint should ONLY be used as a last resort backup when webhook fails
+// It requires additional security measures to prevent abuse
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ referenceId: string }> }
@@ -138,12 +142,86 @@ export async function PATCH(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
+    // SECURITY: Verify user owns the order OR verify payment actually happened
+    // Get user from session if available
+    let isOrderOwner = false
+    try {
+      const cookieStore = cookies()
+      const supabaseAuth = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        {
+          cookies: {
+            get(name: string) {
+              return cookieStore.get(name)?.value
+            },
+            set() {},
+            remove() {},
+          },
+        }
+      )
+      
+      const { data: { user } } = await supabaseAuth.auth.getUser()
+      isOrderOwner = !!(user && order.user_id === user.id)
+    } catch (authError) {
+      // If auth fails, user is not authenticated - continue with other checks
+      logger.log('Auth check failed for return URL update:', authError)
+    }
+
     // Check if this is a retry payment update request
+    // IMPORTANT: Return URL updates are ONLY for retry payments when webhook fails
+    // Webhooks are the PRIMARY mechanism - return URL is backup only
     const { isRetryPayment } = body
     
+    // SECURITY: Additional validation for return URL updates
     if (isRetryPayment && paymentStatus === 'paid') {
-      // This is a retry payment backup update via return URL
-      logger.log('🔄 Processing retry payment update via return URL:', order.id)
+      // SECURITY CHECK 1: Verify order is actually in retry state (failed/pending)
+      if (order.payment_status !== 'failed' && order.payment_status !== 'pending') {
+        logger.log('⚠️ SECURITY: Attempt to update non-retry order via return URL:', {
+          orderId: order.id,
+          currentStatus: order.payment_status,
+          requestedStatus: paymentStatus
+        })
+        return NextResponse.json({ 
+          error: 'Order is not in retry state. Only failed or pending orders can be updated via return URL.' 
+        }, { status: 403 })
+      }
+      
+      // SECURITY CHECK 2: Verify user owns the order OR verify ClickPesa transaction exists
+      // For guest orders, we need to verify the payment actually happened
+      if (!isOrderOwner) {
+        // Check if there's a ClickPesa transaction ID (proves payment happened)
+        const hasClickPesaTransaction = order.clickpesa_transaction_id
+        
+        if (!hasClickPesaTransaction) {
+          logger.log('⚠️ SECURITY: Unauthorized return URL update attempt:', {
+            orderId: order.id,
+            orderUserId: order.user_id,
+            requestUserId: user?.id || 'anonymous',
+            hasTransaction: false
+          })
+          return NextResponse.json({ 
+            error: 'Unauthorized. Only order owner or verified payment can update status.' 
+          }, { status: 403 })
+        }
+      }
+      
+      // SECURITY CHECK 3: Rate limiting - prevent abuse
+      // Check if this order was recently updated (prevent duplicate updates)
+      const recentlyUpdated = order.updated_at && 
+        (new Date().getTime() - new Date(order.updated_at).getTime()) < 5000 // 5 seconds
+      
+      if (recentlyUpdated && order.payment_status === 'paid') {
+        logger.log('⚠️ SECURITY: Duplicate update attempt prevented:', {
+          orderId: order.id,
+          lastUpdated: order.updated_at
+        })
+        return NextResponse.json({ 
+          error: 'Order was recently updated. Please wait before retrying.' 
+        }, { status: 429 })
+      }
+      // This is a retry payment backup update via return URL (webhook didn't work)
+      logger.log('🔄 Processing retry payment update via return URL (webhook backup):', order.id)
       
       // Update payment status
       const { data: updatedOrder, error: updateError } = await supabase
@@ -227,7 +305,7 @@ export async function PATCH(
           paymentStatus: updatedOrder.payment_status,
           updatedAt: updatedOrder.updated_at
         },
-        message: 'Retry payment processed successfully via return URL.'
+        message: 'Payment status updated successfully via return URL (webhook backup).'
       })
     } else {
       // Return current order status (READ-ONLY - no updates)

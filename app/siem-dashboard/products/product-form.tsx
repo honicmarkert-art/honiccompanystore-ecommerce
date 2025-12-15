@@ -27,9 +27,11 @@ interface ProductFormProps {
   onClose: () => void
   onSave?: (productData: any) => void
   autoCloseOnSave?: boolean
+  hideImportChina?: boolean // Hide "Import from China" field for suppliers
+  restrictVariantType?: boolean // Restrict variant type to primary-dependent for suppliers
 }
 
-export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }: ProductFormProps) {
+export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, hideImportChina = false, restrictVariantType = false }: ProductFormProps) {
   const { themeClasses } = useTheme()
   const { toast } = useToast()
   const { categories: rawCategories, isLoading: categoriesLoading, error: categoriesError } = useCategories()
@@ -90,7 +92,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
     sameDayDelivery: false,
     importChina: false,
     variantConfig: {
-      type: 'simple' as 'simple' | 'primary-dependent' | 'multi-dependent',
+      type: (restrictVariantType ? 'primary-dependent' : 'simple') as 'simple' | 'primary-dependent' | 'multi-dependent',
       primaryAttribute: '',
       primaryAttributes: [] as string[],
       attributeOrder: [] as string[],
@@ -172,7 +174,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         importChina: product.importChina || product.import_china || false,
         sameDayDelivery: product.sameDayDelivery || false,
         variantConfig: product.variantConfig || {
-          type: 'simple',
+          type: restrictVariantType ? 'primary-dependent' : 'simple',
           primaryAttribute: '',
           primaryAttributes: [],
           attributeOrder: [],
@@ -198,10 +200,15 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
       
       // Add attributes from variant config
       if (product.variantConfig) {
+        // Force primary-dependent type for suppliers
+        if (restrictVariantType && product.variantConfig.type !== 'primary-dependent') {
+          product.variantConfig.type = 'primary-dependent'
+        }
         if (product.variantConfig.primaryAttribute) {
           allAttributes.add(product.variantConfig.primaryAttribute)
         }
-        if (product.variantConfig.primaryAttributes) {
+        // For suppliers, ensure ALL primaryAttributes are loaded
+        if (product.variantConfig.primaryAttributes && Array.isArray(product.variantConfig.primaryAttributes)) {
           product.variantConfig.primaryAttributes.forEach((attr: string) => allAttributes.add(attr))
         }
         if (product.variantConfig.attributeOrder) {
@@ -253,6 +260,43 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
       setSelectedAttributes(filteredAttributes)
     }
     }, [product, categoriesLoading, brandsLoading])
+
+  // Auto-set ALL attributes as primary for suppliers when attributes are selected
+  useEffect(() => {
+    if (restrictVariantType && formData.variantConfig.type === 'primary-dependent') {
+      const validAttributes = selectedAttributes.filter(attribute => 
+        !/^\d+$/.test(attribute) && 
+        !attribute.endsWith('_raw') &&
+        !attribute.endsWith('_quantity') &&
+        attribute !== 'quantities'
+      )
+      if (validAttributes.length > 0) {
+        const currentPrimary = formData.variantConfig.primaryAttribute
+        const currentPrimaryAttributes = formData.variantConfig.primaryAttributes || []
+        
+        // Set first attribute as primaryAttribute (required for primary-dependent type)
+        const needsPrimaryUpdate = !currentPrimary || !validAttributes.includes(currentPrimary)
+        
+        // Set ALL valid attributes in primaryAttributes array
+        const needsPrimaryAttributesUpdate = 
+          currentPrimaryAttributes.length !== validAttributes.length ||
+          !validAttributes.every(attr => currentPrimaryAttributes.includes(attr))
+        
+        if (needsPrimaryUpdate || needsPrimaryAttributesUpdate) {
+          setFormData(prev => ({
+            ...prev,
+            variantConfig: {
+              ...prev.variantConfig,
+              // Set first attribute as primaryAttribute (required field)
+              primaryAttribute: validAttributes[0],
+              // Set ALL attributes as primaryAttributes (treat all as primary)
+              primaryAttributes: [...validAttributes]
+            }
+          }))
+        }
+      }
+    }
+  }, [selectedAttributes, restrictVariantType, formData.variantConfig.type, formData.variantConfig.primaryAttribute, formData.variantConfig.primaryAttributes])
 
   // Auto-refresh product data after updating (5 seconds, one-time)
   useEffect(() => {
@@ -852,6 +896,14 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         if (vc.type === 'primary-dependent' && !vc.primaryAttribute && usedAttributes.length > 0) {
           vc.primaryAttribute = usedAttributes[0]
         }
+        // For suppliers (restrictVariantType), set ALL used attributes as primaryAttributes even in primary-dependent mode
+        if (vc.type === 'primary-dependent' && restrictVariantType && usedAttributes.length > 0) {
+          vc.primaryAttributes = Array.from(new Set([...usedAttributes]))
+          // Ensure primaryAttribute is set to first attribute
+          if (!vc.primaryAttribute) {
+            vc.primaryAttribute = usedAttributes[0]
+          }
+        }
         // Multi-dependent: ensure primaryAttributes/attributeOrder include used attributes
         if (vc.type === 'multi-dependent') {
           vc.primaryAttributes = Array.isArray(vc.primaryAttributes) && vc.primaryAttributes.length > 0
@@ -1011,11 +1063,11 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
     <>
       <form onSubmit={handleSubmit} className="space-y-6" suppressHydrationWarning>
         <Tabs defaultValue="basic" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="basic">Basic Info</TabsTrigger>
-            <TabsTrigger value="pricing">Pricing</TabsTrigger>
-            <TabsTrigger value="media">Media</TabsTrigger>
-            <TabsTrigger value="advanced">Advanced</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
+            <TabsTrigger value="basic" className="text-xs sm:text-sm px-2 sm:px-4 py-2">Basic Info</TabsTrigger>
+            <TabsTrigger value="pricing" className="text-xs sm:text-sm px-2 sm:px-4 py-2">Pricing</TabsTrigger>
+            <TabsTrigger value="media" className="text-xs sm:text-sm px-2 sm:px-4 py-2">Media</TabsTrigger>
+            <TabsTrigger value="advanced" className="text-xs sm:text-sm px-2 sm:px-4 py-2">Specifications</TabsTrigger>
           </TabsList>
 
         <TabsContent value="basic" className="space-y-4">
@@ -1115,19 +1167,21 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="rating">Rating</Label>
-              <Input
-                id="rating"
-                type="number"
-                step="0.1"
-                min="0"
-                max="5"
-                value={formData.rating}
-                onChange={(e) => handleInputChange("rating", e.target.value)}
-                placeholder="4.5"
-              />
-            </div>
+            {!hideImportChina && (
+              <div className="space-y-2">
+                <Label htmlFor="rating">Rating</Label>
+                <Input
+                  id="rating"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="5"
+                  value={formData.rating}
+                  onChange={(e) => handleInputChange("rating", e.target.value)}
+                  placeholder="4.5"
+                />
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -1250,36 +1304,60 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                   />
                 </div>
 
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label>Import from China</Label>
-            <p className="text-sm text-muted-foreground">Mark if this product is imported from China</p>
+        {!hideImportChina && (
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Import from China</Label>
+              <p className="text-sm text-muted-foreground">Mark if this product is imported from China</p>
+            </div>
+            <Switch
+              checked={formData.importChina}
+              onCheckedChange={(checked) => handleInputChange("importChina", checked)}
+            />
           </div>
-          <Switch
-            checked={formData.importChina}
-            onCheckedChange={(checked) => handleInputChange("importChina", checked)}
-                  />
-                </div>
+        )}
 
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Same Day Delivery</Label>
-                    <p className="text-sm text-muted-foreground">Available for same day delivery</p>
-                  </div>
-                  <Switch
-                    checked={formData.sameDayDelivery}
-                    onCheckedChange={(checked) => handleInputChange("sameDayDelivery", checked)}
-                  />
-                </div>
+        {!hideImportChina && (
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Same Day Delivery</Label>
+              <p className="text-sm text-muted-foreground">Available for same day delivery</p>
+            </div>
+            <Switch
+              checked={formData.sameDayDelivery}
+              onCheckedChange={(checked) => handleInputChange("sameDayDelivery", checked)}
+            />
+          </div>
+        )}
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="pricing" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="price">Price * (in TZS)</Label>
+          <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="originalPrice" className="text-xs sm:text-sm lg:text-base">Original Price (in TZS)</Label>
+              <div className="relative">
+                <Input
+                  id="originalPrice"
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={formData.originalPrice}
+                  onChange={(e) => handleInputChange("originalPrice", e.target.value)}
+                  placeholder="1000"
+                  className="pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10"
+                />
+                <div className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
+                  TZS
+                </div>
+              </div>
+              <p className="text-[9px] sm:text-[10px] text-gray-500 leading-tight">Original price before discount (optional)</p>
+            </div>
+
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="price" className="text-xs sm:text-sm lg:text-base">Price after offer * (in TZS)</Label>
               <div className="relative">
                 <Input
                   id="price"
@@ -1290,37 +1368,17 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                   onChange={(e) => handleInputChange("price", e.target.value)}
                   placeholder="500"
                   required
-                  className="pr-12"
+                  className="pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10"
                 />
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">
+                <div className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
                   TZS
                 </div>
               </div>
-              <p className="text-xs text-gray-500">Enter price in Tanzanian Shillings (minimum 500 TZS)</p>
+              <p className="text-[9px] sm:text-[10px] text-gray-500 leading-tight">Enter price in Tanzanian Shillings (minimum 500 TZS)</p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="originalPrice">Original Price (in TZS)</Label>
-              <div className="relative">
-                <Input
-                  id="originalPrice"
-                  type="number"
-                  step="1"
-                  min="0"
-                  value={formData.originalPrice}
-                  onChange={(e) => handleInputChange("originalPrice", e.target.value)}
-                  placeholder="1000"
-                  className="pr-12"
-                />
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">
-                  TZS
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">Original price before discount (optional)</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="reviews">Number of Reviews</Label>
+            <div className="space-y-1.5 sm:space-y-2 sm:col-span-2">
+              <Label htmlFor="reviews" className="text-xs sm:text-sm lg:text-base">Number of Reviews</Label>
               <Input
                 id="reviews"
                 type="number"
@@ -1328,36 +1386,37 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                 value={formData.reviews}
                 onChange={(e) => handleInputChange("reviews", e.target.value)}
                 placeholder="0"
+                className="text-sm sm:text-base h-9 sm:h-10"
               />
             </div>
           </div>
 
                      {/* Attribute Management */}
            <Card>
-             <CardHeader>
-               <div className="flex items-center justify-between">
-                 <CardTitle>Product Attributes</CardTitle>
-                 <div className="flex items-center gap-2">
+             <CardHeader className="p-4 sm:p-6">
+               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+                 <CardTitle className="text-base sm:text-lg">Product Attributes</CardTitle>
+                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                    <Input
                      placeholder="Add custom attribute"
                      value={newAttribute}
                      onChange={(e) => setNewAttribute(e.target.value)}
                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomAttribute())}
-                     className="w-48"
+                     className="w-full sm:w-48 text-sm sm:text-base"
                    />
-                   <Button type="button" onClick={addCustomAttribute} size="sm">
-                     <Plus className="h-4 w-4 mr-2" />
+                   <Button type="button" onClick={addCustomAttribute} size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
+                     <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                      Add Custom
                    </Button>
                  </div>
                </div>
              </CardHeader>
-             <CardContent>
-               <div className="space-y-4">
+             <CardContent className="p-4 sm:p-6">
+               <div className="space-y-3 sm:space-y-4">
                  {/* Common Attributes */}
                  <div>
-                   <Label className="text-sm font-medium mb-2 block">Common Attributes (Click to select)</Label>
-                   <div className="flex flex-wrap gap-2">
+                   <Label className="text-xs sm:text-sm font-medium mb-2 block">Common Attributes (Click to select)</Label>
+                   <div className="flex flex-wrap gap-1.5 sm:gap-2">
                      {commonAttributes.map(attribute => (
                        <Button
                          key={attribute}
@@ -1365,7 +1424,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                          variant={selectedAttributes.includes(attribute) ? "default" : "outline"}
                          size="sm"
                          onClick={() => toggleAttribute(attribute)}
-                         className="capitalize"
+                         className="capitalize text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3"
                        >
                          {attribute}
                        </Button>
@@ -1376,19 +1435,19 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                  {/* Selected Attributes */}
                  {selectedAttributes.length > 0 && (
                    <div>
-                     <Label className="text-sm font-medium mb-2 block">Selected Attributes</Label>
-                     <div className="flex flex-wrap gap-2">
+                     <Label className="text-xs sm:text-sm font-medium mb-2 block">Selected Attributes</Label>
+                     <div className="flex flex-wrap gap-1.5 sm:gap-2">
                        {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw') && !attribute.endsWith('_quantity') && attribute !== 'quantities' && attribute !== '_quantities' && !attribute.startsWith('_')).map(attribute => (
-                         <Badge key={attribute} variant="secondary" className="flex items-center gap-1 capitalize">
-                           {attribute}
+                         <Badge key={attribute} variant="secondary" className="flex items-center gap-1 capitalize text-xs sm:text-sm px-2 sm:px-3 py-0.5 sm:py-1">
+                           <span className="truncate max-w-[120px] sm:max-w-none">{attribute}</span>
                            <Button
                              type="button"
                              variant="ghost"
                              size="sm"
                              onClick={() => removeAttribute(attribute)}
-                             className="h-4 w-4 p-0 hover:bg-red-100"
+                             className="h-4 w-4 sm:h-4 sm:w-4 p-0 hover:bg-red-100 flex-shrink-0"
                            >
-                             <X className="h-3 w-3" />
+                             <X className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                            </Button>
                          </Badge>
                        ))}
@@ -1397,7 +1456,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                  )}
 
                  {selectedAttributes.length === 0 && (
-                   <p className="text-sm text-muted-foreground">No attributes selected. Select attributes to create variants.</p>
+                   <p className="text-xs sm:text-sm text-muted-foreground">No attributes selected. Select attributes to create variants.</p>
                  )}
 
 
@@ -1415,44 +1474,50 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                 <div>
                   <Label className="text-sm font-medium mb-2 block">Variant Logic Type</Label>
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant={formData.variantConfig.type === 'simple' ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => handleInputChange("variantConfig", { ...formData.variantConfig, type: 'simple' })}
-                    >
-                      Simple (No Price Impact)
-                    </Button>
+                    {!restrictVariantType && (
+                      <Button
+                        type="button"
+                        variant={formData.variantConfig.type === 'simple' ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handleInputChange("variantConfig", { ...formData.variantConfig, type: 'simple' })}
+                      >
+                        Simple (No Price Impact)
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       variant={formData.variantConfig.type === 'primary-dependent' ? "default" : "outline"}
                       size="sm"
-                      onClick={() => handleInputChange("variantConfig", { ...formData.variantConfig, type: 'primary-dependent' })}
+                      onClick={() => !restrictVariantType && handleInputChange("variantConfig", { ...formData.variantConfig, type: 'primary-dependent' })}
+                      disabled={restrictVariantType}
+                      className={restrictVariantType ? "cursor-default" : ""}
                     >
                       Primary-Dependent (One Attribute Affects Price)
                     </Button>
-                    <Button
-                      type="button"
-                      variant={formData.variantConfig.type === 'multi-dependent' ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => handleInputChange("variantConfig", { ...formData.variantConfig, type: 'multi-dependent' })}
-                    >
-                      Multi-Dependent (Step-by-Step Selection)
-                    </Button>
+                    {!restrictVariantType && (
+                      <Button
+                        type="button"
+                        variant={formData.variantConfig.type === 'multi-dependent' ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handleInputChange("variantConfig", { ...formData.variantConfig, type: 'multi-dependent' })}
+                      >
+                        Multi-Dependent (Step-by-Step Selection)
+                      </Button>
+                    )}
                   </div>
                 </div>
 
                 {/* Primary Attribute Selection for Primary-Dependent Logic */}
-                {formData.variantConfig.type === 'primary-dependent' && (
+                {formData.variantConfig.type === 'primary-dependent' && !restrictVariantType && (
                   <div>
-                    <Label className="text-sm font-medium mb-2 block">Primary Attribute (Affects Price)</Label>
+                    <Label className="text-xs sm:text-sm font-medium mb-2 block">Primary Attribute (Affects Price)</Label>
                     <select
                       value={formData.variantConfig.primaryAttribute}
                       onChange={(e) => handleInputChange("variantConfig", { 
                         ...formData.variantConfig, 
                         primaryAttribute: e.target.value 
                       })}
-                      className="w-full p-2 border rounded-md"
+                      className="w-full p-2 border rounded-md text-sm sm:text-base h-9 sm:h-10"
                     >
                       <option value="">Select Primary Attribute</option>
                       {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map(attribute => (
@@ -1467,7 +1532,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                 {/* Primary Attribute Selection for Multi-Dependent Logic */}
                 {formData.variantConfig.type === 'multi-dependent' && (
                   <div>
-                    <Label className="text-sm font-medium mb-2 block">Primary Attributes (Affect Price)</Label>
+                    <Label className="text-xs sm:text-sm font-medium mb-2 block">Primary Attributes (Affect Price)</Label>
                     <div className="space-y-2">
                       {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map((attribute) => (
                         <div key={attribute} className="flex items-center gap-2">
@@ -1485,18 +1550,18 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                 primaryAttributes: newPrimaryAttributes 
                               })
                             }}
-                            className="rounded"
+                            className="rounded w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0"
                           />
-                          <label htmlFor={`primary-${attribute}`} className="flex-1 capitalize text-sm">
-                            {attribute}
+                          <label htmlFor={`primary-${attribute}`} className="flex-1 capitalize text-xs sm:text-sm min-w-0">
+                            <span className="truncate block">{attribute}</span>
                           </label>
                         </div>
                       ))}
                     </div>
                     {formData.variantConfig.primaryAttributes?.length > 0 && (
-                      <div className="mt-2 p-2 bg-orange-50 rounded-md">
-                        <span className="text-sm font-medium text-orange-700">Primary Attributes: </span>
-                        <span className="text-sm text-orange-600">
+                      <div className="mt-2 p-2 sm:p-2.5 bg-orange-50 rounded-md">
+                        <span className="text-xs sm:text-sm font-medium text-orange-700">Primary Attributes: </span>
+                        <span className="text-xs sm:text-sm text-orange-600 break-words">
                           {formData.variantConfig.primaryAttributes.map((attr, index) => (
                             <span key={attr}>
                               {index > 0 ? ", " : ""}{attr.charAt(0).toUpperCase() + attr.slice(1)}
@@ -1511,12 +1576,12 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                 {/* Attribute Order for Multi-Dependent Logic */}
                 {formData.variantConfig.type === 'multi-dependent' && (
                   <div>
-                    <Label className="text-sm font-medium mb-2 block">Attribute Selection Order</Label>
+                    <Label className="text-xs sm:text-sm font-medium mb-2 block">Attribute Selection Order</Label>
                     <div className="space-y-2">
                       {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map((attribute, index) => (
                         <div key={attribute} className="flex items-center gap-2">
-                          <span className="text-sm font-medium w-8">{index + 1}.</span>
-                          <span className="flex-1 capitalize">{attribute}</span>
+                          <span className="text-xs sm:text-sm font-medium w-6 sm:w-8 flex-shrink-0">{index + 1}.</span>
+                          <span className="flex-1 capitalize text-xs sm:text-sm truncate min-w-0">{attribute}</span>
                           <Button
                             type="button"
                             variant="ghost"
@@ -1534,6 +1599,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                 attributeOrder: newOrder 
                               })
                             }}
+                            className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3 flex-shrink-0"
                           >
                             {formData.variantConfig.attributeOrder.includes(attribute) ? "Remove" : "Add"}
                           </Button>
@@ -1541,9 +1607,9 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                       ))}
                     </div>
                     {formData.variantConfig.attributeOrder.length > 0 && (
-                      <div className="mt-2 p-2 bg-blue-50 rounded-md">
-                        <span className="text-sm font-medium">Current Order: </span>
-                        <span className="text-sm">
+                      <div className="mt-2 p-2 sm:p-2.5 bg-blue-50 rounded-md">
+                        <span className="text-xs sm:text-sm font-medium">Current Order: </span>
+                        <span className="text-xs sm:text-sm break-words">
                           {formData.variantConfig.attributeOrder.map((attr, index) => (
                             <span key={attr}>
                               {index > 0 ? " → " : ""}{attr.charAt(0).toUpperCase() + attr.slice(1)}
@@ -1556,18 +1622,18 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                 )}
 
                 {/* Configuration Summary */}
-                <div className={cn("p-3 rounded-md", themeClasses.cardBg, themeClasses.cardBorder)}>
-                  <h4 className={cn("font-medium mb-2", themeClasses.mainText)}>Configuration Summary</h4>
-                  <div className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                    <div><strong>Logic Type:</strong> {formData.variantConfig.type}</div>
+                <div className={cn("p-3 sm:p-4 rounded-md", themeClasses.cardBg, themeClasses.cardBorder)}>
+                  <h4 className={cn("font-medium mb-2 text-sm sm:text-base", themeClasses.mainText)}>Configuration Summary</h4>
+                  <div className={cn("text-xs sm:text-sm space-y-1", themeClasses.textNeutralSecondary)}>
+                    <div className="break-words"><strong>Logic Type:</strong> {formData.variantConfig.type}</div>
                     {formData.variantConfig.type === 'primary-dependent' && formData.variantConfig.primaryAttribute && (
-                      <div><strong>Primary Attribute:</strong> {formData.variantConfig.primaryAttribute}</div>
+                      <div className="break-words"><strong>Primary Attribute:</strong> {formData.variantConfig.primaryAttribute}</div>
                     )}
                     {formData.variantConfig.type === 'multi-dependent' && formData.variantConfig.primaryAttributes?.length > 0 && (
-                      <div><strong>Primary Attributes:</strong> {formData.variantConfig.primaryAttributes.join(", ")}</div>
+                      <div className="break-words"><strong>Primary Attributes:</strong> {formData.variantConfig.primaryAttributes.join(", ")}</div>
                     )}
                     {formData.variantConfig.type === 'multi-dependent' && formData.variantConfig.attributeOrder.length > 0 && (
-                      <div><strong>Selection Order:</strong> {formData.variantConfig.attributeOrder.join(" → ")}</div>
+                      <div className="break-words"><strong>Selection Order:</strong> {formData.variantConfig.attributeOrder.join(" → ")}</div>
                     )}
                     <div><strong>Selected Attributes:</strong> {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).length}</div>
                     <div><strong>Variants Created:</strong> {formData.variants.length}</div>
@@ -1579,12 +1645,12 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
           {/* Variants */}
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                <CardTitle>Product Variants</CardTitle>
+            <CardHeader className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+                <div className="min-w-0 flex-1">
+                <CardTitle className="text-base sm:text-lg">Product Variants</CardTitle>
                   {formData.variants.length > 0 && (
-                    <p className="text-sm text-gray-600 mt-1">
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1 break-words">
                       Total Stock: <span className="font-bold text-green-600">
                         {(() => {
                           let total = 0
@@ -1612,17 +1678,17 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                     </p>
                   )}
                 </div>
-                <Button type="button" onClick={addVariant} size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
+                <Button type="button" onClick={addVariant} size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
+                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                   Add Variant
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 sm:p-6 space-y-3 sm:space-y-4">
               {formData.variants.map((variant, index) => (
-                <div key={variant.id} className="border rounded-lg p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-medium">
+                <div key={variant.id} className="border rounded-lg p-3 sm:p-4 space-y-3 sm:space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="font-medium text-sm sm:text-base truncate flex-1 min-w-0">
                       {variant.sku ? `Variant: ${variant.sku}` : `Variant ${index + 1}`}
                     </h4>
                     <Button
@@ -1630,23 +1696,25 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                       variant="ghost"
                       size="sm"
                       onClick={() => removeVariant(index)}
+                      className="h-7 w-7 sm:h-8 sm:w-8 flex-shrink-0"
                     >
-                      <X className="h-4 w-4" />
+                      <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     </Button>
                   </div>
                   
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>SKU</Label>
+                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <Label className="text-xs sm:text-sm">SKU</Label>
                       <Input
                         value={variant.sku ?? ""}
                         onChange={(e) => updateVariant(index, "sku", e.target.value)}
                         placeholder="Variant SKU"
+                        className="text-sm sm:text-base h-9 sm:h-10"
                       />
                     </div>
                     
-                    <div className="space-y-2">
-                      <Label>Price (TZS)</Label>
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <Label className="text-xs sm:text-sm">Price (TZS)</Label>
                       <div className="relative">
                         <Input
                           type="number"
@@ -1655,9 +1723,9 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                           value={variant.price ?? ""}
                           onChange={(e) => updateVariant(index, "price", parseFloat(e.target.value) || 0)}
                           placeholder="500"
-                          className="pr-12"
+                          className="pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10"
                         />
-                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">
+                        <div className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
                           TZS
                         </div>
                       </div>
@@ -1667,23 +1735,24 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
                                      {/* Dynamic Attributes */}
                    {(selectedAttributes.length > 0 || variant.attributes || variant.primaryValues) && (
-                     <div className="space-y-3">
-                       <Label className="text-sm font-medium">Attributes</Label>
-                       <div className="grid gap-3 md:grid-cols-2">
+                     <div className="space-y-2 sm:space-y-3">
+                       <Label className="text-xs sm:text-sm font-medium">Attributes</Label>
+                       <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                          {(selectedAttributes.length > 0 ? selectedAttributes : Object.keys(variant.attributes || {})).filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw') && !attribute.endsWith('_quantity') && attribute !== 'quantities' && attribute !== '_quantities' && !attribute.startsWith('_')).map(attribute => {
                            const isPrimary = attribute === formData.variantConfig.primaryAttribute || 
                                            (formData.variantConfig.type === 'multi-dependent' && 
-                                            formData.variantConfig.primaryAttributes?.includes(attribute))
+                                            formData.variantConfig.primaryAttributes?.includes(attribute)) ||
+                                           (restrictVariantType && formData.variantConfig.primaryAttributes?.includes(attribute))
                            // All non-primary attributes now support comma-separated values
                            
                            return (
-                             <div key={attribute} className="space-y-1">
-                               <div className="flex items-center justify-between">
-                                 <Label className="text-xs capitalize flex items-center gap-2">
-                                   {attribute}
-                                   {isPrimary && (
-                                     <span className="text-xs text-orange-600 font-medium">
-                                       {formData.variantConfig.type === 'multi-dependent' ? '(Primary - Affects Price)' : '(Primary - Affects Price)'}
+                             <div key={attribute} className="space-y-1.5 sm:space-y-2">
+                               <div className="flex items-start sm:items-center justify-between gap-2">
+                                 <Label className="text-xs sm:text-sm capitalize flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
+                                   <span className="truncate">{attribute}</span>
+                                   {isPrimary && !restrictVariantType && (
+                                     <span className="text-[10px] sm:text-xs text-orange-600 font-medium whitespace-nowrap">
+                                       (Primary)
                                      </span>
                                    )}
                                  </Label>
@@ -1692,31 +1761,47 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                {isPrimary ? (
                                  /* Primary Attribute - Multiple Values with Individual Prices */
                                  <div className="space-y-2">
-                                   {variant.primaryValues?.filter((pv: any) => 
-                                     formData.variantConfig.type === 'multi-dependent' 
-                                       ? pv.attribute === attribute 
-                                       : true
-                                   ).map((primaryValue: any, valueIndex: number) => {
+                                   {variant.primaryValues?.filter((pv: any) => {
+                                     // For suppliers (restrictVariantType), filter by attribute even in primary-dependent mode
+                                     if (restrictVariantType) {
+                                       return pv.attribute === attribute
+                                     }
+                                     // For multi-dependent, filter by attribute
+                                     if (formData.variantConfig.type === 'multi-dependent') {
+                                       return pv.attribute === attribute
+                                     }
+                                     // For regular primary-dependent, show all (only one primary attribute)
+                                     return true
+                                   }).map((primaryValue: any, valueIndex: number) => {
                                      // Get all primary values for this attribute to find the correct index
-                                     const attributePrimaryValues = variant.primaryValues?.filter((pv: any) => 
-                                       formData.variantConfig.type === 'multi-dependent' 
-                                         ? pv.attribute === attribute 
-                                         : true
-                                     ) || []
+                                     const attributePrimaryValues = variant.primaryValues?.filter((pv: any) => {
+                                       if (restrictVariantType) {
+                                         return pv.attribute === attribute
+                                       }
+                                       if (formData.variantConfig.type === 'multi-dependent') {
+                                         return pv.attribute === attribute
+                                       }
+                                       return true
+                                     }) || []
                                      
                                      // Find the actual index in the full primaryValues array
-                                     const actualIndex = variant.primaryValues?.findIndex((pv: any, idx: number) => 
-                                       formData.variantConfig.type === 'multi-dependent' 
-                                         ? pv.attribute === attribute && pv === attributePrimaryValues[valueIndex]
-                                         : idx === valueIndex
-                                     ) || valueIndex
+                                     const actualIndex = variant.primaryValues?.findIndex((pv: any, idx: number) => {
+                                       if (restrictVariantType) {
+                                         return pv.attribute === attribute && pv === attributePrimaryValues[valueIndex]
+                                       }
+                                       if (formData.variantConfig.type === 'multi-dependent') {
+                                         return pv.attribute === attribute && pv === attributePrimaryValues[valueIndex]
+                                       }
+                                       return idx === valueIndex
+                                     }) || valueIndex
                                      
                                      return (
-                                      <div key={valueIndex} className="grid grid-cols-1 md:grid-cols-4 gap-2 p-2 border rounded-md">
+                                      <div key={valueIndex} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 p-2 sm:p-2.5 border rounded-md">
                                          <Input
                                            value={primaryValue.value ?? ""}
                                            onChange={(e) => updatePrimaryValue(index, actualIndex, "value", e.target.value)}
                                            placeholder={`Enter ${attribute} value`}
+                                           className="text-sm sm:text-base h-9 sm:h-10"
                                          />
                                         <div className="relative">
                                           <Input
@@ -1726,9 +1811,9 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                             value={primaryValue.price ?? ""}
                                             onChange={(e) => updatePrimaryValue(index, actualIndex, "price", e.target.value)}
                                             placeholder="500"
-                                            className="pr-8"
+                                            className="pr-8 sm:pr-10 text-sm sm:text-base h-9 sm:h-10"
                                           />
-                                          <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-500">
+                                          <div className="absolute right-2 sm:right-2.5 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
                                             TZS
                                           </div>
                                         </div>
@@ -1738,15 +1823,17 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                           value={primaryValue.quantity ?? ""}
                                           onChange={(e) => updatePrimaryValue(index, actualIndex, "quantity", e.target.value === '' ? '' : String(parseInt(e.target.value) || 0))}
                                           placeholder="Qty"
+                                          className="text-sm sm:text-base h-9 sm:h-10"
                                         />
-                                        <div className="flex items-center">
+                                        <div className="flex items-center justify-center sm:justify-start">
                                          <Button
                                            type="button"
                                            variant="ghost"
                                            size="sm"
                                            onClick={() => removePrimaryValue(index, actualIndex)}
+                                           className="h-8 w-8 sm:h-9 sm:w-9"
                                          >
-                                           <X className="h-3 w-3" />
+                                           <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                          </Button>
                                         </div>
                                        </div>
@@ -1757,15 +1844,17 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                      variant="outline"
                                      size="sm"
                                      onClick={() => addPrimaryValue(index, attribute)}
+                                     className="text-xs sm:text-sm h-8 sm:h-9 w-full sm:w-auto"
                                    >
-                                     <Plus className="h-3 w-3 mr-1" />
-                                     Add {attribute} Value
+                                     <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1" />
+                                     <span className="hidden sm:inline">Add {attribute} Value</span>
+                                     <span className="sm:hidden">Add Value</span>
                                    </Button>
                                  </div>
                                ) : (
                                  /* Regular Attribute - Smart Input (Single or Comma-Separated) */
                                  <div className="space-y-2">
-                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                      <Input
                                        value={(() => {
                                          const attrValue = variant.attributes?.[attribute]
@@ -1778,8 +1867,8 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                        })()}
                                        onChange={(e) => updateSmartAttribute(index, attribute, e.target.value)}
                                        onBlur={() => handleAttributeBlur(index, attribute)}
-                                       placeholder={`Enter ${attribute} values separated by commas (e.g., Red, Blue, Green)`}
-                                       className="w-full"
+                                       placeholder={`Enter ${attribute} values`}
+                                       className="w-full text-sm sm:text-base h-9 sm:h-10"
                                      />
                                      <Input
                                        type="number"
@@ -1787,10 +1876,10 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                        value={variant.quantities?.[attribute] ?? ""}
                                        onChange={(e) => updateSmartQuantity(index, attribute, e.target.value === '' ? '' : String(parseInt(e.target.value) || 0))}
                                        placeholder="Quantity"
-                                       className="w-full"
+                                       className="w-full text-sm sm:text-base h-9 sm:h-10"
                                      />
                                    </div>
-                                   <p className="text-xs text-muted-foreground">
+                                   <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">
                                      Single value or comma-separated values (e.g., Red or Red, Blue, Green)
                                    </p>
                                  </div>
@@ -1929,19 +2018,19 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
           {/* Variant Images Section */}
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <ImageIcon className="w-5 h-5" />
+            <CardHeader className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+                <div className="min-w-0 flex-1">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base sm:text-lg">
+                    <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                     Variant Images
                     {formData.variantImages.length > 0 && (
-                      <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                      <span className="text-[10px] sm:text-xs bg-blue-100 text-blue-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">
                         {formData.variantImages.length} saved
                       </span>
                     )}
                   </CardTitle>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">
                     Upload images for specific product variants and attribute combinations
                   </p>
                 </div>
@@ -1949,22 +2038,22 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                   type="button" 
                   onClick={() => setShowVariantImageDialog(true)} 
                   size="sm"
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm w-full sm:w-auto justify-center"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3 w-3 sm:h-4 sm:w-4" />
                   Add Variant Image
                 </Button>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 sm:p-6">
               
               {formData.variantImages && formData.variantImages.length > 0 ? (
-                <div className="space-y-4 max-h-96 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                <div className="space-y-3 sm:space-y-4 max-h-96 overflow-y-auto pr-1 sm:pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
                   {formData.variantImages.map((variantImg, index) => (
-                    <div key={index} className="flex gap-4 p-4 border rounded-lg">
+                    <div key={index} className="flex flex-col sm:flex-row gap-3 sm:gap-4 p-3 sm:p-4 border rounded-lg">
                       {/* Image Preview Container - Left Side */}
-                      <div className="flex-shrink-0">
-                        <div className="relative w-32 h-32 overflow-hidden rounded-lg border-2 border-gray-200 bg-gray-50">
+                      <div className="flex-shrink-0 mx-auto sm:mx-0">
+                        <div className="relative w-24 h-24 sm:w-32 sm:h-32 overflow-hidden rounded-lg border-2 border-gray-200 bg-gray-50">
                           <img
                             src={variantImg.imageUrl}
                             alt="Variant image"
@@ -1989,24 +2078,24 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                       </div>
 
                       {/* Actions Section - Right Side */}
-                      <div className="flex-1 space-y-3">
+                      <div className="flex-1 space-y-2 sm:space-y-3 min-w-0">
                         {/* Variant Info */}
                         <div>
-                          <h4 className="font-medium text-sm">
+                          <h4 className="font-medium text-xs sm:text-sm">
                             Variant Image {index + 1}
                           </h4>
-                          <div className="text-xs text-gray-500 space-y-1">
+                          <div className="text-[10px] sm:text-xs text-gray-500 space-y-0.5 sm:space-y-1">
                             {variantImg.variantId && (
-                              <p>Variant ID: {variantImg.variantId}</p>
+                              <p className="truncate">Variant ID: {variantImg.variantId}</p>
                             )}
                             {variantImg.attribute && (
-                              <p>Attribute: {variantImg.attribute.name}: {variantImg.attribute.value}</p>
+                              <p className="truncate">Attribute: {variantImg.attribute.name}: {variantImg.attribute.value}</p>
                             )}
                             {variantImg.attributes && variantImg.attributes.length > 0 && (
                               <div>
-                                <p className="text-xs font-medium">Attributes:</p>
-                                {variantImg.attributes.map((attr: any, index: number) => (
-                                  <p key={index} className="text-xs">
+                                <p className="text-[10px] sm:text-xs font-medium">Attributes:</p>
+                                {variantImg.attributes.map((attr: any, attrIndex: number) => (
+                                  <p key={attrIndex} className="text-[10px] sm:text-xs truncate">
                                     • {attr.name}: {attr.value || "any"}
                                   </p>
                                 ))}
@@ -2016,16 +2105,16 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                         </div>
 
                         {/* Action Buttons */}
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-1.5 sm:gap-2">
                           {/* View Button */}
                     <Button
                       type="button"
                             variant="outline"
                       size="sm"
                             onClick={() => window.open(variantImg.imageUrl, '_blank')}
-                            className="text-xs"
+                            className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
                           >
-                            <Eye className="w-3 h-3 mr-1" />
+                            <Eye className="w-3 h-3 mr-0.5 sm:mr-1" />
                             View
                           </Button>
 
@@ -2042,9 +2131,9 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                 setFormData(prev => ({ ...prev, variantImages: updatedImages }))
                               }
                             }}
-                            className="text-xs"
+                            className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
                           >
-                            <Link className="w-3 h-3 mr-1" />
+                            <Link className="w-3 h-3 mr-0.5 sm:mr-1" />
                             Edit
                           </Button>
 
@@ -2061,9 +2150,9 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                                 setFormData(prev => ({ ...prev, variantImages: updatedImages }))
                               }
                             }}
-                            className="text-xs"
+                            className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
                           >
-                            <Link className="w-3 h-3 mr-1" />
+                            <Link className="w-3 h-3 mr-0.5 sm:mr-1" />
                             URLs
                           </Button>
 
@@ -2073,19 +2162,19 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
                             variant="outline"
                             size="sm"
                             onClick={() => deleteVariantImage(index)}
-                            className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                            className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3 text-red-600 hover:text-red-700 hover:bg-red-50"
                           >
-                            <Trash2 className="w-3 h-3 mr-1" />
+                            <Trash2 className="w-3 h-3 mr-0.5 sm:mr-1" />
                             Delete
                     </Button>
                         </div>
 
                         {/* Status Info */}
-                        <div className="text-xs text-gray-500">
-                          <Badge variant="secondary" className="text-xs">
+                        <div className="text-[10px] sm:text-xs text-gray-500 flex flex-wrap items-center gap-1 sm:gap-2">
+                          <Badge variant="secondary" className="text-[10px] sm:text-xs">
                             Variant Image
                           </Badge>
-                          <span className="ml-2">Current file loaded</span>
+                          <span>Current file loaded</span>
                         </div>
                       </div>
                   </div>
@@ -2109,45 +2198,46 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
         <TabsContent value="advanced" className="space-y-4">
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Specifications</CardTitle>
-                <Button type="button" onClick={addSpecification} size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
+            <CardHeader className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+                <CardTitle className="text-base sm:text-lg">Specifications</CardTitle>
+                <Button type="button" onClick={addSpecification} size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
+                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                   Add Specification
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="p-4 sm:p-6 space-y-3 sm:space-y-4">
               {specificationFields.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  <p>No specifications added yet.</p>
-                  <p className="text-sm">Click "Add Specification" to get started.</p>
+                <div className="text-center py-6 sm:py-8 text-muted-foreground">
+                  <p className="text-sm sm:text-base">No specifications added yet.</p>
+                  <p className="text-xs sm:text-sm mt-1">Click "Add Specification" to get started.</p>
                 </div>
               )}
               
               {specificationFields.map((field) => (
-                <div key={field.id} className="flex items-center gap-2">
+                <div key={field.id} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <Input
                     value={field.key ?? ""}
                     onChange={(e) => updateSpecificationField(field.id, 'key', e.target.value)}
-                    placeholder="Specification key (e.g., Color, Size, Material)"
-                    className="w-1/3"
+                    placeholder="Specification key"
+                    className="w-full sm:w-1/3 text-sm sm:text-base"
                   />
                   <Input
                     value={field.value ?? ""}
                     onChange={(e) => updateSpecificationField(field.id, 'value', e.target.value)}
                     placeholder="Specification value"
-                    className="flex-1"
+                    className="flex-1 text-sm sm:text-base"
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => removeSpecificationField(field.id)}
-                    className="text-red-500 hover:text-red-700"
+                    className="text-red-500 hover:text-red-700 h-8 sm:h-10 w-full sm:w-auto"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-4 w-4 mr-1 sm:mr-0" />
+                    <span className="sm:hidden">Remove</span>
                   </Button>
                 </div>
               ))}
@@ -2156,14 +2246,17 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
         </TabsContent>
       </Tabs>
 
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onClose}>
+      <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-2 pt-4">
+        <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto text-sm sm:text-base order-2 sm:order-1">
           Cancel
         </Button>
         <Button 
           type="submit" 
           disabled={isSubmitting}
-          className={isSuccess ? "bg-green-600 hover:bg-green-700" : ""}
+          className={cn(
+            isSuccess ? "bg-green-600 hover:bg-green-700" : "",
+            "w-full sm:w-auto text-sm sm:text-base order-1 sm:order-2"
+          )}
         >
           {isSubmitting ? "Saving..." : isSuccess ? "✅ Updated!" : (product ? "Update Product" : "Create Product")}
         </Button>
@@ -2175,41 +2268,43 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true }
 
     {/* Variant Image Dialog */}
     <Dialog open={showVariantImageDialog} onOpenChange={setShowVariantImageDialog}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Add Variant Image</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+        <DialogHeader className="space-y-2">
+          <DialogTitle className="text-base sm:text-lg">Add Variant Image</DialogTitle>
+          <DialogDescription className="text-xs sm:text-sm">
             Upload an image for a product variant. The image will be automatically added to your product when uploaded. You can optionally assign it to specific attributes, or leave it unassigned to apply to the entire variant.
           </DialogDescription>
         </DialogHeader>
         
-        <div className="space-y-6 pr-2">
+        <div className="space-y-4 sm:space-y-6 pr-1 sm:pr-2">
           {/* Variant Selection */}
-          <div className="space-y-2">
-            <Label>Select Variant (Optional)</Label>
-            <Select
-              value={selectedVariantForImage?.toString() || "none"}
-              onValueChange={(value) => {
-                setSelectedVariantForImage(value === "none" ? null : Number(value))
-                setSelectedAttributesForImage([])
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a variant (optional)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No specific variant</SelectItem>
-                {formData.variants.map((variant, index) => (
-                  <SelectItem key={variant.id} value={variant.id.toString()}>
-                    {variant.sku || `Variant ${index + 1}`} {variant.variantType ? `(${variant.variantType})` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {!restrictVariantType && (
+            <div className="space-y-2">
+              <Label className="text-xs sm:text-sm">Select Variant (Optional)</Label>
+              <Select
+                value={selectedVariantForImage?.toString() || "none"}
+                onValueChange={(value) => {
+                  setSelectedVariantForImage(value === "none" ? null : Number(value))
+                  setSelectedAttributesForImage([])
+                }}
+              >
+                <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
+                  <SelectValue placeholder="Choose a variant (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific variant</SelectItem>
+                  {formData.variants.map((variant, index) => (
+                    <SelectItem key={variant.id} value={variant.id.toString()}>
+                      {variant.sku || `Variant ${index + 1}`} {variant.variantType ? `(${variant.variantType})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Multiple Attribute Selection */}
-          {selectedVariantForImage && (() => {
+          {!restrictVariantType && selectedVariantForImage && (() => {
             const selectedVariant = formData.variants.find(v => v.id === selectedVariantForImage)
             if (!selectedVariant) return null
 

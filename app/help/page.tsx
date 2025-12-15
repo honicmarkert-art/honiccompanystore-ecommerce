@@ -1,7 +1,9 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
-import { HelpCircle } from 'lucide-react'
+import { redirect } from 'next/navigation'
 
 export default function HelpPage() {
+  redirect('/')
+}
+
   return (
     <ComingSoonPage
       title="Help Center"

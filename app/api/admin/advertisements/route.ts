@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
-// GET - Fetch all advertisements
+// GET - Fetch all advertisements with supplier info
 export async function GET() {
   try {
     const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
@@ -20,7 +23,39 @@ export async function GET() {
     
     if (error) throw error
     
-    return NextResponse.json({ advertisements })
+    // Fetch supplier info separately for ads with supplier_id
+    const adsWithSupplierInfo = await Promise.all(
+      (advertisements || []).map(async (ad: any) => {
+        if (!ad.supplier_id) {
+          return { ...ad, supplier: null, plan: null }
+        }
+        
+        // Fetch supplier profile
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('company_name, full_name, email, supplier_plan_id')
+          .eq('id', ad.supplier_id)
+          .single()
+        
+        let plan = null
+        if (profile?.supplier_plan_id) {
+          const { data: planData } = await supabase
+            .from('supplier_plans')
+            .select('name, slug')
+            .eq('id', profile.supplier_plan_id)
+            .single()
+          plan = planData
+        }
+        
+        return {
+          ...ad,
+          supplier: profile,
+          plan
+        }
+      })
+    )
+    
+    return NextResponse.json({ advertisements: adsWithSupplierInfo })
   } catch (error) {
     console.error('Error fetching advertisements:', error)
     return NextResponse.json(

@@ -1,5 +1,8 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
-import { Cpu } from 'lucide-react'
+import { redirect } from 'next/navigation'
+
+export default function PrototypingServicePage() {
+  redirect('/')
+}
 
 export default function PrototypingPage() {
   return (

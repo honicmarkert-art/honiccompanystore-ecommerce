@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { otpManager, OTPUtils } from '@/lib/otp'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   try {
@@ -63,6 +66,16 @@ export async function POST(request: NextRequest) {
 
       case 'admin-access':
         otp = OTPUtils.generateAdminOTP(userId)
+        break
+
+      case 'password-change':
+        if (!email) {
+          return NextResponse.json(
+            { error: 'email is required for password change verification' },
+            { status: 400 }
+          )
+        }
+        otp = OTPUtils.generatePasswordChangeOTP(email)
         break
 
       default:

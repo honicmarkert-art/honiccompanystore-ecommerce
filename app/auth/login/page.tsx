@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { logger } from '@/lib/logger'
 
@@ -49,11 +50,12 @@ function LoginPageContent() {
             </CardDescription>
           </CardHeader>
         <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
               <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
                   <Input
                     id="email"
+                    name="email"
                     type="email"
                     placeholder="Enter your email"
                 value={email}
@@ -64,6 +66,7 @@ function LoginPageContent() {
                     handleSubmit(e)
                   }
                 }}
+                    autoComplete="email"
                 required
                      disabled={isLoggingIn}
                   />
@@ -74,6 +77,7 @@ function LoginPageContent() {
                 <div className="relative">
                   <Input
                     id="password"
+                    name="password"
                   type={showPassword ? 'text' : 'password'}
                     placeholder="Enter your password"
                   value={password}
@@ -84,6 +88,7 @@ function LoginPageContent() {
                       handleSubmit(e)
                     }
                   }}
+                  autoComplete="current-password"
                   required
                      disabled={isLoggingIn}
                   />
@@ -131,6 +136,16 @@ function LoginPageContent() {
                 )}
               </Button>
             </form>
+
+            <div className="mt-4 text-center text-sm">
+              <span className="text-gray-600 dark:text-gray-400">Don't have an account? </span>
+              <Link 
+                href="/auth/register" 
+                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium underline"
+              >
+                Register here
+              </Link>
+            </div>
 
           </CardContent>
         </Card>

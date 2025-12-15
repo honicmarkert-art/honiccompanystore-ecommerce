@@ -25,6 +25,16 @@ interface Advertisement {
   display_order: number
   placement: string
   created_at: string
+  supplier_id?: string
+  supplier?: {
+    company_name?: string
+    full_name?: string
+    email?: string
+  }
+  plan?: {
+    name?: string
+    slug?: string
+  }
 }
 
 export default function AdvertisementsPage() {
@@ -496,7 +506,7 @@ export default function AdvertisementsPage() {
             <div>
               <Label>Preview</Label>
               {previewUrl ? (
-                <div className="mt-1 border rounded-lg p-4 bg-gray-50">
+                <div className="mt-1 border rounded-lg p-4 bg-gray-50 dark:bg-gray-800">
                   {selectedFile?.type.startsWith('image/') ? (
                     <Image 
                       src={previewUrl} 
@@ -514,7 +524,7 @@ export default function AdvertisementsPage() {
                   )}
                 </div>
               ) : (
-                <div className="mt-1 border-2 border-dashed rounded-lg p-8 bg-gray-50 flex flex-col items-center justify-center text-gray-400">
+                <div className="mt-1 border-2 border-dashed rounded-lg p-8 bg-gray-50 dark:bg-gray-800 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500">
                   <ImageIcon className="w-12 h-12 mb-2" />
                   <p className="text-sm">No file selected</p>
                   <p className="text-xs mt-1">Preview will appear here</p>
@@ -557,25 +567,43 @@ export default function AdvertisementsPage() {
                     )}
                   </div>
                   <div className="flex-1">
-                    <h3 className="font-semibold">{ad.title}</h3>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-semibold">{ad.title}</h3>
+                      <span className={`text-xs px-2 py-1 rounded ${ad.is_active ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}>
+                        {ad.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      {ad.supplier_id && (
+                        <span className="text-xs px-2 py-1 rounded bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
+                          Supplier Ad
+                        </span>
+                      )}
+                    </div>
                     {ad.description && (
-                      <p className="text-sm text-gray-600 mt-1">{ad.description}</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{ad.description}</p>
                     )}
                     {ad.link_url && (
                       <a 
                         href={ad.link_url} 
                         target="_blank" 
                         rel="noopener noreferrer"
-                        className="text-sm text-blue-600 hover:underline mt-1 block"
+                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline mt-1 block"
                       >
                         {ad.link_url}
                       </a>
                     )}
+                    {ad.supplier && (
+                      <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs">
+                        <p className="font-semibold text-gray-900 dark:text-gray-100">Supplier Information:</p>
+                        <p className="text-gray-700 dark:text-gray-300">Name: {ad.supplier.company_name || ad.supplier.full_name || 'N/A'}</p>
+                        <p className="text-gray-700 dark:text-gray-300">Email: {ad.supplier.email || 'N/A'}</p>
+                        {ad.plan && (
+                          <p className="text-gray-700 dark:text-gray-300">Plan: <span className="font-semibold">{ad.plan.name || ad.plan.slug || 'N/A'}</span></p>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center space-x-2 mt-2">
                       <span className="text-xs text-gray-500">Order: {ad.display_order}</span>
-                      <span className={`text-xs px-2 py-1 rounded ${ad.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                        {ad.is_active ? 'Active' : 'Inactive'}
-                      </span>
+                      <span className="text-xs text-gray-500">Placement: {ad.placement}</span>
                     </div>
                   </div>
                   <div className="flex flex-col space-y-2">

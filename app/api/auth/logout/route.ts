@@ -39,6 +39,11 @@ export async function POST(request: NextRequest) {
 
     const isProd = process.env.NODE_ENV === 'production'
 
+    // Get project ref to clear Supabase SSR cookies
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+    const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
+    const supabaseAuthCookieName = projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
+
     // Create response
     const response = NextResponse.json({
       success: true,
@@ -63,10 +68,26 @@ export async function POST(request: NextRequest) {
       maxAge: 0
     }
 
-    // Clear official Supabase auth cookies
+    // Clear official Supabase SSR cookies (these are the actual cookies Supabase uses)
+    // Supabase SSR uses cookies like: sb-{project-ref}-auth-token.0 and sb-{project-ref}-auth-token.1
+    if (projectRef) {
+      // Clear all possible Supabase SSR cookie variants
+      response.cookies.set(`${supabaseAuthCookieName}.0`, '', cookieOptions)
+      response.cookies.set(`${supabaseAuthCookieName}.1`, '', cookieOptions)
+      response.cookies.set(supabaseAuthCookieName, '', cookieOptions)
+    }
+
+    // Clear custom Supabase auth cookies (legacy)
     response.cookies.set('sb-access-token', '', cookieOptions)
     response.cookies.set('sb-refresh-token', '', cookieOptions)
     response.cookies.set('sb-session-active', '', {
+      httpOnly: false,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0
+    })
+    response.cookies.set('sb-user-role', '', {
       httpOnly: false,
       secure: isProd,
       sameSite: 'lax',
@@ -84,6 +105,13 @@ export async function POST(request: NextRequest) {
       sameSite: 'lax',
       path: '/',
       maxAge: 0
+    })
+
+    // Clear all cookies that start with 'sb-' to catch any other Supabase cookies
+    request.cookies.getAll().forEach(cookie => {
+      if (cookie.name.startsWith('sb-')) {
+        response.cookies.set(cookie.name, '', cookieOptions)
+      }
     })
 
     return response
@@ -107,9 +135,28 @@ export async function POST(request: NextRequest) {
       maxAge: 0
     }
 
+    // Get project ref to clear Supabase SSR cookies
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+    const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
+    const supabaseAuthCookieName = projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
+
+    // Clear Supabase SSR cookies
+    if (projectRef) {
+      response.cookies.set(`${supabaseAuthCookieName}.0`, '', cookieOptions)
+      response.cookies.set(`${supabaseAuthCookieName}.1`, '', cookieOptions)
+      response.cookies.set(supabaseAuthCookieName, '', cookieOptions)
+    }
+
     response.cookies.set('sb-access-token', '', cookieOptions)
     response.cookies.set('sb-refresh-token', '', cookieOptions)
     response.cookies.set('sb-session-active', '', {
+      httpOnly: false,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0
+    })
+    response.cookies.set('sb-user-role', '', {
       httpOnly: false,
       secure: isProd,
       sameSite: 'lax',
@@ -125,6 +172,13 @@ export async function POST(request: NextRequest) {
       sameSite: 'lax',
       path: '/',
       maxAge: 0
+    })
+
+    // Clear all cookies that start with 'sb-'
+    request.cookies.getAll().forEach(cookie => {
+      if (cookie.name.startsWith('sb-')) {
+        response.cookies.set(cookie.name, '', cookieOptions)
+      }
     })
 
     return response

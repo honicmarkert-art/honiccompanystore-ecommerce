@@ -26,8 +26,23 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   '/api/payment': { windowMs: 5 * 60 * 1000, maxRequests: 10, blockDurationMs: 60 * 60 * 1000 },
   '/api/checkout': { windowMs: 5 * 60 * 1000, maxRequests: 5, blockDurationMs: 30 * 60 * 1000 },
   
+  // Newsletter subscription - moderate limits to prevent spam
+  '/api/newsletter/subscribe': { windowMs: 60 * 60 * 1000, maxRequests: 5, blockDurationMs: 60 * 60 * 1000 },
+  
+  // Public API endpoints - moderate limits
+  '/api/products': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  '/api/categories': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  '/api/advertisements': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  
   // Admin endpoints - moderate limits
   '/api/admin': { windowMs: 60 * 1000, maxRequests: 30, blockDurationMs: 10 * 60 * 1000 },
+  
+  // Supplier endpoints - moderate limits
+  '/api/supplier/products': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  '/api/supplier/orders': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  '/api/supplier/logo-upload': { windowMs: 60 * 1000, maxRequests: 10, blockDurationMs: 10 * 60 * 1000 }, // Stricter for file uploads
+  '/api/supplier-plans': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  '/api/supplier': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 }, // Catch-all for other supplier endpoints
   
   // General API endpoints
   default: { windowMs: 60 * 1000, maxRequests: 100, blockDurationMs: 5 * 60 * 1000 }

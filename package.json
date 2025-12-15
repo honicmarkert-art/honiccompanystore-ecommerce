@@ -60,8 +60,10 @@
     "lucide-react": "^0.454.0",
     "nanoid": "^5.1.5",
     "next": "15.2.4",
+    "next-intl": "^4.5.8",
     "next-themes": "^0.4.4",
     "node-fetch": "^3.3.2",
+    "nodemailer": "^7.0.10",
     "react": "^19",
     "react-day-picker": "9.8.0",
     "react-dom": "^19",
@@ -78,6 +80,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/nodemailer": "^7.0.4",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "eslint": "^9.34.0",

@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { generateToken, hashPassword, validatePassword } from '@/lib/auth'
 import { findUserByEmail, createUser, validateUserData } from '@/lib/users'
+import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { logger } from '@/lib/logger'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+
+// Force dynamic rendering - don't pre-render during build
+
+export const dynamic = 'force-dynamic'
+
 export const runtime = 'nodejs'
 // Validation schema
 const registerSchema = z.object({
@@ -47,14 +52,122 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if user already exists
-    const existingUser = findUserByEmail(validatedData.email)
-    if (existingUser) {
+    // CRITICAL SECURITY: Check if email already exists using multiple methods
+    // Method 1: Profiles table (primary - most reliable)
+    // Method 2: Auth users list (fallback if profiles check fails)
+    // Method 3: Local user store (legacy)
+    const email = validatedData.email.toLowerCase().trim()
+    let emailExists = false
+    
+    try {
+      const adminSupabase = createAdminSupabaseClient()
+      console.log('🔍 [Register API] Checking if email exists (Method 1 - Profiles table):', email)
+      
+      // Method 1: Check profiles table (primary method - most reliable)
+      const { data: profile, error: profileError } = await adminSupabase
+        .from('profiles')
+        .select('id, email, created_at')
+        .eq('email', email)
+        .limit(1)
+        .maybeSingle()
+      
+      console.log('🔍 [Register API] Profiles table check result:', {
+        hasError: !!profileError,
+        errorMessage: profileError?.message,
+        hasProfile: !!profile,
+        profileId: profile?.id,
+        createdAt: profile?.created_at
+      })
+      
+      // If profile exists, email is already registered
+      if (!profileError && profile) {
+        emailExists = true
+        logger.log('🚨 [Register API] Registration blocked - email already exists in profiles:', { 
+          email, 
+          profileId: profile.id,
+          createdAt: profile.created_at 
+        })
+        console.error('🚨 [Register API] BLOCKING REGISTRATION - Email already exists in profiles:', email)
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'An account with this email address already exists. Please use a different email or try logging in.',
+            type: 'EMAIL_ALREADY_EXISTS'
+          },
+          { status: 409 }
+        )
+      }
+      
+      // Method 2: Try to check auth users using listUsers (fallback)
+      if (profileError && profileError.code !== 'PGRST116') {
+        // PGRST116 is "not found" which is expected, other errors might indicate issues
+        console.log('🔍 [Register API] Checking Auth users (Method 2 - fallback):', email)
+        try {
+          // List users and filter by email
+          const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
+          
+          if (!listError && authUsers?.users) {
+            const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === email)
+            if (existingAuthUser) {
+              emailExists = true
+              logger.log('🚨 [Register API] Registration blocked - email already exists in Auth:', { 
+                email, 
+                userId: existingAuthUser.id,
+                createdAt: existingAuthUser.created_at 
+              })
+              console.error('🚨 [Register API] BLOCKING REGISTRATION - Email already exists in Auth:', email)
+              return NextResponse.json(
+                {
+                  success: false,
+                  error: 'An account with this email address already exists. Please use a different email or try logging in.',
+                  type: 'EMAIL_ALREADY_EXISTS'
+                },
+                { status: 409 }
+              )
+            }
+          }
+        } catch (authCheckError: any) {
+          logger.warn('⚠️ [Register API] Auth users check failed (proceeding - local check as fallback):', {
+            error: authCheckError?.message || authCheckError
+          })
+          console.warn('⚠️ [Register API] Auth users check error:', authCheckError)
+        }
+      } else {
+        // Profile not found - email is available
+        logger.log('✅ [Register API] Email available for registration:', email)
+        console.log('✅ [Register API] Email is available - proceeding with registration')
+      }
+    } catch (checkError: any) {
+      // If all checks fail, log but continue - local check will catch as fallback
+      logger.error('⚠️ [Register API] Error during email pre-check (proceeding - local check as fallback):', {
+        error: checkError?.message || checkError,
+        email: email
+      })
+      console.error('⚠️ [Register API] Exception during email pre-check:', checkError)
+    }
+    
+    // Method 3: Legacy local user store check (fallback)
+    const existingLocalUser = findUserByEmail(email)
+    if (existingLocalUser) {
+      console.error('🚨 [Register API] BLOCKING REGISTRATION - Email exists in local store:', email)
       return NextResponse.json(
         { 
           success: false,
           error: 'An account with this email address already exists. Please use a different email or try logging in.',
-          type: 'USER_ALREADY_EXISTS'
+          type: 'EMAIL_ALREADY_EXISTS'
+        },
+        { status: 409 }
+      )
+    }
+    
+    // If we determined email exists, don't proceed
+    if (emailExists) {
+      console.error('🚨 [Register API] Email exists check failed - blocking registration')
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'An account with this email address already exists. Please use a different email or try logging in.',
+          type: 'EMAIL_ALREADY_EXISTS'
         },
         { status: 409 }
       )

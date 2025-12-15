@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { logger } from '@/lib/logger'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { sanitizeOrderNumber, validateOrderOwnership } from '@/lib/auth-utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +13,26 @@ export async function GET(
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
   try {
-    const { orderNumber } = await params
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/user/orders/[orderNumber]/invoice',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
+    const { orderNumber: rawOrderNumber } = await params
+    
+    // Sanitize and validate order number
+    const orderNumber = sanitizeOrderNumber(rawOrderNumber)
+    if (!orderNumber) {
+      return NextResponse.json({ error: 'Invalid order number format' }, { status: 400 })
+    }
     const cookieStore = await cookies()
     
     const response = new NextResponse()
@@ -56,8 +77,14 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    // Check authorization
-    if (order.user_id !== user.id) {
+    // Check authorization - ensure the authenticated user owns this order
+    if (!validateOrderOwnership(order.user_id, user.id)) {
+      logSecurityEvent('UNAUTHORIZED_INVOICE_ACCESS', {
+        endpoint: '/api/user/orders/[orderNumber]/invoice',
+        orderNumber: orderNumber,
+        orderUserId: order.user_id,
+        requestUserId: user.id
+      }, request)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 

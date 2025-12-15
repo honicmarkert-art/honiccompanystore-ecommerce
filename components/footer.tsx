@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { usePublicCompanyContext } from '@/contexts/public-company-context'
-import { logger } from '@/lib/logger'
+import { useToast } from '@/hooks/use-toast'
 import { 
   Mail, 
   Phone, 
@@ -30,12 +30,57 @@ export function Footer() {
   } = usePublicCompanyContext()
   
   const [email, setEmail] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { toast } = useToast()
 
-  const handleNewsletterSubmit = (e: React.FormEvent) => {
+  const handleNewsletterSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Handle newsletter subscription
-    logger.log('Newsletter subscription:', email)
-    setEmail('')
+    
+    if (!email || !email.includes('@')) {
+      toast({
+        title: 'Invalid Email',
+        description: 'Please enter a valid email address',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    setIsSubmitting(true)
+
+    try {
+      const response = await fetch('/api/newsletter/subscribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        toast({
+          title: 'Subscribed!',
+          description: result.message || 'Thank you for subscribing to our newsletter!',
+        })
+        setEmail('')
+      } else {
+        toast({
+          title: 'Error',
+          description: result.error || 'Failed to subscribe. Please try again.',
+          variant: 'destructive'
+        })
+      }
+    } catch (error) {
+      console.error('Newsletter subscription error:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to subscribe. Please try again.',
+        variant: 'destructive'
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const footerLinks = {
@@ -68,9 +113,9 @@ export function Footer() {
   }
 
   const socialLinks = [
-    { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, href: '/social/facebook' },
-    { name: 'Instagram', icon: <Instagram className="w-5 h-5" />, href: '/social/instagram' },
-    { name: 'YouTube', icon: <Youtube className="w-5 h-5" />, href: '/social/youtube' }
+    { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, href: process.env.NEXT_PUBLIC_FACEBOOK_URL || '/social/facebook' },
+    { name: 'Instagram', icon: <Instagram className="w-5 h-5" />, href: process.env.NEXT_PUBLIC_INSTAGRAM_URL || '/social/instagram' },
+    { name: 'YouTube', icon: <Youtube className="w-5 h-5" />, href: process.env.NEXT_PUBLIC_YOUTUBE_URL || '/social/youtube' }
   ]
 
   return (
@@ -86,7 +131,7 @@ export function Footer() {
               <ul className="space-y-1">
                 {footerLinks.company.map((link, index) => (
                   <li key={index}>
-                    <a href={link.href} className="text-xs hover:text-orange-400 transition-colors">
+                    <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs hover:text-orange-400 transition-colors">
                       {link.name}
                     </a>
                   </li>
@@ -100,7 +145,7 @@ export function Footer() {
               <ul className="space-y-1">
                 {footerLinks.services.map((link, index) => (
                   <li key={index}>
-                    <a href={link.href} className="text-xs hover:text-orange-400 transition-colors">
+                    <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs hover:text-orange-400 transition-colors">
                       {link.name}
                     </a>
                   </li>
@@ -114,7 +159,7 @@ export function Footer() {
               <ul className="space-y-1">
                 {footerLinks.support.map((link, index) => (
                   <li key={index}>
-                    <a href={link.href} className="text-xs hover:text-orange-400 transition-colors">
+                    <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs hover:text-orange-400 transition-colors">
                       {link.name}
                     </a>
                   </li>
@@ -212,7 +257,7 @@ export function Footer() {
             <ul className="space-y-1 sm:space-y-2">
               {footerLinks.company.map((link, index) => (
                 <li key={index}>
-                  <a href={link.href} className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
+                  <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
                     {link.name}
                   </a>
                 </li>
@@ -226,7 +271,7 @@ export function Footer() {
             <ul className="space-y-1 sm:space-y-2">
               {footerLinks.services.map((link, index) => (
                 <li key={index}>
-                  <a href={link.href} className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
+                  <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
                     {link.name}
                   </a>
                 </li>
@@ -240,7 +285,7 @@ export function Footer() {
             <ul className="space-y-1 sm:space-y-2">
               {footerLinks.support.map((link, index) => (
                 <li key={index}>
-                  <a href={link.href} className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
+                  <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
                     {link.name}
                   </a>
                 </li>
@@ -266,9 +311,18 @@ export function Footer() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-400 text-xs sm:text-sm"
                 required
+                disabled={isSubmitting}
               />
-              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-xs sm:text-sm">
-                <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4" />
+              <Button 
+                type="submit" 
+                className="bg-orange-500 hover:bg-orange-600 text-xs sm:text-sm"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  'Subscribing...'
+                ) : (
+                  <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4" />
+                )}
               </Button>
             </form>
           </div>
@@ -283,14 +337,24 @@ export function Footer() {
                 Download our mobile app for a better shopping experience on the go.
               </p>
               <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                <Button variant="outline" className="border-gray-700 hover:bg-gray-800 text-xs sm:text-sm">
+                <a 
+                  href="https://apps.apple.com" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center px-4 py-2 border border-gray-700 hover:bg-gray-800 text-white text-xs sm:text-sm rounded-md transition-colors"
+                >
                   <Download className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
                   App Store
-                </Button>
-                <Button variant="outline" className="border-gray-700 hover:bg-gray-800 text-xs sm:text-sm">
+                </a>
+                <a 
+                  href="https://play.google.com" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center px-4 py-2 border border-gray-700 hover:bg-gray-800 text-white text-xs sm:text-sm rounded-md transition-colors"
+                >
                   <Download className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
                   Google Play
-                </Button>
+                </a>
               </div>
             </div>
             <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
@@ -323,6 +387,13 @@ export function Footer() {
                     {link.name}
                   </a>
                 ))}
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-4 text-xs sm:text-sm">
+              <span>Made with Honic Company Limited in Tanzania</span>
+              <div className="flex items-center space-x-2">
+                <Flag className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span>TZ</span>
               </div>
             </div>
           </div>

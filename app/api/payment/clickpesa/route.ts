@@ -17,9 +17,24 @@ import {
   type CheckoutLinkRequest 
 } from "@/lib/clickpesa-api"
 import { createClient } from '@supabase/supabase-js'
+import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/payment/clickpesa',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { success: false, error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
     // Log the incoming request for debugging
     logger.log('ClickPesa API Request:', {
       url: request.url,
@@ -101,6 +116,11 @@ export async function POST(request: NextRequest) {
       // Validate amount
       const numAmount = parseFloat(amount)
       if (isNaN(numAmount) || numAmount <= 0) {
+        logSecurityEvent('INVALID_AMOUNT', {
+          endpoint: '/api/payment/clickpesa',
+          amount: amount,
+          orderId: orderId
+        }, request)
         return NextResponse.json(
           { 
             success: false, 
@@ -109,6 +129,87 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
+
+      // SECURITY: Validate order exists and amount matches (prevent tampering)
+      const adminSupabase = createAdminSupabaseClient()
+      const normalizedOrderRef = orderId.replace(/-/g, '')
+      
+      // Try to find order by reference_id (normalized, without hyphens)
+      const { data: order, error: orderError } = await adminSupabase
+        .from('orders')
+        .select('id, reference_id, total_amount, currency, payment_status, status')
+        .or(`reference_id.eq.${orderId},reference_id.eq.${normalizedOrderRef}`)
+        .maybeSingle()
+
+      if (orderError || !order) {
+        logSecurityEvent('ORDER_NOT_FOUND', {
+          endpoint: '/api/payment/clickpesa',
+          orderId: orderId,
+          normalizedRef: normalizedOrderRef,
+          error: orderError?.message
+        }, request)
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: "Order not found. Please create an order first." 
+          },
+          { status: 404 }
+        )
+      }
+
+      // SECURITY: Verify payment amount matches order total (prevent tampering)
+      const orderTotal = parseFloat(order.total_amount?.toString() || '0')
+      const amountDifference = Math.abs(numAmount - orderTotal)
+      const tolerance = 0.01 // Allow 0.01 difference for floating point precision
+
+      if (amountDifference > tolerance) {
+        logSecurityEvent('AMOUNT_MISMATCH', {
+          endpoint: '/api/payment/clickpesa',
+          orderId: order.id,
+          orderReference: order.reference_id,
+          orderTotal: orderTotal,
+          providedAmount: numAmount,
+          difference: amountDifference,
+          ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+        }, request)
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: "Payment amount does not match order total. Possible tampering detected." 
+          },
+          { status: 400 }
+        )
+      }
+
+      // SECURITY: Verify order is in pending status (prevent double payment)
+      if (order.payment_status === 'paid' || order.payment_status === 'success') {
+        logSecurityEvent('DUPLICATE_PAYMENT_ATTEMPT', {
+          endpoint: '/api/payment/clickpesa',
+          orderId: order.id,
+          orderReference: order.reference_id,
+          currentStatus: order.payment_status,
+          ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+        }, request)
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: "This order has already been paid." 
+          },
+          { status: 400 }
+        )
+      }
+
+      // Use order currency if available, otherwise use provided currency
+      const finalCurrency = (order.currency || currency) as 'TZS' | 'USD'
+      
+      logger.log('✅ Order validation passed:', {
+        orderId: order.id,
+        referenceId: order.reference_id,
+        orderTotal: orderTotal,
+        providedAmount: numAmount,
+        currency: finalCurrency,
+        paymentStatus: order.payment_status
+      })
 
       try {
         // Log customer details for debugging
@@ -125,15 +226,24 @@ export async function POST(request: NextRequest) {
 
         // Prepare ClickPesa checkout link request
         // ClickPesa supports multiple payment methods: mobile money, cards, bank transfers
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
-                       process.env.NEXT_PUBLIC_SITE_URL ||
-                       (process.env.NODE_ENV === 'production' ? 'https://yourdomain.com' : 'http://localhost:3000')
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
+                       process.env.NEXT_PUBLIC_APP_URL ||
+                       (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined)
+        
+        if (!baseUrl) {
+          console.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
+          return NextResponse.json(
+            { error: 'Server configuration error: Base URL not configured. Please set NEXT_PUBLIC_SITE_URL or NEXT_PUBLIC_APP_URL environment variable.' },
+            { status: 500 }
+          )
+        }
+        
         const webhookUrl = `${baseUrl}/api/webhooks/clickpesa`
         
         const checkoutRequest: CheckoutLinkRequest = {
           totalPrice: formatAmountForClickPesa(numAmount),
-          orderReference: orderId.replace(/-/g, ''), // Full UUID without hyphens
-          orderCurrency: currency as 'TZS' | 'USD',
+          orderReference: normalizedOrderRef, // Use normalized reference (without hyphens)
+          orderCurrency: finalCurrency,
           customerName: customerDetails.fullName || 
                        (customerDetails.firstName && customerDetails.lastName ? 
                         `${customerDetails.firstName} ${customerDetails.lastName}` : 
@@ -145,23 +255,36 @@ export async function POST(request: NextRequest) {
           webhookUrl: webhookUrl
         }
 
-        // Log final ClickPesa request for debugging
-        logger.log('ClickPesa: Final checkout request:', {
-          totalPrice: checkoutRequest.totalPrice,
+        // Log final ClickPesa request for debugging and security
+        logger.log('ClickPesa: Final checkout request (validated):', {
+          orderId: order.id,
           orderReference: checkoutRequest.orderReference,
+          totalPrice: checkoutRequest.totalPrice,
           orderCurrency: checkoutRequest.orderCurrency,
+          orderTotal: orderTotal,
+          amountValidated: true,
           customerName: checkoutRequest.customerName,
           customerEmail: checkoutRequest.customerEmail,
-          customerPhone: checkoutRequest.customerPhone,
+          customerPhone: checkoutRequest.customerPhone ? '***MASKED***' : undefined,
           returnUrl: checkoutRequest.returnUrl,
           cancelUrl: checkoutRequest.cancelUrl,
           webhookUrl: checkoutRequest.webhookUrl
         })
+        
+        logSecurityEvent('PAYMENT_LINK_CREATED', {
+          endpoint: '/api/payment/clickpesa',
+          orderId: order.id,
+          orderReference: checkoutRequest.orderReference,
+          amount: numAmount,
+          currency: finalCurrency,
+          ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+        }, request)
 
         // Checksum will be generated automatically in createCheckoutLink function
 
         // Create checkout link
-        const checkoutResult = await createCheckoutLink(checkoutRequest)
+        // Create checkout link using regular credentials (not supplier)
+        const checkoutResult = await createCheckoutLink(checkoutRequest, false)
 
         return NextResponse.json({
           success: true,
@@ -381,18 +504,21 @@ async function handleClickPesaWebhook(request: NextRequest) {
                   continue
                 }
 
-                // Find and update the matching primaryValue quantity
+                // Find and update the matching primaryValue quantities
+                // Each attribute in variant_attributes should match a primaryValue
                 for (const variant of variants) {
                   if (!variant.primary_values || !Array.isArray(variant.primary_values)) continue
 
                   let updated = false
                   const updatedPrimaryValues = variant.primary_values.map((pv: any) => {
-                    // Match by attribute values
-                    const matches = Object.entries(item.variant_attributes).every(([key, value]) => {
-                      return pv.attribute === key && pv.value === value
-                    })
+                    // Check if this primaryValue matches any attribute in the order item
+                    // For each attribute in variant_attributes, find the matching primaryValue
+                    const matchingAttribute = Object.entries(item.variant_attributes).find(
+                      ([key, value]) => pv.attribute === key && pv.value === value
+                    )
 
-                    if (matches) {
+                    if (matchingAttribute) {
+                      // This primaryValue matches one of the ordered attributes
                       const currentQty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
                       const newQty = Math.max(0, currentQty - item.quantity)
                       updated = true
@@ -403,27 +529,53 @@ async function handleClickPesaWebhook(request: NextRequest) {
                   })
 
                   if (updated) {
-                    await supabase
+                    // Update variant with decremented primaryValues
+                    const { error: variantUpdateError } = await supabase
                       .from('product_variants')
                       .update({ primary_values: updatedPrimaryValues })
                       .eq('id', variant.id)
 
-                    // Recalculate and update product total stock
-                    const totalStock = updatedPrimaryValues.reduce((sum: number, pv: any) => {
-                      const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                      return sum + qty
-                    }, 0)
+                    if (variantUpdateError) {
+                      console.error(`❌ Error updating variant ${variant.id}:`, variantUpdateError)
+                      continue
+                    }
 
-                    await supabase
-                      .from('products')
-                      .update({
-                        stock_quantity: totalStock,
-                        in_stock: totalStock > 0,
-                        updated_at: new Date().toISOString()
-                      })
-                      .eq('id', item.product_id)
+                    logger.log(`✅ Variant ${variant.id} updated with new primary_values`)
 
-                    logger.log(`✅ Product total stock updated to: ${totalStock}`)
+                    // Recalculate total stock from ALL variants for this product
+                    const { data: allVariants, error: allVariantsError } = await supabase
+                      .from('product_variants')
+                      .select('primary_values')
+                      .eq('product_id', item.product_id)
+
+                    if (!allVariantsError && allVariants) {
+                      // Sum up all quantities from all primaryValues across all variants
+                      let totalStock = 0
+                      for (const v of allVariants) {
+                        if (v.primary_values && Array.isArray(v.primary_values)) {
+                          for (const pv of v.primary_values) {
+                            const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
+                            totalStock += qty
+                          }
+                        }
+                      }
+
+                      // Update product total stock
+                      const { error: productUpdateError } = await supabase
+                        .from('products')
+                        .update({
+                          stock_quantity: totalStock,
+                          in_stock: totalStock > 0,
+                          updated_at: new Date().toISOString()
+                        })
+                        .eq('id', item.product_id)
+
+                      if (productUpdateError) {
+                        console.error(`❌ Error updating product stock:`, productUpdateError)
+                      } else {
+                        logger.log(`✅ Product ${item.product_id} total stock updated to: ${totalStock}`)
+                      }
+                    }
                   }
                 }
               } else {

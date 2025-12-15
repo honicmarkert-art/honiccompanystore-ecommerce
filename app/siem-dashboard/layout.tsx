@@ -19,6 +19,8 @@ import {
   ShoppingCart,
   Image as ImageIcon,
   FileImage,
+  Building2,
+  Wallet,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -32,12 +34,16 @@ import { useCompanyContext } from "@/components/company-provider"
 import { supabaseClient } from "@/lib/supabase-client"
 import { AdminRoleGuard } from "@/components/admin-role-guard"
 import { Admin2FAGuard } from "@/components/admin-2fa-guard"
+import { AdminNotificationCenter } from "@/components/admin-notification-center"
 
 const navigation = [
   { name: "Dashboard", href: "/siem-dashboard", icon: LayoutDashboard },
   { name: "Products", href: "/siem-dashboard/products", icon: Package },
   { name: "Orders", href: "/siem-dashboard/orders", icon: ShoppingCart },
   { name: "Confirmed Orders", href: "/siem-dashboard/confirmed-orders", icon: ShoppingCart },
+  { name: "Suppliers", href: "/siem-dashboard/suppliers", icon: Building2 },
+  { name: "Supplier Plans", href: "/siem-dashboard/supplier-plans", icon: DollarSign },
+  { name: "Payout Accounts", href: "/siem-dashboard/payout-accounts", icon: Wallet },
   { name: "Categories", href: "/siem-dashboard/categories", icon: Tags },
   { name: "Advertisements", href: "/siem-dashboard/advertisements", icon: FileImage },
   { name: "Media", href: "/siem-dashboard/media", icon: ImageIcon },
@@ -400,6 +406,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="flex flex-1 items-center gap-x-4 self-stretch lg:gap-x-6" suppressHydrationWarning>
             <div className="flex flex-1" suppressHydrationWarning />
             <div className="flex items-center gap-x-4 lg:gap-x-6" suppressHydrationWarning>
+              {/* Admin Notification Center */}
+              <AdminNotificationCenter />
+              
               {/* Theme Switcher */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

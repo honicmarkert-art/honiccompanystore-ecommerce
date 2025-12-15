@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { logger } from '@/lib/logger'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { sanitizeOrderNumber, validateOrderOwnership } from '@/lib/auth-utils'
 
 // GET /api/user/orders/[orderNumber] - Get order details by order number (customer-facing)
 export async function GET(
@@ -9,7 +11,26 @@ export async function GET(
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
   try {
-    const { orderNumber } = await params
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/user/orders/[orderNumber]',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
+    const { orderNumber: rawOrderNumber } = await params
+    
+    // Sanitize and validate order number
+    const orderNumber = sanitizeOrderNumber(rawOrderNumber)
+    if (!orderNumber) {
+      return NextResponse.json({ error: 'Invalid order number format' }, { status: 400 })
+    }
     const cookieStore = await cookies()
     
     // Create response to handle cookie updates
@@ -61,7 +82,8 @@ export async function GET(
           variant_name,
           quantity,
           price,
-          total_price
+          total_price,
+          tracking_number
         )
       `)
       .eq('order_number', orderNumber)  // Use order_number instead of id
@@ -79,29 +101,94 @@ export async function GET(
     }
 
     // Check user authorization - ensure the authenticated user owns this order
-    if (order.user_id !== user.id) {
+    if (!validateOrderOwnership(order.user_id, user.id)) {
       logger.log('❌ Unauthorized access attempt:', { 
         orderUserId: order.user_id, 
         requestUserId: user.id 
       })
+      logSecurityEvent('UNAUTHORIZED_ORDER_ACCESS', {
+        endpoint: '/api/user/orders/[orderNumber]',
+        orderNumber: orderNumber,
+        orderUserId: order.user_id,
+        requestUserId: user.id
+      }, request)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
     
     logger.log('✅ User authorized for order:', orderNumber)
     
-    // Fetch product images
-    const productIds = order.order_items?.map((item: any) => item.product_id).filter(Boolean) || []
+    // Fetch confirmed order data if it exists
+    const { data: confirmedOrder } = await supabase
+      .from('confirmed_orders')
+      .select('id, status, confirmed_at, is_received, received_at, updated_at, delivery_option')
+      .eq('order_id', order.id)
+      .single()
+    
+    // Fetch confirmed order items with status if order is confirmed
+    let confirmedOrderItems: any[] = []
+    if (confirmedOrder?.id) {
+      const { data: items } = await supabase
+        .from('confirmed_order_items')
+        .select(`
+          id,
+          product_id,
+          product_name,
+          variant_id,
+          variant_name,
+          quantity,
+          price,
+          total_price,
+          status,
+          tracking_number
+        `)
+        .eq('confirmed_order_id', confirmedOrder.id)
+      
+      if (items) {
+        confirmedOrderItems = items
+      }
+    }
+    
+    // Use confirmed order items if available, otherwise fall back to order_items
+    const orderItems = confirmedOrderItems.length > 0 ? confirmedOrderItems : (order.order_items || [])
+    
+    // Fetch product images and supplier information
+    const productIds = orderItems.map((item: any) => item.product_id).filter(Boolean) || []
     let productImagesMap = new Map<number, string>()
+    let productSuppliersMap = new Map<number, { supplierId: string | null, supplierName: string | null }>()
     
     if (productIds.length > 0) {
       const { data: products, error: productsError } = await supabase
         .from('products')
-        .select('id, image')
+        .select('id, image, supplier_id, user_id')
         .in('id', productIds)
       
       if (products && !productsError) {
+        // Get unique supplier IDs
+        const supplierIds = [...new Set(products.map(p => p.supplier_id || p.user_id).filter(Boolean))]
+        
+        // Fetch supplier names
+        let suppliersMap = new Map<string, string>()
+        if (supplierIds.length > 0) {
+          const { data: suppliers } = await supabase
+            .from('profiles')
+            .select('id, company_name, full_name')
+            .in('id', supplierIds)
+          
+          if (suppliers) {
+            suppliers.forEach(supplier => {
+              suppliersMap.set(supplier.id, supplier.company_name || supplier.full_name || 'Unknown Supplier')
+            })
+          }
+        }
+        
         products.forEach(product => {
           productImagesMap.set(product.id, product.image || '/placeholder.jpg')
+          const supplierId = product.supplier_id || product.user_id
+          const supplierName = supplierId ? (suppliersMap.get(supplierId) || 'Unknown Supplier') : null
+          productSuppliersMap.set(product.id, {
+            supplierId: supplierId,
+            supplierName: supplierName
+          })
         })
       }
     }
@@ -112,34 +199,44 @@ export async function GET(
       orderNumber: order.order_number,
       referenceId: order.reference_id, // READ-ONLY: Payment gateway integration only
       pickupId: order.pickup_id,       // READ-ONLY: Customer pickup confirmation
-      status: order.status,
+      status: confirmedOrder?.status || order.status,
       totalAmount: order.total_amount,
       currency: order.currency || 'TZS',
-      itemCount: order.order_items?.length || 0,
-      totalItems: order.order_items?.reduce((sum: number, item: any) => sum + item.quantity, 0) || 0,
+      itemCount: orderItems.length || 0,
+      totalItems: orderItems.reduce((sum: number, item: any) => sum + item.quantity, 0) || 0,
       createdAt: order.created_at,
-      updatedAt: order.updated_at,
+      updatedAt: confirmedOrder?.updated_at || confirmedOrder?.confirmed_at || order.updated_at,
       paymentMethod: order.payment_method,
       paymentStatus: order.payment_status,
       clickpesaTransactionId: order.clickpesa_transaction_id,
       paymentTimestamp: order.payment_timestamp,
       failureReason: order.failure_reason,
-      deliveryOption: order.delivery_option,
+      deliveryOption: confirmedOrder?.delivery_option || order.delivery_option,
       trackingNumber: order.tracking_number,
       estimatedDelivery: order.estimated_delivery,
+      isReceived: confirmedOrder?.is_received || false,
+      receivedAt: confirmedOrder?.received_at || null,
+      confirmedAt: confirmedOrder?.confirmed_at || null,
       shippingAddress: order.shipping_address,
       billingAddress: order.billing_address,
-      items: (order.order_items || []).map((item: any) => ({
-        id: item.id,
-        productId: item.product_id,
-        productName: item.product_name || 'Unknown Product',
-        productImage: productImagesMap.get(item.product_id) || '/placeholder.jpg',
-        variantName: item.variant_name,
-        variantAttributes: item.variant_attributes,
-        quantity: item.quantity,
-        unitPrice: item.price, // This is the unit price from the database
-        totalPrice: item.total_price // This is the total price from the database
-      })),
+      items: orderItems.map((item: any) => {
+        const supplierInfo = productSuppliersMap.get(item.product_id) || { supplierId: null, supplierName: null }
+        return {
+          id: item.id,
+          productId: item.product_id,
+          productName: item.product_name || 'Unknown Product',
+          productImage: productImagesMap.get(item.product_id) || '/placeholder.jpg',
+          variantName: item.variant_name,
+          variantAttributes: item.variant_attributes,
+          quantity: item.quantity,
+          unitPrice: item.price, // This is the unit price from the database
+          totalPrice: item.total_price, // This is the total price from the database
+          supplierId: supplierInfo.supplierId,
+          supplierName: supplierInfo.supplierName,
+          trackingNumber: item.tracking_number || null,
+          status: item.status || 'confirmed' // Per-item status from confirmed_order_items
+        }
+      }),
       notes: order.notes
     }
 
@@ -161,9 +258,55 @@ export async function PATCH(
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
   try {
-    const { orderNumber } = await params
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/user/orders/[orderNumber]',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
+    const { orderNumber: rawOrderNumber } = await params
+    
+    // Sanitize and validate order number
+    const orderNumber = sanitizeOrderNumber(rawOrderNumber)
+    if (!orderNumber) {
+      return NextResponse.json({ error: 'Invalid order number format' }, { status: 400 })
+    }
     const body = await request.json()
-    const supabase = getSupabaseClient()
+    const cookieStore = await cookies()
+    
+    const response = new NextResponse()
+    
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value
+          },
+          set(name: string, value: string, options: any) {
+            response.cookies.set(name, value, options)
+          },
+          remove(name: string, options: any) {
+            response.cookies.delete(name)
+          },
+        },
+      }
+    )
+    
+    // Get the current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
     // Only allow certain fields to be updated by customers
     const allowedFields = ['notes'] // Customers can only update notes
@@ -201,8 +344,20 @@ export async function PATCH(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    // TODO: Add user authorization check
-    // Ensure the authenticated user owns this order
+    // Check user authorization - ensure the authenticated user owns this order
+    if (!validateOrderOwnership(order.user_id, user.id)) {
+      logger.log('❌ Unauthorized order update attempt:', { 
+        orderUserId: order.user_id, 
+        requestUserId: user.id 
+      })
+      logSecurityEvent('UNAUTHORIZED_ORDER_UPDATE', {
+        endpoint: '/api/user/orders/[orderNumber]',
+        orderNumber: orderNumber,
+        orderUserId: order.user_id,
+        requestUserId: user.id
+      }, request)
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
 
     // Update the order
     const { error: updateError } = await supabase

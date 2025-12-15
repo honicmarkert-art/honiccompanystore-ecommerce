@@ -205,6 +205,32 @@ export function validateOrderAmount(amount: number): ValidationResult {
   }
 }
 
+// Validate quantity based on product price
+// Products under 500 TZS require minimum quantity of 5
+export function validateQuantityForPrice(quantity: number, productPrice: number): ValidationResult {
+  const errors: string[] = []
+
+  if (typeof quantity !== 'number' || isNaN(quantity) || quantity <= 0) {
+    errors.push('Quantity must be a positive number')
+    return { isValid: false, errors }
+  }
+
+  // For products under 500 TZS, minimum quantity is 5
+  if (productPrice < 500 && quantity < 5) {
+    errors.push(`Minimum order quantity is 5 for products under 500 TZS. You requested ${quantity}.`)
+  }
+
+  // General minimum quantity check
+  if (quantity < 1) {
+    errors.push('Quantity must be at least 1')
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors
+  }
+}
+
 // Validate cart items
 export function validateCartItems(cartItems: any[]): ValidationResult {
   const errors: string[] = []
@@ -239,6 +265,14 @@ export function validateCartItems(cartItems: any[]): ValidationResult {
     
     if (!item.price || typeof item.price !== 'number' || item.price < 0) {
       errors.push(`Item ${i + 1}: Invalid price`)
+    }
+
+    // Validate quantity based on product price
+    if (item.price && item.quantity) {
+      const quantityValidation = validateQuantityForPrice(item.quantity, item.price)
+      if (!quantityValidation.isValid) {
+        errors.push(`Item ${i + 1}: ${quantityValidation.errors.join(', ')}`)
+      }
     }
   }
 

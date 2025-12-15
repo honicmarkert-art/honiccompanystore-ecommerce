@@ -4,6 +4,8 @@ import React, { useState, useMemo, useEffect, useRef, useCallback, Suspense } fr
 import { createPortal } from 'react-dom'
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { logger } from '@/lib/logger'
+import { BuyerRouteGuard } from '@/components/buyer-route-guard'
+import { EmailVerificationBanner } from '@/components/email-verification-banner'
 
 // Extend window object for search timeout
 declare global {
@@ -59,7 +61,6 @@ import {
   Filter,
   SlidersHorizontal,
   Facebook,
-  Twitter,
   Instagram,
   Youtube,
   HelpCircle,
@@ -73,6 +74,10 @@ import {
   Ticket,
   Settings,
   MoreHorizontal,
+  ArrowRight,
+  Moon,
+  Sun,
+  UserPlus,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -84,6 +89,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
 import {
   Sheet,
@@ -102,6 +108,7 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 // import { useProducts } from "@/hooks/use-products" // Removed - using useProductsOptimized instead
@@ -126,6 +133,10 @@ function LandingPageContent() {
   const { addItem, isInCart, cartUniqueProducts, getItemQuantity } = useCart() // Use useCart hook
   const { toast } = useToast() // Initialize toast
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  
+  // China image format fallback - tries png, jpg, jpeg, webp
+  const [chinaImageSrc, setChinaImageSrc] = useState('/china.png?v=2')
+  const chinaFormats = ['/china.png?v=2', '/china.jpg?v=2', '/china.jpeg?v=2', '/china.webp?v=2']
   
   // China import modal state
   const [showChinaImportModal, setShowChinaImportModal] = useState(false)
@@ -189,16 +200,18 @@ function LandingPageContent() {
     // Initialize category state from URL
     // Read again after potential cleanup above
     const urlMainCategory = urlSearchParams?.get('mainCategory') || null
-    const urlSubCategories = urlSearchParams?.get('subCategories')?.split(',') || []
+    // Support both subCategory (singular) and subCategories (plural, comma-separated)
+    const urlSubCategory = urlSearchParams?.get('subCategory')
+    const urlSubCategoriesParam = urlSearchParams?.get('subCategories')
+    const urlSubCategories = urlSubCategory 
+      ? [urlSubCategory] 
+      : (urlSubCategoriesParam?.split(',') || [])
     
     // Only set selectedMainCategory if it's different AND we're not in the middle of a checkbox operation
     // The checkbox should only set selectedSubCategories, not selectedMainCategory
     if (urlMainCategory && urlMainCategory !== selectedMainCategory) {
-      // Only set selectedMainCategory if there are no subcategories in URL
-      // This means it was clicked from the category name, not the checkbox
-      if (urlSubCategories.length === 0) {
-        setSelectedMainCategory(urlMainCategory)
-      }
+      // Set selectedMainCategory when mainCategory is in URL
+      setSelectedMainCategory(urlMainCategory)
     }
     
     if (urlSubCategories.length > 0 && JSON.stringify(urlSubCategories) !== JSON.stringify(selectedSubCategories)) {
@@ -215,6 +228,8 @@ function LandingPageContent() {
   // Submit search (updates URL and triggers server-side filtering)
   const submitSearch = useCallback(() => {
     const query = (searchTerm || '').trim()
+    setShowSuggestions(false)
+    setIsSearchFocused(false)
     const params = new URLSearchParams(urlSearchParams?.toString() || '')
     if (query) {
       params.set('search', query)
@@ -269,18 +284,18 @@ function LandingPageContent() {
 
   // Fallback categories in case API fails
   const fallbackMainCategories = [
-    { id: '1', name: 'DIY Electronic Components', slug: 'diy-electronic-components', image_url: null, is_main: true },
-    { id: '2', name: 'Home Electronic Devices', slug: 'home-electronic-devices', image_url: null, is_main: true },
-    { id: '3', name: 'Computer & Office', slug: 'computer-office', image_url: null, is_main: true },
-    { id: '4', name: 'School Items', slug: 'school-items', image_url: null, is_main: true },
-    { id: '5', name: 'Clothes & Shoes', slug: 'clothes-and-shoes', image_url: null, is_main: true },
-    { id: '6', name: 'Sport & Entertainment', slug: 'sport-and-entertainment', image_url: null, is_main: true },
-    { id: '7', name: 'Games', slug: 'games', image_url: null, is_main: true },
-    { id: '8', name: 'Fashion & Jewelry', slug: 'fashion-and-jewelry', image_url: null, is_main: true },
-    { id: '9', name: 'Beauty & Health', slug: 'beauty-health', image_url: null, is_main: true },
-    { id: '10', name: 'Home & Garden', slug: 'home-garden', image_url: null, is_main: true },
-    { id: '11', name: 'Toys & Hobbies', slug: 'toys-hobbies', image_url: null, is_main: true },
-    { id: '12', name: 'Automotive', slug: 'automotive', image_url: null, is_main: true },
+    { id: 'diy-electronic-components', name: 'DIY Electronic Components', slug: 'diy-electronic-components', image_url: null, is_main: true },
+    { id: 'home-electronic-devices', name: 'Home Electronic Devices', slug: 'home-electronic-devices', image_url: null, is_main: true },
+    { id: 'home-office-furnitures', name: 'Home & Office furnitures', slug: 'home-office-furnitures', image_url: null, is_main: true },
+    { id: 'training-kits-school-items', name: 'Training kits & School Items', slug: 'training-kits-school-items', image_url: null, is_main: true },
+    { id: 'phones-telecom-devices', name: 'Phones & Telecom Devices', slug: 'phones-telecom-devices', image_url: null, is_main: true },
+    { id: 'fashion-jewelry', name: 'Fashion and Jewelry', slug: 'fashion-jewelry', image_url: null, is_main: true },
+    { id: 'computer-accessories', name: 'Computer & Accessories', slug: 'computer-accessories', image_url: null, is_main: true },
+    { id: 'automotive-parts', name: 'Automotive Parts', slug: 'automotive-parts', image_url: null, is_main: true },
+    { id: 'sports-outdoors', name: 'Sports & Outdoors', slug: 'sports-outdoors', image_url: null, is_main: true },
+    { id: 'beauty-health', name: 'Beauty & Health', slug: 'beauty-health', image_url: null, is_main: true },
+    { id: 'toys-games', name: 'Toys & Games', slug: 'toys-games', image_url: null, is_main: true },
+    { id: 'home-appliances', name: 'Home Appliances', slug: 'home-appliances', image_url: null, is_main: true },
   ]
 
   // Process categories data
@@ -316,11 +331,24 @@ function LandingPageContent() {
       parent_name: cat.parent?.name,
       is_main: !cat.parent_id,
       is_sub: !!cat.parent_id,
-      product_count: cat.product_count || 0
+      product_count: cat.product_count || 0,
+      display_order: cat.display_order ?? 999 // Preserve display_order, default to 999 if missing
     }))
 
-    const mainCategories = allCategories.filter(cat => cat.is_main)
-    const subCategories = allCategories.filter(cat => cat.is_sub)
+    // Sort by display_order to maintain admin-set order
+    const sortedCategories = [...allCategories].sort((a, b) => {
+      // Ensure display_order is treated as a number
+      const orderA = Number(a.display_order) ?? 999
+      const orderB = Number(b.display_order) ?? 999
+      if (orderA !== orderB) {
+        return orderA - orderB
+      }
+      // If display_order is the same, sort by name
+      return (a.name || '').localeCompare(b.name || '')
+    })
+
+    const mainCategories = sortedCategories.filter(cat => cat.is_main)
+    const subCategories = sortedCategories.filter(cat => cat.is_sub)
 
     // If no main categories found, use fallback
     if (mainCategories.length === 0) {
@@ -410,6 +438,9 @@ function LandingPageContent() {
   const [isCategoryNavOpen, setIsCategoryNavOpen] = useState(false)
   const [selectedMainCategory, setSelectedMainCategory] = useState<string | null>(null)
   const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>([])
+  const [isCategoryMegaMenuOpen, setIsCategoryMegaMenuOpen] = useState(false)
+  const [hoveredMegaCategory, setHoveredMegaCategory] = useState<string | null>(null)
+  const categoryMegaMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [showMoreCategories, setShowMoreCategories] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const moreButtonRef = useRef<HTMLDivElement>(null)
@@ -427,6 +458,61 @@ function LandingPageContent() {
   const [desktopDropdownPosition, setDesktopDropdownPosition] = useState({ top: 0, left: 0 })
   const desktopMoreButtonRef = useRef<HTMLDivElement>(null)
   const desktopCategoriesContainerRef = useRef<HTMLDivElement>(null)
+  const openCategoryMegaMenu = useCallback(() => {
+    if (categoryMegaMenuTimeoutRef.current) {
+      clearTimeout(categoryMegaMenuTimeoutRef.current)
+    }
+    // Add 400ms delay before opening
+    categoryMegaMenuTimeoutRef.current = setTimeout(() => {
+    if (!isCategoryMegaMenuOpen) {
+      setIsCategoryMegaMenuOpen(true)
+    }
+    }, 400)
+  }, [isCategoryMegaMenuOpen])
+
+  const closeCategoryMegaMenu = useCallback(() => {
+    if (categoryMegaMenuTimeoutRef.current) {
+      clearTimeout(categoryMegaMenuTimeoutRef.current)
+    }
+    categoryMegaMenuTimeoutRef.current = setTimeout(() => {
+      setIsCategoryMegaMenuOpen(false)
+    }, 120)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (categoryMegaMenuTimeoutRef.current) {
+        clearTimeout(categoryMegaMenuTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const hoveredMegaCategoryData = useMemo(() => {
+    if (!hoveredMegaCategory) return null
+    return categoriesData.mainCategories.find((cat: any) => cat.slug === hoveredMegaCategory) || null
+  }, [hoveredMegaCategory, categoriesData.mainCategories])
+
+  const megaMenuSubCategories = useMemo(() => {
+    if (!hoveredMegaCategoryData) return []
+    return categoriesData.subCategories.filter((sub: any) => sub.parent_id === hoveredMegaCategoryData.id)
+  }, [hoveredMegaCategoryData, categoriesData.subCategories])
+
+  const chunkedMegaMenuSubCategories = useMemo(() => {
+    const chunkSize = 6
+    const chunks = []
+    for (let i = 0; i < megaMenuSubCategories.length; i += chunkSize) {
+      chunks.push(megaMenuSubCategories.slice(i, i + chunkSize))
+    }
+    return chunks
+  }, [megaMenuSubCategories])
+
+  const recommendedMegaMenuSubCategories = useMemo(() => megaMenuSubCategories.slice(0, 12), [megaMenuSubCategories])
+
+  useEffect(() => {
+    if (!hoveredMegaCategory && categoriesData.mainCategories.length > 0) {
+      setHoveredMegaCategory(categoriesData.mainCategories[0]?.slug || null)
+    }
+  }, [categoriesData.mainCategories, hoveredMegaCategory])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -481,199 +567,28 @@ function LandingPageContent() {
     }
   }, [showMoreCategories, showDesktopMoreCategories])
   
-  // Calculate which categories fit in the mobile row
+  // Show only first 6 categories (mobile)
   useEffect(() => {
-    const calculateVisibleCategories = () => {
-      if (!mobileCategoriesContainerRef.current || categoriesData.mainCategories.length === 0) {
-        return
-      }
-      
-      const container = mobileCategoriesContainerRef.current
-      const containerWidth = container.clientWidth
-      const gap = 12 // gap-3 = 12px
-      const moreButtonWidth = 70 // Approximate width of "More" button with icon
-      
-      // Get all main categories
-      const allCategories = categoriesData.mainCategories
-      let totalWidth = 0
-      const visible: any[] = []
-      const overflow: any[] = []
-      
-      // Reserve space for China button - measure if possible, otherwise estimate
-      const chinaButton = container.querySelector('a[href="/china"]')
-      const chinaButtonWidth = chinaButton ? (chinaButton as HTMLElement).offsetWidth : 50
-      totalWidth += chinaButtonWidth + gap
-      
-      // Create a temporary element to measure text width
-      const measureElement = document.createElement('span')
-      measureElement.style.position = 'absolute'
-      measureElement.style.visibility = 'hidden'
-      measureElement.style.whiteSpace = 'nowrap'
-      measureElement.style.fontSize = '0.875rem' // text-sm
-      measureElement.style.fontWeight = '500' // font-medium
-      measureElement.style.padding = '0'
-      document.body.appendChild(measureElement)
-      
-      // First, calculate widths for all categories
-      const categoryWidths: number[] = []
-      for (let i = 0; i < allCategories.length; i++) {
-        const category = allCategories[i]
-        const firstWord = category.name.split(' ')[0]
-        measureElement.textContent = firstWord
-        const textWidth = measureElement.offsetWidth
-        categoryWidths.push(textWidth + 8) // Add some padding
-      }
-      
-      // First, try to fit all categories WITHOUT More button
-      let testTotalWidth = totalWidth
-      let allFit = true
-      
-      for (let i = 0; i < allCategories.length; i++) {
-        const categoryWidth = categoryWidths[i]
-        const spaceNeeded = testTotalWidth + categoryWidth + gap
-        
-        if (spaceNeeded <= containerWidth) {
-          testTotalWidth += categoryWidth + gap
-        } else {
-          // Categories overflow, need More button
-          allFit = false
-          break
-        }
-      }
-      
-      if (allFit) {
-        // All categories fit without More button, show them all
-        setVisibleCategories(allCategories)
-        setOverflowCategories([])
-        document.body.removeChild(measureElement)
-        return
-      }
-      
-      // Categories overflow, calculate which ones fit WITH More button
-      for (let i = 0; i < allCategories.length; i++) {
-        const category = allCategories[i]
-        const categoryWidth = categoryWidths[i]
-        
-        // Check if this category fits (with More button space reserved)
-        const spaceNeeded = totalWidth + categoryWidth + gap + moreButtonWidth + gap
-        
-        if (spaceNeeded <= containerWidth) {
-          visible.push(category)
-          totalWidth += categoryWidth + gap
-        } else {
-          // This and remaining categories go to overflow
-          overflow.push(...allCategories.slice(i))
-          break
-        }
-      }
-      
-      // Force minimum of 6 categories to be visible
-      const minCategories = 6
-      if (visible.length < minCategories && allCategories.length >= minCategories) {
-        // Reset and show at least 6 categories
-        visible.length = 0
-        overflow.length = 0
-        totalWidth = chinaButtonWidth + gap
-        
-        for (let i = 0; i < Math.min(minCategories, allCategories.length); i++) {
-          visible.push(allCategories[i])
-          totalWidth += categoryWidths[i] + gap
-        }
-        
-        // Remaining categories go to overflow
-        if (allCategories.length > minCategories) {
-          overflow.push(...allCategories.slice(minCategories))
-        }
-      }
-      
-      // Clean up
-      document.body.removeChild(measureElement)
-      
-      setVisibleCategories(visible)
-      setOverflowCategories(overflow)
+    if (categoriesData.mainCategories.length === 0) {
+      return
     }
     
-    // Calculate on mount, when categories load, and on resize
-    const timeoutId = setTimeout(calculateVisibleCategories, 150)
-    window.addEventListener('resize', calculateVisibleCategories)
-    
-    return () => {
-      clearTimeout(timeoutId)
-      window.removeEventListener('resize', calculateVisibleCategories)
-    }
+    // Simply show first 6 categories
+    const first6Categories = categoriesData.mainCategories.slice(0, 6)
+    setVisibleCategories(first6Categories)
+    setOverflowCategories([])
   }, [categoriesData.mainCategories])
 
-  // Calculate which categories fit in the desktop navigation row
+  // Show maximum 6 categories (no More button)
   useEffect(() => {
-    const calculateDesktopVisibleCategories = () => {
-      if (!desktopCategoriesContainerRef.current || categoriesData.mainCategories.length === 0) {
-        return
-      }
-      
-      const container = desktopCategoriesContainerRef.current
-      const containerWidth = container.clientWidth
-      const gap = 20 // gap-4 = 16px on lg, gap-6 = 24px on xl (average ~20px)
-      const moreButtonWidth = 80 // Approximate width of "More" button with icon
-      
-      // Get all main categories
-      const allCategories = categoriesData.mainCategories
-      let totalWidth = 0
-      const visible: any[] = []
-      const overflow: any[] = []
-      
-      // Reserve space for "From China" button - measure if possible, otherwise estimate
-      const chinaButton = container.querySelector('a[href="/china"]')
-      const chinaButtonWidth = chinaButton ? (chinaButton as HTMLElement).offsetWidth : 120
-      totalWidth += chinaButtonWidth + gap
-      
-      // Create a temporary element to measure text width
-      const measureElement = document.createElement('span')
-      measureElement.style.position = 'absolute'
-      measureElement.style.visibility = 'hidden'
-      measureElement.style.whiteSpace = 'nowrap'
-      measureElement.style.fontSize = '1rem' // text-base
-      measureElement.style.fontWeight = '500' // font-medium
-      measureElement.style.padding = '0'
-      document.body.appendChild(measureElement)
-      
-      // Calculate width for each category
-      for (let i = 0; i < allCategories.length; i++) {
-        const category = allCategories[i]
-        const categoryName = category.name
-        
-        // Measure actual text width
-        measureElement.textContent = categoryName
-        const textWidth = measureElement.offsetWidth
-        const categoryWidth = textWidth + 8 // Add some padding
-        
-        // Check if this category fits (including More button space if needed)
-        const hasMoreCategories = i < allCategories.length - 1
-        const spaceNeeded = totalWidth + categoryWidth + gap + (hasMoreCategories ? moreButtonWidth + gap : 0)
-        
-        if (spaceNeeded <= containerWidth) {
-          visible.push(category)
-          totalWidth += categoryWidth + gap
-        } else {
-          // This and remaining categories go to overflow
-          overflow.push(...allCategories.slice(i))
-          break
-        }
-      }
-      
-      document.body.removeChild(measureElement)
-      
-      setDesktopVisibleCategories(visible)
-      setDesktopOverflowCategories(overflow)
+    if (categoriesData.mainCategories.length === 0) {
+      return
     }
     
-    // Calculate on mount, when categories change, and on resize
-    const timeoutId = setTimeout(calculateDesktopVisibleCategories, 150)
-    window.addEventListener('resize', calculateDesktopVisibleCategories)
-    
-    return () => {
-      clearTimeout(timeoutId)
-      window.removeEventListener('resize', calculateDesktopVisibleCategories)
-    }
+    // Show maximum 6 categories
+    const maxCategories = categoriesData.mainCategories.slice(0, 6)
+    setDesktopVisibleCategories(maxCategories)
+    setDesktopOverflowCategories([])
   }, [categoriesData.mainCategories])
   
   const [sortOrder, setSortOrder] = useState('price-low')
@@ -739,8 +654,8 @@ function LandingPageContent() {
     brand: activeBrand || undefined,
     search: searchTerm || undefined,
     categories: isCategoryFilterActive ? allCategoryIds : undefined,
-    sortBy: sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
-    sortOrder: sortOrder === 'price-high' ? 'desc' : 'asc',
+    sortBy: sortOrder === 'featured' ? 'featured' : sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
+    sortOrder: sortOrder === 'featured' ? 'desc' : sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
     useOptimized: true,
@@ -982,6 +897,7 @@ function LandingPageContent() {
     freeDelivery: product.free_delivery,
     sameDayDelivery: product.same_day_delivery,
     is_new: product.is_new, // For "New" badge calculation
+    is_featured: (product as any).is_featured || false, // For "Featured" badge
     updated_at: product.updated_at, // For "New" badge calculation
     variants: product.product_variants || [],
     gallery: product.image ? [product.image] : [],
@@ -1380,6 +1296,7 @@ function LandingPageContent() {
     // Update URL to remove category parameters
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
+    params.delete('subCategory')
     params.delete('subCategories')
     const nextUrl = `/${params.toString() ? `?${params.toString()}` : ''}`
     router.push(nextUrl)
@@ -1404,8 +1321,9 @@ function LandingPageContent() {
     
     setSelectedSubCategories(newSubCategories)
     
-    // Update URL
+    // Update URL - clean up both subCategory (singular) and subCategories (plural)
     const params = new URLSearchParams(urlSearchParams?.toString())
+    params.delete('subCategory') // Remove singular form
     if (newSubCategories.length > 0) {
       params.set('subCategories', newSubCategories.join(','))
     } else {
@@ -1422,6 +1340,7 @@ function LandingPageContent() {
     // Update URL
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
+    params.delete('subCategory')
     params.delete('subCategories')
     const nextUrl = `/${params.toString() ? `?${params.toString()}` : ''}`
     router.push(nextUrl)
@@ -1434,6 +1353,7 @@ function LandingPageContent() {
     // Update URL
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
+    params.delete('subCategory')
     params.delete('subCategories')
     const nextUrl = `/${params.toString() ? `?${params.toString()}` : ''}`
     router.push(nextUrl)
@@ -1653,10 +1573,39 @@ function LandingPageContent() {
       </div>
 
       <header
-        className="fixed top-6 z-40 w-full bg-white dark:bg-black/50 backdrop-blur-sm border-b border-white dark:border-gray-800 sm:top-0 shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
+        className="fixed top-6 sm:top-0 z-40 w-full bg-white dark:bg-black/50 backdrop-blur-sm border-b border-white dark:border-gray-800 shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
+        onMouseEnter={(e) => {
+          e.stopPropagation()
+          // Close mega menu when cursor enters header area (regardless of how it was opened)
+          if (isCategoryMegaMenuOpen) {
+            if (categoryMegaMenuTimeoutRef.current) {
+              clearTimeout(categoryMegaMenuTimeoutRef.current)
+            }
+            setIsCategoryMegaMenuOpen(false)
+          }
+        }}
+        onMouseLeave={(e) => {
+          e.stopPropagation()
+        }}
+        suppressHydrationWarning
+      >
+        <div 
+          className="flex items-center h-10 sm:h-16 px-2 sm:px-3 md:px-4 lg:px-6 xl:px-8 2xl:px-10 w-full max-w-full" 
+          onMouseEnter={(e) => {
+            e.stopPropagation()
+            // Close mega menu when cursor enters header content area (regardless of how it was opened)
+            if (isCategoryMegaMenuOpen) {
+              if (categoryMegaMenuTimeoutRef.current) {
+                clearTimeout(categoryMegaMenuTimeoutRef.current)
+              }
+              setIsCategoryMegaMenuOpen(false)
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.stopPropagation()
+          }}
           suppressHydrationWarning
         >
-        <div className="flex items-center h-10 sm:h-16 px-2 sm:px-3 md:px-4 lg:px-6 xl:px-8 2xl:px-10 w-full max-w-full" suppressHydrationWarning>
           {/* Mobile Hamburger Menu Button */}
           <Button
             variant="ghost"
@@ -1679,7 +1628,7 @@ function LandingPageContent() {
                   alt={`${companyName} Logo`} 
                   width={32} 
                   height={32} 
-                  className="w-8 h-8 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
+                  className="w-8 h-8 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)] dark:[box-shadow:0_2px_8px_rgba(255,255,255,0.5),0_1px_4px_rgba(255,255,255,0.4)]"
                 suppressHydrationWarning
             />
           </Link>
@@ -1695,7 +1644,7 @@ function LandingPageContent() {
               alt={`${companyName} Logo`}
               width={48}
               height={48}
-                className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
+                className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)] dark:[box-shadow:0_2px_8px_rgba(255,255,255,0.5),0_1px_4px_rgba(255,255,255,0.4)]"
                 suppressHydrationWarning
             />
                               <div className="hidden sm:flex flex-col">
@@ -1710,16 +1659,30 @@ function LandingPageContent() {
           </Link>
 
 
-          {/* All Categories Button */}
-              <Button
-            onClick={() => setIsCategoryNavOpen(true)}
-            variant="outline"
-            size="sm"
-            className="hidden sm:flex items-center gap-2 ml-3 text-xs sm:text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+          {/* All Categories Button with Mega Menu */}
+          <div
+            className="hidden sm:block ml-3"
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              openCategoryMegaMenu()
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation()
+              closeCategoryMegaMenu()
+            }}
+            onFocusCapture={openCategoryMegaMenu}
+            onBlurCapture={closeCategoryMegaMenu}
           >
-            <Package className="w-4 h-4" />
-            All Categories
-              </Button>
+            <Button
+              onClick={() => setIsCategoryNavOpen(true)}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 text-xs sm:text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              <Package className="w-4 h-4" />
+              All Categories
+            </Button>
+          </div>
 
           {/* Search Bar Container - Moved to start */}
           <div className="flex-1 min-w-0 mx-2 sm:mx-3 md:mx-4 lg:mx-6 xl:mx-8 2xl:mx-10 flex items-center relative" suppressHydrationWarning>
@@ -1743,10 +1706,10 @@ function LandingPageContent() {
                   suppressHydrationWarning
               />
               <Input
-                type="search"
+                type="text"
                 placeholder="Search for products..."
                 className={cn(
-                    "w-full pl-8 sm:pl-10 pr-20 sm:pr-28 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
+                    "w-full pl-8 sm:pl-10 pr-32 sm:pr-40 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
                     darkHeaderFooterClasses.inputBg,
                     darkHeaderFooterClasses.inputBorder,
                     darkHeaderFooterClasses.textNeutralPrimary,
@@ -1802,27 +1765,28 @@ function LandingPageContent() {
               />
               
               {/* Search Loading Indicator - removed since we're using client-side filtering */}
-              {/* Search Button */}
-                <button
+              
+              {/* Search Submit Button */}
+              <button
                 type="submit"
                 onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                   e.preventDefault()
                   if (searchTerm.trim()) {
-                    handleModalTextSearch(searchTerm.trim())
+                    submitSearch()
                   }
                 }}
                 disabled={!searchTerm.trim()}
                 className={cn(
-                  "absolute right-12 sm:right-16 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors",
+                  "absolute right-6 sm:right-8 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors",
                   searchTerm.trim() 
                     ? cn(darkHeaderFooterClasses.textNeutralSecondaryFixed, "hover:bg-neutral-200 dark:hover:bg-neutral-700")
                     : "text-gray-400 dark:text-gray-600 cursor-not-allowed"
                 )}
-                title={searchTerm.trim() ? "Search products" : "Enter search term"}
+                title="Search"
               >
                 <Search className="w-3 h-3 sm:w-4 sm:h-4" />
-                </button>
-
+              </button>
+              
               {/* Image Search Button */}
               <button
                 onClick={() => {
@@ -1830,13 +1794,13 @@ function LandingPageContent() {
                   setIsSearchModalOpen(true)
                 }}
                 className={cn(
-                  "absolute right-6 sm:right-8 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center",
-                  darkHeaderFooterClasses.textNeutralSecondaryFixed,
-                  "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
+                  "absolute right-12 sm:right-16 top-1/2 -translate-y-1/2 px-2 py-1 rounded flex items-center justify-center text-xs sm:text-sm text-yellow-500 hover:text-yellow-600",
+                  "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors whitespace-nowrap"
                 )}
                 title="Search by image"
               >
-                <Camera className="w-3 h-3 sm:w-4 sm:h-4" />
+                <Camera className="w-4 h-4 sm:hidden" />
+                <span className="hidden sm:inline">Search by image</span>
               </button>
               
               {/* Clear Search Button */}
@@ -1867,13 +1831,13 @@ function LandingPageContent() {
 
           {/* Navigation Links - Near Search Bar */}
           <div className="hidden lg:flex items-center gap-2 xl:gap-3 ml-2 xl:ml-3">
-            <Link href="/ai-agent" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
               AI Sourcing
             </Link>
-            <Link href="/discover" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
               Discovery
             </Link>
-            <Link href="/become-supplier" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+            <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm")}>
               Become Supplier
             </Link>
             <DropdownMenu>
@@ -1890,44 +1854,119 @@ function LandingPageContent() {
                 >
                   <Settings className="w-3 h-3 text-white group-hover:text-black transition-colors" />
                   <span className="text-sm font-medium text-white group-hover:text-black transition-colors" suppressHydrationWarning>
-                    Services
+                    Service
                   </span>
-                  <span className="sr-only" suppressHydrationWarning>Services Menu</span>
+                  <span className="sr-only" suppressHydrationWarning>Service Menu</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
                 className="w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg"
               >
+                <DropdownMenuLabel className="text-base font-semibold px-3 py-2">
+                  Other Service
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/buyer-central'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
-                  <Settings className="w-4 h-4 mr-2" /> Our Services
+                  <Settings className="w-4 h-4 mr-2" /> Education Tools
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/electronics-supply'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
-                  <Package className="w-4 h-4 mr-2" /> Electronics Supply
+                  <Package className="w-4 h-4 mr-2" /> Electronic Manufacturing
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/prototyping'}
-                >
-                  <Settings className="w-4 h-4 mr-2" /> Prototyping Services
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/pcb-printing'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
                   <Laptop className="w-4 h-4 mr-2" /> PCB Printing
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/ai-consultancy'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
-                  <TrendingUp className="w-4 h-4 mr-2" /> AI Consultancy
+                  <TrendingUp className="w-4 h-4 mr-2" /> Project Development
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  asChild
+                >
+                  <Link href="/become-supplier" className="flex items-center">
+                    <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                  </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1936,7 +1975,7 @@ function LandingPageContent() {
           {/* Right Side Actions */}
           <div className="flex items-center gap-1 sm:gap-2 lg:gap-3 flex-shrink-0 min-w-0" suppressHydrationWarning>
             {/* Mobile Cart Button - Always Visible */}
-            <Link href="/cart" className="sm:hidden">
+            <Link href="/cart" className="sm:hidden flex items-center">
               <Button
                 variant="outline"
                 size="icon"
@@ -1952,15 +1991,21 @@ function LandingPageContent() {
             </Link>
 
             {/* Mobile Profile Button */}
-            <div className="sm:hidden mt-2">
+            <div className="sm:hidden">
               {isAuthenticated ? (
-                <div className="flex flex-col items-center gap-0.5">
-                  <div className="rounded-full overflow-hidden">
+                <div className="flex flex-col items-center">
+                  <div className="h-8 w-8 flex items-center justify-center">
                     <UserProfile />
                   </div>
-                  <span className="text-xs font-medium text-neutral-900 dark:text-white truncate max-w-[80px]">
+                  <span className="text-xs font-medium text-black dark:text-white truncate max-w-[80px] mt-0.5 text-center">
                     {(() => {
-                      const name = (user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User';
+                      // Extract name from various sources (handles Google OAuth users)
+                      const name = user?.name?.trim() || 
+                                   (user as any)?.user_metadata?.full_name?.trim() || 
+                                   (user as any)?.user_metadata?.name?.trim() ||
+                                   user?.email?.split('@')[0] || 
+                                   'User';
+                      if (!name || name === '') return 'User';
                       return name.length > 5 ? name.substring(0, 5) + '...' : name;
                     })()}
                     </span>
@@ -1985,7 +2030,6 @@ function LandingPageContent() {
                     align="end"
                     className={cn(
                       "w-56",
-                      // Force solid backgrounds in both themes
                       "bg-white text-neutral-900 border border-neutral-200 dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800",
                     )}
                   >
@@ -2049,57 +2093,38 @@ function LandingPageContent() {
             </div>
 
 
-            {/* Theme Switcher Dropdown - Hidden on Mobile */}
+
+            {/* Theme Toggle Button - Switch between White and Dark (Black) */}
           <div className="hidden sm:block">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                      "flex items-center gap-1 border-yellow-500 bg-transparent hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs",
-                      darkHeaderFooterClasses.buttonGhostText,
-                  )}
-                    suppressHydrationWarning
-                >
-                    <span className="text-sm font-medium" suppressHydrationWarning>
-                      Theme
-                    </span>
-                    <span className="sr-only" suppressHydrationWarning>Change Background Color ({backgroundColor})</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className={cn(
-                  themeClasses.cardBg,
-                  themeClasses.mainText,
-                  themeClasses.cardBorder,
-                )}
-              >
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("dark")}
-                  className={cn("hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors", backgroundColor === "dark" && "bg-yellow-500 text-white")}
-                  suppressHydrationWarning
-                >
-                  Dark {backgroundColor === "dark" && "✓"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("gray")}
-                  className={cn("hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors", backgroundColor === "gray" && "bg-yellow-500 text-white")}
-                  suppressHydrationWarning
-                >
-                  Gray {backgroundColor === "gray" && "✓"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("white")}
-                  className={cn("hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors", backgroundColor === "white" && "bg-yellow-500 text-white")}
-                  suppressHydrationWarning
-                >
-                  White {backgroundColor === "white" && "✓"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-              </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                // Toggle between white and dark (black) only
+                const newTheme = (backgroundColor === 'white' || backgroundColor === 'gray') ? 'dark' : 'white'
+                setBackgroundColor(newTheme)
+              }}
+              className={cn(
+                "flex items-center gap-2",
+                "border-gray-300 dark:border-gray-600",
+                "hover:bg-gray-50 dark:hover:bg-gray-800"
+              )}
+              title={(backgroundColor === 'white' || backgroundColor === 'gray') ? 'Switch to dark theme' : 'Switch to light theme'}
+              suppressHydrationWarning
+            >
+              {(backgroundColor === 'white' || backgroundColor === 'gray') ? (
+                <>
+                  <Moon className="w-4 h-4" />
+                  <span className="hidden sm:inline" suppressHydrationWarning>Dark</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-4 h-4" />
+                  <span className="hidden sm:inline" suppressHydrationWarning>Light</span>
+                </>
+              )}
+            </Button>
+          </div>
 
             <div className="hidden sm:block">
             <DropdownMenu>
@@ -2158,13 +2183,21 @@ function LandingPageContent() {
               </Button>
             </Link>
 
-            {/* User Profile - Hidden on Mobile */}
+            {/* User Profile - Desktop */}
             <div className="hidden sm:block">
               {isAuthenticated ? (
                 <div className="flex flex-col items-center">
                   <UserProfile />
-                  <span className="text-xs text-white mt-1">
-                    {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                  <span className="text-xs text-black dark:text-white mt-1">
+                    {(() => {
+                      // Extract name from various sources (handles Google OAuth users)
+                      const name = user?.name?.trim() || 
+                                   (user as any)?.user_metadata?.full_name?.trim() || 
+                                   (user as any)?.user_metadata?.name?.trim() ||
+                                   user?.email?.split('@')[0] || 
+                                   'User';
+                      return name;
+                    })()}
                   </span>
                 </div>
               ) : (
@@ -2274,180 +2307,657 @@ function LandingPageContent() {
                 </DropdownMenu>
               )}
             </div>
+
           </div>
               </div>
 
         {/* Second Row - Main Categories */}
         <div 
           ref={desktopCategoriesContainerRef}
-          className="hidden lg:flex items-center justify-start gap-4 xl:gap-6 py-3 pl-[50px] pr-0 overflow-hidden"
+          className="hidden lg:flex items-center justify-between gap-2 xl:gap-3 py-3 px-5 overflow-hidden"
         >
           {/* Import from China Link */}
-          <Link 
-            href="/china" 
-            target="_blank"
-            rel="noopener noreferrer"
-            prefetch={false}
+          <div 
+            style={{ marginLeft: '10px', marginRight: '4px' }} 
             className="flex-shrink-0"
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              if (isCategoryMegaMenuOpen) {
+                setIsCategoryMegaMenuOpen(false)
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation()
+            }}
           >
             <Button
               variant="ghost"
               size="sm"
+              onMouseEnter={(e) => {
+                e.stopPropagation()
+                if (isCategoryMegaMenuOpen) {
+                  setIsCategoryMegaMenuOpen(false)
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.stopPropagation()
+              }}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setIsCategoryMegaMenuOpen(false)
+                toast({
+                  title: "Coming Soon",
+                  description: "This feature is coming soon. Stay tuned!",
+                  duration: 3000,
+                })
+              }}
               className={cn(
-                 "flex items-center gap-1 border-2 border-white bg-black hover:border-yellow-600 transition-colors text-xs text-white",
+                 "flex items-center gap-1 transition-colors text-xs text-black dark:text-white relative px-3 py-2 h-8",
                 darkHeaderFooterClasses.buttonGhostText,
+                "cursor-pointer",
+                "[box-shadow:0_4px_6px_-1px_rgba(0,0,0,0.3),0_2px_4px_-1px_rgba(0,0,0,0.25)]",
+                "hover:[box-shadow:0_10px_15px_-3px_rgba(0,0,0,0.4),0_4px_6px_-2px_rgba(0,0,0,0.3)]",
+                "dark:[box-shadow:0_4px_6px_-1px_rgba(255,255,255,0.5),0_2px_4px_-1px_rgba(255,255,255,0.4)]",
+                "dark:hover:[box-shadow:0_10px_15px_-3px_rgba(255,255,255,0.6),0_4px_6px_-2px_rgba(255,255,255,0.5)]"
               )}
-              style={{ borderRadius: '20px' }}
+              style={{ 
+                borderRadius: '16px',
+                backgroundImage: 'url(/button.jpg)',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat'
+              }}
               suppressHydrationWarning
             >
-               <span className="text-sm font-medium text-red-400" suppressHydrationWarning>
-             From China
+               <span className="text-xs font-medium text-black dark:text-white flex items-center gap-1.5" suppressHydrationWarning>
+             <Image src={chinaImageSrc} alt="China" width={24} height={15} className="object-cover flex-shrink-0" suppressHydrationWarning onError={() => { const currentIndex = chinaFormats.indexOf(chinaImageSrc); if (currentIndex < chinaFormats.length - 1) setChinaImageSrc(chinaFormats[currentIndex + 1]); }} />
+             Buy from China
+                <Badge className="bg-yellow-500 text-black text-[8px] px-1 py-0 h-3 leading-none font-semibold" suppressHydrationWarning>
+                  Soon
+                </Badge>
               </span>
-               <span className="sr-only" suppressHydrationWarning>From China</span>
+               <span className="sr-only" suppressHydrationWarning>Buy from China</span>
             </Button>
-          </Link>
+          </div>
           
-          {/* Visible Main Categories */}
-          {desktopVisibleCategories.map((cat: any) => (
-          <Link 
-              key={cat.id}
-              href={`/?mainCategory=${cat.slug}`} 
-            className={cn(
-                "text-base font-medium transition-colors whitespace-nowrap flex-shrink-0",
-                selectedMainCategory === cat.slug ? 'text-yellow-500' : themeClasses.mainText
-            )}
-            prefetch={false}
-              scroll={false}
-          >
-              {cat.name}
-          </Link>
-          ))}
-          
-          {/* More Button - Only show if there are overflow categories */}
-          {desktopOverflowCategories.length > 0 && (
-            <div ref={desktopMoreButtonRef} className="relative flex-shrink-0 desktop-more-categories-dropdown">
-              <Button
-                variant="ghost"
-                size="sm"
+          {/* Visible Main Categories - Flex to fill space */}
+          <div className="flex items-center justify-between flex-1 gap-2 xl:gap-3 ml-2">
+            {desktopVisibleCategories.map((cat: any) => (
+            <div
+                key={cat.id}
+                className="relative flex-1"
+                onMouseEnter={() => {
+                  if (categoryMegaMenuTimeoutRef.current) {
+                    clearTimeout(categoryMegaMenuTimeoutRef.current)
+                  }
+                  setHoveredMegaCategory(cat.slug)
+                  openCategoryMegaMenu()
+                }}
+                onMouseLeave={() => {
+                  // Don't close immediately, let the mega menu handle it
+                }}
+            >
+              <Link 
+                href={`/?mainCategory=${cat.slug}`} 
+                className={cn(
+                    "text-base font-medium whitespace-nowrap flex-1 text-center inline-flex items-center justify-center gap-1",
+                    "transition-all duration-300 ease-in-out",
+                    "transform hover:scale-110",
+                    selectedMainCategory === cat.slug 
+                      ? 'text-yellow-500 hover:text-yellow-600' 
+                      : cn(themeClasses.mainText, "hover:text-yellow-500")
+                )}
+                prefetch={false}
+                scroll={false}
                 onClick={(e) => {
                   e.preventDefault()
-                  e.stopPropagation()
-                  
-                  if (desktopMoreButtonRef.current) {
-                    const rect = desktopMoreButtonRef.current.getBoundingClientRect()
-                    const dropdownWidth = 280
-                    const pageMargin = 5
-                    
-                    setDesktopDropdownPosition({
-                      top: rect.bottom + 8,
-                      left: Math.min(rect.left, window.innerWidth - dropdownWidth - pageMargin)
-                    })
-                  }
-                  
-                  setShowDesktopMoreCategories(prev => !prev)
+                  router.push(`/?mainCategory=${cat.slug}`)
+                  setIsCategoryMegaMenuOpen(false)
                 }}
-            className={cn(
-                  "flex items-center gap-1 text-base font-medium whitespace-nowrap",
-                  themeClasses.mainText,
-                  "hover:text-yellow-500"
-                )}
               >
-                More
-                <MoreHorizontal className="w-4 h-4" />
-              </Button>
+                  {cat.name}
+                  <ChevronDown className="w-3 h-3 flex-shrink-0 transition-transform duration-300 group-hover:rotate-180" />
+              </Link>
             </div>
-          )}
+            ))}
+            
+          </div>
               </div>
 
         {/* Mobile Categories Row */}
         <div 
           ref={mobileCategoriesContainerRef}
-          className="lg:hidden flex items-center justify-start gap-3 py-3 px-4 overflow-x-hidden overflow-y-visible" 
+          className="lg:hidden flex items-center justify-between gap-0 sm:gap-1 py-3 px-0 overflow-x-hidden overflow-y-visible" 
           suppressHydrationWarning
         >
           {/* Import from China Link */}
-          <Link 
-            href="/china" 
-            target="_blank"
-            rel="noopener noreferrer"
-            prefetch={false}
+          <div 
+            className="flex-shrink-0" 
+            style={{ marginLeft: '4px', marginRight: '2px' }}
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              if (isCategoryMegaMenuOpen) {
+                setIsCategoryMegaMenuOpen(false)
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation()
+            }}
           >
             <Button
               variant="ghost"
               size="sm"
-              className={cn(
-                 "flex items-center gap-1 border border-white bg-black hover:border-yellow-600 transition-colors text-[10px] px-2 py-1 h-6 text-white flex-shrink-0",
-                darkHeaderFooterClasses.buttonGhostText,
-              )}
-               style={{ borderRadius: '12px' }}
-              suppressHydrationWarning
-            >
-               <span className="text-[10px] font-medium text-red-400" suppressHydrationWarning>
-             China
-                </span>
-               <span className="sr-only" suppressHydrationWarning>China</span>
-            </Button>
-          </Link>
-          
-          {/* Visible Categories */}
-          {visibleCategories.map((category) => {
-            const firstWord = category.name.split(' ')[0]
-            return (
-          <Link 
-                key={category.id}
-                href={`/?mainCategory=${category.slug}`} 
-            className={cn(
-                  "text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0",
-                  selectedMainCategory === category.slug ? 'text-yellow-500' : themeClasses.mainText
-            )}
-            prefetch={false}
-                scroll={false}
-          >
-                {firstWord}
-          </Link>
-            )
-          })}
-          
-          {/* More Button - Only show if there are overflow categories */}
-          {overflowCategories.length > 0 && (
-          <div ref={moreButtonRef} className="relative flex-shrink-0 more-categories-dropdown">
-            <Button
-              variant="ghost"
-              size="sm"
+              onMouseEnter={(e) => {
+                e.stopPropagation()
+                if (isCategoryMegaMenuOpen) {
+                  setIsCategoryMegaMenuOpen(false)
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.stopPropagation()
+              }}
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                
-                if (moreButtonRef.current) {
-                  const rect = moreButtonRef.current.getBoundingClientRect()
-                  const dropdownWidth = 280 // match max-w-[280px]
-                  const pageMargin = 5 // requested 5px right margin
-                  
-                  setDropdownPosition({
-                    top: rect.bottom + 8,
-                    left: Math.min(rect.left, window.innerWidth - dropdownWidth - pageMargin)
-                  })
-                }
-                
-                setShowMoreCategories(prev => {
-                  return !prev
+                setIsCategoryMegaMenuOpen(false)
+                toast({
+                  title: "Coming Soon",
+                  description: "This feature is coming soon. Stay tuned!",
+                  duration: 3000,
                 })
               }}
-              className="flex items-center gap-1 text-sm font-medium hover:text-yellow-500 px-2 py-1 h-auto"
+              className={cn(
+                 "flex items-center gap-1 border-[1.5px] border-black hover:border-yellow-600 transition-colors text-[10px] px-[5px] py-1 h-6 text-black dark:border-white dark:text-black flex-shrink-0 relative",
+                darkHeaderFooterClasses.buttonGhostText,
+                "cursor-pointer"
+              )}
+               style={{ 
+                 borderRadius: '12px',
+                 backgroundImage: 'url(/button.jpg)',
+                 backgroundSize: 'cover',
+                 backgroundPosition: 'center',
+                 backgroundRepeat: 'no-repeat'
+               }}
+              suppressHydrationWarning
             >
-              More
-              <MoreHorizontal className="w-3 h-3" />
+               <span className="text-[10px] font-medium text-black flex items-center gap-1" suppressHydrationWarning>
+             <Image src={chinaImageSrc} alt="China" width={20} height={12} className="object-cover flex-shrink-0" suppressHydrationWarning onError={() => { const currentIndex = chinaFormats.indexOf(chinaImageSrc); if (currentIndex < chinaFormats.length - 1) setChinaImageSrc(chinaFormats[currentIndex + 1]); }} />
+             Buy from China
+                <Badge className="bg-yellow-500 text-black text-[7px] px-0.5 py-0 h-2.5 leading-none font-semibold" suppressHydrationWarning>
+                  Soon
+                </Badge>
+                </span>
+               <span className="sr-only" suppressHydrationWarning>Buy from China</span>
             </Button>
+          </div>
+          
+          {/* All Categories Button - Mobile */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.preventDefault()
+              setIsCategoryMegaMenuOpen(!isCategoryMegaMenuOpen)
+            }}
+            className={cn(
+              "flex items-center gap-1.5 border-0 bg-white hover:bg-gray-50 dark:bg-black dark:hover:bg-gray-800 transition-colors text-[10px] px-2.5 py-1 h-6 flex-shrink-0 ml-0 sm:ml-1",
+              isCategoryMegaMenuOpen && "bg-gray-100 dark:bg-gray-800"
+            )}
+            style={{ borderRadius: '12px' }}
+          >
+            <Package className="w-3 h-3 flex-shrink-0" />
+            <span className="font-medium text-black dark:text-white">All Categories</span>
+            <ChevronDown className={cn(
+              "w-2.5 h-2.5 flex-shrink-0 transition-transform",
+              isCategoryMegaMenuOpen && "rotate-180"
+            )} />
+          </Button>
+
+          {/* Service Button - Mobile with Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-1.5 border-0 bg-white hover:bg-gray-50 dark:bg-black dark:hover:bg-gray-800 transition-colors text-[10px] px-2.5 py-1 h-6 flex-shrink-0 ml-0"
+                style={{ borderRadius: '12px' }}
+              >
+                <Settings className="w-3 h-3 flex-shrink-0" />
+                <span className="font-medium text-black dark:text-white">Service</span>
+                <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 ml-0.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg"
+            >
+              <DropdownMenuLabel className="text-base font-semibold px-3 py-2">
+                Other Service
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                onClick={(e) => {
+                  e.preventDefault()
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
+                  }
+                }}
+              >
+                <Settings className="w-4 h-4 mr-2" /> Education Tools
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                onClick={(e) => {
+                  e.preventDefault()
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
+                  }
+                }}
+              >
+                <Package className="w-4 h-4 mr-2" /> Electronic Manufacturing
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                onClick={(e) => {
+                  e.preventDefault()
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
+                  }
+                }}
+              >
+                <Laptop className="w-4 h-4 mr-2" /> PCB Printing
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                onClick={(e) => {
+                  e.preventDefault()
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
+                  }
+                }}
+              >
+                <TrendingUp className="w-4 h-4 mr-2" /> Project Development
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                asChild
+              >
+                <Link href="/become-supplier" className="flex items-center">
+                  <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-          )}
-        </div>
+
+        {/* Backdrop for Mobile Mega Menu */}
+        {isCategoryMegaMenuOpen && (
+          <div 
+            className="fixed inset-0 bg-black/20 dark:bg-black/40 z-40 lg:hidden"
+            onClick={() => setIsCategoryMegaMenuOpen(false)}
+          />
+        )}
+
+        {/* Mega Menu Dropdown - Full Width Below Nav */}
+        {isCategoryMegaMenuOpen && categoriesData.mainCategories.length > 0 && (
+          <div 
+            className="absolute left-0 top-full w-full bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl z-50 max-h-[calc(100vh-200px)] overflow-y-auto"
+            onMouseEnter={openCategoryMegaMenu}
+            onMouseLeave={closeCategoryMegaMenu}
+            onClick={(e) => {
+              // On mobile, clicking inside the menu should not close it
+              e.stopPropagation()
+            }}
+          >
+            <div className="max-w-full px-3 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 py-3 sm:py-6">
+              <div className="grid grid-cols-12 gap-3 sm:gap-4">
+                <div className="col-span-12 lg:col-span-3 border-r-0 lg:border-r border-gray-100 dark:border-gray-800 lg:pr-4 pb-3 lg:pb-0 max-h-[300px] sm:max-h-[360px] overflow-y-auto">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
+                    Main Categories
+                  </p>
+                  <div className="space-y-1">
+                    {categoriesData.mainCategories.map((category: any) => {
+                      const isActive = hoveredMegaCategory === category.slug
+                      return (
+                        <button
+                          key={category.id}
+                          className={cn(
+                            'w-full text-left px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2',
+                            'transition-all duration-300 ease-in-out transform hover:scale-105',
+                            isActive
+                              ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-yellow-500'
+                          )}
+                          onMouseEnter={() => setHoveredMegaCategory(category.slug)}
+                          onFocus={() => setHoveredMegaCategory(category.slug)}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            // On mobile, just set the hovered category to show subcategories
+                            // On desktop, navigate and close menu
+                            if (window.innerWidth >= 1024) {
+                              router.push(`/?mainCategory=${category.slug}`)
+                              setIsCategoryMegaMenuOpen(false)
+                            } else {
+                              // Mobile: just select the category to show subcategories
+                              setHoveredMegaCategory(category.slug)
+                            }
+                          }}
+                        >
+                          {category.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="col-span-12 lg:col-span-9 mt-3 lg:mt-0">
+                  {hoveredMegaCategoryData ? (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-2">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Subcategories
+                          </p>
+                          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                            {hoveredMegaCategoryData.name}
+                          </h3>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-orange-600 hover:text-orange-700 dark:text-orange-400"
+                          onClick={() => {
+                            router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}`)
+                            setIsCategoryMegaMenuOpen(false)
+                          }}
+                        >
+                          View all
+                        </Button>
+                      </div>
+
+                      {recommendedMegaMenuSubCategories.length > 0 && (
+                        <div className="mb-4">
+                          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                            Recommended
+                          </p>
+                          {/* Mobile: Show 4 items, Desktop: Show 12 items */}
+                          <div className="flex flex-row gap-2 sm:gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-6 xl:grid-cols-12 lg:gap-3 lg:overflow-x-visible lg:pb-0">
+                            {/* Mobile: Show first 4 items */}
+                            {recommendedMegaMenuSubCategories.slice(0, 4).map((sub: any) => (
+                              <Link
+                                key={sub.id}
+                                href={`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
+                                className="flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110 flex-shrink-0 min-w-[80px] sm:min-w-[90px] lg:min-w-0"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                  setIsCategoryMegaMenuOpen(false)
+                                }}
+                              >
+                                <div className="w-16 h-16 sm:w-20 sm:h-20 lg:w-16 lg:h-16 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
+                                  {sub.image_url ? (
+                                    <LazyImage
+                                      src={sub.image_url}
+                                      alt={sub.name}
+                                      width={64}
+                                      height={64}
+                                      className="w-full h-full object-cover rounded-lg"
+                                    />
+                                  ) : (
+                                    <Package className="w-6 h-6 sm:w-7 sm:h-7 lg:w-6 lg:h-6 text-orange-600 dark:text-orange-300" />
+                                  )}
+                                </div>
+                                <span className="text-[9px] sm:text-[10px] font-medium text-center text-gray-700 dark:text-gray-200 line-clamp-2 mt-1">
+                                  {sub.name}
+                                </span>
+                              </Link>
+                            ))}
+                            {/* Desktop: Show additional 8 items (total 12) */}
+                            {recommendedMegaMenuSubCategories.slice(4, 12).map((sub: any) => (
+                              <Link
+                                key={sub.id}
+                                href={`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
+                                className="hidden lg:flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                  setIsCategoryMegaMenuOpen(false)
+                                }}
+                              >
+                                <div className="w-16 h-16 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
+                                  {sub.image_url ? (
+                                    <LazyImage
+                                      src={sub.image_url}
+                                      alt={sub.name}
+                                      width={64}
+                                      height={64}
+                                      className="w-full h-full object-cover rounded-lg"
+                                    />
+                                  ) : (
+                                    <Package className="w-6 h-6 text-orange-600 dark:text-orange-300" />
+                                  )}
+                                </div>
+                                <span className="text-[10px] font-medium text-center text-gray-700 dark:text-gray-200 line-clamp-2 mt-1">
+                                  {sub.name}
+                                </span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {chunkedMegaMenuSubCategories.length > 0 ? (
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                          {chunkedMegaMenuSubCategories.map((subGroup, idx) => (
+                            <div key={idx} className="space-y-2">
+                              {subGroup.map((sub: any) => (
+                                <Link
+                                  key={sub.id}
+                                  href={`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
+                                  className="group flex items-center justify-between py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-300 ease-in-out transform hover:scale-105"
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                    setIsCategoryMegaMenuOpen(false)
+                                  }}
+                                >
+                                  <span>{sub.name}</span>
+                                  <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </Link>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                          No subcategories available yet.
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      Select a main category to view subcategories.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
+      {/* Ads Container - Right after category nav (Mobile) */}
+      <div className="lg:hidden w-full overflow-x-hidden" style={{ minHeight: '1px', marginTop: '114px', position: 'relative' }}>
+        <div 
+          className="relative overflow-hidden rounded-none"
+          style={{ 
+            width: '100vw', 
+            marginLeft: 'calc(50% - 50vw)', 
+            marginRight: 'calc(50% - 50vw)',
+            position: 'relative'
+          }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {/* Previous Arrow */}
+          {!adsLoading && advertisements.length > 1 && (
+          <button
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.preventDefault()
+                setCurrentAdIndex((prev: number) => prev === 0 ? advertisements.length - 1 : prev - 1)
+              }}
+              className="absolute left-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
+              aria-label="Previous ad"
+            >
+              <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          )}
+          
+          {/* Next Arrow */}
+          {!adsLoading && advertisements.length > 1 && (
+            <button
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.preventDefault()
+                setCurrentAdIndex((prev: number) => (prev + 1) % advertisements.length)
+              }}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
+              aria-label="Next ad"
+            >
+              <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          )}
 
-      <main className={cn("flex-1 pt-24 xs:pt-24 sm:pt-24", themeClasses.mainBg)} suppressHydrationWarning>
+          {adsLoading ? (
+            <div className="block h-48 sm:h-64 md:h-80 relative z-0">
+              <div className="relative overflow-hidden rounded-none h-full bg-gray-200 dark:bg-gray-700 animate-pulse flex items-center justify-center">
+                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Loading advertisement...</p>
+              </div>
+            </div>
+          ) : advertisements.length > 0 && advertisements[currentAdIndex] ? (
+            <Link 
+              href={advertisements[currentAdIndex].link_url || "/products"}
+              className="block cursor-pointer h-48 sm:h-64 md:h-80 relative z-0"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <div className="relative overflow-hidden rounded-none h-full bg-gray-100 dark:bg-gray-800">
+                {advertisements[currentAdIndex].media_type === 'image' ? (
+                  <LazyImage
+                    src={advertisements[currentAdIndex].media_url}
+                    alt={advertisements[currentAdIndex].title}
+                    fill
+                    className="object-contain transition-opacity duration-500"
+                    priority={currentAdIndex === 0}
+                    quality={85}
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 100vw, 1200px"
+                  />
+                ) : (
+                  <video
+                    key={currentAdIndex}
+                    src={advertisements[currentAdIndex].media_url}
+                    className="w-full h-full object-contain transition-opacity duration-500"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                  />
+                )}
+                {/* Ad Title Overlay */}
+                {advertisements[currentAdIndex].title && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                    <p className="text-white text-xs sm:text-sm font-medium truncate" suppressHydrationWarning>
+                      {advertisements[currentAdIndex].title}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </Link>
+          ) : (
+            <div className="block h-48 sm:h-64 md:h-80 relative z-0">
+              <div className="relative overflow-hidden rounded-none h-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>No advertisements available</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Ad Navigation Dots */}
+          {!adsLoading && advertisements.length > 1 && (
+            <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-10">
+              {advertisements.map((_: any, index: number) => (
+                <button
+                  key={index}
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    e.preventDefault()
+                    setCurrentAdIndex(index)
+                  }}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    index === currentAdIndex 
+                      ? 'bg-white w-6' 
+                      : 'bg-white/50 hover:bg-white/75'
+                  }`}
+                  aria-label={`Go to ad ${index + 1}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
-        {/* Ads Container - Above filter buttons */}
-        <div className="w-full overflow-x-hidden mt-8" style={{ minHeight: '1px' }}>
+      {/* Ads Container - Right after category nav (Desktop) */}
+      <div className="hidden lg:block w-full overflow-x-hidden" style={{ minHeight: '1px', marginTop: '125px' }}>
             <div 
               className="relative overflow-hidden rounded-none"
               style={{ 
@@ -2563,8 +3073,15 @@ function LandingPageContent() {
             </div>
           </div>
 
+      <main className={cn("flex-1 pt-24 xs:pt-24 sm:pt-24 -mt-12 lg:-mt-16", themeClasses.mainBg)} suppressHydrationWarning>
+        <div className="container mx-auto px-4 pt-0 pb-0">
+          <div className="-mb-4">
+            <EmailVerificationBanner />
+          </div>
+        </div>
+
         {/* Filter and Sort Section */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3 mt-2" suppressHydrationWarning>
           {/* Left Side - Filter Buttons and Product Count */}
           <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto" suppressHydrationWarning>
             {/* Filter Buttons */}
@@ -2960,7 +3477,7 @@ function LandingPageContent() {
             loading={infiniteLoadingMore}
             error={infiniteError}
           >
-            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-8 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
             {displayedProducts.length > 0 && (
               <>
                 
@@ -2997,6 +3514,10 @@ function LandingPageContent() {
             const discountPercentage = ((testOriginalPrice - effectivePrice) / testOriginalPrice) * 100
             
             const productInCart = isInCart(product.id, product.variants?.[0]?.id) // Check if product or its default variant is in cart
+            const hasFreeShipping = product.free_delivery === true ||
+              product.freeDelivery === true ||
+              (product as any)?.free_shipping === true ||
+              (product as any)?.freeShipping === true
             
             return (
               <Card
@@ -3092,39 +3613,60 @@ function LandingPageContent() {
                         prefetch={false}
                         priority="low"
                       >
-                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 transition-colors line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
+                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 transition-all duration-300 line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
                       </OptimizedLink>
+                  {/* Sold count - on new line above ratings on mobile */}
+                  {product.sold_count && (
+                    <div className="sm:hidden text-[10px] mt-0.5" suppressHydrationWarning>
+                      <span className={themeClasses.textNeutralSecondary} suppressHydrationWarning>
+                        {product.sold_count >= 1000 
+                          ? `${(product.sold_count / 1000).toFixed(1)}k+` 
+                          : `${product.sold_count}+`} sold out
+                      </span>
+                    </div>
+                  )}
                   <div
                     className={cn(
-                      "flex items-center gap-1 text-[10px] mt-0.5 sm:text-xs",
+                      "flex flex-wrap items-center gap-1 text-[10px] mt-0.5 sm:text-xs min-h-[1.5rem]",
                       themeClasses.textNeutralSecondary,
                     )}
                         suppressHydrationWarning
                   >
-                    {/* Sold count - displayed before ratings */}
+                    {/* Sold count - inline on desktop */}
                     {product.sold_count && (
-                      <span className="text-[10px] sm:text-xs" suppressHydrationWarning>
+                      <span className="hidden sm:inline text-xs whitespace-nowrap" suppressHydrationWarning>
                         {product.sold_count >= 1000 
                           ? `${(product.sold_count / 1000).toFixed(1)}k+` 
                           : `${product.sold_count}+`} sold
                       </span>
                     )}
                     {product.sold_count && (
-                      <span className="mx-0.5" suppressHydrationWarning>•</span>
+                      <span className="hidden sm:inline mx-0.5" suppressHydrationWarning>•</span>
                     )}
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
                     {Array.from({ length: 5 }).map((_, i) => (
                       <Star
                         key={i}
-                        className={`w-3 h-3 ${
+                          className={`w-3 h-3 flex-shrink-0 ${
                           i < Math.floor(product.rating)
                             ? "fill-yellow-400 text-yellow-400"
                             : themeClasses.textNeutralSecondary
                         }`}
-                            suppressHydrationWarning
+                        suppressHydrationWarning
                       />
                     ))}
-                        <span suppressHydrationWarning>({product.reviews})</span>
-              </div>
+                      <span className="whitespace-nowrap" suppressHydrationWarning>({product.reviews})</span>
+                    </div>
+                  </div>
+                  {hasFreeShipping && (
+                    <div
+                      className="text-[10px] sm:text-xs font-semibold text-red-600 uppercase tracking-wide mt-1 flex items-center gap-1"
+                      suppressHydrationWarning
+                    >
+                      <span aria-hidden="true">•</span>
+                      <span>Free Shipping</span>
+                    </div>
+                  )}
                       <div className="flex flex-wrap items-baseline gap-x-2 mt-0.5" suppressHydrationWarning>
                         {/* Main Price */}
                         <div className="text-sm font-bold sm:text-base lg:text-lg" suppressHydrationWarning>
@@ -3202,7 +3744,7 @@ function LandingPageContent() {
       </main>
 
 
-      <Footer />
+      {!infiniteLoading && !infiniteLoadingMore && !(categoriesLoading && infiniteProducts.length === 0) && <Footer />}
 
       {/* Category Navigation Modal */}
       <Sheet open={isCategoryNavOpen} onOpenChange={setIsCategoryNavOpen}>
@@ -3643,6 +4185,22 @@ function LandingPageContent() {
                 </div>
           </div>
 
+              {/* Navigation */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Navigation</h3>
+                <div className="space-y-2">
+                  <Link 
+                    href="/"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Settings className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">Service</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                </div>
+              </div>
+
               {/* Settings */}
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Settings</h3>
@@ -3714,7 +4272,16 @@ function LandingPageContent() {
                   </span>
                 </div>
                 <div className="flex-1">
-                  <p className="text-white font-medium text-sm">{user?.email}</p>
+                  <p className="text-white font-medium text-sm">
+                    {user?.email ? (() => {
+                      const [localPart, domain] = user.email.split('@')
+                      if (!domain) return user.email
+                      const maskedLocal = localPart.length > 2 
+                        ? `${localPart.substring(0, 2)}${'*'.repeat(Math.min(localPart.length - 2, 4))}`
+                        : '***'
+                      return `${maskedLocal}@${domain}`
+                    })() : 'User'}
+                  </p>
                   <p className="text-white/60 text-xs">Welcome back!</p>
                 </div>
               </div>
@@ -3734,78 +4301,6 @@ function LandingPageContent() {
         initialTab={searchModalInitialTab}
       />
 
-      {/* Portal Dropdown for Desktop More Categories */}
-      {showDesktopMoreCategories && desktopMoreButtonRef.current && (
-        <div 
-          className="fixed desktop-more-categories-portal bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-2xl z-[99999] min-w-[180px] max-w-[280px] ring-1 ring-black/5"
-          style={{
-            top: desktopDropdownPosition.top,
-            left: desktopDropdownPosition.left,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Dropdown Arrow */}
-          <div 
-            className="absolute -top-1 w-2 h-2 bg-white dark:bg-gray-800 border-l border-t border-gray-200 dark:border-gray-700 transform rotate-45"
-            style={{
-              left: desktopMoreButtonRef.current ? 
-                Math.min(16, desktopMoreButtonRef.current.getBoundingClientRect().width / 2 - 4) : 16
-            }}
-          ></div>
-          <div className="p-2">
-            {desktopOverflowCategories.map((category) => (
-              <Link
-                key={category.id}
-                href={`/?mainCategory=${category.slug}`}
-                className={cn(
-                  "block px-3 py-2 text-sm transition-colors rounded",
-                  selectedMainCategory === category.slug 
-                    ? 'text-yellow-500 bg-yellow-50 dark:bg-yellow-900/20' 
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-700',
-                  themeClasses.mainText
-                )}
-                onClick={() => setShowDesktopMoreCategories(false)}
-                scroll={false}
-              >
-                {category.name}
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Portal Dropdown for More Categories */}
-      {showMoreCategories && moreButtonRef.current && (
-        <div 
-          className="fixed more-categories-portal bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-2xl z-[99999] min-w-[180px] max-w-[280px] ring-1 ring-black/5"
-          style={{
-            top: dropdownPosition.top,
-            left: dropdownPosition.left,
-          }}
-        >
-          {/* Dropdown Arrow */}
-          <div 
-            className="absolute -top-1 w-2 h-2 bg-white dark:bg-gray-800 border-l border-t border-gray-200 dark:border-gray-700 transform rotate-45"
-            style={{
-              left: moreButtonRef.current ? 
-                Math.min(16, moreButtonRef.current.getBoundingClientRect().width / 2 - 4) : 16
-            }}
-          ></div>
-          <div className="p-2">
-            {overflowCategories.map((category) => (
-            <Link
-                key={category.id}
-                href={`/?mainCategory=${category.slug}`}
-              className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-              onClick={() => setShowMoreCategories(false)}
-                scroll={false}
-            >
-                {category.name}
-            </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* China Import Modal */}
       {showChinaImportModal && (
@@ -3847,8 +4342,11 @@ function LandingPageContent() {
 
 export default function LandingPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
-      <LandingPageContent />
-    </Suspense>
+    <BuyerRouteGuard>
+      <EmailVerificationBanner />
+      <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
+        <LandingPageContent />
+      </Suspense>
+    </BuyerRouteGuard>
   )
 } 

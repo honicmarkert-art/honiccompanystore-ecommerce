@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -32,6 +33,19 @@ async function getClient() {
 
 export async function GET(request: NextRequest) {
   try {
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/user/orders',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
     console.log('🔍 [ORDERS API] Starting GET request')
     
     const supabase = await getClient()
@@ -151,7 +165,7 @@ export async function GET(request: NextRequest) {
       console.log('🔍 [ORDERS API] Querying confirmed_orders table...')
       const { data: confirmedOrders, error: confirmedOrdersError } = await supabase
         .from('confirmed_orders')
-        .select('order_id, status, confirmed_at')
+        .select('order_id, status, confirmed_at, is_received, received_at')
         .in('order_id', orderIds)
       
       console.log('✅ [ORDERS API] Confirmed orders query result:', {
@@ -197,6 +211,9 @@ export async function GET(request: NextRequest) {
         deliveryOption: order.delivery_option || 'shipping',
         trackingNumber: order.tracking_number,
         estimatedDelivery: order.estimated_delivery,
+        isReceived: confirmedOrder?.is_received || false,
+        receivedAt: confirmedOrder?.received_at || null,
+        confirmedAt: confirmedOrder?.confirmed_at || null,
         shippingAddress: {
           fullName: order.shipping_address?.fullName || order.shipping_address?.full_name || '',
           address: order.shipping_address?.address1 || order.shipping_address?.address || '',
@@ -243,6 +260,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/user/orders',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
     const supabase = await getClient()
     
     // Get the current user
@@ -308,6 +338,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to create order items' }, { status: 500 })
       }
     }
+
 
     return NextResponse.json({ order })
 

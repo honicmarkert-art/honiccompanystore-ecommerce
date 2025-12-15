@@ -49,6 +49,9 @@ interface ConfirmedOrderItem {
   price: number
   total_price: number
   created_at: string
+  supplierId?: string | null
+  supplierName?: string | null
+  status?: string | null
 }
 
 interface ConfirmedOrder {
@@ -85,6 +88,8 @@ interface ConfirmedOrder {
   failureReason?: string
   deliveryOption: 'shipping' | 'pickup'
   order_items: ConfirmedOrderItem[]
+  suppliers?: string[] // Array of supplier names
+  hasSuppliers?: boolean // Boolean flag
 }
 
 export default function ConfirmedOrdersPage() {
@@ -95,6 +100,7 @@ export default function ConfirmedOrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [userTypeFilter, setUserTypeFilter] = useState<string>('all')
   const [deliveryOptionFilter, setDeliveryOptionFilter] = useState<string>('all')
+  const [supplierFilter, setSupplierFilter] = useState<string>('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [timeFrom, setTimeFrom] = useState('')
@@ -145,7 +151,9 @@ export default function ConfirmedOrdersPage() {
           paymentMethod: o.payment_method || 'clickpesa',
           paymentStatus: o.payment_status || 'paid',
           failureReason: o.failure_reason || undefined,
-          order_items: o.order_items || []
+          order_items: o.order_items || [],
+          suppliers: o.suppliers || [],
+          hasSuppliers: o.hasSuppliers || false
         }
       })
       setOrders(normalized)
@@ -242,6 +250,15 @@ export default function ConfirmedOrdersPage() {
       filtered = filtered.filter(order => order.deliveryOption === deliveryOptionFilter)
     }
 
+    // Supplier filter
+    if (supplierFilter !== 'all') {
+      filtered = filtered.filter(order => {
+        if (supplierFilter === 'with-suppliers') return order.hasSuppliers === true
+        if (supplierFilter === 'no-suppliers') return order.hasSuppliers === false
+        return true
+      })
+    }
+
     // Date filter (using confirmedAt for confirmed orders)
     if (dateFrom || dateTo) {
       filtered = filtered.filter(order => {
@@ -277,23 +294,28 @@ export default function ConfirmedOrdersPage() {
     }
 
     setFilteredOrders(filtered)
-  }, [orders, searchTerm, statusFilter, userTypeFilter, deliveryOptionFilter, dateFrom, dateTo, timeFrom, timeTo])
+  }, [orders, searchTerm, statusFilter, userTypeFilter, deliveryOptionFilter, supplierFilter, dateFrom, dateTo, timeFrom, timeTo])
 
-  const getStatusBadge = (status: ConfirmedOrder['status']) => {
-    const statusConfig = {
+  const getStatusBadge = (status: ConfirmedOrder['status'] | string) => {
+    const statusConfig: Record<string, { color: string; icon: any }> = {
       confirmed: { color: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300', icon: CheckCircle },
       shipped: { color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300', icon: Truck },
       delivered: { color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300', icon: Package },
+      picked_up: { color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300', icon: Package },
+      ready_for_pickup: { color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300', icon: Clock },
       cancelled: { color: 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300', icon: XCircle }
     }
 
-    const config = statusConfig[status]
+    const config = statusConfig[status] || { 
+      color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300', 
+      icon: Package 
+    }
     const Icon = config.icon
 
     return (
       <Badge className={cn("flex items-center gap-1", config.color)}>
         <Icon className="w-3 h-3" />
-        {status.charAt(0).toUpperCase() + status.slice(1)}
+        {status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ')}
       </Badge>
     )
   }
@@ -380,6 +402,7 @@ export default function ConfirmedOrdersPage() {
 
   const updateOrderStatus = async (order: ConfirmedOrder, newStatus: string) => {
     try {
+      // Update order status directly (tracking numbers are auto-assigned when order is confirmed)
       const res = await fetch('/api/admin/confirmed-orders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -390,8 +413,10 @@ export default function ConfirmedOrdersPage() {
         await fetchConfirmedOrders()
       }
     } catch (error) {
+      console.error('Error updating order status:', error)
     }
   }
+
 
   if (isLoading) {
     return (
@@ -518,8 +543,26 @@ export default function ConfirmedOrdersPage() {
                 </select>
               </div>
 
-              {/* Placeholder for alignment */}
-              <div></div>
+              {/* Supplier Filter */}
+              <div>
+                <label className={cn("block text-sm font-medium mb-1", themeClasses.textNeutralSecondary)}>
+                  Supplier Orders
+                </label>
+                <select
+                  value={supplierFilter}
+                  onChange={(e) => setSupplierFilter(e.target.value)}
+                  className={cn(
+                    "w-full px-3 py-2 border rounded-md",
+                    themeClasses.cardBg,
+                    themeClasses.cardBorder,
+                    themeClasses.mainText
+                  )}
+                >
+                  <option value="all">All Orders</option>
+                  <option value="with-suppliers">With Suppliers</option>
+                  <option value="no-suppliers">No Suppliers</option>
+                </select>
+              </div>
             </div>
 
             {/* Filter Row 2 - Date and Time */}
@@ -673,6 +716,12 @@ export default function ConfirmedOrdersPage() {
                               <span className={cn("text-xs px-2 py-1 rounded bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200", themeClasses.mainText)}>
                                 Original: #{order.order_id}
                               </span>
+                              {/* Show supplier badge if order has suppliers */}
+                              {order.hasSuppliers && order.suppliers && order.suppliers.length > 0 && (
+                                <span className={cn("text-xs px-2 py-1 rounded bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200", themeClasses.mainText)}>
+                                  Suppliers: {order.suppliers.length}
+                                </span>
+                              )}
                             </div>
                             <div className="flex flex-wrap gap-2">
                               {getPaymentStatusBadge(order.paymentStatus)}
@@ -1019,6 +1068,25 @@ export default function ConfirmedOrdersPage() {
                 )}
               </div>
 
+              {/* Supplier Info - Only in Detail View */}
+              {selectedOrder.hasSuppliers && selectedOrder.suppliers && selectedOrder.suppliers.length > 0 && (
+                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Package className="w-5 h-5 text-green-600 dark:text-green-400" />
+                    <h3 className={cn("font-semibold text-lg", themeClasses.mainText)}>
+                      Suppliers ({selectedOrder.suppliers.length})
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedOrder.suppliers.map((supplier, idx) => (
+                      <Badge key={idx} className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-sm py-1 px-3">
+                        {supplier}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Order Items */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -1034,37 +1102,96 @@ export default function ConfirmedOrdersPage() {
                 </div>
                 
                 {selectedOrder.order_items && selectedOrder.order_items.length > 0 ? (
-                  <div className="space-y-2">
-                    {selectedOrder.order_items.map((item, index) => (
-                      <div key={item.id || index} className={cn("p-4 rounded-lg border", themeClasses.cardBg, themeClasses.cardBorder)}>
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <h4 className={cn("font-medium", themeClasses.mainText)}>
-                              {item.product_name}
-                            </h4>
-                            {item.variant_name && (
-                              <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                                Variant: {item.variant_name}
-                              </p>
-                            )}
-                            <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                              Product ID: {item.product_id}
-                            </p>
-                            <p className={cn("text-xs mt-2 px-2 py-1 rounded bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-mono", themeClasses.mainText)}>
-                              Item #{String(index + 1).padStart(3, '0')}
-                            </p>
+                  <div className="space-y-4">
+                    {(() => {
+                      // Group items by supplier
+                      const groupedBySupplier = new Map<string | null, typeof selectedOrder.order_items>()
+                      
+                      selectedOrder.order_items.forEach(item => {
+                        const supplierKey = item.supplierName || 'no-supplier'
+                        if (!groupedBySupplier.has(supplierKey)) {
+                          groupedBySupplier.set(supplierKey, [])
+                        }
+                        groupedBySupplier.get(supplierKey)!.push(item)
+                      })
+                      
+                      return Array.from(groupedBySupplier.entries()).map(([supplierKey, items]) => {
+                        const supplierName = items[0]?.supplierName || 'Honic Company'
+                        const groupTotal = items.reduce((sum, item) => sum + item.total_price, 0)
+                        
+                        return (
+                          <div key={supplierKey} className="space-y-2">
+                            {/* Supplier Header */}
+                            <div className="flex items-center justify-between pb-2 border-b">
+                              <div className="flex items-center gap-2">
+                                <Package className="w-4 h-4 text-green-600 dark:text-green-400" />
+                                <h4 className={cn("font-semibold text-base", themeClasses.mainText)}>
+                                  {supplierName}
+                                </h4>
+                                <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                  {items.length} {items.length === 1 ? 'item' : 'items'}
+                                </Badge>
+                              </div>
+                              <div className="text-right">
+                                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Subtotal:</p>
+                                <p className={cn("font-semibold", themeClasses.mainText)}>
+                                  {formatPrice(groupTotal, selectedOrder.currency)}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* Items for this supplier */}
+                            <div className="space-y-2 pl-4">
+                              {items.map((item, index) => (
+                                <div key={item.id || index} className={cn("p-3 rounded-lg border", themeClasses.cardBg, themeClasses.cardBorder)}>
+                                  <div className="flex justify-between items-start">
+                                    <div className="flex-1">
+                                      <h4 className={cn("font-medium", themeClasses.mainText)}>
+                                        {item.product_name}
+                                      </h4>
+                                      {item.variant_name && (
+                                        <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
+                                          Variant: {item.variant_name}
+                                        </p>
+                                      )}
+                                      <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
+                                        Product ID: {item.product_id}
+                                      </p>
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <p className={cn("text-xs px-2 py-1 rounded bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-mono", themeClasses.mainText)}>
+                                          Item #{String(index + 1).padStart(3, '0')}
+                                        </p>
+                                        {item.status && (
+                                          <Badge className={cn(
+                                            item.status === 'shipped' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                                            item.status === 'delivered' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' :
+                                            item.status === 'picked_up' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                                            'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                                          )}>
+                                            {item.status === 'picked_up' ? 'Picked Up' : 
+                                             item.status === 'delivered' ? 'Delivered' :
+                                             item.status === 'shipped' ? 'Shipped' :
+                                             item.status.charAt(0).toUpperCase() + item.status.slice(1).replace(/_/g, ' ')}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                                        {item.quantity}x {formatPrice(item.price, selectedOrder.currency)}
+                                      </p>
+                                      <p className={cn("font-semibold", themeClasses.mainText)}>
+                                        {formatPrice(item.total_price, selectedOrder.currency)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {item.quantity}x {formatPrice(item.price, selectedOrder.currency)}
-                            </p>
-                            <p className={cn("font-semibold", themeClasses.mainText)}>
-                              {formatPrice(item.total_price, selectedOrder.currency)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                        )
+                      })
+                    })()}
                   </div>
                 ) : (
                   <div className={cn("p-4 text-center rounded-lg border", themeClasses.cardBg, themeClasses.cardBorder)}>
@@ -1079,6 +1206,7 @@ export default function ConfirmedOrdersPage() {
           )}
         </DialogContent>
       </Dialog>
+
     </div>
   )
 }

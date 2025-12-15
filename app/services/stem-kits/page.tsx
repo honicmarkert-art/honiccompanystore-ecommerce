@@ -1,5 +1,8 @@
-import { ComingSoonPage } from '@/components/coming-soon-page'
-import { Building2 } from 'lucide-react'
+import { redirect } from 'next/navigation'
+
+export default function STEMKitsPage() {
+  redirect('/')
+}
 
 export default function StemKitsPage() {
   return (
