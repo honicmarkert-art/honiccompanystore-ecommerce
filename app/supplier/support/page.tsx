@@ -26,6 +26,7 @@ export default function SupplierSupportPage() {
   const [currentPlan, setCurrentPlan] = useState<{ slug: string } | null>(null)
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null)
   const [hasValidPremiumPayment, setHasValidPremiumPayment] = useState<boolean>(false)
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
 
   useEffect(() => {
     fetchCurrentPlan()
@@ -41,6 +42,7 @@ export default function SupplierSupportPage() {
         setCurrentPlan(data.plan)
         setPendingPlanId(data.pendingPlanId || null)
         setHasValidPremiumPayment(data.hasValidPremiumPayment || false)
+        setPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
       console.error('Error fetching current plan:', error)
@@ -48,8 +50,8 @@ export default function SupplierSupportPage() {
   }
 
   const isFreePlan = currentPlan?.slug === 'free'
-  // Check if premium plan payment is pending (even if API returns free plan due to pending payment)
-  const isPremiumPendingPayment = pendingPlanId && !hasValidPremiumPayment
+  // Check if premium plan payment is pending - use payment_status directly
+  const isPremiumPendingPayment = paymentStatus === 'pending'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -279,7 +281,7 @@ export default function SupplierSupportPage() {
                       }
                     }}
                   >
-                    {isPremiumPendingPayment && !isFreePlan ? 'Complete Payment' : 'Upgrade for Access'}
+                    {isPremiumPendingPayment ? 'Complete Payment' : 'Upgrade Plan'}
                   </Button>
                 )}
               </CardContent>

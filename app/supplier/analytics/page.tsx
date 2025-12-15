@@ -74,6 +74,7 @@ export default function SupplierAnalyticsPage() {
   const [currentPlan, setCurrentPlan] = useState<{ slug: string } | null>(null)
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null)
   const [hasValidPremiumPayment, setHasValidPremiumPayment] = useState<boolean>(false)
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d')
   const [activeTab, setActiveTab] = useState<string>('overview')
 
@@ -92,6 +93,7 @@ export default function SupplierAnalyticsPage() {
         setCurrentPlan(data.plan)
         setPendingPlanId(data.pendingPlanId || null)
         setHasValidPremiumPayment(data.hasValidPremiumPayment || false)
+        setPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
       console.error('Error fetching current plan:', error)
@@ -240,8 +242,8 @@ export default function SupplierAnalyticsPage() {
 
   const isPremiumPlan = currentPlan?.slug === 'premium' && hasValidPremiumPayment
   const isFreePlan = currentPlan?.slug === 'free'
-  // Check if premium plan payment is pending (even if API returns free plan due to pending payment)
-  const isPremiumPendingPayment = pendingPlanId && !hasValidPremiumPayment
+  // Check if premium plan payment is pending - use payment_status directly
+  const isPremiumPendingPayment = paymentStatus === 'pending'
 
   // Filter data by time range
   const filteredOrders = useMemo(() => {
@@ -719,7 +721,7 @@ export default function SupplierAnalyticsPage() {
                 }}
                 className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-md font-semibold"
               >
-                {isPremiumPendingPayment && currentPlan?.slug !== 'free' ? 'Complete Payment' : 'Upgrade Now'}
+                {isPremiumPendingPayment ? 'Complete Payment' : 'Upgrade Plan'}
               </button>
             </div>
           </CardContent>

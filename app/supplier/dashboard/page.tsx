@@ -25,6 +25,7 @@ function SupplierDashboardContent() {
   const [currentPlan, setCurrentPlan] = useState<{ slug: string } | null>(null)
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null)
   const [hasValidPremiumPayment, setHasValidPremiumPayment] = useState<boolean>(false)
+  const [planPaymentStatus, setPlanPaymentStatus] = useState<string | null>(null)
   const [loadingPlan, setLoadingPlan] = useState(true)
   const [showPaymentAlert, setShowPaymentAlert] = useState(false)
   const [paymentStatus, setPaymentStatus] = useState<'success' | 'cancelled' | null>(null)
@@ -115,6 +116,7 @@ function SupplierDashboardContent() {
         setCurrentPlan(data.plan)
         setPendingPlanId(data.pendingPlanId || null)
         setHasValidPremiumPayment(data.hasValidPremiumPayment || false)
+        setPlanPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
       console.error('Error fetching current plan:', error)
@@ -380,19 +382,20 @@ function SupplierDashboardContent() {
         </p>
       </div>
 
-      {/* Pending Premium Plan Banner */}
-      {hasPendingPremiumPlan && (
+      {/* Pending Premium Plan Banner - Only show when payment_status is 'pending' (premium selected but payment not initiated yet) */}
+      {/* When payment_status is null, it means free/winga plan - no banner needed */}
+      {hasPendingPremiumPlan && planPaymentStatus === 'pending' && (
         <Alert className="mb-4 sm:mb-6 border-orange-500 bg-orange-50 dark:bg-orange-950/20">
           <CreditCard className="h-4 w-4 text-orange-600 dark:text-orange-400" />
           <AlertTitle className="text-orange-900 dark:text-orange-100 font-semibold">
-            Complete Your Premium Plan Payment
+            Upgrading to Premium Plan
           </AlertTitle>
           <AlertDescription className="text-orange-800 dark:text-orange-200 mt-1">
-            You have selected the Premium plan. Complete your payment to unlock unlimited products and premium features.
+            You have selected the Premium plan. Proceed to payment to unlock unlimited products and premium features.
             <div className="mt-3">
               <Link href={`/supplier/payment?planId=${pendingPlanId}`}>
                 <Button size="sm" className="bg-orange-500 hover:bg-orange-600 text-white">
-                  Complete Payment
+                  Proceed to Payment
                 </Button>
               </Link>
             </div>

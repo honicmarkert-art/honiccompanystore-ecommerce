@@ -651,11 +651,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
       }
       
-      // Force refresh and redirect to ensure clean state
-      startTransition(() => {
+      // Force hard redirect to home page to ensure clean state
+      // Use window.location.replace to prevent back button and route guard interference
+      if (typeof window !== 'undefined') {
+        window.location.replace('/')
+      } else {
         router.push('/')
-        router.refresh() // Force Next.js to clear client cache and refresh session context
-      })
+        router.refresh()
+      }
       
     } catch (error) {
       // Even if there's an error, clear the local state
@@ -675,11 +678,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         variant: "default"
       })
       
-      // Force refresh and redirect
-      startTransition(() => {
+      // Force hard redirect to home page
+      if (typeof window !== 'undefined') {
+        window.location.replace('/')
+      } else {
         router.push('/')
         router.refresh()
-      })
+      }
     }
   }
 

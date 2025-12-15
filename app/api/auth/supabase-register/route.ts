@@ -388,12 +388,14 @@ export async function POST(request: NextRequest) {
                 }
               } else {
                 // Store premium plan as pending and assign free plan
+                // Set payment_status to null since free plan is active (premium payment will set it to 'pending' when initiated)
                 const { error: updateError } = await adminSupabase
                   .from('profiles')
                   .update({
                     supplier_plan_id: freePlan.id,
                     pending_plan_id: planId, // Use pending_plan_id (same as upgrade flow)
                     is_supplier: true,
+                    payment_status: null, // Free plan uses null, premium will set to 'pending' when payment is initiated
                     updated_at: new Date().toISOString()
                   })
                   .eq('id', userData.id)
@@ -414,11 +416,13 @@ export async function POST(request: NextRequest) {
               }
             } else {
               // Free or Winga plan - assign immediately
+              // Set payment_status to null to differentiate from premium (which uses 'pending')
               const { error: updateError } = await adminSupabase
                 .from('profiles')
                 .update({
                   supplier_plan_id: planId,
                   is_supplier: true,
+                  payment_status: null, // Free/Winga plans use null, Premium uses 'pending'
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', userData.id)

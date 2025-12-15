@@ -119,6 +119,13 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString()
     }
 
+    // Set payment_status based on plan type
+    // Free and Winga plans use null, Premium uses 'pending'
+    if (plan.slug === 'free' || plan.slug === 'winga' || plan.price === 0) {
+      updateData.payment_status = null // Free/Winga plans use null to differentiate from premium
+    }
+    // Note: Premium plans will have payment_status set to 'pending' in upgrade/initiate route
+
     // Update registration number if provided (for Winga plan changes)
     if (registrationNumber && registrationNumber.trim()) {
       updateData.tin_or_nida = registrationNumber.trim()

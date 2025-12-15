@@ -28,6 +28,7 @@ export default function SupplierFeaturedPage() {
   const [currentPlan, setCurrentPlan] = useState<{ slug: string } | null>(null)
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null)
   const [hasValidPremiumPayment, setHasValidPremiumPayment] = useState<boolean>(false)
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
 
   useEffect(() => {
     fetchProducts()
@@ -44,6 +45,7 @@ export default function SupplierFeaturedPage() {
         setCurrentPlan(data.plan)
         setPendingPlanId(data.pendingPlanId || null)
         setHasValidPremiumPayment(data.hasValidPremiumPayment || false)
+        setPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
       console.error('Error fetching current plan:', error)
@@ -129,8 +131,8 @@ export default function SupplierFeaturedPage() {
 
   const isPremiumPlan = currentPlan?.slug === 'premium' && hasValidPremiumPayment
   const isFreePlan = currentPlan?.slug === 'free'
-  // Check if premium plan payment is pending (even if API returns free plan due to pending payment)
-  const isPremiumPendingPayment = pendingPlanId && !hasValidPremiumPayment
+  // Check if premium plan payment is pending - use payment_status directly
+  const isPremiumPendingPayment = paymentStatus === 'pending'
   const featuredProducts = products.filter(p => p.is_featured)
   const nonFeaturedProducts = products.filter(p => !p.is_featured)
 
@@ -234,7 +236,7 @@ export default function SupplierFeaturedPage() {
                   }}
                   className="inline-block px-4 sm:px-6 py-2 sm:py-3 bg-yellow-500 hover:bg-yellow-600 text-black rounded-md font-semibold text-sm sm:text-base"
                 >
-                  {isPremiumPendingPayment && currentPlan?.slug !== 'free' ? 'Complete Payment' : 'Upgrade to Premium'}
+                  {isPremiumPendingPayment ? 'Complete Payment' : 'Upgrade Plan'}
                 </button>
               </div>
             </CardContent>

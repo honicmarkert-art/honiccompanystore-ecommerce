@@ -16,6 +16,7 @@ function LoginPageContent() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState<boolean>(false)
+  const [isRedirecting, setIsRedirecting] = useState(false)
   const { signIn, isLoggingIn } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -31,11 +32,35 @@ function LoginPageContent() {
     const result = await signIn(email, password, remember, false, redirectTo) // Pass redirect parameter
     
     if (result.success) {
-      // AuthContext will handle the redirect to home page
+      // Show redirecting state
+      setIsRedirecting(true)
       logger.log('Login successful! AuthContext will handle redirect')
     } else {
       console.error('Login failed:', result.error)
     }
+  }
+
+  // Show redirecting state
+  if (isRedirecting) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center justify-center space-y-4 py-8">
+              <Loader2 className="h-12 w-12 animate-spin text-blue-600 dark:text-blue-400" />
+              <div className="text-center space-y-2">
+                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Redirecting to Dashboard
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Please wait...
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (

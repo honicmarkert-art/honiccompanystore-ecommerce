@@ -115,6 +115,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const [loadingPlan, setLoadingPlan] = useState(true)
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null)
   const [hasValidPremiumPayment, setHasValidPremiumPayment] = useState<boolean>(false)
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
   const [unreadOrderCount, setUnreadOrderCount] = useState(0)
   const [isActive, setIsActive] = useState<boolean | null>(null)
   const [userCompanyName, setUserCompanyName] = useState<string | null>(null)
@@ -138,14 +139,41 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
-      await signOut()
-      router.push('/')
+      // Clear local state immediately to prevent route guards from interfering
+      // Clear all storage first
+      if (typeof window !== 'undefined') {
+        localStorage.clear()
+        sessionStorage.clear()
+      }
+      
+      // Call logout API directly to avoid signOut's redirect interfering
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include'
+        })
+      } catch (apiError) {
+        console.error('Logout API error:', apiError)
+        // Continue with redirect even if API fails
+      }
+      
+      // Force hard redirect to become-supplier page immediately
+      // Use window.location.replace to prevent back button from going to supplier pages
+      // Do this immediately without waiting for anything else
+      if (typeof window !== 'undefined') {
+        window.location.replace('/become-supplier')
+        return // Exit early to prevent any other code from running
+      }
     } catch (error) {
-      toast({
-        title: "Logout Error",
-        description: "Failed to logout. Please try again.",
-        variant: "destructive"
-      })
+      console.error('Logout error:', error)
+      // On error, still force redirect to become-supplier immediately
+      if (typeof window !== 'undefined') {
+        window.location.replace('/become-supplier')
+        return
+      }
     } finally {
       setIsLoggingOut(false)
     }
@@ -174,6 +202,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           setCurrentPlan(data.plan)
           setPendingPlanId(data.pendingPlanId || null)
           setHasValidPremiumPayment(data.hasValidPremiumPayment || false)
+          setPaymentStatus(data.paymentStatus || null)
         }
       } catch (error) {
         console.error('Error fetching current plan:', error)
@@ -481,7 +510,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const isFreePlan = currentPlan?.slug === 'free'
   const isPremiumPlan = currentPlan?.slug === 'premium' && hasValidPremiumPayment
   const isWingaPlan = currentPlan?.slug === 'winga'
-  const isPremiumPendingPayment = pendingPlanId && !hasValidPremiumPayment
+  const isPremiumPendingPayment = paymentStatus === 'pending' // Check payment_status directly
 
   // Compute navigation items using useMemo to prevent flash when plan loads
   const navigationItems = useMemo(() => {

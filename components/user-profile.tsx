@@ -6,7 +6,7 @@ import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { User, LogOut, Settings, ShoppingBag, Heart, CreditCard, Crown, ArrowUp } from 'lucide-react'
+import { User, LogOut, Settings, ShoppingBag, Heart, CreditCard, Crown, ArrowUp, LayoutDashboard, Package, TrendingUp, Building2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -83,8 +83,13 @@ export function UserProfile() {
     const fetchCurrentPlan = async () => {
       if (!user) {
         setLoadingPlan(false)
+        setIsSupplier(false)
         return
       }
+
+      // Check user object first for immediate supplier detection
+      const userIsSupplier = user.isSupplier || user.profile?.is_supplier || false
+      setIsSupplier(userIsSupplier)
 
       try {
         const response = await fetch('/api/user/current-plan', {
@@ -93,11 +98,13 @@ export function UserProfile() {
         const data = await response.json()
         
         if (data.success) {
-          setIsSupplier(data.isSupplier || false)
+          // Use API response, but also check user object as fallback
+          setIsSupplier(data.isSupplier || userIsSupplier || false)
           setCurrentPlan(data.plan)
         }
       } catch (error) {
         console.error('Error fetching current plan:', error)
+        // Keep the user object check as fallback
       } finally {
         setLoadingPlan(false)
       }
@@ -252,26 +259,59 @@ export function UserProfile() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => router.push('/account')}>
-          <User className="mr-2 h-4 w-4" />
-          <span>Profile</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push('/account/orders')}>
-          <ShoppingBag className="mr-2 h-4 w-4" />
-          <span>My Orders</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push('/account/wishlist')}>
-          <Heart className="mr-2 h-4 w-4" />
-          <span>Wishlist</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push('/account/payment')}>
-          <CreditCard className="mr-2 h-4 w-4" />
-          <span>Payment Methods</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push('/account/settings')}>
-          <Settings className="mr-2 h-4 w-4" />
-          <span>Settings</span>
-        </DropdownMenuItem>
+        {isSupplier ? (
+          // Supplier menu items
+          <>
+            <DropdownMenuItem onClick={() => router.push('/supplier/dashboard')}>
+              <LayoutDashboard className="mr-2 h-4 w-4" />
+              <span>Dashboard</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/supplier/products')}>
+              <Package className="mr-2 h-4 w-4" />
+              <span>Products</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/supplier/orders')}>
+              <ShoppingBag className="mr-2 h-4 w-4" />
+              <span>Orders</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/supplier/analytics')}>
+              <TrendingUp className="mr-2 h-4 w-4" />
+              <span>Analytics</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/supplier/company-info')}>
+              <Building2 className="mr-2 h-4 w-4" />
+              <span>Company Info</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/supplier/account/settings')}>
+              <Settings className="mr-2 h-4 w-4" />
+              <span>Account Settings</span>
+            </DropdownMenuItem>
+          </>
+        ) : (
+          // Regular user menu items
+          <>
+            <DropdownMenuItem onClick={() => router.push('/account')}>
+              <User className="mr-2 h-4 w-4" />
+              <span>Profile</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/account/orders')}>
+              <ShoppingBag className="mr-2 h-4 w-4" />
+              <span>My Orders</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/account/wishlist')}>
+              <Heart className="mr-2 h-4 w-4" />
+              <span>Wishlist</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/account/payment')}>
+              <CreditCard className="mr-2 h-4 w-4" />
+              <span>Payment Methods</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/account/settings')}>
+              <Settings className="mr-2 h-4 w-4" />
+              <span>Settings</span>
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut}>
           <LogOut className="mr-2 h-4 w-4" />

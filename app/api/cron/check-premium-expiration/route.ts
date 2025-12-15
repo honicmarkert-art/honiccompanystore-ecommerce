@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
       .from('profiles')
       .update({
         supplier_plan_id: freePlan.id,
-        payment_status: 'expired',
+        payment_status: null, // Free plan uses null to differentiate from premium (which uses 'pending')
         updated_at: new Date().toISOString()
       })
       .in('id', supplierIds)

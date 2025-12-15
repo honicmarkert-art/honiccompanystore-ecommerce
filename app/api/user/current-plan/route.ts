@@ -102,6 +102,7 @@ export async function GET(request: NextRequest) {
           },
           isSupplier: true,
           pendingPlanId: profile.pending_plan_id || null, // Include pending plan info
+          paymentStatus: profile.payment_status || null, // Include payment status to determine button text
           hasValidPremiumPayment: (plan.slug === 'premium' || plan.price > 0) && 
             (profile.payment_status === 'paid' || profile.payment_status === 'completed' ||
              (profile.payment_expires_at && new Date(profile.payment_expires_at) > new Date()))
@@ -128,7 +129,8 @@ export async function GET(request: NextRequest) {
           currency: freePlan.currency,
           term: freePlan.term
         },
-        isSupplier: true
+        isSupplier: true,
+        paymentStatus: profile?.payment_status || null // Include payment status
       })
     }
 
