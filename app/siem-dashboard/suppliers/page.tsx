@@ -36,8 +36,14 @@ import {
   Power,
   PowerOff,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  FileText,
+  Download,
+  Image as ImageIcon,
+  IdCard,
+  Camera
 } from 'lucide-react'
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
@@ -69,6 +75,11 @@ interface Supplier {
   phone: string | null
   location: string | null
   officeNumber: string | null
+  businessRegistrationNumber?: string | null
+  registrationType?: string | null
+  tinOrNida?: string | null
+  region?: string | null
+  nation?: string | null
   isSupplier: boolean
   isActive: boolean
   planId: string | null
@@ -79,6 +90,12 @@ interface Supplier {
   detailSentence?: string | null
   rating?: number | null
   reviewCount?: number | null
+  companyLogo?: string | null
+  businessTinCertificateUrl?: string | null
+  companyCertificateUrl?: string | null
+  nidaCardFrontUrl?: string | null
+  nidaCardRearUrl?: string | null
+  selfPictureUrl?: string | null
 }
 
 export default function SuppliersPage() {
@@ -102,7 +119,14 @@ export default function SuppliersPage() {
     rating: 0,
     reviewCount: 0
   })
+  const [previewDocumentUrl, setPreviewDocumentUrl] = useState<string | null>(null)
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const { toast } = useToast()
+
+  const openDocumentPreview = (url: string) => {
+    setPreviewDocumentUrl(url)
+    setIsPreviewOpen(true)
+  }
 
   // Fetch suppliers from API
   const fetchSuppliers = async () => {
@@ -981,8 +1005,276 @@ export default function SuppliersPage() {
                       </div>
                     </div>
                   )}
+
+                  {selectedSupplier.region && (
+                    <div className="flex items-start gap-3">
+                      <MapPin className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className={cn("text-xs font-medium mb-1", themeClasses.textNeutralSecondary)}>Region</p>
+                        <p className={cn("text-sm", themeClasses.mainText)}>{selectedSupplier.region}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedSupplier.nation && (
+                    <div className="flex items-start gap-3">
+                      <Building2 className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className={cn("text-xs font-medium mb-1", themeClasses.textNeutralSecondary)}>Nation</p>
+                        <p className={cn("text-sm", themeClasses.mainText)}>{selectedSupplier.nation}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Registration Information */}
+              {(selectedSupplier.registrationType || selectedSupplier.businessRegistrationNumber || selectedSupplier.tinOrNida) && (
+                <div className="pt-4 border-t">
+                  <h4 className={cn("text-lg font-semibold mb-4", themeClasses.mainText)}>Registration Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {selectedSupplier.registrationType && (
+                      <div className="flex items-start gap-3">
+                        <FileText className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className={cn("text-xs font-medium mb-1", themeClasses.textNeutralSecondary)}>Registration Type</p>
+                          <p className={cn("text-sm font-semibold", themeClasses.mainText)}>
+                            {selectedSupplier.registrationType === 'tin' && 'TIN Number'}
+                            {selectedSupplier.registrationType === 'business_registration' && 'Business Registration Number'}
+                            {selectedSupplier.registrationType === 'company_registration' && 'Company Registration Number'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedSupplier.businessRegistrationNumber && (
+                      <div className="flex items-start gap-3">
+                        <FileText className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className={cn("text-xs font-medium mb-1", themeClasses.textNeutralSecondary)}>
+                            {selectedSupplier.registrationType === 'tin' && 'TIN Number'}
+                            {selectedSupplier.registrationType === 'business_registration' && 'Business Registration Number'}
+                            {selectedSupplier.registrationType === 'company_registration' && 'Company Registration Number'}
+                            {!selectedSupplier.registrationType && 'Registration Number'}
+                          </p>
+                          <p className={cn("text-sm font-mono", themeClasses.mainText)}>{selectedSupplier.businessRegistrationNumber}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedSupplier.tinOrNida && (
+                      <div className="flex items-start gap-3">
+                        <IdCard className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className={cn("text-xs font-medium mb-1", themeClasses.textNeutralSecondary)}>TIN/NIDA Number</p>
+                          <p className={cn("text-sm font-mono", themeClasses.mainText)}>{selectedSupplier.tinOrNida}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Company Logo */}
+              {selectedSupplier.companyLogo && (
+                <div className="pt-4 border-t">
+                  <h4 className={cn("text-lg font-semibold mb-4", themeClasses.mainText)}>Company Logo</h4>
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <Image
+                        src={selectedSupplier.companyLogo}
+                        alt="Company Logo"
+                        width={120}
+                        height={120}
+                        className="w-30 h-30 object-contain border rounded-md"
+                      />
+                    </div>
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openDocumentPreview(selectedSupplier.companyLogo!)}
+                        className="flex items-center gap-2"
+                      >
+                        <Eye className="w-4 h-4" />
+                        View Full Size
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Uploaded Documents - Free/Premium Plans */}
+              {(selectedSupplier.businessTinCertificateUrl || selectedSupplier.companyCertificateUrl) && (
+                <div className="pt-4 border-t">
+                  <h4 className={cn("text-lg font-semibold mb-4", themeClasses.mainText)}>Business Documents</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {selectedSupplier.businessTinCertificateUrl && (
+                      <div className="border rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <FileText className="w-5 h-5 text-blue-500" />
+                          <p className={cn("text-sm font-semibold", themeClasses.mainText)}>Business TIN Certificate</p>
+                        </div>
+                        <div className="mb-3">
+                          {selectedSupplier.businessTinCertificateUrl.includes('.pdf') || selectedSupplier.businessTinCertificateUrl.includes('application/pdf') ? (
+                            <div className="w-full h-32 border rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+                              <FileText className="w-12 h-12 text-gray-400" />
+                            </div>
+                          ) : (
+                            <div className="relative w-full h-32 border rounded-md overflow-hidden">
+                              <Image
+                                src={selectedSupplier.businessTinCertificateUrl}
+                                alt="TIN Certificate"
+                                fill
+                                className="object-contain"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openDocumentPreview(selectedSupplier.businessTinCertificateUrl!)}
+                          className="w-full flex items-center justify-center gap-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          View/Download
+                        </Button>
+                      </div>
+                    )}
+
+                    {selectedSupplier.companyCertificateUrl && (
+                      <div className="border rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <FileText className="w-5 h-5 text-green-500" />
+                          <p className={cn("text-sm font-semibold", themeClasses.mainText)}>
+                            {selectedSupplier.registrationType === 'business_registration' 
+                              ? 'Business Registration Certificate'
+                              : 'Company Registration Certificate'}
+                          </p>
+                        </div>
+                        <div className="mb-3">
+                          {selectedSupplier.companyCertificateUrl.includes('.pdf') || selectedSupplier.companyCertificateUrl.includes('application/pdf') ? (
+                            <div className="w-full h-32 border rounded-md flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+                              <FileText className="w-12 h-12 text-gray-400" />
+                            </div>
+                          ) : (
+                            <div className="relative w-full h-32 border rounded-md overflow-hidden">
+                              <Image
+                                src={selectedSupplier.companyCertificateUrl}
+                                alt="Company Certificate"
+                                fill
+                                className="object-contain"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openDocumentPreview(selectedSupplier.companyCertificateUrl!)}
+                          className="w-full flex items-center justify-center gap-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          View/Download
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Uploaded Documents - Winga Plan */}
+              {(selectedSupplier.nidaCardFrontUrl || selectedSupplier.nidaCardRearUrl || selectedSupplier.selfPictureUrl) && (
+                <div className="pt-4 border-t">
+                  <h4 className={cn("text-lg font-semibold mb-4", themeClasses.mainText)}>Identity Documents (Winga Plan)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {selectedSupplier.nidaCardFrontUrl && (
+                      <div className="border rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <IdCard className="w-5 h-5 text-purple-500" />
+                          <p className={cn("text-sm font-semibold", themeClasses.mainText)}>NIDA Card - Front</p>
+                        </div>
+                        <div className="mb-3">
+                          <div className="relative w-full h-32 border rounded-md overflow-hidden">
+                            <Image
+                              src={selectedSupplier.nidaCardFrontUrl}
+                              alt="NIDA Card Front"
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openDocumentPreview(selectedSupplier.nidaCardFrontUrl!)}
+                          className="w-full flex items-center justify-center gap-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          View/Download
+                        </Button>
+                      </div>
+                    )}
+
+                    {selectedSupplier.nidaCardRearUrl && (
+                      <div className="border rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <IdCard className="w-5 h-5 text-purple-500" />
+                          <p className={cn("text-sm font-semibold", themeClasses.mainText)}>NIDA Card - Rear</p>
+                        </div>
+                        <div className="mb-3">
+                          <div className="relative w-full h-32 border rounded-md overflow-hidden">
+                            <Image
+                              src={selectedSupplier.nidaCardRearUrl}
+                              alt="NIDA Card Rear"
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openDocumentPreview(selectedSupplier.nidaCardRearUrl!)}
+                          className="w-full flex items-center justify-center gap-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          View/Download
+                        </Button>
+                      </div>
+                    )}
+
+                    {selectedSupplier.selfPictureUrl && (
+                      <div className="border rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Camera className="w-5 h-5 text-orange-500" />
+                          <p className={cn("text-sm font-semibold", themeClasses.mainText)}>Self Picture</p>
+                        </div>
+                        <div className="mb-3">
+                          <div className="relative w-full h-32 border rounded-md rounded-full overflow-hidden">
+                            <Image
+                              src={selectedSupplier.selfPictureUrl}
+                              alt="Self Picture"
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openDocumentPreview(selectedSupplier.selfPictureUrl!)}
+                          className="w-full flex items-center justify-center gap-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          View/Download
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Plan Information */}
               {selectedSupplier.plan && (
@@ -1299,6 +1591,36 @@ export default function SuppliersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Document Preview Dialog */}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-4xl w-full h-[90vh] p-0">
+          <DialogHeader className="px-6 pt-6 pb-2">
+            <DialogTitle className={cn(themeClasses.mainText)}>Document Preview</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 px-6 pb-6 overflow-hidden">
+            {previewDocumentUrl && (
+              <div className="w-full h-full border rounded-lg overflow-hidden">
+                {previewDocumentUrl.includes('.pdf') || previewDocumentUrl.includes('application/pdf') ? (
+                  <iframe
+                    src={previewDocumentUrl}
+                    className="w-full h-full border-0"
+                    title="Document Preview"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-900">
+                    <img
+                      src={previewDocumentUrl}
+                      alt="Document Preview"
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

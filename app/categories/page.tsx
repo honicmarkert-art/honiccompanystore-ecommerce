@@ -1,8 +1,4 @@
-import { redirect } from 'next/navigation'
-
-export default function CategoriesPage() {
-  redirect('/')
-}
+"use client"
 
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'

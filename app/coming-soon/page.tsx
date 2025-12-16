@@ -1,8 +1,4 @@
-import { redirect } from 'next/navigation'
-
-export default function ComingSoonPage() {
-  redirect('/')
-}
+"use client"
 
 import { useTheme } from '@/hooks/use-theme'
 import { usePublicCompanyContext } from '@/contexts/public-company-context'

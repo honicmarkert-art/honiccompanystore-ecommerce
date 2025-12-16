@@ -1,9 +1,9 @@
-import { redirect } from 'next/navigation'
+'use client'
+
+import { Star } from 'lucide-react'
+import { ComingSoonPage } from '@/components/coming-soon-page'
 
 export default function FeaturedPage() {
-  redirect('/')
-}
-
   return (
     <ComingSoonPage
       title="Featured Selections"
@@ -22,7 +22,3 @@ export default function FeaturedPage() {
     />
   )
 }
-
-
-
-

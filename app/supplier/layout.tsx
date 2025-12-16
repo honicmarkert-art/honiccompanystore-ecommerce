@@ -36,6 +36,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import { useAuth } from "@/contexts/auth-context"
@@ -45,7 +46,7 @@ import { useLanguage } from "@/contexts/language-context"
 import { useCompanyContext } from "@/components/company-provider"
 import { SupplierRouteGuard } from "@/components/supplier-route-guard"
 import { SupplierNotificationCenter } from "@/components/supplier-notification-center"
-import { Building2 as Building2Icon, MapPin, Phone, Save, FileText, AlertTriangle, Bell, Languages } from "lucide-react"
+import { Building2 as Building2Icon, MapPin, Phone, Save, FileText, AlertTriangle, Bell, Languages, User, IdCard, Camera, Upload, Image as ImageIcon, Lightbulb } from "lucide-react"
 import { useIntlTranslation, useIntlTranslationNamespace } from "@/hooks/use-intl-translation"
 
 // All Tanzania regions
@@ -127,10 +128,16 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     officeNumber: '',
     businessRegistrationNumber: '',
     tinOrNida: '',
+    fullLegalName: '',
     region: '',
     nation: 'Tanzania'
   })
+  const [nidaCardPhoto, setNidaCardPhoto] = useState<string | null>(null)
+  const [selfFacePhoto, setSelfFacePhoto] = useState<string | null>(null)
+  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null)
   const [isSubmittingCompanyInfo, setIsSubmittingCompanyInfo] = useState(false)
+  const [nidaDeclarationAccepted, setNidaDeclarationAccepted] = useState(false)
+  const [certificationDeclarationAccepted, setCertificationDeclarationAccepted] = useState(false)
   
   // Fallback logo system
   const fallbackLogo = "/android-chrome-512x512.png"
@@ -295,9 +302,22 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             officeNumber: profile.office_number || '',
             businessRegistrationNumber: profile.business_registration_number || '',
             tinOrNida: profile.tin_or_nida || '',
+            fullLegalName: profile.full_legal_name || '',
             region: profile.region || '',
             nation: profile.nation || 'Tanzania'
           })
+          if (profile.nida_card_photo_url) {
+            setNidaCardPhoto(profile.nida_card_photo_url)
+          }
+          if (profile.self_face_photo_url) {
+            setSelfFacePhoto(profile.self_face_photo_url)
+          }
+          
+          // Auto-accept declarations if user already has submitted info
+          if (profile.company_name || profile.business_registration_number || profile.tin_or_nida) {
+            setNidaDeclarationAccepted(true)
+            setCertificationDeclarationAccepted(true)
+          }
         } else {
           // If no profile or error, show modal to fill info
           setCompanyInfoComplete(false)
@@ -449,7 +469,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           try {
             const { data: profile, error } = await supabaseClient
               .from('profiles')
-              .select('is_active, company_name, company_logo, location, office_number, business_registration_number, tin_or_nida, region, nation')
+              .select('is_active, company_name, company_logo, location, office_number, business_registration_number, tin_or_nida, full_legal_name, nida_card_photo_url, self_face_photo_url, region, nation')
               .eq('id', user.id)
               .single()
 
@@ -465,9 +485,22 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
               officeNumber: profile.office_number || '',
               businessRegistrationNumber: profile.business_registration_number || '',
               tinOrNida: profile.tin_or_nida || '',
+              fullLegalName: profile.full_legal_name || '',
               region: profile.region || '',
               nation: profile.nation || 'Tanzania'
             })
+            if (profile.nida_card_photo_url) {
+              setNidaCardPhoto(profile.nida_card_photo_url)
+            }
+            if (profile.self_face_photo_url) {
+              setSelfFacePhoto(profile.self_face_photo_url)
+            }
+            
+            // Auto-accept declarations if user already has submitted info
+            if (profile.company_name || profile.business_registration_number || profile.tin_or_nida) {
+              setNidaDeclarationAccepted(true)
+              setCertificationDeclarationAccepted(true)
+            }
           }
           } catch (refreshError) {
             console.error('Error refreshing supplier status:', refreshError)
@@ -1043,7 +1076,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 <div className="space-y-2">
                   <Label htmlFor="modal-office-number" className={cn(themeClasses.mainText)}>
                     <Phone className="inline w-4 h-4 mr-2" />
-                    {isWingaPlan ? 'Business Number *' : t('company.officeNumber')} <span className="text-red-500">*</span>
+                    {isWingaPlan ? 'Business Phone Number *' : t('company.officeNumber')} <span className="text-red-500">*</span>
                   </Label>
                   {isWingaPlan && (
                     <p className={cn("text-xs mb-1", themeClasses.textNeutralSecondary)}>
@@ -1131,9 +1164,27 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 {isWingaPlan && (
                   <>
                     <div className="space-y-2">
+                      <Label htmlFor="modal-full-legal-name" className={cn(themeClasses.mainText)}>
+                        <User className="inline w-4 h-4 mr-2" />
+                        Full Legal Name (NIDA Name) * <span className="text-red-500">*</span>
+                      </Label>
+                      <p className={cn("text-xs mb-1", themeClasses.textNeutralSecondary)}>
+                        Enter your full legal name as it appears on your NIDA card
+                      </p>
+                      <Input
+                        id="modal-full-legal-name"
+                        type="text"
+                        placeholder="Enter your full legal name"
+                        value={companyInfoForm.fullLegalName}
+                        onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, fullLegalName: e.target.value })}
+                        required
+                        className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
+                      />
+                    </div>
+                    <div className="space-y-2">
                       <Label htmlFor="modal-tin-or-nida" className={cn(themeClasses.mainText)}>
                         <FileText className="inline w-4 h-4 mr-2" />
-                        TIN No or NIDA No (Winga & Business Detail) * <span className="text-red-500">*</span>
+                        NIDA Number (Winga Personal Detail) * * <span className="text-red-500">*</span>
                       </Label>
                       <p className={cn("text-xs mb-1", themeClasses.textNeutralSecondary)}>
                         Important for trust, verification, and priority in search results and orders
@@ -1141,18 +1192,148 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                       <Input
                         id="modal-tin-or-nida"
                         type="text"
-                        placeholder="Enter your TIN or NIDA number"
+                        placeholder="Enter your NIDA number"
                         value={companyInfoForm.tinOrNida}
                         onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, tinOrNida: e.target.value })}
                         required
                         className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
                       />
                       <div className={cn("mt-2 p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800")}>
-                        <p className={cn("text-xs text-purple-800 dark:text-purple-300")}>
-                          <strong>💡 Why this matters for Wingas:</strong> {language === 'sw' 
-                            ? 'Kutoa nambari yako ya TIN au NIDA huongeza uaminifu wako na kutupa kipaumbele katika matokeo ya utafutaji na usindikaji wa maagizo. Hii husaidia kuthibitisha uhalali wako kama broker/connector na inahitajika wakati wa kuboresha mipango.'
-                            : 'Providing your TIN or NIDA number increases your trust and gives us to priority you in search results and order processing. This helps verify your authenticity as a broker/connector and is required when upgrading plans.'}
+                        <p className={cn("text-xs text-purple-800 dark:text-purple-300 flex items-start gap-2")}>
+                          <Lightbulb className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                          <span><strong>Why this matters for Wingas:</strong> {language === 'sw' 
+                            ? 'Kutoa nambari yako ya NIDA huongeza uaminifu wako na kutupa kipaumbele katika matokeo ya utafutaji na usindikaji wa maagizo. Hii husaidia kuthibitisha uhalali wako kama broker/connector. Hii ni bora kwa sababu za kisheria, usalama, na uaminifu.'
+                            : 'Providing your NIDA number increases your trust and gives us to priority you in search results and order processing. This helps verify your authenticity as a broker/connector. This is better for legal, security, and trust reasons.'}</span>
                         </p>
+                      </div>
+                    </div>
+                    {/* NIDA Card Photo Upload (Optional) */}
+                    <div className="space-y-2">
+                      <Label htmlFor="modal-nida-card-photo" className={cn(themeClasses.mainText)}>
+                        <IdCard className="inline w-4 h-4 mr-2" />
+                        NIDA Card Photo <span className="text-yellow-600 dark:text-yellow-400 text-xs">(Optional - can upload later)</span>
+                      </Label>
+                      <p className={cn("text-xs mb-1", themeClasses.textNeutralSecondary)}>
+                        Upload a clear photo of your NIDA card for verification and comparison purposes
+                      </p>
+                      <div className={cn("mt-2 p-3 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800")}>
+                        <p className={cn("text-xs text-yellow-800 dark:text-yellow-300")}>
+                          <strong>⚠️ Important:</strong> {language === 'sw' 
+                            ? 'Ingawa sehemu hii ni ya hiari, akaunti yako haiwezi kuamilishwa hadi picha ya kadi ya NIDA itakapopakiwa. Tafadhali ipakie haraka iwezekanavyo ili kukamilisha uamilishaji wa akaunti yako.'
+                            : 'While this field is optional, your account cannot be activated until the NIDA card photo is uploaded. Please upload it as soon as possible to complete your account activation.'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        {nidaCardPhoto ? (
+                          <div className="relative">
+                            <Image
+                              src={nidaCardPhoto}
+                              alt="NIDA Card"
+                              width={64}
+                              height={64}
+                              className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                            />
+                          </div>
+                        ) : (
+                          <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                            <IdCard className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                          </div>
+                        )}
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            id="modal-nida-card-photo"
+                            accept=".png,.jpg,.jpeg,.gif,.webp"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) {
+                                const reader = new FileReader()
+                                reader.onload = (event) => {
+                                  setNidaCardPhoto(event.target?.result as string)
+                                }
+                                reader.readAsDataURL(file)
+                              }
+                            }}
+                            className="hidden"
+                            disabled={uploadingDocument === 'nida_card'}
+                          />
+                          <Label
+                            htmlFor="modal-nida-card-photo"
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                              themeClasses.cardBorder,
+                              themeClasses.cardBg,
+                              uploadingDocument === 'nida_card' && "opacity-50 cursor-not-allowed"
+                            )}
+                          >
+                            <Upload className="h-4 w-4" />
+                            <span>{uploadingDocument === 'nida_card' ? "Uploading..." : nidaCardPhoto ? "Change Photo" : "Upload NIDA Card Photo"}</span>
+                          </Label>
+                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                            PNG, JPG (max 10MB) - Required for account activation
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Self Face Photo Upload (Optional) */}
+                    <div className="space-y-2">
+                      <Label htmlFor="modal-self-face-photo" className={cn(themeClasses.mainText)}>
+                        <Camera className="inline w-4 h-4 mr-2" />
+                        Self Face Photo <span className="text-yellow-600 dark:text-yellow-400 text-xs">(Optional - can upload later)</span>
+                      </Label>
+                      <p className={cn("text-xs mb-1", themeClasses.textNeutralSecondary)}>
+                        Upload a clear photo of yourself for comparison with your NIDA card photo
+                      </p>
+                      <div className="flex items-center gap-4">
+                        {selfFacePhoto ? (
+                          <div className="relative">
+                            <Image
+                              src={selfFacePhoto}
+                              alt="Self Face"
+                              width={64}
+                              height={64}
+                              className={cn("w-16 h-16 object-cover border rounded-full", themeClasses.cardBorder, themeClasses.cardBg)}
+                            />
+                          </div>
+                        ) : (
+                          <div className={cn("w-16 h-16 border rounded-full flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                            <Camera className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                          </div>
+                        )}
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            id="modal-self-face-photo"
+                            accept=".png,.jpg,.jpeg,.gif,.webp"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) {
+                                const reader = new FileReader()
+                                reader.onload = (event) => {
+                                  setSelfFacePhoto(event.target?.result as string)
+                                }
+                                reader.readAsDataURL(file)
+                              }
+                            }}
+                            className="hidden"
+                            disabled={uploadingDocument === 'self_face'}
+                          />
+                          <Label
+                            htmlFor="modal-self-face-photo"
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                              themeClasses.cardBorder,
+                              themeClasses.cardBg,
+                              uploadingDocument === 'self_face' && "opacity-50 cursor-not-allowed"
+                            )}
+                          >
+                            <Camera className="h-4 w-4" />
+                            <span>{uploadingDocument === 'self_face' ? "Uploading..." : selfFacePhoto ? "Change Photo" : "Upload Self Face Photo"}</span>
+                          </Label>
+                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                            PNG, JPG (max 10MB) - Can be uploaded later
+                          </p>
+                        </div>
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -1222,10 +1403,93 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     </div>
                   </div>
                 )}
+                
+                {/* Declarations Section */}
+                <div className={cn("pt-4 border-t space-y-4", themeClasses.cardBorder)}>
+                  {/* NIDA Declaration for Winga Plans */}
+                  {isWingaPlan && (
+                    <div className={cn("p-4 rounded-lg border-2", themeClasses.cardBorder, themeClasses.cardBg)}>
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          id="modal-nida-declaration"
+                          checked={nidaDeclarationAccepted}
+                          onCheckedChange={(checked) => setNidaDeclarationAccepted(checked === true)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1">
+                          <Label 
+                            htmlFor="modal-nida-declaration" 
+                            className={cn("text-sm font-semibold cursor-pointer", themeClasses.mainText)}
+                          >
+                            Declaration * <span className="text-red-500">*</span>
+                          </Label>
+                          <p className={cn("text-xs mt-2 leading-relaxed", themeClasses.textNeutralSecondary)}>
+                            I hereby declare that:
+                          </p>
+                          <ul className={cn("text-xs mt-2 ml-4 space-y-1 list-disc", themeClasses.textNeutralSecondary)}>
+                            <li>The NIDA card information provided is accurate and belongs to me</li>
+                            <li>The self-picture uploaded is a recent and accurate representation of myself</li>
+                            <li>I understand that providing false or misleading information will result in account suspension or termination</li>
+                            <li>I agree to comply with all applicable laws and regulations regarding identity verification</li>
+                            <li>I understand that this information will be used for verification purposes and to build trust with customers</li>
+                          </ul>
+                          {!nidaDeclarationAccepted && (
+                            <p className={cn("text-xs mt-2 text-red-600 dark:text-red-400")}>
+                              You must accept this declaration to submit your information
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Certification Declaration for Free and Premium Plans */}
+                  {!isWingaPlan && (
+                    <div className={cn("p-4 rounded-lg border-2", themeClasses.cardBorder, themeClasses.cardBg)}>
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          id="modal-certification-declaration"
+                          checked={certificationDeclarationAccepted}
+                          onCheckedChange={(checked) => setCertificationDeclarationAccepted(checked === true)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1">
+                          <Label 
+                            htmlFor="modal-certification-declaration" 
+                            className={cn("text-sm font-semibold cursor-pointer", themeClasses.mainText)}
+                          >
+                            Certification Declaration * <span className="text-red-500">*</span>
+                          </Label>
+                          <p className={cn("text-xs mt-2 leading-relaxed", themeClasses.textNeutralSecondary)}>
+                            I hereby declare that:
+                          </p>
+                          <ul className={cn("text-xs mt-2 ml-4 space-y-1 list-disc", themeClasses.textNeutralSecondary)}>
+                            <li>The business registration certificate provided is authentic and valid</li>
+                            <li>All business information provided is accurate and up-to-date</li>
+                            <li>I understand that providing false or misleading information will result in account suspension or termination</li>
+                            <li>I agree to comply with all applicable laws and regulations regarding business registration</li>
+                            <li>I understand that this information will be used for verification purposes and to build trust with customers</li>
+                            <li>The uploaded certificate document is a true copy of the original document</li>
+                          </ul>
+                          {!certificationDeclarationAccepted && (
+                            <p className={cn("text-xs mt-2 text-red-600 dark:text-red-400")}>
+                              You must accept this declaration to submit your information
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
                 <Button
                   type="submit"
-                  disabled={isSubmittingCompanyInfo}
-                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-neutral-950 font-semibold"
+                  disabled={
+                    isSubmittingCompanyInfo || 
+                    (isWingaPlan && !nidaDeclarationAccepted) ||
+                    (!isWingaPlan && !certificationDeclarationAccepted)
+                  }
+                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-neutral-950 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmittingCompanyInfo ? (
                     <>

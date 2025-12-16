@@ -638,7 +638,6 @@ function AccountPageContent() {
 }
 
 import { BuyerRouteGuard } from '@/components/buyer-route-guard'
-import { ProtectedRoute } from '@/components/protected-route'
 
 export default function AccountPage() {
   return (
@@ -648,5 +647,4 @@ export default function AccountPage() {
       </ProtectedRoute>
     </BuyerRouteGuard>
   )
-} 
- 
+}

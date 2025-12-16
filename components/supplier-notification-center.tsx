@@ -50,13 +50,40 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
 
   // Fetch notifications
   const fetchNotifications = useCallback(async (silent = false) => {
+    const abortController = new AbortController()
+    let timeoutId: NodeJS.Timeout | null = setTimeout(() => abortController.abort(), 10000) // 10 second timeout
+    
     try {
       if (!silent) {
         setLoading(true)
       }
+      
       const response = await fetch('/api/notifications?limit=20', {
-        credentials: 'include'
+        credentials: 'include',
+        signal: abortController.signal
       })
+      
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      
+      // Check if response is ok before parsing
+      if (!response.ok) {
+        // Don't log 401/403 as errors (user might not be authenticated)
+        if (response.status !== 401 && response.status !== 403) {
+          console.warn('Failed to fetch notifications:', response.status, response.statusText)
+        }
+        return
+      }
+      
+      // Check content type before parsing JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        console.warn('Unexpected content type when fetching notifications:', contentType)
+        return
+      }
+      
       const data = await response.json()
 
       if (data.success) {
@@ -79,8 +106,23 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
           window.dispatchEvent(new CustomEvent('account-status-changed'))
         }
       }
-    } catch (error) {
-      console.error('Error fetching notifications:', error)
+    } catch (error: any) {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      
+      // Ignore AbortError (timeout) and network errors silently for silent fetches
+      if (silent && (error.name === 'AbortError' || error.message === 'Failed to fetch' || error.message?.includes('fetch'))) {
+        return
+      }
+      
+      // Only log non-network errors or errors during non-silent fetches
+      if (error.name !== 'AbortError' && error.message !== 'Failed to fetch' && !error.message?.includes('fetch')) {
+        console.error('Error fetching notifications:', error)
+      } else if (!silent) {
+        console.warn('Network error fetching notifications (this may be due to browser extensions or network issues):', error.message || error)
+      }
     } finally {
       setLoading(false)
     }

@@ -5,7 +5,7 @@ import { useTheme } from '@/hooks/use-theme'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Building2, MapPin, Phone, Save, Upload, Image as ImageIcon, FileText, AlertTriangle, ArrowRight } from 'lucide-react'
+import { Building2, MapPin, Phone, Save, Upload, Image as ImageIcon, FileText, AlertTriangle, ArrowRight, User, IdCard, Camera, Lightbulb } from 'lucide-react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,11 +30,15 @@ function WingaBusinessInfoContent() {
     location: '',
     officeNumber: '',
     tinOrNida: '',
+    fullLegalName: '',
     region: '',
     nation: 'Tanzania'
   })
   const [companyLogo, setCompanyLogo] = useState<string | null>(null)
   const [isUploadingLogo, setIsUploadingLogo] = useState(false)
+  const [nidaCardPhoto, setNidaCardPhoto] = useState<string | null>(null)
+  const [selfFacePhoto, setSelfFacePhoto] = useState<string | null>(null)
+  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null)
 
   const hasLoadedRef = useRef(false)
   useEffect(() => {
@@ -72,9 +76,16 @@ function WingaBusinessInfoContent() {
               location: data.profile.location || '',
               officeNumber: data.profile.office_number || '',
               tinOrNida: data.profile.tin_or_nida || '',
+              fullLegalName: data.profile.full_legal_name || '',
               region: data.profile.region || '',
               nation: data.profile.nation || 'Tanzania'
             })
+            if (data.profile.nida_card_photo_url) {
+              setNidaCardPhoto(data.profile.nida_card_photo_url)
+            }
+            if (data.profile.self_face_photo_url) {
+              setSelfFacePhoto(data.profile.self_face_photo_url)
+            }
             setCompanyLogo(data.profile.company_logo || null)
             // Set account active status
             setIsActive(data.profile.is_active !== false) // Default to true if null
@@ -335,11 +346,12 @@ function WingaBusinessInfoContent() {
                   </div>
                   
                   <div className={cn("pt-6 border-t", themeClasses.cardBorder)}>
-                    <div className={cn("p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800")}>
-                      <p className={cn("text-sm text-purple-800 dark:text-purple-300")}>
-                        <strong>💡 Winga Tip:</strong> As a broker/connector, you help customers find products without owning stock. Your TIN/NIDA number increases trust and gives priority in search results.
-                      </p>
-                    </div>
+                      <div className={cn("p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800")}>
+                        <p className={cn("text-sm text-purple-800 dark:text-purple-300 flex items-start gap-2")}>
+                          <Lightbulb className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                          <span><strong>Winga Tip:</strong> As a broker/connector, you help customers find products without owning stock. Your TIN/NIDA number increases trust and gives priority in search results.</span>
+                        </p>
+                      </div>
                   </div>
                 </div>
               </CardContent>
@@ -446,7 +458,7 @@ function WingaBusinessInfoContent() {
 
                     <div>
                       <Label htmlFor="officeNumber" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        Business Number *
+                        Business Phone Number *
                       </Label>
                       <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
                         Your phone number for customer contact (WhatsApp, calls, etc.)
@@ -466,8 +478,29 @@ function WingaBusinessInfoContent() {
                     </div>
 
                     <div>
+                      <Label htmlFor="fullLegalName" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
+                        Full Legal Name (NIDA Name) *
+                      </Label>
+                      <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
+                        Enter your full legal name as it appears on your NIDA card
+                      </p>
+                      <div className="relative mt-1">
+                        <User className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5", themeClasses.textNeutralSecondary)} />
+                        <Input
+                          id="fullLegalName"
+                          type="text"
+                          value={formData.fullLegalName}
+                          onChange={(e) => setFormData(prev => ({ ...prev, fullLegalName: e.target.value }))}
+                          placeholder="Enter your full legal name"
+                          className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div>
                       <Label htmlFor="tinOrNida" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        TIN No or NIDA No (Winga & Business Detail) *
+                        NIDA Number (Winga Personal Detail) * *
                       </Label>
                       <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
                         Important for trust, verification, and priority in search results and orders
@@ -479,15 +512,147 @@ function WingaBusinessInfoContent() {
                           type="text"
                           value={formData.tinOrNida}
                           onChange={(e) => setFormData(prev => ({ ...prev, tinOrNida: e.target.value }))}
-                          placeholder="Enter your TIN or NIDA number"
+                          placeholder="Enter your NIDA number"
                           className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
                           required
                         />
                       </div>
                       <div className={cn("mt-2 p-3 rounded-md bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800")}>
-                        <p className={cn("text-xs text-purple-800 dark:text-purple-300")}>
-                          <strong>💡 Why this matters for Wingas:</strong> Providing your TIN or NIDA number increases customer trust and gives your products priority in search results and order processing. This helps verify your authenticity as a broker/connector and is required when upgrading plans.
+                        <p className={cn("text-xs text-purple-800 dark:text-purple-300 flex items-start gap-2")}>
+                          <Lightbulb className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                          <span><strong>Why this matters for Wingas:</strong> Providing your NIDA number increases your trust and gives us priority you in search results and order processing. This helps verify your authenticity as a broker/connector. This is better for legal, security, and trust reasons.</span>
                         </p>
+                      </div>
+                    </div>
+
+                    {/* NIDA Card Photo Upload (Optional) */}
+                    <div>
+                      <Label htmlFor="nidaCardPhoto" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
+                        NIDA Card Photo <span className="text-yellow-600 dark:text-yellow-400">(Optional - can upload later)</span>
+                      </Label>
+                      <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
+                        Upload a clear photo of your NIDA card for verification and comparison purposes
+                      </p>
+                      <div className={cn("mt-2 p-3 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800")}>
+                        <p className={cn("text-xs text-yellow-800 dark:text-yellow-300")}>
+                          <strong>⚠️ Important:</strong> While this field is optional, your account cannot be activated until the NIDA card photo is uploaded. Please upload it as soon as possible to complete your account activation.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 mt-2">
+                        {nidaCardPhoto ? (
+                          <div className="relative">
+                            <Image
+                              src={nidaCardPhoto}
+                              alt="NIDA Card"
+                              width={64}
+                              height={64}
+                              className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                            />
+                          </div>
+                        ) : (
+                          <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                            <IdCard className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                          </div>
+                        )}
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            id="nidaCardPhoto"
+                            accept=".png,.jpg,.jpeg,.gif,.webp"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) {
+                                // Handle upload here - you can reuse the document upload logic
+                                // For now, just show a placeholder
+                                const reader = new FileReader()
+                                reader.onload = (event) => {
+                                  setNidaCardPhoto(event.target?.result as string)
+                                }
+                                reader.readAsDataURL(file)
+                              }
+                            }}
+                            className="hidden"
+                            disabled={uploadingDocument === 'nida_card'}
+                          />
+                          <Label
+                            htmlFor="nidaCardPhoto"
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                              themeClasses.cardBorder,
+                              themeClasses.cardBg,
+                              uploadingDocument === 'nida_card' && "opacity-50 cursor-not-allowed"
+                            )}
+                          >
+                            <Upload className="h-4 w-4" />
+                            <span>{uploadingDocument === 'nida_card' ? "Uploading..." : nidaCardPhoto ? "Change Photo" : "Upload NIDA Card Photo"}</span>
+                          </Label>
+                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                            PNG, JPG (max 10MB) - Required for account activation
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Self Face Photo Upload (Optional) */}
+                    <div>
+                      <Label htmlFor="selfFacePhoto" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
+                        Self Face Photo <span className="text-yellow-600 dark:text-yellow-400">(Optional - can upload later)</span>
+                      </Label>
+                      <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
+                        Upload a clear photo of yourself for comparison with your NIDA card photo
+                      </p>
+                      <div className="flex items-center gap-4 mt-2">
+                        {selfFacePhoto ? (
+                          <div className="relative">
+                            <Image
+                              src={selfFacePhoto}
+                              alt="Self Face"
+                              width={64}
+                              height={64}
+                              className={cn("w-16 h-16 object-cover border rounded-full", themeClasses.cardBorder, themeClasses.cardBg)}
+                            />
+                          </div>
+                        ) : (
+                          <div className={cn("w-16 h-16 border rounded-full flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                            <Camera className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                          </div>
+                        )}
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            id="selfFacePhoto"
+                            accept=".png,.jpg,.jpeg,.gif,.webp"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) {
+                                // Handle upload here - you can reuse the document upload logic
+                                // For now, just show a placeholder
+                                const reader = new FileReader()
+                                reader.onload = (event) => {
+                                  setSelfFacePhoto(event.target?.result as string)
+                                }
+                                reader.readAsDataURL(file)
+                              }
+                            }}
+                            className="hidden"
+                            disabled={uploadingDocument === 'self_face'}
+                          />
+                          <Label
+                            htmlFor="selfFacePhoto"
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                              themeClasses.cardBorder,
+                              themeClasses.cardBg,
+                              uploadingDocument === 'self_face' && "opacity-50 cursor-not-allowed"
+                            )}
+                          >
+                            <Camera className="h-4 w-4" />
+                            <span>{uploadingDocument === 'self_face' ? "Uploading..." : selfFacePhoto ? "Change Photo" : "Upload Self Face Photo"}</span>
+                          </Label>
+                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                            PNG, JPG (max 10MB) - Can be uploaded later
+                          </p>
+                        </div>
                       </div>
                     </div>
 

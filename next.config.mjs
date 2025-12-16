@@ -64,6 +64,12 @@ const nextConfig = {
     ],
   },
   // Performance optimizations
+  // Allow cross-origin requests from dev domain
+  allowedDevOrigins: [
+    'https://dev.honiccompanystore.com',
+    'http://dev.honiccompanystore.com',
+    'dev.honiccompanystore.com',
+  ],
   experimental: {
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
     // Enable modern performance features

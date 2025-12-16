@@ -1,8 +1,7 @@
-import { redirect } from 'next/navigation'
+'use client'
 
-export default function PCBServicePage() {
-  redirect('/')
-}
+import { CircuitBoard } from 'lucide-react'
+import { ComingSoonPage } from '@/components/coming-soon-page'
 
 export default function PcbPage() {
   return (
@@ -23,7 +22,3 @@ export default function PcbPage() {
     />
   )
 }
-
-
-
-

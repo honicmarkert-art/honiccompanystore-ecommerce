@@ -1,8 +1,7 @@
-import { redirect } from 'next/navigation'
+'use client'
 
-export default function AIServicePage() {
-  redirect('/')
-}
+import { Bot } from 'lucide-react'
+import { ComingSoonPage } from '@/components/coming-soon-page'
 
 export default function AiPage() {
   return (
@@ -23,7 +22,3 @@ export default function AiPage() {
     />
   )
 }
-
-
-
-

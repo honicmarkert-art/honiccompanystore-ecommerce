@@ -1,9 +1,9 @@
-import { redirect } from 'next/navigation'
+'use client'
+
+import { HelpCircle } from 'lucide-react'
+import { ComingSoonPage } from '@/components/coming-soon-page'
 
 export default function HelpPage() {
-  redirect('/')
-}
-
   return (
     <ComingSoonPage
       title="Help Center"
@@ -22,7 +22,3 @@ export default function HelpPage() {
     />
   )
 }
-
-
-
-

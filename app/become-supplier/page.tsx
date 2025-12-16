@@ -824,9 +824,9 @@ export default function BecomeSupplierPage() {
                   <ul className="list-disc list-inside space-y-2 ml-2">
                     <li>You must maintain account security and protect your login credentials</li>
                     <li>Your account may be suspended or terminated for violations of these terms</li>
-                    <li>You can upgrade to Premium or downgrade to Free plan anytime (requires registration number)</li>
+                    <li>You can upgrade to Premium or to Free plan anytime (requires business/company/TIN business registration number)</li>
                     <li>You can delete your account at any time</li>
-                    <li>You must provide TIN No or NIDA No when changing plans (important for trust and verification)</li>
+                    <li>You must provide NIDA Number, 2 photos of NIDA card front and rear (important for trust and verification)</li>
                   </ul>
                 </div>
 
@@ -1069,7 +1069,7 @@ export default function BecomeSupplierPage() {
                     })
                     router.push('/supplier/company-info')
                   } else {
-                    // User needs to verify email - show message but don't auto-open login form
+                    // User needs to verify email - show message and auto-open login form
                     toast({
                       title: 'Account Created',
                       description: 'Please verify your email to continue. Check your inbox for the verification link.',
@@ -1087,10 +1087,16 @@ export default function BecomeSupplierPage() {
                       acceptedPrivacyPolicy: false
                     })
                     
-                    // Store email for verification message (in case user manually opens login later)
+                    // Store email for verification message
                     if (typeof window !== 'undefined') {
                       sessionStorage.setItem('pending_verification_email', registrationForm.email)
+                      sessionStorage.setItem('supplier_registration', 'true')
                     }
+                    
+                    // Auto-open login form after a short delay
+                    setTimeout(() => {
+                      openAuthModal('login', '/supplier/dashboard')
+                    }, 500)
                   }
                 } else {
                   setRegistrationError(result.error || 'Registration failed. Please try again.')

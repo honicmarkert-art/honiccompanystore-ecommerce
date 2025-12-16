@@ -1,8 +1,7 @@
-import { redirect } from 'next/navigation'
+'use client'
 
-export default function PrototypingServicePage() {
-  redirect('/')
-}
+import { Cpu } from 'lucide-react'
+import { ComingSoonPage } from '@/components/coming-soon-page'
 
 export default function PrototypingPage() {
   return (
@@ -23,7 +22,3 @@ export default function PrototypingPage() {
     />
   )
 }
-
-
-
-

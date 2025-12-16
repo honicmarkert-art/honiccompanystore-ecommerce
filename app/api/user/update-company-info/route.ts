@@ -39,7 +39,22 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { companyName, location, officeNumber, businessRegistrationNumber, tinOrNida, region, nation, detailSentence } = body
+    const { 
+      companyName, 
+      location, 
+      officeNumber, 
+      registrationType,
+      businessRegistrationNumber, 
+      tinOrNida, 
+      region, 
+      nation, 
+      detailSentence,
+      businessTinCertificateUrl,
+      companyCertificateUrl,
+      nidaCardFrontUrl,
+      nidaCardRearUrl,
+      selfPictureUrl
+    } = body
 
     if (!companyName || !officeNumber) {
       return NextResponse.json(
@@ -117,11 +132,21 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
+      // For non-Winga users, require registration type and number
+      if (!registrationType || !registrationType.trim()) {
+        return NextResponse.json(
+          { 
+            success: false,
+            error: 'Registration type is required'
+          },
+          { status: 400 }
+        )
+      }
       if (!businessRegistrationNumber || !businessRegistrationNumber.trim()) {
         return NextResponse.json(
           { 
             success: false,
-            error: 'Business registration number is required'
+            error: 'Registration number is required'
           },
           { status: 400 }
         )
@@ -161,6 +186,23 @@ export async function POST(request: NextRequest) {
     // Add detail sentence (optional - appears after rating on all products)
     if (detailSentence !== undefined) {
       updateData.detail_sentence = detailSentence.trim() === '' ? null : detailSentence.trim()
+    }
+    
+    // Add document URLs if provided
+    if (businessTinCertificateUrl) {
+      updateData.business_tin_certificate_url = businessTinCertificateUrl
+    }
+    if (companyCertificateUrl) {
+      updateData.company_certificate_url = companyCertificateUrl
+    }
+    if (nidaCardFrontUrl) {
+      updateData.nida_card_front_url = nidaCardFrontUrl
+    }
+    if (nidaCardRearUrl) {
+      updateData.nida_card_rear_url = nidaCardRearUrl
+    }
+    if (selfPictureUrl) {
+      updateData.self_picture_url = selfPictureUrl
     }
     
     // Check if this is first-time company info submission (for welcome email)

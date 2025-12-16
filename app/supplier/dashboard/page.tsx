@@ -60,6 +60,9 @@ function SupplierDashboardContent() {
   const [loadingSections, setLoadingSections] = useState(true)
 
   useEffect(() => {
+    // Abort controllers for cleanup
+    const abortControllers: AbortController[] = []
+    
     // Check for payment return parameters first (before fetching data)
     const paymentParam = searchParams.get('payment')
     const referenceId = searchParams.get('referenceId')
@@ -98,12 +101,24 @@ function SupplierDashboardContent() {
     
     // Fetch data in parallel for faster loading
     Promise.all([
-      fetchDashboardStats(),
-      fetchTopProductsAndOrders(),
+      fetchDashboardStats(abortControllers),
+      fetchTopProductsAndOrders(abortControllers),
       fetchCurrentPlan()
     ]).catch(error => {
-      console.error('Error loading dashboard data:', error)
+      // Ignore AbortError - it's expected when component unmounts or requests are cancelled
+      if (error.name !== 'AbortError') {
+        console.error('Error loading dashboard data:', error)
+      }
     })
+    
+    // Cleanup: abort all pending requests when component unmounts or effect re-runs
+    return () => {
+      abortControllers.forEach(controller => {
+        if (!controller.signal.aborted) {
+          controller.abort()
+        }
+      })
+    }
   }, [searchParams, router, toast])
 
   const fetchCurrentPlan = async () => {
@@ -130,11 +145,15 @@ function SupplierDashboardContent() {
   // Check if user has pending premium plan (only show if payment is not completed)
   const hasPendingPremiumPlan = !!pendingPlanId && !hasValidPremiumPayment
 
-  const fetchDashboardStats = async () => {
+  const fetchDashboardStats = async (abortControllers?: AbortController[]) => {
+    const controller = new AbortController()
+    if (abortControllers) {
+      abortControllers.push(controller)
+    }
+    
     try {
       setLoading(true)
       // Fetch products with timeout for faster loading
-      const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
       
       const productsResponse = await fetch('/api/supplier/products?limit=100', {
@@ -143,6 +162,12 @@ function SupplierDashboardContent() {
       })
       
       clearTimeout(timeoutId)
+      
+      // Check if request was aborted
+      if (controller.signal.aborted) {
+        return
+      }
+      
       const productsData = await productsResponse.json()
 
       if (productsData.success) {
@@ -161,19 +186,29 @@ function SupplierDashboardContent() {
           outOfStockProducts
         })
       }
-    } catch (error) {
-      console.error('Error fetching dashboard stats:', error)
+    } catch (error: any) {
+      // Ignore AbortError - it's expected when request is cancelled
+      if (error.name !== 'AbortError' && !controller.signal.aborted) {
+        console.error('Error fetching dashboard stats:', error)
+      }
     } finally {
-      setLoading(false)
+      // Only update loading state if request wasn't aborted
+      if (!controller.signal.aborted) {
+        setLoading(false)
+      }
     }
   }
 
-  const fetchTopProductsAndOrders = async () => {
+  const fetchTopProductsAndOrders = async (abortControllers?: AbortController[]) => {
+    const controller = new AbortController()
+    if (abortControllers) {
+      abortControllers.push(controller)
+    }
+    
     try {
       setLoadingSections(true)
       
       // Fetch products and orders in parallel with timeout for faster loading
-      const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
       
       const [productsResponse, ordersResponse] = await Promise.all([
@@ -182,6 +217,11 @@ function SupplierDashboardContent() {
       ])
       
       clearTimeout(timeoutId)
+      
+      // Check if request was aborted
+      if (controller.signal.aborted) {
+        return
+      }
 
       const productsData = await productsResponse.json()
       const ordersData = await ordersResponse.json()
@@ -262,10 +302,16 @@ function SupplierDashboardContent() {
 
         setRecentOrders(recentOrdersList)
       }
-    } catch (error) {
-      console.error('Error fetching top products and orders:', error)
+    } catch (error: any) {
+      // Ignore AbortError - it's expected when request is cancelled
+      if (error.name !== 'AbortError' && !controller.signal.aborted) {
+        console.error('Error fetching top products and orders:', error)
+      }
     } finally {
-      setLoadingSections(false)
+      // Only update loading state if request wasn't aborted
+      if (!controller.signal.aborted) {
+        setLoadingSections(false)
+      }
     }
   }
 
