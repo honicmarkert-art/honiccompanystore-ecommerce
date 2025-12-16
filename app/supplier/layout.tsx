@@ -1486,6 +1486,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                   type="submit"
                   disabled={
                     isSubmittingCompanyInfo || 
+                    loadingPlan ||
+                    !currentPlan ||
                     (isWingaPlan && !nidaDeclarationAccepted) ||
                     (!isWingaPlan && !certificationDeclarationAccepted)
                   }
