@@ -521,6 +521,7 @@ function ProductsPageContent() {
 
   // Pagination state - URL-based page number
   const [currentPage, setCurrentPage] = useState(1)
+  const [isPageTransitioning, setIsPageTransitioning] = useState(false)
   const PRODUCTS_PER_PAGE = 120
   const BATCH_SIZE = 24 // Load 24 at a time with infinite scroll
 
@@ -609,6 +610,51 @@ function ProductsPageContent() {
       setCurrentPage(page)
     }
   }, [urlSearchParams])
+
+  // Client-side page navigation - keeps same page structure, only changes products
+  const goToPage = useCallback((newPage: number) => {
+    if (newPage < 1 || isPageTransitioning) return
+    
+    // Start page transition - keep current products visible with loading overlay
+    setIsPageTransitioning(true)
+    
+    // Scroll to top smoothly
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    
+    // Build URL with current filters
+    const params = new URLSearchParams()
+    params.set('page', newPage.toString())
+    
+    if (activeBrand) params.set('brand', activeBrand)
+    if (searchTerm) params.set('search', searchTerm)
+    if (sortOrder !== 'featured') params.set('sort', sortOrder)
+    if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
+    if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
+    if (selectedMainCategory) params.set('category', selectedMainCategory)
+    if (selectedSubCategories.length > 0) params.set('sub', selectedSubCategories.join(','))
+    if (urlSupplier) params.set('supplier', urlSupplier)
+    
+    // Update URL without full page reload
+    router.push(`/products?${params.toString()}`, { scroll: false })
+    
+    // Update page state
+    setCurrentPage(newPage)
+    
+    // Reset infinite scroll to load products for new page
+    infiniteReset()
+  }, [activeBrand, searchTerm, sortOrder, priceRange, selectedMainCategory, selectedSubCategories, urlSupplier, router, infiniteReset, isPageTransitioning])
+
+  // End page transition when products finish loading
+  useEffect(() => {
+    if (isPageTransitioning && !infiniteLoading && infiniteProducts.length > 0) {
+      setIsPageTransitioning(false)
+    }
+  }, [isPageTransitioning, infiniteLoading, infiniteProducts.length])
+
+  // Calculate total pages
+  const totalPages = useMemo(() => {
+    return Math.ceil(infiniteTotalCount / PRODUCTS_PER_PAGE) || 1
+  }, [infiniteTotalCount])
 
   // Infinite scroll products hook for enhanced performance
 
@@ -991,19 +1037,6 @@ function ProductsPageContent() {
   const hasNextPage = infiniteTotalCount > PRODUCTS_PER_PAGE || (displayedProducts.length >= PRODUCTS_PER_PAGE && infiniteHasMore)
   const currentPageProductCount = displayedProducts.length
   
-  // Build next page URL with current filters
-  const buildNextPageUrl = useCallback(() => {
-    const params = new URLSearchParams()
-    params.set('page', (currentPage + 1).toString())
-    
-    if (activeBrand) params.set('brand', activeBrand)
-    if (searchTerm) params.set('search', searchTerm)
-    if (sortOrder !== 'featured') params.set('sort', sortOrder)
-    if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
-    if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
-    
-    return `/products?${params.toString()}`
-  }, [currentPage, activeBrand, searchTerm, sortOrder, priceRange])
 
   // Track prefetched products to avoid duplicate requests
   const prefetchedProductsRef = useRef<Set<number>>(new Set())
@@ -2754,13 +2787,23 @@ function ProductsPageContent() {
 
                 {/* Products Grid */}
         {!isLoading && !error && displayedProducts.length > 0 && (
-          <InfiniteScrollTrigger
-            onLoadMore={infiniteLoadMore}
-            hasMore={hasMoreProducts}
-            loading={infiniteLoadingMore}
-            error={infiniteError}
-          >
-            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-8 3xl:grid-cols-12 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+          <div className="relative">
+            {/* Page Transition Overlay - keeps layout stable during pagination */}
+            {isPageTransitioning && (
+              <div className="absolute inset-0 bg-white/60 dark:bg-neutral-950/60 backdrop-blur-sm z-10 flex items-center justify-center min-h-[200px]">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-3 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className={cn("text-sm font-medium", themeClasses.mainText)}>Loading page {currentPage}...</p>
+                </div>
+              </div>
+            )}
+            <InfiniteScrollTrigger
+              onLoadMore={infiniteLoadMore}
+              hasMore={hasMoreProducts}
+              loading={infiniteLoadingMore}
+              error={infiniteError}
+            >
+              <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-8 3xl:grid-cols-12 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
               <>
                 
                 {/* All Product Cards */}
@@ -2988,28 +3031,113 @@ function ProductsPageContent() {
             )
                 })}
               </>
-            </div>
-          </InfiniteScrollTrigger>
+              </div>
+            </InfiniteScrollTrigger>
+          </div>
         )}
 
-        {/* Next Page Navigation */}
-        {!hasMoreProducts && currentPageProductCount >= PRODUCTS_PER_PAGE && hasNextPage && (
-          <div className="flex flex-col items-center justify-center py-12 px-4 gap-4" suppressHydrationWarning>
+        {/* Pagination Controls */}
+        {(currentPage > 1 || hasNextPage) && displayedProducts.length > 0 && (
+          <div className="flex flex-col items-center justify-center py-8 px-4 gap-4" suppressHydrationWarning>
+            {/* Page Info */}
             <div className="text-center">
-              <p className={cn("text-sm mb-6", themeClasses.textNeutralSecondary)}>
-                {infiniteTotalCount > PRODUCTS_PER_PAGE 
-                  ? `${infiniteTotalCount - currentPageProductCount} more products available` 
-                  : 'More products available'}
+              <p className={cn("text-sm mb-2", themeClasses.textNeutralSecondary)}>
+                Page {currentPage} of {totalPages > 0 ? totalPages : '...'} 
+                {infiniteTotalCount > 0 && ` • ${infiniteTotalCount.toLocaleString()} total products`}
               </p>
+              {!hasMoreProducts && hasNextPage && (
+                <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
+                  {infiniteTotalCount > PRODUCTS_PER_PAGE 
+                    ? `${Math.max(0, infiniteTotalCount - (currentPage * PRODUCTS_PER_PAGE))} more products on next pages` 
+                    : 'More products available'}
+                </p>
+              )}
             </div>
-            <Link href={buildNextPageUrl()} target="_blank" rel="noopener noreferrer">
-              <Button
-                size="lg"
-                className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600 px-8 py-4 text-base font-semibold"
-              >
-                Next Page ({currentPage + 1}) →
-              </Button>
-            </Link>
+            
+            {/* Pagination Buttons */}
+            <div className="flex items-center gap-3">
+              {/* Previous Page Button */}
+              {currentPage > 1 && (
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={isPageTransitioning}
+                  className={cn("px-6 py-3 text-base font-medium", themeClasses.cardBorder, isPageTransitioning && "opacity-50 cursor-not-allowed")}
+                >
+                  {isPageTransitioning ? "Loading..." : "← Previous"}
+                </Button>
+              )}
+              
+              {/* Page Numbers (show up to 5 pages) */}
+              {totalPages > 1 && (
+                <div className="hidden sm:flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    // Calculate which page numbers to show
+                    let pageNum: number
+                    if (totalPages <= 5) {
+                      pageNum = i + 1
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i
+                    } else {
+                      pageNum = currentPage - 2 + i
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageNum}
+                        size="sm"
+                        variant={currentPage === pageNum ? "default" : "outline"}
+                        onClick={() => goToPage(pageNum)}
+                        disabled={isPageTransitioning || currentPage === pageNum}
+                        className={cn(
+                          "w-10 h-10 p-0 text-sm font-medium",
+                          currentPage === pageNum 
+                            ? "bg-yellow-500 text-neutral-950 hover:bg-yellow-600" 
+                            : themeClasses.cardBorder,
+                          isPageTransitioning && "opacity-50 cursor-not-allowed"
+                        )}
+                      >
+                        {pageNum}
+                      </Button>
+                    )
+                  })}
+                  {totalPages > 5 && currentPage < totalPages - 2 && (
+                    <>
+                      <span className={cn("px-1", themeClasses.textNeutralSecondary)}>...</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => goToPage(totalPages)}
+                        disabled={isPageTransitioning}
+                        className={cn("w-10 h-10 p-0 text-sm font-medium", themeClasses.cardBorder, isPageTransitioning && "opacity-50 cursor-not-allowed")}
+                      >
+                        {totalPages}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+              
+              {/* Next Page Button */}
+              {hasNextPage && !hasMoreProducts && (
+                <Button
+                  size="lg"
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={isPageTransitioning}
+                  className={cn("bg-yellow-500 text-neutral-950 hover:bg-yellow-600 px-6 py-3 text-base font-semibold", isPageTransitioning && "opacity-50 cursor-not-allowed")}
+                >
+                  {isPageTransitioning ? "Loading..." : "Next →"}
+                </Button>
+              )}
+            </div>
+            
+            {/* Mobile: Simple page indicator */}
+            <p className={cn("text-xs sm:hidden", themeClasses.textNeutralSecondary)}>
+              Showing page {currentPage}
+            </p>
           </div>
         )}
         
