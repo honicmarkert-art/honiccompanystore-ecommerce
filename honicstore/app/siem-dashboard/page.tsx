@@ -355,7 +355,6 @@ export default function AdminDashboard() {
                         className="h-12 w-12 rounded-md object-cover"
                       />
                     )}
-                  />
                   <div className="flex-1 min-w-0">
                     <p className={cn("text-base font-medium truncate", themeClasses.mainText)}>
                       {product.name}
