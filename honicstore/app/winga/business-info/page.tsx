@@ -149,6 +149,7 @@ function WingaBusinessInfoContent() {
               location: refreshData.profile.location || '',
               officeNumber: refreshData.profile.office_number || '',
               tinOrNida: refreshData.profile.tin_or_nida || '',
+              fullLegalName: refreshData.profile.full_legal_name || '',
               region: refreshData.profile.region || '',
               nation: refreshData.profile.nation || 'Tanzania'
             })
@@ -427,7 +428,7 @@ function WingaBusinessInfoContent() {
                         <Input
                           id="companyName"
                           type="text"
-                          value={formData.companyName}
+                          value={formData.companyName ?? ''}
                           onChange={(e) => setFormData(prev => ({ ...prev, companyName: e.target.value }))}
                           placeholder="Enter your business or trading name"
                           className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
@@ -448,7 +449,7 @@ function WingaBusinessInfoContent() {
                         <Input
                           id="location"
                           type="text"
-                          value={formData.location}
+                          value={formData.location ?? ''}
                           onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
                           placeholder="Enter your operating location"
                           className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
@@ -468,7 +469,7 @@ function WingaBusinessInfoContent() {
                         <Input
                           id="officeNumber"
                           type="tel"
-                          value={formData.officeNumber}
+                          value={formData.officeNumber ?? ''}
                           onChange={(e) => setFormData(prev => ({ ...prev, officeNumber: e.target.value }))}
                           placeholder="Enter your business phone number"
                           className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
@@ -489,7 +490,7 @@ function WingaBusinessInfoContent() {
                         <Input
                           id="fullLegalName"
                           type="text"
-                          value={formData.fullLegalName}
+                          value={formData.fullLegalName ?? ''}
                           onChange={(e) => setFormData(prev => ({ ...prev, fullLegalName: e.target.value }))}
                           placeholder="Enter your full legal name"
                           className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
@@ -510,7 +511,7 @@ function WingaBusinessInfoContent() {
                         <Input
                           id="tinOrNida"
                           type="text"
-                          value={formData.tinOrNida}
+                          value={formData.tinOrNida ?? ''}
                           onChange={(e) => setFormData(prev => ({ ...prev, tinOrNida: e.target.value }))}
                           placeholder="Enter your NIDA number"
                           className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
@@ -668,7 +669,7 @@ function WingaBusinessInfoContent() {
                         <Input
                           id="region"
                           type="text"
-                          value={formData.region}
+                          value={formData.region ?? ''}
                           onChange={(e) => setFormData(prev => ({ ...prev, region: e.target.value }))}
                           placeholder="Enter your region"
                           className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
@@ -689,7 +690,7 @@ function WingaBusinessInfoContent() {
                         <Input
                           id="nation"
                           type="text"
-                          value={formData.nation}
+                          value={formData.nation ?? 'Tanzania'}
                           disabled
                           className={cn("pl-9 sm:pl-10 text-sm bg-gray-100 dark:bg-gray-800", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
                           required

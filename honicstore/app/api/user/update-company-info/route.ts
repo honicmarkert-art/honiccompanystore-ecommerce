@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
       registrationType,
       businessRegistrationNumber, 
       tinOrNida, 
+      fullLegalName,
       region, 
       nation, 
       detailSentence,
@@ -172,9 +173,24 @@ export async function POST(request: NextRequest) {
       updateData.business_registration_number = businessRegistrationNumber.trim()
     }
 
+    // Add registration type if provided (map form values to database values)
+    if (registrationType && registrationType.trim()) {
+      const registrationTypeMap: Record<string, string> = {
+        'business': 'business_registration',
+        'company': 'company_registration',
+        'tin': 'tin'
+      }
+      updateData.registration_type = registrationTypeMap[registrationType.trim()] || registrationType.trim()
+    }
+
     // Add TIN/NIDA if provided
     if (tinOrNida && tinOrNida.trim()) {
       updateData.tin_or_nida = tinOrNida.trim()
+    }
+
+    // Add full legal name (NIDA name) if provided
+    if (fullLegalName && fullLegalName.trim()) {
+      updateData.full_legal_name = fullLegalName.trim()
     }
 
     // Add region (required for all users - already validated above)

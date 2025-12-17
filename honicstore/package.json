@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build",
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start"
@@ -83,6 +83,7 @@
     "@types/nodemailer": "^7.0.4",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "cross-env": "^10.1.0",
     "eslint": "^9.34.0",
     "eslint-config-next": "15.5.0",
     "postcss": "^8.5",

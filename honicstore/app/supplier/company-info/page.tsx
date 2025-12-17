@@ -5,7 +5,7 @@ import { useTheme } from '@/hooks/use-theme'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Building2, MapPin, Phone, Save, ArrowRight, FileText, AlertTriangle, Upload, Image as ImageIcon } from 'lucide-react'
+import { Building2, MapPin, Phone, Save, ArrowRight, FileText, AlertTriangle, Upload, Image as ImageIcon, FileCheck, IdCard } from 'lucide-react'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -62,6 +62,7 @@ function CompanyInfoPageContent() {
     companyName: '',
     location: '',
     officeNumber: '',
+    registrationType: '',
     businessRegistrationNumber: '',
     region: '',
     nation: 'Tanzania',
@@ -69,6 +70,10 @@ function CompanyInfoPageContent() {
   })
   const [companyLogo, setCompanyLogo] = useState<string | null>(null)
   const [isUploadingLogo, setIsUploadingLogo] = useState(false)
+  const [currentPlan, setCurrentPlan] = useState<{ slug: string } | null>(null)
+  const [businessTinCertificate, setBusinessTinCertificate] = useState<string | null>(null)
+  const [companyCertificate, setCompanyCertificate] = useState<string | null>(null)
+  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null)
 
   const hasLoadedRef = useRef(false)
   useEffect(() => {
@@ -101,19 +106,48 @@ function CompanyInfoPageContent() {
         if (response.ok) {
           const data = await response.json()
           if (data.profile) {
+            // Map database registration_type values back to form values
+            const registrationTypeMap: Record<string, string> = {
+              'business_registration': 'business',
+              'company_registration': 'company',
+              'tin': 'tin'
+            }
+            const formRegistrationType = data.profile.registration_type 
+              ? (registrationTypeMap[data.profile.registration_type] || data.profile.registration_type)
+              : ''
+
             setFormData({
               companyName: data.profile.company_name || '',
               location: data.profile.location || '',
               officeNumber: data.profile.office_number || '',
+              registrationType: formRegistrationType,
               businessRegistrationNumber: data.profile.business_registration_number || '',
               region: data.profile.region || '',
               nation: data.profile.nation || 'Tanzania',
               detailSentence: data.profile.detail_sentence || ''
             })
             setCompanyLogo(data.profile.company_logo || null)
+            setBusinessTinCertificate(data.profile.business_tin_certificate_url || null)
+            setCompanyCertificate(data.profile.company_certificate_url || null)
             // Set account active status
             setIsActive(data.profile.is_active !== false) // Default to true if null
           }
+        }
+
+        // Fetch current plan to determine if user is on free/premium plan
+        const planResponse = await fetch('/api/user/current-plan', {
+          credentials: 'include'
+        })
+        if (planResponse.ok) {
+          const planData = await planResponse.json()
+          if (planData.success && planData.plan) {
+            setCurrentPlan(planData.plan)
+            console.log('Current plan loaded:', planData.plan.slug)
+          } else {
+            console.log('No plan found or plan data missing')
+          }
+        } else {
+          console.log('Failed to fetch plan:', planResponse.status)
         }
       } catch (error) {
         console.error('Error loading profile:', error)
@@ -136,7 +170,12 @@ function CompanyInfoPageContent() {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          registrationType: formData.registrationType,
+          businessTinCertificateUrl: businessTinCertificate,
+          companyCertificateUrl: companyCertificate
+        })
       })
 
       const result = await response.json()
@@ -168,16 +207,29 @@ function CompanyInfoPageContent() {
         if (refreshResponse.ok) {
           const refreshData = await refreshResponse.json()
           if (refreshData.profile) {
+            // Map database registration_type values back to form values
+            const registrationTypeMap: Record<string, string> = {
+              'business_registration': 'business',
+              'company_registration': 'company',
+              'tin': 'tin'
+            }
+            const formRegistrationType = refreshData.profile.registration_type 
+              ? (registrationTypeMap[refreshData.profile.registration_type] || refreshData.profile.registration_type)
+              : ''
+
             setFormData({
               companyName: refreshData.profile.company_name || '',
               location: refreshData.profile.location || '',
               officeNumber: refreshData.profile.office_number || '',
+              registrationType: formRegistrationType,
               businessRegistrationNumber: refreshData.profile.business_registration_number || '',
               region: refreshData.profile.region || '',
               nation: refreshData.profile.nation || 'Tanzania',
               detailSentence: refreshData.profile.detail_sentence || ''
             })
             setCompanyLogo(refreshData.profile.company_logo || null)
+            setBusinessTinCertificate(refreshData.profile.business_tin_certificate_url || null)
+            setCompanyCertificate(refreshData.profile.company_certificate_url || null)
             // Update isActive status after submission (will be false after submission)
             setIsActive(refreshData.profile.is_active !== false)
             // Trigger a custom event to refresh company name in layout
@@ -268,6 +320,83 @@ function CompanyInfoPageContent() {
       event.target.value = ''
     }
   }
+
+  const handleDocumentUpload = async (event: React.ChangeEvent<HTMLInputElement>, documentType: 'business_tin_certificate' | 'company_certificate') => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    // Check file type - allow images and PDFs
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'application/pdf']
+    if (!allowedTypes.includes(file.type)) {
+      toast({
+        title: "Error",
+        description: "Please upload a valid image file (PNG, JPG, GIF, WebP) or PDF",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Check file size (max 10MB for documents)
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "Error",
+        description: "File size must be less than 10MB",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setUploadingDocument(documentType)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('documentType', documentType)
+
+      const response = await fetch('/api/supplier/document-upload', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+      })
+
+      const result = await response.json()
+
+      if (response.ok && result.success) {
+        if (documentType === 'business_tin_certificate') {
+          setBusinessTinCertificate(result.url)
+        } else if (documentType === 'company_certificate') {
+          setCompanyCertificate(result.url)
+        }
+        toast({
+          title: "Success",
+          description: "Certificate uploaded successfully",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: result.error || "Failed to upload certificate",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An error occurred while uploading the certificate",
+        variant: "destructive",
+      })
+    } finally {
+      setUploadingDocument(null)
+      // Reset file input
+      event.target.value = ''
+    }
+  }
+
+  // Determine if user is on Winga plan (only if plan is loaded and slug is 'winga')
+  const isWingaPlan = currentPlan !== null && currentPlan.slug === 'winga'
+  // Show certification sections for non-Winga plans (free, premium, etc.)
+  // Always show if plan hasn't loaded yet (assume non-Winga)
+  // For now, show for all users when registration type is selected (can be restricted later if needed)
+  const showCertificationSection = !isWingaPlan || currentPlan === null
 
   // Only show loading on initial load, not during form submission
   // Add timeout to prevent infinite loading
@@ -386,6 +515,58 @@ function CompanyInfoPageContent() {
               <Card className={cn("border-2", themeClasses.cardBorder, themeClasses.cardBg)}>
                 <CardContent className="p-4 sm:p-6">
                   <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+                    {/* Company Logo Upload - At the top */}
+                    <div>
+                      <Label htmlFor="companyLogo" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
+                        Company Logo
+                      </Label>
+                      <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
+                        Upload your company logo. This will be displayed on your product detail pages.
+                      </p>
+                      <div className="flex items-center gap-4 mt-2">
+                        <div className="relative">
+                          {companyLogo ? (
+                            <Image
+                              src={companyLogo}
+                              alt="Company Logo"
+                              width={64}
+                              height={64}
+                              className={cn("w-16 h-16 object-contain border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                            />
+                          ) : (
+                            <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                              <ImageIcon className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            id="companyLogo"
+                            accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
+                            onChange={handleLogoUpload}
+                            className="hidden"
+                            disabled={isUploadingLogo}
+                          />
+                          <Label
+                            htmlFor="companyLogo"
+                            className={cn(
+                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                              themeClasses.cardBorder,
+                              themeClasses.cardBg,
+                              isUploadingLogo && "opacity-50 cursor-not-allowed"
+                            )}
+                          >
+                            <Upload className="h-4 w-4" />
+                            <span>{isUploadingLogo ? "Uploading..." : companyLogo ? "Change Logo" : "Upload Logo"}</span>
+                          </Label>
+                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                            Supports PNG, JPG, GIF, WebP, SVG (max 5MB)
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                     <div>
                       <Label htmlFor="companyName" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
                         Company / Business Name *
@@ -444,20 +625,48 @@ function CompanyInfoPageContent() {
                     </div>
 
                     <div>
-                      <Label htmlFor="businessRegistrationNumber" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        Business / Company Registration Number *
+                      <Label className={cn("text-sm sm:text-base", themeClasses.mainText)}>
+                        Business / Company / TIN Registration Type & Number *
                       </Label>
-                      <div className="relative mt-1">
-                        <FileText className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5", themeClasses.textNeutralSecondary)} />
-                        <Input
-                          id="businessRegistrationNumber"
-                          type="text"
-                          value={formData.businessRegistrationNumber}
-                          onChange={(e) => setFormData(prev => ({ ...prev, businessRegistrationNumber: e.target.value }))}
-                          placeholder="Enter your business registration number"
-                          className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
-                          required
-                        />
+                      <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
+                        Select the type of registration and enter your registration number
+                      </p>
+                      <div className="grid grid-cols-2 gap-3 mt-1">
+                        <div className="relative">
+                          <FileText className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 z-10 pointer-events-none", themeClasses.textNeutralSecondary)} />
+                          <Select
+                            value={formData.registrationType}
+                            onValueChange={(value) => {
+                              console.log('Registration type selected:', value)
+                              setFormData(prev => ({ ...prev, registrationType: value }))
+                            }}
+                            required
+                          >
+                            <SelectTrigger 
+                              className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
+                            >
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="business">Business</SelectItem>
+                              <SelectItem value="company">Company</SelectItem>
+                              <SelectItem value="tin">TIN</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="relative">
+                          <FileText className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5", themeClasses.textNeutralSecondary)} />
+                          <Input
+                            id="businessRegistrationNumber"
+                            type="text"
+                            value={formData.businessRegistrationNumber ?? ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, businessRegistrationNumber: e.target.value }))}
+                            placeholder="Enter registration number"
+                            className={cn("pl-9 sm:pl-10 text-sm", themeClasses.cardBg, themeClasses.borderNeutralSecondary)}
+                            required
+                            disabled={!formData.registrationType}
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -536,57 +745,166 @@ function CompanyInfoPageContent() {
                       </p>
                     </div>
 
-                    {/* Company Logo Upload */}
-                    <div>
-                      <Label htmlFor="companyLogo" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        Company Logo
-                      </Label>
-                      <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
-                        Upload your company logo. This will be displayed on your product detail pages.
-                      </p>
-                      <div className="flex items-center gap-4 mt-2">
-                        <div className="relative">
-                          {companyLogo ? (
-                            <Image
-                              src={companyLogo}
-                              alt="Company Logo"
-                              width={64}
-                              height={64}
-                              className={cn("w-16 h-16 object-contain border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
-                            />
-                          ) : (
-                            <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
-                              <ImageIcon className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <input
-                            type="file"
-                            id="companyLogo"
-                            accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
-                            onChange={handleLogoUpload}
-                            className="hidden"
-                            disabled={isUploadingLogo}
-                          />
-                          <Label
-                            htmlFor="companyLogo"
-                            className={cn(
-                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
-                              themeClasses.cardBorder,
-                              themeClasses.cardBg,
-                              isUploadingLogo && "opacity-50 cursor-not-allowed"
+                    {/* Certification Documents for Free and Premium Plans */}
+                    {/* Show section when registration type is selected */}
+                    {formData.registrationType ? (
+                          <>
+                            {/* Debug info - remove in production */}
+                            {process.env.NODE_ENV === 'development' && (
+                              <div className="text-xs text-gray-500 mb-2">
+                                Debug: registrationType={formData.registrationType}, showCertificationSection={showCertificationSection ? 'true' : 'false'}, isWingaPlan={isWingaPlan ? 'true' : 'false'}, currentPlan={currentPlan ? currentPlan.slug : 'null'}
+                              </div>
                             )}
-                          >
-                            <Upload className="h-4 w-4" />
-                            <span>{isUploadingLogo ? "Uploading..." : companyLogo ? "Change Logo" : "Upload Logo"}</span>
-                          </Label>
-                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
-                            Supports PNG, JPG, GIF, WebP, SVG (max 5MB)
-                          </p>
-                        </div>
+                            {/* Business TIN Certificate Upload - Show for Business or TIN registration type */}
+                            {(formData.registrationType === 'business' || formData.registrationType === 'tin') && (
+                              <div>
+                                <Label htmlFor="businessTinCertificate" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
+                                  Business TIN Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                                </Label>
+                                <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
+                                  Upload a clear photo or scan of your Business TIN Certificate. This is required for account verification.
+                                </p>
+                                <div className="flex items-center gap-4 mt-2">
+                                  <div className="relative">
+                                    {businessTinCertificate ? (
+                                      <div className="relative">
+                                        {businessTinCertificate.includes('.pdf') || businessTinCertificate.toLowerCase().includes('application/pdf') ? (
+                                          <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                            <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                          </div>
+                                        ) : (
+                                          <img
+                                            src={businessTinCertificate}
+                                            alt="Business TIN Certificate"
+                                            className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                                          />
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                        <FileCheck className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex-1">
+                                    <input
+                                      type="file"
+                                      id="businessTinCertificate"
+                                      accept=".png,.jpg,.jpeg,.gif,.webp,.pdf"
+                                      onChange={(e) => handleDocumentUpload(e, 'business_tin_certificate')}
+                                      className="hidden"
+                                      disabled={uploadingDocument === 'business_tin_certificate'}
+                                    />
+                                    <Label
+                                      htmlFor="businessTinCertificate"
+                                      className={cn(
+                                        "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                                        themeClasses.cardBorder,
+                                        themeClasses.cardBg,
+                                        uploadingDocument === 'business_tin_certificate' && "opacity-50 cursor-not-allowed"
+                                      )}
+                                    >
+                                      <Upload className="h-4 w-4" />
+                                      <span>{uploadingDocument === 'business_tin_certificate' ? "Uploading..." : businessTinCertificate ? "Change Certificate" : "Upload TIN Certificate"}</span>
+                                    </Label>
+                                    <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                                      PNG, JPG, PDF (max 10MB) - Required for verification
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Company Certificate Upload - Show for Company registration type */}
+                            {formData.registrationType === 'company' && (
+                              <div>
+                                <Label htmlFor="companyCertificate" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
+                                  Company Registration Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                                </Label>
+                                <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
+                                  Upload a clear photo or scan of your Company Registration Certificate. This is required for account verification.
+                                </p>
+                                <div className="flex items-center gap-4 mt-2">
+                                  <div className="relative">
+                                    {companyCertificate ? (
+                                      <div className="relative">
+                                        {companyCertificate.includes('.pdf') || companyCertificate.toLowerCase().includes('application/pdf') ? (
+                                          <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                            <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                          </div>
+                                        ) : (
+                                          <img
+                                            src={companyCertificate}
+                                            alt="Company Certificate"
+                                            className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                                          />
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                        <FileCheck className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex-1">
+                                    <input
+                                      type="file"
+                                      id="companyCertificate"
+                                      accept=".png,.jpg,.jpeg,.gif,.webp,.pdf"
+                                      onChange={(e) => handleDocumentUpload(e, 'company_certificate')}
+                                      className="hidden"
+                                      disabled={uploadingDocument === 'company_certificate'}
+                                    />
+                                    <Label
+                                      htmlFor="companyCertificate"
+                                      className={cn(
+                                        "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                                        themeClasses.cardBorder,
+                                        themeClasses.cardBg,
+                                        uploadingDocument === 'company_certificate' && "opacity-50 cursor-not-allowed"
+                                      )}
+                                    >
+                                      <Upload className="h-4 w-4" />
+                                      <span>{uploadingDocument === 'company_certificate' ? "Uploading..." : companyCertificate ? "Change Certificate" : "Upload Company Certificate"}</span>
+                                    </Label>
+                                    <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                                      PNG, JPG, PDF (max 10MB) - Required for verification
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Certification Declaration */}
+                            {showCertificationSection && (
+                              <div className={cn("p-4 rounded-lg border-2", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                <div className="space-y-2">
+                                  <Label className={cn("text-sm font-semibold", themeClasses.mainText)}>
+                                    Certification Declaration <span className="text-red-500">*</span>
+                                  </Label>
+                                  <p className={cn("text-xs leading-relaxed", themeClasses.textNeutralSecondary)}>
+                                    By submitting this form, I hereby declare that:
+                                  </p>
+                                  <ul className={cn("text-xs mt-2 ml-4 space-y-1 list-disc", themeClasses.textNeutralSecondary)}>
+                                    <li>The business registration certificate provided is authentic and valid</li>
+                                    <li>All business information provided is accurate and up-to-date</li>
+                                    <li>I understand that providing false or misleading information will result in account suspension or termination</li>
+                                    <li>I agree to comply with all applicable laws and regulations regarding business registration</li>
+                                    <li>I understand that this information will be used for verification purposes and to build trust with customers</li>
+                                    <li>The uploaded certificate documents are true copies of the original documents</li>
+                                  </ul>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                    ) : showCertificationSection ? (
+                      <div className={cn("p-4 rounded-lg border-2 border-yellow-500/50 bg-yellow-50 dark:bg-yellow-900/20", themeClasses.cardBorder)}>
+                        <p className={cn("text-sm", themeClasses.mainText)}>
+                          <AlertTriangle className="inline w-4 h-4 mr-2 text-yellow-600 dark:text-yellow-400" />
+                          Please select a registration type above to see the required certificate upload section.
+                        </p>
                       </div>
-                    </div>
+                    ) : null}
 
                     {/* Warning Message - Only show when account is inactive */}
                     {isActive === false && (

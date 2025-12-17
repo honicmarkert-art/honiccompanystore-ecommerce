@@ -151,15 +151,15 @@ export default function SupplierPlansPage() {
   const handleEdit = (plan: SupplierPlan) => {
     setEditingPlan(plan)
     setFormData({
-      name: plan.name,
-      slug: plan.slug,
+      name: plan.name || '',
+      slug: plan.slug || '',
       description: plan.description || '',
-      price: plan.price,
-      currency: plan.currency,
-      is_active: plan.is_active,
-      max_products: plan.max_products,
-      commission_rate: plan.commission_rate,
-      display_order: plan.display_order
+      price: plan.price ?? 0,
+      currency: plan.currency || 'TZS',
+      is_active: plan.is_active ?? true,
+      max_products: plan.max_products ?? null,
+      commission_rate: plan.commission_rate ?? null,
+      display_order: plan.display_order ?? 0
     })
     setIsEditDialogOpen(true)
   }
@@ -215,24 +215,42 @@ export default function SupplierPlansPage() {
       
       const method = editingPlan ? 'PUT' : 'POST'
 
+      // Ensure all values are properly formatted before sending
+      const payload = {
+        name: formData.name?.trim() || '',
+        slug: formData.slug?.trim() || '',
+        description: formData.description?.trim() || null,
+        price: Number(formData.price) || 0,
+        currency: formData.currency?.trim() || 'TZS',
+        is_active: Boolean(formData.is_active),
+        max_products: formData.max_products === '' || formData.max_products === null || formData.max_products === undefined 
+          ? null 
+          : Number(formData.max_products),
+        commission_rate: formData.commission_rate === '' || formData.commission_rate === null || formData.commission_rate === undefined
+          ? null 
+          : Number(formData.commission_rate),
+        display_order: Number(formData.display_order) || 0
+      }
+
       const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json'
         },
         credentials: 'include',
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       })
 
       if (response.ok) {
+        const result = await response.json()
         toast({
           title: "Success",
           description: editingPlan ? "Plan updated successfully" : "Plan created successfully"
         })
+        // Close dialogs and reset form
         setIsAddDialogOpen(false)
         setIsEditDialogOpen(false)
         setEditingPlan(null)
-        fetchPlans()
         setFormData({
           name: '',
           slug: '',
@@ -244,6 +262,8 @@ export default function SupplierPlansPage() {
           commission_rate: null,
           display_order: 0
         })
+        // Refresh plans list to show updated data
+        await fetchPlans()
       } else {
         const data = await response.json()
         toast({
@@ -420,9 +440,9 @@ export default function SupplierPlansPage() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={isAddDialogOpen || isEditDialogOpen} onOpenChange={(open) => {
-        setIsAddDialogOpen(open)
-        setIsEditDialogOpen(open)
-        if (!open) {
+        if (!open && !isSubmitting) {
+          setIsAddDialogOpen(false)
+          setIsEditDialogOpen(false)
           setEditingPlan(null)
           setFormData({
             name: '',
@@ -450,7 +470,7 @@ export default function SupplierPlansPage() {
                 <Label htmlFor="name">Plan Name *</Label>
                 <Input
                   id="name"
-                  value={formData.name}
+                  value={formData.name ?? ''}
                   onChange={(e) => handleNameChange(e.target.value)}
                   placeholder="e.g., Premium Plan"
                   required
@@ -460,7 +480,7 @@ export default function SupplierPlansPage() {
                 <Label htmlFor="slug">Slug *</Label>
                 <Input
                   id="slug"
-                  value={formData.slug}
+                  value={formData.slug ?? ''}
                   onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
                   placeholder="e.g., premium-plan"
                   required
@@ -473,7 +493,7 @@ export default function SupplierPlansPage() {
               <Label htmlFor="description">Description</Label>
               <Textarea
                 id="description"
-                value={formData.description}
+                value={formData.description ?? ''}
                 onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                 placeholder="Plan description..."
                 rows={3}
@@ -488,7 +508,7 @@ export default function SupplierPlansPage() {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={formData.price}
+                  value={formData.price ?? 0}
                   onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
                   required
                 />
@@ -497,7 +517,7 @@ export default function SupplierPlansPage() {
                 <Label htmlFor="currency">Currency *</Label>
                 <Input
                   id="currency"
-                  value={formData.currency}
+                  value={formData.currency ?? 'TZS'}
                   onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
                   placeholder="TZS"
                   required
@@ -511,10 +531,10 @@ export default function SupplierPlansPage() {
                 <Input
                   id="max_products"
                   type="number"
-                  value={formData.max_products === null ? '' : formData.max_products}
+                  value={formData.max_products === null || formData.max_products === undefined ? '' : formData.max_products}
                   onChange={(e) => setFormData(prev => ({ 
                     ...prev, 
-                    max_products: e.target.value === '' ? null : parseInt(e.target.value) 
+                    max_products: e.target.value === '' ? null : parseInt(e.target.value) || null
                   }))}
                   placeholder="Leave empty for no limit"
                 />
@@ -527,10 +547,10 @@ export default function SupplierPlansPage() {
                   min="0"
                   max="100"
                   step="0.1"
-                  value={formData.commission_rate === null ? '' : formData.commission_rate}
+                  value={formData.commission_rate === null || formData.commission_rate === undefined ? '' : formData.commission_rate}
                   onChange={(e) => setFormData(prev => ({ 
                     ...prev, 
-                    commission_rate: e.target.value === '' ? null : parseFloat(e.target.value) 
+                    commission_rate: e.target.value === '' ? null : parseFloat(e.target.value) || null
                   }))}
                   placeholder="e.g., 5"
                 />
@@ -542,7 +562,7 @@ export default function SupplierPlansPage() {
               <Input
                 id="display_order"
                 type="number"
-                value={formData.display_order}
+                value={formData.display_order ?? 0}
                 onChange={(e) => setFormData(prev => ({ ...prev, display_order: parseInt(e.target.value) || 0 }))}
               />
             </div>

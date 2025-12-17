@@ -67,16 +67,15 @@ export async function getServerSideProducts(limit = 20, offset = 0): Promise<Pro
         free_delivery,
         same_day_delivery,
         specifications,
-        variants,
         variant_images,
         variant_config,
         sku,
         model,
         views,
         video,
-        view_360
+        view360
       `)
-      .eq('is_active', true)
+      .eq('is_hidden', false)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
@@ -108,7 +107,7 @@ export async function getServerSideProducts(limit = 20, offset = 0): Promise<Pro
       model: product.model,
       views: product.views || 0,
       video: product.video,
-      view360: product.view_360
+      view360: product.view360
     })) || []
   } catch (error) {
     console.error('Error in getServerSideProducts:', error)
@@ -156,17 +155,16 @@ export async function getServerSideProductById(id: number): Promise<Product | nu
         free_delivery,
         same_day_delivery,
         specifications,
-        variants,
         variant_images,
         variant_config,
         sku,
         model,
         views,
         video,
-        view_360
+        view360
       `)
       .eq('id', id)
-      .eq('is_active', true)
+      .eq('is_hidden', false)
       .single()
 
     if (error) {
@@ -199,7 +197,7 @@ export async function getServerSideProductById(id: number): Promise<Product | nu
       model: data.model,
       views: data.views || 0,
       video: data.video,
-      view360: data.view_360
+      view360: data.view360
     }
   } catch (error) {
     console.error('Error in getServerSideProductById:', error)

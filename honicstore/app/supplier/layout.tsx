@@ -46,7 +46,7 @@ import { useLanguage } from "@/contexts/language-context"
 import { useCompanyContext } from "@/components/company-provider"
 import { SupplierRouteGuard } from "@/components/supplier-route-guard"
 import { SupplierNotificationCenter } from "@/components/supplier-notification-center"
-import { Building2 as Building2Icon, MapPin, Phone, Save, FileText, AlertTriangle, Bell, Languages, User, IdCard, Camera, Upload, Image as ImageIcon, Lightbulb } from "lucide-react"
+import { Building2 as Building2Icon, MapPin, Phone, Save, FileText, AlertTriangle, Bell, Languages, User, IdCard, Camera, Upload, Image as ImageIcon, Lightbulb, FileCheck } from "lucide-react"
 import { useIntlTranslation, useIntlTranslationNamespace } from "@/hooks/use-intl-translation"
 
 // All Tanzania regions
@@ -126,6 +126,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     companyName: '',
     location: '',
     officeNumber: '',
+    registrationType: '',
     businessRegistrationNumber: '',
     tinOrNida: '',
     fullLegalName: '',
@@ -134,6 +135,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   })
   const [nidaCardPhoto, setNidaCardPhoto] = useState<string | null>(null)
   const [selfFacePhoto, setSelfFacePhoto] = useState<string | null>(null)
+  const [businessTinCertificate, setBusinessTinCertificate] = useState<string | null>(null)
+  const [companyCertificate, setCompanyCertificate] = useState<string | null>(null)
   const [uploadingDocument, setUploadingDocument] = useState<string | null>(null)
   const [isSubmittingCompanyInfo, setIsSubmittingCompanyInfo] = useState(false)
   const [nidaDeclarationAccepted, setNidaDeclarationAccepted] = useState(false)
@@ -257,7 +260,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         
         const { data: profile, error } = await supabaseClient
           .from('profiles')
-          .select('is_active, company_name, company_logo, location, office_number, business_registration_number, tin_or_nida, region, nation')
+          .select('is_active, company_name, company_logo, location, office_number, registration_type, business_registration_number, tin_or_nida, region, nation, business_tin_certificate_url, company_certificate_url')
           .eq('id', user.id)
           .single()
 
@@ -285,21 +288,34 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 profile.company_name && 
                 profile.location && 
                 profile.office_number &&
+                profile.registration_type &&
                 profile.business_registration_number &&
                 profile.region &&
                 profile.company_name.trim() !== '' &&
                 profile.location.trim() !== '' &&
                 profile.office_number.trim() !== '' &&
+                profile.registration_type.trim() !== '' &&
                 profile.business_registration_number.trim() !== '' &&
                 profile.region.trim() !== ''
               )
           setCompanyInfoComplete(isComplete)
+          
+          // Map database registration_type values back to form values
+          const registrationTypeMap: Record<string, string> = {
+            'business_registration': 'business',
+            'company_registration': 'company',
+            'tin': 'tin'
+          }
+          const formRegistrationType = profile.registration_type 
+            ? (registrationTypeMap[profile.registration_type] || profile.registration_type)
+            : ''
           
           // Set form data
           setCompanyInfoForm({
             companyName: profile.company_name || '',
             location: profile.location || '',
             officeNumber: profile.office_number || '',
+            registrationType: formRegistrationType,
             businessRegistrationNumber: profile.business_registration_number || '',
             tinOrNida: profile.tin_or_nida || '',
             fullLegalName: profile.full_legal_name || '',
@@ -312,10 +328,19 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           if (profile.self_face_photo_url) {
             setSelfFacePhoto(profile.self_face_photo_url)
           }
+          if (profile.business_tin_certificate_url) {
+            setBusinessTinCertificate(profile.business_tin_certificate_url)
+          }
+          if (profile.company_certificate_url) {
+            setCompanyCertificate(profile.company_certificate_url)
+          }
           
           // Auto-accept declarations if user already has submitted info
           if (profile.company_name || profile.business_registration_number || profile.tin_or_nida) {
             setNidaDeclarationAccepted(true)
+            setCertificationDeclarationAccepted(true)
+          }
+          if (profile.business_tin_certificate_url || profile.company_certificate_url) {
             setCertificationDeclarationAccepted(true)
           }
         } else {
@@ -423,18 +448,75 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     }
   }, [user?.id, isAuthenticated]) // Only depend on user.id
 
+  const handleDocumentUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'business_tin_certificate' | 'company_certificate') => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'application/pdf']
+    if (!allowedTypes.includes(file.type)) {
+      toast({ title: "Error", description: "Please upload a valid image or PDF file.", variant: "destructive" })
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit
+      toast({ title: "Error", description: "File size must be less than 10MB", variant: "destructive" })
+      return
+    }
+
+    setUploadingDocument(type)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('documentType', type)
+
+      const response = await fetch('/api/supplier/document-upload', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+      })
+      const result = await response.json()
+
+      if (response.ok && result.success) {
+        if (type === 'business_tin_certificate') setBusinessTinCertificate(result.url)
+        if (type === 'company_certificate') setCompanyCertificate(result.url)
+        toast({ title: "Success", description: `${type.replace(/_/g, ' ')} uploaded successfully.` })
+      } else {
+        toast({ title: "Error", description: result.error || `Failed to upload ${type.replace(/_/g, ' ')}.`, variant: "destructive" })
+      }
+    } catch (error) {
+      toast({ title: "Error", description: `An error occurred while uploading ${type.replace(/_/g, ' ')}.`, variant: "destructive" })
+    } finally {
+      setUploadingDocument(null)
+      event.target.value = ''
+    }
+  }
+
   const handleCompanyInfoSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmittingCompanyInfo(true)
 
     try {
+      // Map registration type values for API
+      const registrationTypeMap: Record<string, string> = {
+        'business': 'business_registration',
+        'company': 'company_registration',
+        'tin': 'tin'
+      }
+      const mappedRegistrationType = companyInfoForm.registrationType 
+        ? (registrationTypeMap[companyInfoForm.registrationType] || companyInfoForm.registrationType)
+        : companyInfoForm.registrationType
+
       const response = await fetch('/api/user/update-company-info', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify(companyInfoForm)
+        body: JSON.stringify({
+          ...companyInfoForm,
+          registrationType: mappedRegistrationType,
+          businessTinCertificateUrl: businessTinCertificate,
+          companyCertificateUrl: companyCertificate
+        })
       })
 
       const result = await response.json()
@@ -469,7 +551,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           try {
             const { data: profile, error } = await supabaseClient
               .from('profiles')
-              .select('is_active, company_name, company_logo, location, office_number, business_registration_number, tin_or_nida, full_legal_name, nida_card_photo_url, self_face_photo_url, region, nation')
+              .select('is_active, company_name, company_logo, location, office_number, registration_type, business_registration_number, tin_or_nida, full_legal_name, nida_card_photo_url, self_face_photo_url, region, nation, business_tin_certificate_url, company_certificate_url')
               .eq('id', user.id)
               .single()
 
@@ -478,11 +560,22 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             setUserCompanyName(profile.company_name || null)
             setUserCompanyLogo(profile.company_logo || null)
             
+            // Map database registration_type values back to form values
+            const registrationTypeMap: Record<string, string> = {
+              'business_registration': 'business',
+              'company_registration': 'company',
+              'tin': 'tin'
+            }
+            const formRegistrationType = profile.registration_type 
+              ? (registrationTypeMap[profile.registration_type] || profile.registration_type)
+              : ''
+            
             // Update form data with latest values
             setCompanyInfoForm({
               companyName: profile.company_name || '',
               location: profile.location || '',
               officeNumber: profile.office_number || '',
+              registrationType: formRegistrationType,
               businessRegistrationNumber: profile.business_registration_number || '',
               tinOrNida: profile.tin_or_nida || '',
               fullLegalName: profile.full_legal_name || '',
@@ -494,6 +587,12 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             }
             if (profile.self_face_photo_url) {
               setSelfFacePhoto(profile.self_face_photo_url)
+            }
+            if (profile.business_tin_certificate_url) {
+              setBusinessTinCertificate(profile.business_tin_certificate_url)
+            }
+            if (profile.company_certificate_url) {
+              setCompanyCertificate(profile.company_certificate_url)
             }
             
             // Auto-accept declarations if user already has submitted info
@@ -1096,19 +1195,39 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 {!isWingaPlan && (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="modal-business-registration-number" className={cn(themeClasses.mainText)}>
+                      <Label className={cn(themeClasses.mainText)}>
                         <FileText className="inline w-4 h-4 mr-2" />
-                        Business / TIN / Company Registration Number <span className="text-red-500">*</span>
+                        Business / Company /TIN Registration Number <span className="text-red-500">*</span>
                       </Label>
-                      <Input
-                        id="modal-business-registration-number"
-                        type="text"
-                        placeholder="Enter your business registration/TIN number"
-                        value={companyInfoForm.businessRegistrationNumber}
-                        onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, businessRegistrationNumber: e.target.value })}
-                        required
-                        className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
-                      />
+                      <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
+                        Select the type of registration and enter your registration number
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Select
+                          value={companyInfoForm.registrationType}
+                          onValueChange={(value) => setCompanyInfoForm({ ...companyInfoForm, registrationType: value })}
+                          required
+                        >
+                          <SelectTrigger className={cn(themeClasses.cardBorder, themeClasses.cardBg)}>
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="business">Business</SelectItem>
+                            <SelectItem value="company">Company</SelectItem>
+                            <SelectItem value="tin">TIN</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          id="modal-business-registration-number"
+                          type="text"
+                          placeholder="Enter registration number"
+                          value={companyInfoForm.businessRegistrationNumber ?? ''}
+                          onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, businessRegistrationNumber: e.target.value })}
+                          required
+                          disabled={!companyInfoForm.registrationType}
+                          className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
+                        />
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="modal-region" className={cn(themeClasses.mainText)}>
@@ -1158,6 +1277,131 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                         Nation is set to Tanzania by default. Other nations are not available at this time.
                       </p>
                     </div>
+                    
+                    {/* Certification Documents - Show when registration type is selected */}
+                    {companyInfoForm.registrationType && (
+                      <>
+                        {/* Business TIN Certificate Upload - Show for Business or TIN registration type */}
+                        {(companyInfoForm.registrationType === 'business' || companyInfoForm.registrationType === 'tin') && (
+                          <div className="space-y-2">
+                            <Label htmlFor="modal-business-tin-certificate" className={cn(themeClasses.mainText)}>
+                              Business TIN Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                            </Label>
+                            <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
+                              Upload a clear photo or scan of your Business TIN Certificate. This is required for account verification.
+                            </p>
+                            <div className="flex items-center gap-4">
+                              <div className="relative">
+                                {businessTinCertificate ? (
+                                  <div className="relative">
+                                    {businessTinCertificate.includes('.pdf') || businessTinCertificate.toLowerCase().includes('application/pdf') ? (
+                                      <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                        <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                      </div>
+                                    ) : (
+                                      <img
+                                        src={businessTinCertificate}
+                                        alt="Business TIN Certificate"
+                                        className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                                      />
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                    <FileCheck className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <input
+                                  type="file"
+                                  id="modal-business-tin-certificate"
+                                  accept=".png,.jpg,.jpeg,.gif,.webp,.pdf"
+                                  onChange={(e) => handleDocumentUpload(e, 'business_tin_certificate')}
+                                  className="hidden"
+                                  disabled={uploadingDocument === 'business_tin_certificate'}
+                                />
+                                <Label
+                                  htmlFor="modal-business-tin-certificate"
+                                  className={cn(
+                                    "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                                    themeClasses.cardBorder,
+                                    themeClasses.cardBg,
+                                    uploadingDocument === 'business_tin_certificate' && "opacity-50 cursor-not-allowed"
+                                  )}
+                                >
+                                  <Upload className="h-4 w-4" />
+                                  <span>{uploadingDocument === 'business_tin_certificate' ? "Uploading..." : businessTinCertificate ? "Change Certificate" : "Upload TIN Certificate"}</span>
+                                </Label>
+                                <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                                  PNG, JPG, PDF (max 10MB) - Required for verification
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Company Certificate Upload - Show for Company registration type */}
+                        {companyInfoForm.registrationType === 'company' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="modal-company-certificate" className={cn(themeClasses.mainText)}>
+                              Company Registration Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                            </Label>
+                            <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
+                              Upload a clear photo or scan of your Company Registration Certificate. This is required for account verification.
+                            </p>
+                            <div className="flex items-center gap-4">
+                              <div className="relative">
+                                {companyCertificate ? (
+                                  <div className="relative">
+                                    {companyCertificate.includes('.pdf') || companyCertificate.toLowerCase().includes('application/pdf') ? (
+                                      <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                        <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                      </div>
+                                    ) : (
+                                      <img
+                                        src={companyCertificate}
+                                        alt="Company Certificate"
+                                        className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                                      />
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                    <FileCheck className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <input
+                                  type="file"
+                                  id="modal-company-certificate"
+                                  accept=".png,.jpg,.jpeg,.gif,.webp,.pdf"
+                                  onChange={(e) => handleDocumentUpload(e, 'company_certificate')}
+                                  className="hidden"
+                                  disabled={uploadingDocument === 'company_certificate'}
+                                />
+                                <Label
+                                  htmlFor="modal-company-certificate"
+                                  className={cn(
+                                    "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                                    themeClasses.cardBorder,
+                                    themeClasses.cardBg,
+                                    uploadingDocument === 'company_certificate' && "opacity-50 cursor-not-allowed"
+                                  )}
+                                >
+                                  <Upload className="h-4 w-4" />
+                                  <span>{uploadingDocument === 'company_certificate' ? "Uploading..." : companyCertificate ? "Change Certificate" : "Upload Company Certificate"}</span>
+                                </Label>
+                                <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                                  PNG, JPG, PDF (max 10MB) - Required for verification
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </>
                 )}
                 {/* Winga-specific fields */}
@@ -1489,7 +1733,12 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     loadingPlan ||
                     !currentPlan ||
                     (isWingaPlan && !nidaDeclarationAccepted) ||
-                    (!isWingaPlan && !certificationDeclarationAccepted)
+                    (!isWingaPlan && (
+                      !certificationDeclarationAccepted ||
+                      (companyInfoForm.registrationType === 'business' && !businessTinCertificate) ||
+                      (companyInfoForm.registrationType === 'tin' && !businessTinCertificate) ||
+                      (companyInfoForm.registrationType === 'company' && !companyCertificate)
+                    ))
                   }
                   className="w-full bg-yellow-500 hover:bg-yellow-600 text-neutral-950 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
