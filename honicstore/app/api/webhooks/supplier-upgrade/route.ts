@@ -550,7 +550,7 @@ export async function POST(request: NextRequest) {
           .select('name, slug')
           .eq('id', profile.pending_plan_id)
           .single()
-
+        
         const planName = plan?.name || 'Premium Plan'
         
         await createNotification(
@@ -573,6 +573,38 @@ export async function POST(request: NextRequest) {
           planName: planName,
           transactionId: finalTransactionId || orderReference
         })
+
+        // Send secure, non-promotional receipt email
+        try {
+          const { data: supplierProfile } = await supabase
+            .from('profiles')
+            .select('company_name, email, payment_amount, payment_currency')
+            .eq('id', profile.id)
+            .single()
+
+          const userEmail = supplierProfile?.email
+          if (userEmail) {
+            const { sendSupplierPremiumReceiptEmail } = await import('@/lib/user-email-service')
+            await sendSupplierPremiumReceiptEmail(userEmail, {
+              companyName: supplierProfile?.company_name || userEmail,
+              planName,
+              amount: Number(supplierProfile?.payment_amount || 0),
+              currency: supplierProfile?.payment_currency || 'TZS',
+              referenceId: orderReference,
+              transactionId: finalTransactionId || undefined,
+              billingCycle: 'monthly', // current webhook doesn't carry billing cycle; safe default
+              paymentDate: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+              dashboardUrl: `${baseUrl}/supplier/dashboard`,
+            })
+          }
+        } catch (emailError) {
+          console.error('Error sending supplier premium receipt email:', emailError)
+          logger.error('Failed to send supplier premium receipt email', {
+            error: emailError instanceof Error ? emailError.message : String(emailError),
+            userId: profile.id,
+          })
+          // Do not fail webhook if email fails
+        }
       } catch (notifError) {
         console.error('Error creating payment success notification for supplier:', notifError)
         logger.error('Failed to create payment success notification', {

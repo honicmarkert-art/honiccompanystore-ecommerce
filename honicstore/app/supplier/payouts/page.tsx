@@ -342,7 +342,7 @@ export default function PayoutAccountsPage() {
       <div className="max-w-6xl mx-auto">
         {/* Warning Banner */}
         {companyInfoComplete === false && (
-          <Card className={cn("mb-6 border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20", themeClasses.cardBg)}>
+          <Card className={cn("mb-6 border-yellow-200 dark:border-yellow-800", themeClasses.cardBg, themeClasses.cardBorder)}>
             <CardContent className="pt-6">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
@@ -383,7 +383,7 @@ export default function PayoutAccountsPage() {
         </div>
 
         {/* Information Text */}
-        <div className={cn("mb-6 p-3 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800")}>
+        <div className={cn("mb-6 p-3 rounded-md border border-blue-200 dark:border-blue-800", themeClasses.cardBg)}>
           <div className="flex items-start gap-2">
             <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
             <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
@@ -512,7 +512,7 @@ export default function PayoutAccountsPage() {
             
             {/* Information Banner */}
             {!editingAccount && (
-              <div className={cn("p-3 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800")}>
+              <div className={cn("p-3 rounded-md border border-blue-200 dark:border-blue-800", themeClasses.cardBg)}>
                 <div className="flex items-start gap-2">
                   <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
                   <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>

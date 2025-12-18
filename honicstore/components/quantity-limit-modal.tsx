@@ -14,7 +14,7 @@ interface QuantityLimitModalProps {
 export function QuantityLimitModal({ isOpen, onClose, productName }: QuantityLimitModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 shadow-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
             <AlertCircle className="w-5 h-5 text-amber-500" />

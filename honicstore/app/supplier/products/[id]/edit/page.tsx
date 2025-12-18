@@ -169,6 +169,7 @@ function SupplierEditProductContent() {
             autoCloseOnSave={false}
             hideImportChina={true}
             restrictVariantType={true}
+            hideAttributesAndVariants={true}
           />
         </div>
     </>

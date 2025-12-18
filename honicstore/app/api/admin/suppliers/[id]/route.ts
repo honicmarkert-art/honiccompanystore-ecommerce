@@ -4,7 +4,7 @@ import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-// PATCH /api/admin/suppliers/[id] - Update supplier status (activate/deactivate)
+// PATCH /api/admin/suppliers/[id] - Update supplier status (activate/deactivate) or info
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -18,11 +18,11 @@ export async function PATCH(
 
     const { id } = await params
     const body = await request.json()
-    const { action } = body // 'activate', 'deactivate', or 'update'
+    const { action } = body // 'activate', 'deactivate', 'update', or 'reset_account_info'
 
-    if (!action || !['activate', 'deactivate', 'update'].includes(action)) {
+    if (!action || !['activate', 'deactivate', 'update', 'reset_account_info'].includes(action)) {
       return NextResponse.json(
-        { error: 'Invalid action. Must be "activate", "deactivate", or "update"' },
+        { error: 'Invalid action. Must be "activate", "deactivate", "update", or "reset_account_info"' },
         { status: 400 }
       )
     }
@@ -158,6 +158,67 @@ export async function PATCH(
       })
     }
 
+    // Handle full account info reset
+    if (action === 'reset_account_info') {
+      const supabase = createAdminSupabaseClient()
+
+      // Check supplier exists and is a supplier
+      const { data: supplier, error: supplierError } = await supabase
+        .from('profiles')
+        .select('id, is_supplier')
+        .eq('id', id)
+        .single()
+
+      if (supplierError || !supplier) {
+        return NextResponse.json(
+          { error: 'Supplier not found' },
+          { status: 404 }
+        )
+      }
+
+      if (!supplier.is_supplier) {
+        return NextResponse.json(
+          { error: 'User is not a supplier' },
+          { status: 400 }
+        )
+      }
+
+      // Clear business info + docs; do NOT delete account
+      const resetData = {
+        company_name: null,
+        location: null,
+        office_number: null,
+        registration_type: null,
+        business_registration_number: null,
+        region: null,
+        nation: 'Tanzania',
+        detail_sentence: null,
+        company_logo: null,
+        business_tin_certificate_url: null,
+        company_certificate_url: null,
+        // Keep supplier flag, but mark inactive until they re-submit
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      }
+
+      const { error: resetError } = await supabase
+        .from('profiles')
+        .update(resetData)
+        .eq('id', id)
+
+      if (resetError) {
+        return NextResponse.json(
+          { error: 'Failed to reset supplier account info', details: resetError.message },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Supplier account info reset successfully. Supplier will need to resubmit details.',
+      })
+    }
+
     const supabase = createAdminSupabaseClient()
 
     // Check if supplier exists
@@ -288,10 +349,10 @@ export async function DELETE(
     const { id } = await params
     const supabase = createAdminSupabaseClient()
 
-    // Check if supplier exists
+    // Check if supplier exists and get document URLs for cleanup
     const { data: supplier, error: supplierError } = await supabase
       .from('profiles')
-      .select('id, is_supplier, email')
+      .select('id, is_supplier, email, company_logo, business_tin_certificate_url, company_certificate_url, nida_card_photo_url, self_face_photo_url')
       .eq('id', id)
       .single()
 
@@ -320,13 +381,65 @@ export async function DELETE(
       // Continue with deletion even if hiding products fails
     }
 
+    // Best-effort: delete any stored documents (logo & certificates) from storage bucket
+    try {
+      const adminSupabase = createAdminSupabaseClient()
+
+      const fileUrls: string[] = []
+      if (supplier.company_logo) fileUrls.push(supplier.company_logo)
+      if (supplier.business_tin_certificate_url) fileUrls.push(supplier.business_tin_certificate_url)
+      if (supplier.company_certificate_url) fileUrls.push(supplier.company_certificate_url)
+      if (supplier.nida_card_photo_url) fileUrls.push(supplier.nida_card_photo_url)
+      if (supplier.self_face_photo_url) fileUrls.push(supplier.self_face_photo_url)
+
+      const filesToRemove: string[] = []
+
+      for (const url of fileUrls) {
+        let path: string | null = null
+
+        // Supabase public URL format: .../object/public/service-images/<path>
+        if (url.includes('service-images')) {
+          const match = url.match(/service-images\/([^?]+)/)
+          if (match && match[1]) {
+            path = match[1]
+          }
+        }
+
+        // Also support direct path style (already like supplier-logos/...)
+        if (!path && url.match(/^[^:]+\/.+/)) {
+          path = url
+        }
+
+        if (path) {
+          filesToRemove.push(path)
+        }
+      }
+
+      if (filesToRemove.length > 0) {
+        const { error: storageError } = await adminSupabase.storage
+          .from('service-images')
+          .remove(filesToRemove)
+
+        if (storageError) {
+          console.error('Error deleting supplier files from storage:', storageError)
+        }
+      }
+    } catch (storageCleanupError) {
+      console.error('Exception during supplier storage cleanup:', storageCleanupError)
+    }
+
     // Remove supplier flag and set is_active to false
-    // We don't delete the profile completely, just remove supplier status
+    // We don't delete the profile completely, just remove supplier status and clear document URLs
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ 
         is_supplier: false,
         is_active: false,
+        company_logo: null,
+        business_tin_certificate_url: null,
+        company_certificate_url: null,
+        nida_card_photo_url: null,
+        self_face_photo_url: null,
         updated_at: new Date().toISOString()
       })
       .eq('id', id)

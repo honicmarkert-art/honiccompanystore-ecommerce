@@ -172,7 +172,10 @@ function SupplierDashboardContent() {
 
       if (productsData.success) {
         const products = productsData.products || []
-        const totalProducts = products.length
+        const totalProducts =
+          (productsData.pagination && typeof productsData.pagination.total === 'number')
+            ? productsData.pagination.total
+            : products.length
         const inStockProducts = products.filter((p: any) => p.in_stock).length
         const outOfStockProducts = totalProducts - inStockProducts
         const totalRevenue = products.reduce((sum: number, p: any) => sum + (p.price || 0), 0)

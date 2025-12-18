@@ -36,16 +36,9 @@ export function AdvancedRoutePrefetcher() {
       }
     ]
 
-    if (isAuthenticated) {
-      baseRoutes.push(
-        {
-          routes: ['/profile'], // Only prefetch profile for authenticated users
-          priority: 'medium' as const,
-          condition: () => true,
-          delay: 5000 // Much longer delay for authenticated routes
-        }
-      )
-    }
+    // NOTE: We no longer prefetch a separate '/profile' route because the app
+    // uses '/account' for profile/settings. Keeping this minimal avoids 404s
+    // and unnecessary network noise.
 
     // Disable category and product detail prefetching to reduce API load
     // Only prefetch essential routes

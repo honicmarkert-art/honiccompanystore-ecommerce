@@ -845,7 +845,7 @@ export default function ConfirmedOrdersPage() {
 
       {/* Order Details Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={cn("max-w-4xl max-h-[90vh] overflow-y-auto shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
           <DialogHeader>
             <DialogTitle className={cn("flex items-center gap-2", themeClasses.mainText)}>
               <CheckCircle className="w-5 h-5" />

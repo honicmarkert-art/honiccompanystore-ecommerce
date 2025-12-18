@@ -383,7 +383,7 @@ export default function SiemCategories() {
               Add Category
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className={cn("max-w-2xl shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
             <DialogHeader>
               <DialogTitle>
                 {editingCategory ? "Edit Category" : "Add New Category"}

@@ -69,11 +69,6 @@ export function SupplierRouteGuard({ children }: SupplierRouteGuardProps) {
     
     // If on company-info page, allow access and don't run redirect logic
     if (isCompanyInfoPage) {
-      console.log('✅ SupplierRouteGuard: Allowing access to company-info page (registration flow)', {
-        pathname,
-        windowPath: typeof window !== 'undefined' ? window.location.pathname : 'none',
-        currentPath
-      })
       hasRedirected.current = false // Reset redirect flag
       return // Allow access to company-info page - don't check supplier status
     }
@@ -129,7 +124,6 @@ export function SupplierRouteGuard({ children }: SupplierRouteGuardProps) {
     // Already checked at the top, but double-check here with fallback
     const currentPathCheck = pathname || (typeof window !== 'undefined' ? window.location.pathname : '')
     if (currentPathCheck === '/supplier/company-info') {
-      console.log('✅ SupplierRouteGuard: Double-check confirmed company-info page access')
       return // Allow access to company-info page
     }
 
@@ -137,7 +131,6 @@ export function SupplierRouteGuard({ children }: SupplierRouteGuardProps) {
       // Double-check we're not on company-info page before redirecting
       const currentPathCheck = pathname === '/supplier/company-info'
       if (currentPathCheck) {
-        console.log('✅ SupplierRouteGuard: User on company-info page, skipping redirect check')
         return // Don't redirect if on company-info page
       }
       
@@ -153,10 +146,6 @@ export function SupplierRouteGuard({ children }: SupplierRouteGuardProps) {
         const isStillOnCompanyInfo = finalPathCheck === '/supplier/company-info'
         
         if (isStillOnCompanyInfo) {
-          console.log('✅ SupplierRouteGuard: Still on company-info page, aborting redirect', {
-            pathname,
-            windowPath: typeof window !== 'undefined' ? window.location.pathname : 'none'
-          })
           return // Don't redirect if still on company-info page
         }
         

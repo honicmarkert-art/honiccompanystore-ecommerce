@@ -12,6 +12,7 @@ const planUpdateSchema = z.object({
   slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens').optional(),
   description: z.string().optional(),
   price: z.number().min(0).optional(),
+  yearly_price: z.number().min(0).nullable().optional(),
   currency: z.string().optional(),
   is_active: z.boolean().optional(),
   max_products: z.number().nullable().optional(),

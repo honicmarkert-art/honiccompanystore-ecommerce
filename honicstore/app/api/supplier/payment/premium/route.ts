@@ -73,12 +73,12 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { planId, amount } = body
+    const { planId, billingCycle } = body
     const currency = 'TZS' // Always use TZS for supplier plan payments
 
-    if (!planId || !amount) {
+    if (!planId) {
       return NextResponse.json(
-        { success: false, error: 'Missing required fields: planId and amount' },
+        { success: false, error: 'Missing required field: planId' },
         { status: 400 }
       )
     }
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     // Verify plan exists and is premium/paid plan
     const { data: plan, error: planError } = await adminSupabase
       .from('supplier_plans')
-      .select('id, name, slug, price, currency')
+      .select('id, name, slug, price, currency, yearly_price')
       .eq('id', planId)
       .eq('is_active', true)
       .single()
@@ -115,13 +115,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify amount matches plan price
-    if (parseFloat(amount.toString()) !== parseFloat(plan.price.toString())) {
-      return NextResponse.json(
-        { success: false, error: 'Payment amount does not match plan price' },
-        { status: 400 }
-      )
+    // Determine expected amount based on billing cycle
+    const normalizedBillingCycle = billingCycle === 'yearly' ? 'yearly' : 'monthly'
+    const basePrice = parseFloat(plan.price.toString())
+    const yearlyPriceFromDb = (plan as any).yearly_price != null
+      ? parseFloat((plan as any).yearly_price.toString())
+      : null
+
+    if (normalizedBillingCycle === 'yearly') {
+      if (yearlyPriceFromDb == null || Number.isNaN(yearlyPriceFromDb)) {
+        return NextResponse.json(
+          { success: false, error: 'Yearly price is not configured for this plan. Please contact support.' },
+          { status: 400 }
+        )
+      }
     }
+
+    const expectedAmount =
+      normalizedBillingCycle === 'yearly'
+        ? yearlyPriceFromDb!
+        : basePrice
 
     // Generate unique reference ID for this payment
     // ClickPesa requires alphanumeric characters only (no hyphens) and max 32 characters
@@ -132,7 +145,7 @@ export async function POST(request: NextRequest) {
     // Ensure pending_plan_id is set if not already set
     const updateData: any = {
       payment_reference_id: referenceId,
-      payment_amount: amount.toString(),
+      payment_amount: expectedAmount.toString(),
       payment_currency: currency,
       payment_status: 'pending',
       payment_method: 'clickpesa',
@@ -146,10 +159,14 @@ export async function POST(request: NextRequest) {
       updateData.pending_plan_id = planId
     }
     
-    // Calculate payment expiration date for Premium plan (1 month from now)
+    // Calculate payment expiration date for Premium plan
     if (plan.slug === 'premium') {
       const expirationDate = new Date()
-      expirationDate.setMonth(expirationDate.getMonth() + 1)
+      if (normalizedBillingCycle === 'yearly') {
+        expirationDate.setFullYear(expirationDate.getFullYear() + 1)
+      } else {
+        expirationDate.setMonth(expirationDate.getMonth() + 1)
+      }
       updateData.payment_expires_at = expirationDate.toISOString()
     }
 
@@ -198,14 +215,15 @@ export async function POST(request: NextRequest) {
     logger.log('Creating ClickPesa checkout link for premium plan payment:', {
       referenceId,
       planId,
-      amount,
+      billingCycle: normalizedBillingCycle,
+      expectedAmount,
       currency,
       userId: user.id
     })
 
     // Prepare ClickPesa checkout link request
     const checkoutRequest: CheckoutLinkRequest = {
-      totalPrice: formatAmountForClickPesa(parseFloat(amount.toString())),
+      totalPrice: formatAmountForClickPesa(expectedAmount),
       orderReference: referenceId,
       orderCurrency: currency as 'TZS' | 'USD',
       customerName: profile.full_name || 'Supplier',
@@ -235,7 +253,10 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     logger.error('Error creating payment link for premium plan:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to create payment link' },
+      { 
+        success: false, 
+        error: error?.message || 'Failed to create payment link' 
+      },
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

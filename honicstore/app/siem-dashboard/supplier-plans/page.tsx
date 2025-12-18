@@ -59,6 +59,7 @@ interface SupplierPlan {
   max_products: number | null
   commission_rate: number | null
   display_order: number
+  yearly_price?: number | null
   features: PlanFeature[]
   created_at: string
   updated_at: string
@@ -82,6 +83,7 @@ export default function SupplierPlansPage() {
     slug: '',
     description: '',
     price: 0,
+    yearly_price: null as number | null,
     currency: 'TZS',
     is_active: true,
     max_products: null as number | null,
@@ -138,6 +140,7 @@ export default function SupplierPlansPage() {
       slug: '',
       description: '',
       price: 0,
+      yearly_price: null,
       currency: 'TZS',
       is_active: true,
       max_products: null,
@@ -155,6 +158,7 @@ export default function SupplierPlansPage() {
       slug: plan.slug || '',
       description: plan.description || '',
       price: plan.price ?? 0,
+      yearly_price: plan.yearly_price ?? null,
       currency: plan.currency || 'TZS',
       is_active: plan.is_active ?? true,
       max_products: plan.max_products ?? null,
@@ -221,6 +225,9 @@ export default function SupplierPlansPage() {
         slug: formData.slug?.trim() || '',
         description: formData.description?.trim() || null,
         price: Number(formData.price) || 0,
+        yearly_price: formData.yearly_price === '' || formData.yearly_price === null || formData.yearly_price === undefined
+          ? null
+          : Number(formData.yearly_price),
         currency: formData.currency?.trim() || 'TZS',
         is_active: Boolean(formData.is_active),
         max_products: formData.max_products === '' || formData.max_products === null || formData.max_products === undefined 
@@ -457,7 +464,7 @@ export default function SupplierPlansPage() {
           })
         }
       }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={cn("max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
           <DialogHeader>
             <DialogTitle>{editingPlan ? 'Edit Plan' : 'Add New Plan'}</DialogTitle>
             <DialogDescription>
@@ -514,15 +521,33 @@ export default function SupplierPlansPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="currency">Currency *</Label>
+                <Label htmlFor="yearly_price">Yearly Price (optional)</Label>
                 <Input
-                  id="currency"
-                  value={formData.currency ?? 'TZS'}
-                  onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
-                  placeholder="TZS"
-                  required
+                  id="yearly_price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.yearly_price === null || formData.yearly_price === undefined ? '' : formData.yearly_price}
+                  onChange={(e) =>
+                    setFormData(prev => ({
+                      ...prev,
+                      yearly_price: e.target.value === '' ? null : parseFloat(e.target.value) || null,
+                    }))
+                  }
+                  placeholder="Leave empty to auto-calculate from monthly price"
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="currency">Currency *</Label>
+              <Input
+                id="currency"
+                value={formData.currency ?? 'TZS'}
+                onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
+                placeholder="TZS"
+                required
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">

@@ -598,7 +598,7 @@ export default function SupplierMarketingPage() {
                 <Card key={index} className={cn("border-2 opacity-60", themeClasses.cardBorder, themeClasses.cardBg)}>
                   <CardContent className="p-4 sm:p-6">
                     <div className="flex items-start gap-3 sm:gap-4">
-                      <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900/20 rounded-lg flex-shrink-0">
+                      <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex-shrink-0">
                         <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -831,7 +831,7 @@ export default function SupplierMarketingPage() {
                 <Card key={index} className={cn("border-2", themeClasses.cardBorder, themeClasses.cardBg)}>
                   <CardContent className="p-4 sm:p-6">
                     <div className="flex items-start gap-3 sm:gap-4">
-                      <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900/20 rounded-lg flex-shrink-0">
+                      <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex-shrink-0">
                         <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -880,7 +880,7 @@ export default function SupplierMarketingPage() {
         setIsCreateDialogOpen(open)
         if (!open) resetForm()
       }}>
-        <DialogContent className={cn("sm:max-w-[600px] max-h-[90vh] overflow-y-auto", themeClasses.cardBg)}>
+        <DialogContent className={cn("sm:max-w-[600px] max-h-[90vh] overflow-y-auto shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
           <DialogHeader>
             <DialogTitle className={cn(themeClasses.mainText)}>
               {editingPromotion ? 'Edit Promotion' : 'Create Promotion'}
@@ -1099,7 +1099,7 @@ export default function SupplierMarketingPage() {
         setIsAdDialogOpen(open)
         if (!open) resetAdForm()
       }}>
-        <DialogContent className={cn("sm:max-w-[700px] max-h-[90vh] overflow-y-auto", themeClasses.cardBg)}>
+        <DialogContent className={cn("sm:max-w-[700px] max-h-[90vh] overflow-y-auto shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
           <DialogHeader>
             <DialogTitle className={cn(themeClasses.mainText)}>
               Create Advertisement

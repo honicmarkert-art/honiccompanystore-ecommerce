@@ -62,7 +62,6 @@ export function BuyerRouteGuard({ children }: BuyerRouteGuardProps) {
     // If user is a supplier, auto-redirect to dashboard immediately
     if (isSupplier && !hasRedirected.current) {
       hasRedirected.current = true
-      console.log('🔄 Auto-redirecting supplier to dashboard')
       // Use replace instead of push for faster navigation (no history entry)
       router.replace('/supplier/dashboard')
       return

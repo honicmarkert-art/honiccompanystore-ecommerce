@@ -215,6 +215,103 @@ export const Icons = {
   </svg>`,
 }
 
+// Supplier Premium Receipt Email Template
+export function getSupplierPremiumReceiptTemplate(
+  data: {
+    companyName: string
+    planName: string
+    amount: number
+    currency: string
+    referenceId: string
+    transactionId?: string
+    billingCycle: 'monthly' | 'yearly'
+    paymentDate: string
+    dashboardUrl: string
+  },
+  options: EmailTemplateOptions = {}
+): { html: string; text: string } {
+  const billingLabel = data.billingCycle === 'yearly' ? 'per year' : 'per month'
+  const amountFormatted = data.amount.toLocaleString('en-US', {
+    style: 'currency',
+    currency: data.currency || 'TZS',
+  })
+
+  const html = getBaseEmailTemplate(
+    `
+    <div class="email-content">
+      <h2 style="color: #111827; margin-bottom: 16px;">
+        ${Icons.checkCircle} Premium Plan Payment Receipt
+      </h2>
+      <p style="margin-bottom: 12px;">
+        Hi ${data.companyName || 'Supplier'},
+      </p>
+      <p style="margin-bottom: 20px;">
+        Thank you for upgrading your account. Your payment for the <strong>${data.planName}</strong> has been received and processed securely.
+      </p>
+
+      <div class="info-box">
+        <div class="info-box-title">${Icons.dollar} Payment Summary</div>
+        <div class="info-box-content">
+          <p><strong>Amount:</strong> ${amountFormatted} <span style="color: #6b7280;">(${billingLabel})</span></p>
+          <p><strong>Plan:</strong> ${data.planName}</p>
+          <p><strong>Payment Date:</strong> ${data.paymentDate}</p>
+          <p><strong>Reference ID:</strong> ${data.referenceId}</p>
+          ${
+            data.transactionId
+              ? `<p><strong>Transaction ID:</strong> ${data.transactionId}</p>`
+              : ''
+          }
+        </div>
+      </div>
+
+      <p style="margin: 20px 0 10px;">
+        You can view your premium benefits and manage your products from your supplier dashboard.
+      </p>
+
+      <a href="${data.dashboardUrl}" class="email-button" target="_blank" rel="noopener noreferrer">
+        Go to Supplier Dashboard
+      </a>
+
+      <div class="divider"></div>
+
+      <p style="font-size: 14px; color: #6b7280; margin-bottom: 6px;">
+        For your security:
+      </p>
+      <ul style="font-size: 14px; color: #6b7280; padding-left: 20px; margin-bottom: 0;">
+        <li>We will never ask you to share your password or 2FA codes by email.</li>
+        <li>If you did not authorize this payment, please contact support immediately.</li>
+      </ul>
+    </div>
+  `,
+    options
+  )
+
+  const text = `
+Premium Plan Payment Receipt
+
+Hi ${data.companyName || 'Supplier'},
+
+Thank you for upgrading your account. Your payment for the ${data.planName} has been received and processed securely.
+
+Payment Summary
+- Amount: ${amountFormatted} (${billingLabel})
+- Plan: ${data.planName}
+- Payment Date: ${data.paymentDate}
+- Reference ID: ${data.referenceId}${
+    data.transactionId ? `\n- Transaction ID: ${data.transactionId}` : ''
+  }
+
+You can view your premium benefits and manage your products from your supplier dashboard:
+${data.dashboardUrl}
+
+Security notice:
+- We will never ask you to share your password or 2FA codes by email.
+- If you did not authorize this payment, please contact support immediately.
+`.trim()
+
+  return { html, text }
+}
+
 // Order Confirmation Email Template
 export function getOrderConfirmationTemplate(order: {
   orderNumber: string

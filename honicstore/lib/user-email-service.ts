@@ -104,6 +104,60 @@ function validateEmail(email: string): boolean {
 }
 
 /**
+ * Send Supplier Premium Plan Receipt Email
+ * - Uses modern, responsive template
+ * - Rate-limited via existing mechanism
+ * - No tracking pixels, no promotional spam
+ */
+export async function sendSupplierPremiumReceiptEmail(
+  userEmail: string,
+  data: {
+    companyName: string
+    planName: string
+    amount: number
+    currency: string
+    referenceId: string
+    transactionId?: string
+    billingCycle: 'monthly' | 'yearly'
+    paymentDate: string
+    dashboardUrl: string
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!validateEmail(userEmail)) {
+      return { success: false, error: 'Invalid email address' }
+    }
+
+    // Very conservative rate limit: reuse global limit (5 emails/hour per user)
+    if (!checkRateLimit(userEmail)) {
+      logger.warn(`Rate limit exceeded for supplier premium receipt email: ${userEmail}`)
+      return { success: false, error: 'Rate limit exceeded' }
+    }
+
+    const options = await getCompanySettings()
+    const { getSupplierPremiumReceiptTemplate } = await import('./email-templates')
+    const { html, text } = getSupplierPremiumReceiptTemplate(data, options)
+
+    const result = await sendEmail({
+      to: userEmail,
+      subject: `Payment Receipt – ${data.planName}`,
+      html,
+      text,
+      from: `Billing <${getSenderEmailForFrom()}>`,
+    })
+
+    if (result.success) {
+      logger.log(`Supplier premium receipt email sent to ${userEmail} for reference ${data.referenceId}`)
+    }
+
+    return result
+  } catch (error: any) {
+    logger.error('Error sending supplier premium receipt email:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+/**
  * Send Order Placed Welcome Email (Simple Thank You)
  */
 export async function sendOrderPlacedWelcomeEmail(

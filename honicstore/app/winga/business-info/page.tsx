@@ -541,7 +541,7 @@ function WingaBusinessInfoContent() {
                       </div>
                       <div className="flex items-center gap-4 mt-2">
                         {nidaCardPhoto ? (
-                          <div className="relative">
+                          <div className="relative flex flex-col items-center gap-2">
                             <Image
                               src={nidaCardPhoto}
                               alt="NIDA Card"
@@ -549,6 +549,15 @@ function WingaBusinessInfoContent() {
                               height={64}
                               className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
                             />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="xs"
+                              className="mt-1 text-[10px] px-2 h-6"
+                              onClick={() => window.open(nidaCardPhoto, '_blank', 'noopener,noreferrer')}
+                            >
+                              Preview
+                            </Button>
                           </div>
                         ) : (
                           <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
@@ -556,40 +565,55 @@ function WingaBusinessInfoContent() {
                           </div>
                         )}
                         <div className="flex-1">
-                          <input
-                            type="file"
-                            id="nidaCardPhoto"
-                            accept=".png,.jpg,.jpeg,.gif,.webp"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0]
-                              if (file) {
-                                // Handle upload here - you can reuse the document upload logic
-                                // For now, just show a placeholder
-                                const reader = new FileReader()
-                                reader.onload = (event) => {
-                                  setNidaCardPhoto(event.target?.result as string)
+                          {!nidaCardPhoto ? (
+                            <>
+                              <input
+                                type="file"
+                                id="nidaCardPhoto"
+                                accept=".png,.jpg,.jpeg,.gif,.webp"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0]
+                                  if (file) {
+                                    const reader = new FileReader()
+                                    reader.onload = (event) => {
+                                      setNidaCardPhoto(event.target?.result as string)
+                                    }
+                                    reader.readAsDataURL(file)
+                                  }
+                                }}
+                                className="hidden"
+                                disabled={uploadingDocument === 'nida_card'}
+                              />
+                              <Label
+                                htmlFor="nidaCardPhoto"
+                                className={cn(
+                                  "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                                  themeClasses.cardBorder,
+                                  themeClasses.cardBg,
+                                  uploadingDocument === 'nida_card' && "opacity-50 cursor-not-allowed"
+                                )}
+                              >
+                                <Upload className="h-4 w-4" />
+                                <span>{uploadingDocument === 'nida_card' ? "Uploading..." : "Upload NIDA Card Photo"}</span>
+                              </Label>
+                              <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                                PNG, JPG (max 10MB) - Required for account activation
+                              </p>
+                            </>
+                          ) : (
+                            <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                              NIDA card photo is already uploaded.{" "}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  router.push('/supplier/support?subject=Update%20NIDA%20Card%20Photo&category=verification')
                                 }
-                                reader.readAsDataURL(file)
-                              }
-                            }}
-                            className="hidden"
-                            disabled={uploadingDocument === 'nida_card'}
-                          />
-                          <Label
-                            htmlFor="nidaCardPhoto"
-                            className={cn(
-                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
-                              themeClasses.cardBorder,
-                              themeClasses.cardBg,
-                              uploadingDocument === 'nida_card' && "opacity-50 cursor-not-allowed"
-                            )}
-                          >
-                            <Upload className="h-4 w-4" />
-                            <span>{uploadingDocument === 'nida_card' ? "Uploading..." : nidaCardPhoto ? "Change Photo" : "Upload NIDA Card Photo"}</span>
-                          </Label>
-                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
-                            PNG, JPG (max 10MB) - Required for account activation
-                          </p>
+                                className="underline text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                              >
+                                Please contact support if you need to update it.
+                              </button>
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -604,7 +628,7 @@ function WingaBusinessInfoContent() {
                       </p>
                       <div className="flex items-center gap-4 mt-2">
                         {selfFacePhoto ? (
-                          <div className="relative">
+                          <div className="relative flex flex-col items-center gap-2">
                             <Image
                               src={selfFacePhoto}
                               alt="Self Face"
@@ -612,6 +636,15 @@ function WingaBusinessInfoContent() {
                               height={64}
                               className={cn("w-16 h-16 object-cover border rounded-full", themeClasses.cardBorder, themeClasses.cardBg)}
                             />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="xs"
+                              className="mt-1 text-[10px] px-2 h-6"
+                              onClick={() => window.open(selfFacePhoto, '_blank', 'noopener,noreferrer')}
+                            >
+                              Preview
+                            </Button>
                           </div>
                         ) : (
                           <div className={cn("w-16 h-16 border rounded-full flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
@@ -619,40 +652,55 @@ function WingaBusinessInfoContent() {
                           </div>
                         )}
                         <div className="flex-1">
-                          <input
-                            type="file"
-                            id="selfFacePhoto"
-                            accept=".png,.jpg,.jpeg,.gif,.webp"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0]
-                              if (file) {
-                                // Handle upload here - you can reuse the document upload logic
-                                // For now, just show a placeholder
-                                const reader = new FileReader()
-                                reader.onload = (event) => {
-                                  setSelfFacePhoto(event.target?.result as string)
+                          {!selfFacePhoto ? (
+                            <>
+                              <input
+                                type="file"
+                                id="selfFacePhoto"
+                                accept=".png,.jpg,.jpeg,.gif,.webp"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0]
+                                  if (file) {
+                                    const reader = new FileReader()
+                                    reader.onload = (event) => {
+                                      setSelfFacePhoto(event.target?.result as string)
+                                    }
+                                    reader.readAsDataURL(file)
+                                  }
+                                }}
+                                className="hidden"
+                                disabled={uploadingDocument === 'self_face'}
+                              />
+                              <Label
+                                htmlFor="selfFacePhoto"
+                                className={cn(
+                                  "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                                  themeClasses.cardBorder,
+                                  themeClasses.cardBg,
+                                  uploadingDocument === 'self_face' && "opacity-50 cursor-not-allowed"
+                                )}
+                              >
+                                <Camera className="h-4 w-4" />
+                                <span>{uploadingDocument === 'self_face' ? "Uploading..." : "Upload Self Face Photo"}</span>
+                              </Label>
+                              <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                                PNG, JPG (max 10MB) - Can be uploaded later
+                              </p>
+                            </>
+                          ) : (
+                            <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                              Self face photo is already uploaded.{" "}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  router.push('/supplier/support?subject=Update%20Self%20Face%20Photo&category=verification')
                                 }
-                                reader.readAsDataURL(file)
-                              }
-                            }}
-                            className="hidden"
-                            disabled={uploadingDocument === 'self_face'}
-                          />
-                          <Label
-                            htmlFor="selfFacePhoto"
-                            className={cn(
-                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
-                              themeClasses.cardBorder,
-                              themeClasses.cardBg,
-                              uploadingDocument === 'self_face' && "opacity-50 cursor-not-allowed"
-                            )}
-                          >
-                            <Camera className="h-4 w-4" />
-                            <span>{uploadingDocument === 'self_face' ? "Uploading..." : selfFacePhoto ? "Change Photo" : "Upload Self Face Photo"}</span>
-                          </Label>
-                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
-                            PNG, JPG (max 10MB) - Can be uploaded later
-                          </p>
+                                className="underline text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                              >
+                                Please contact support if you need to update it.
+                              </button>
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>

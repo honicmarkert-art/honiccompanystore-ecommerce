@@ -177,9 +177,7 @@ export default function SupplierOrdersPage() {
         await fetchOrders(true)
       })
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Subscribed to supplier orders real-time updates')
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn(`⚠️ Supplier orders realtime status: ${status}`)
           fetchOrders(true)
           if (isMounted) {
@@ -572,7 +570,12 @@ export default function SupplierOrdersPage() {
 
       {/* Order Details Dialog */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className={cn("max-w-3xl max-h-[90vh] overflow-y-auto", themeClasses.cardBg)}>
+        <DialogContent
+          className={cn(
+            "max-w-3xl max-h-[90vh] overflow-y-auto shadow-xl bg-white dark:bg-neutral-900",
+            themeClasses.cardBorder
+          )}
+        >
           <DialogHeader>
             <DialogTitle className={cn(themeClasses.mainText)}>
               Order Details - #{selectedOrder?.order_number}

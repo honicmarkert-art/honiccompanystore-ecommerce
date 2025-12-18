@@ -49,6 +49,7 @@ import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
 import {
   AlertDialog,
+  AlertDialogTrigger,
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
@@ -124,8 +125,21 @@ export default function SuppliersPage() {
   const { toast } = useToast()
 
   const openDocumentPreview = (url: string) => {
-    setPreviewDocumentUrl(url)
-    setIsPreviewOpen(true)
+    try {
+      const win = window.open(url, '_blank', 'noopener,noreferrer')
+      if (!win) {
+        // Popup blocked – fall back to storing URL (for potential future inline preview)
+        setPreviewDocumentUrl(url)
+        setIsPreviewOpen(true)
+      }
+    } catch (error) {
+      console.error('Error opening document preview:', error)
+      toast({
+        title: 'Unable to open document',
+        description: 'Your browser blocked the new tab. Please check popup settings.',
+        variant: 'destructive',
+      })
+    }
   }
 
   // Fetch suppliers from API
@@ -934,7 +948,7 @@ export default function SuppliersPage() {
 
       {/* Supplier Details Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={cn("max-w-3xl max-h-[90vh] overflow-y-auto shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
           <DialogHeader>
             <DialogTitle className={cn("flex items-center gap-2", themeClasses.mainText)}>
               <Building2 className="w-5 h-5" />
@@ -1319,7 +1333,78 @@ export default function SuppliersPage() {
 
               {/* Account Information */}
               <div className="pt-4 border-t">
-                <h4 className={cn("text-lg font-semibold mb-4", themeClasses.mainText)}>Account Information</h4>
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className={cn("text-lg font-semibold", themeClasses.mainText)}>Account Information</h4>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-red-500 text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                      >
+                        Reset Account Info
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="max-w-md border-2 border-red-500/70 bg-red-50 dark:bg-red-950 shadow-xl">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="text-red-800 dark:text-red-200">
+                          Dangerous Action: Reset Supplier Account Info
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-xs sm:text-sm text-red-800/90 dark:text-red-200/90 mt-1">
+                          This will clear the supplier&apos;s verified business information (company name, location,
+                          registration type &amp; number, region, nation, logo, and certificate URLs) and mark the
+                          account as inactive. The supplier will need to submit their information again for review.
+                          <br />
+                          Make sure you have confirmed this request with the supplier (e.g. via phone) before
+                          continuing.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isActionLoading}>
+                          Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                          disabled={isActionLoading}
+                          className="bg-red-600 hover:bg-red-700 text-white"
+                          onClick={async () => {
+                            if (!selectedSupplier) return
+                            try {
+                              setIsActionLoading(true)
+                              const response = await fetch(`/api/admin/suppliers/${selectedSupplier.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({ action: 'reset_account_info' }),
+                              })
+                              const data = await response.json()
+                              if (!response.ok) {
+                                throw new Error(data.error || 'Failed to reset account info')
+                              }
+                              // Refresh suppliers list
+                              await fetchSuppliers()
+                              toast({
+                                title: 'Account Info Reset',
+                                description:
+                                  'Supplier account info has been cleared. They will need to resubmit their details.',
+                              })
+                            } catch (error: any) {
+                              console.error('Reset account info error:', error)
+                              toast({
+                                title: 'Error',
+                                description: error.message || 'Failed to reset account info.',
+                                variant: 'destructive',
+                              })
+                            } finally {
+                              setIsActionLoading(false)
+                            }
+                          }}
+                        >
+                          {isActionLoading ? 'Resetting...' : 'Confirm Reset'}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-start gap-3">
                     <User className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
@@ -1592,32 +1677,30 @@ export default function SuppliersPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Document Preview Dialog */}
+      {/* Document Preview Dialog (fallback if popup blocked) */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-        <DialogContent className="max-w-4xl w-full h-[90vh] p-0">
-          <DialogHeader className="px-6 pt-6 pb-2">
+        <DialogContent className="max-w-2xl w-full">
+          <DialogHeader>
             <DialogTitle className={cn(themeClasses.mainText)}>Document Preview</DialogTitle>
+            <DialogDescription className={cn(themeClasses.textNeutralSecondary)}>
+              We tried to open this document in a new tab, but your browser blocked the popup.
+              Please allow popups for this site or click the button below.
+            </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 px-6 pb-6 overflow-hidden">
-            {previewDocumentUrl && (
-              <div className="w-full h-full border rounded-lg overflow-hidden">
-                {previewDocumentUrl.includes('.pdf') || previewDocumentUrl.includes('application/pdf') ? (
-                  <iframe
-                    src={previewDocumentUrl}
-                    className="w-full h-full border-0"
-                    title="Document Preview"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-                    <img
-                      src={previewDocumentUrl}
-                      alt="Document Preview"
-                      className="max-w-full max-h-full object-contain"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+          <div className="mt-4 flex flex-col gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={() => {
+                if (previewDocumentUrl) {
+                  window.open(previewDocumentUrl, '_blank', 'noopener,noreferrer')
+                }
+              }}
+            >
+              <Download className="w-4 h-4" />
+              <span>Open document in new tab</span>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

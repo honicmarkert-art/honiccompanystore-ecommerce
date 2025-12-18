@@ -106,7 +106,6 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
         
         if (recentAccountStatusNotifications.length > 0 && now - lastAccountStatusTriggerAtRef.current >= 5000) {
           lastAccountStatusTriggerAtRef.current = now
-          console.log('🔄 Account status notification found, triggering status refresh')
           window.dispatchEvent(new CustomEvent('account-status-changed'))
         }
       }
@@ -213,13 +212,11 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
               const newNotification = payload.new as Notification
               // Filter by user_id in the callback (more reliable than filter parameter)
               if (newNotification.user_id === user.id) {
-                console.log('🔔 New notification received via real-time:', newNotification)
                 // Immediately refresh notifications without loading spinner
                 fetchNotifications(true)
                 
                 // If this is an account status change notification, trigger status refresh
                 if (newNotification.type === 'account_activated' || newNotification.type === 'account_deactivated') {
-                  console.log('🔄 Account status notification received, triggering status refresh')
                   window.dispatchEvent(new CustomEvent('account-status-changed'))
                 }
               }
@@ -266,9 +263,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
             }
           )
           .subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              console.log('✅ Subscribed to real-time notifications')
-            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
               console.warn(`⚠️ Notification real-time status: ${status}`)
               // Try to reconnect after a delay
               if (isMounted) {
@@ -329,7 +324,6 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
         
         // If this is an account status notification, trigger status refresh
         if (isAccountStatusNotification) {
-          console.log('🔄 Account status notification marked as read, triggering status refresh')
           window.dispatchEvent(new CustomEvent('account-status-changed'))
         }
       }
@@ -390,7 +384,6 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
       
       // Keep in deleted set permanently for this session - don't remove it
       // This prevents the notification from reappearing if refetched
-      console.log('✅ Notification deleted successfully:', notificationId)
     } catch (error) {
       console.error('Error deleting notification:', error)
     }
@@ -469,20 +462,20 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
     }
     switch (type) {
       case 'account_activated':
-        return 'bg-green-50 dark:bg-green-900/20'
+        return 'bg-green-50 dark:bg-green-900'
       case 'account_deactivated':
-        return 'bg-red-50 dark:bg-red-900/20'
+        return 'bg-red-50 dark:bg-red-900'
       case 'order_received':
       case 'order_updated':
-        return 'bg-blue-50 dark:bg-blue-900/20'
+        return 'bg-blue-50 dark:bg-blue-900'
       case 'welcome':
-        return 'bg-blue-50 dark:bg-blue-900/20'
+        return 'bg-blue-50 dark:bg-blue-900'
       case 'waiting_for_review':
-        return 'bg-orange-50 dark:bg-orange-900/20'
+        return 'bg-orange-50 dark:bg-orange-900'
       case 'plan_expired':
-        return 'bg-red-50 dark:bg-red-900/20'
+        return 'bg-red-50 dark:bg-red-900'
       default:
-        return 'bg-gray-50 dark:bg-gray-900/20'
+        return 'bg-gray-50 dark:bg-gray-900'
     }
   }
 
@@ -494,7 +487,6 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
 
     // If this is an account status change notification, trigger status refresh
     if (notification.type === 'account_activated' || notification.type === 'account_deactivated') {
-      console.log('🔄 Account status notification clicked, triggering status refresh')
       window.dispatchEvent(new CustomEvent('account-status-changed'))
     }
 

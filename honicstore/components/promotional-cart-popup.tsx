@@ -62,7 +62,7 @@ export function PromotionalCartPopup({ isOpen, onClose, products }: PromotionalC
   if (!products || products.length === 0) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="sm:max-w-md p-4">
+        <DialogContent className="sm:max-w-md p-4 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 shadow-xl">
           <DialogHeader className="pb-3">
             <DialogTitle className="flex items-center gap-2 text-lg">
               <ShoppingCart className="w-5 h-5 text-blue-600" />
@@ -83,7 +83,7 @@ export function PromotionalCartPopup({ isOpen, onClose, products }: PromotionalC
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-xs sm:max-w-md max-h-[80vh] overflow-y-auto p-3">
+      <DialogContent className="max-w-xs sm:max-w-md max-h-[80vh] overflow-y-auto p-3 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 shadow-xl">
         <DialogHeader className="pb-2">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-base">

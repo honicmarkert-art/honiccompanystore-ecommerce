@@ -135,6 +135,9 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     region: '',
     nation: 'Tanzania'
   })
+  const [hasInitializedCompanyInfoForm, setHasInitializedCompanyInfoForm] = useState(false)
+  const [companyInfoFormDirty, setCompanyInfoFormDirty] = useState(false)
+  const companyInfoFormDirtyRef = useRef(false)
   const [nidaCardPhoto, setNidaCardPhoto] = useState<string | null>(null)
   const [selfFacePhoto, setSelfFacePhoto] = useState<string | null>(null)
   const [businessTinCertificate, setBusinessTinCertificate] = useState<string | null>(null)
@@ -243,6 +246,11 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     isCheckingCompanyInfoRef.current = isCheckingCompanyInfo
   }, [isCheckingCompanyInfo])
 
+  // Keep a ref of whether the modal form has been edited, to avoid stale closures
+  useEffect(() => {
+    companyInfoFormDirtyRef.current = companyInfoFormDirty
+  }, [companyInfoFormDirty])
+
   // Auto-detect and check company info completeness on mount, route change, and plan change
   useEffect(() => {
     if (!user?.id || !isAuthenticated) {
@@ -250,6 +258,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       statusFetchedRef.current = false
       setIsCheckingCompanyInfo(false)
       setShouldShowCompanyInfoModal(false)
+      setHasInitializedCompanyInfoForm(false)
+      setCompanyInfoFormDirty(false)
       return
     }
 
@@ -327,18 +337,21 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             ? (registrationTypeMap[profile.registration_type] || profile.registration_type)
             : ''
           
-          // Set form data
-          setCompanyInfoForm({
-            companyName: profile.company_name || '',
-            location: profile.location || '',
-            officeNumber: profile.office_number || '',
-            registrationType: formRegistrationType,
-            businessRegistrationNumber: profile.business_registration_number || '',
-            tinOrNida: profile.tin_or_nida || '',
-            fullLegalName: profile.full_legal_name || '',
-            region: profile.region || '',
-            nation: profile.nation || 'Tanzania'
-          })
+          // Set form data only once per session and only if user hasn't started editing
+          if (!hasInitializedCompanyInfoForm && !companyInfoFormDirtyRef.current) {
+            setCompanyInfoForm({
+              companyName: profile.company_name || '',
+              location: profile.location || '',
+              officeNumber: profile.office_number || '',
+              registrationType: formRegistrationType,
+              businessRegistrationNumber: profile.business_registration_number || '',
+              tinOrNida: profile.tin_or_nida || '',
+              fullLegalName: profile.full_legal_name || '',
+              region: profile.region || '',
+              nation: profile.nation || 'Tanzania'
+            })
+            setHasInitializedCompanyInfoForm(true)
+          }
           if (profile.nida_card_photo_url) {
             setNidaCardPhoto(profile.nida_card_photo_url)
           }
@@ -562,7 +575,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
 
       const result = await response.json()
 
-      if (result.success) {
+        if (result.success) {
         // Immediately update account status to inactive (API sets is_active to false)
         setIsActive(false)
         
@@ -586,6 +599,9 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           description: 'Your account will be activated after we review and confirm your information. Please ensure all details are correct.',
           duration: 10000,
         })
+
+        // Close the company info modal after successful save
+        setShouldShowCompanyInfoModal(false)
         
         // Immediately refetch supplier status to update all fields
         if (user?.id) {
@@ -596,10 +612,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
               .eq('id', user.id)
               .single()
 
-          if (!error && profile) {
+            if (!error && profile) {
             setIsActive(profile.is_active !== false)
             setUserCompanyName(profile.company_name || null)
-            setUserCompanyLogo(profile.company_logo || null)
+              setUserCompanyLogo(profile.company_logo || null)
             
             // Map database registration_type values back to form values
             const registrationTypeMap: Record<string, string> = {
@@ -611,18 +627,20 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
               ? (registrationTypeMap[profile.registration_type] || profile.registration_type)
               : ''
             
-            // Update form data with latest values
-            setCompanyInfoForm({
-              companyName: profile.company_name || '',
-              location: profile.location || '',
-              officeNumber: profile.office_number || '',
-              registrationType: formRegistrationType,
-              businessRegistrationNumber: profile.business_registration_number || '',
-              tinOrNida: profile.tin_or_nida || '',
-              fullLegalName: profile.full_legal_name || '',
-              region: profile.region || '',
-              nation: profile.nation || 'Tanzania'
-            })
+            // Update form data with latest values ONLY if user hasn't started editing in this session
+            if (!companyInfoFormDirtyRef.current) {
+              setCompanyInfoForm({
+                companyName: profile.company_name || '',
+                location: profile.location || '',
+                officeNumber: profile.office_number || '',
+                registrationType: formRegistrationType,
+                businessRegistrationNumber: profile.business_registration_number || '',
+                tinOrNida: profile.tin_or_nida || '',
+                fullLegalName: profile.full_legal_name || '',
+                region: profile.region || '',
+                nation: profile.nation || 'Tanzania'
+              })
+            }
             if (profile.nida_card_photo_url) {
               setNidaCardPhoto(profile.nida_card_photo_url)
             }
@@ -646,6 +664,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             console.error('Error refreshing supplier status:', refreshError)
           }
         }
+        // Form is now in sync with backend; future auto-refreshes can safely overwrite
+        setCompanyInfoFormDirty(false)
         
         // Trigger refresh event for other components
         if (typeof window !== 'undefined') {
@@ -1187,7 +1207,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     type="text"
                     placeholder={isWingaPlan ? "Enter your business or trading name" : "Enter your company name"}
                     value={companyInfoForm.companyName}
-                    onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, companyName: e.target.value })}
+                    onChange={(e) => {
+                      setCompanyInfoFormDirty(true)
+                      setCompanyInfoForm({ ...companyInfoForm, companyName: e.target.value })
+                    }}
                     required
                     className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
                   />
@@ -1208,7 +1231,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     type="text"
                     placeholder={isWingaPlan ? "Enter your operating location (recommended)" : "Enter your company location (e.g., Near ABC Mall, Main Street, City)"}
                     value={companyInfoForm.location}
-                    onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, location: e.target.value })}
+                    onChange={(e) => {
+                      setCompanyInfoFormDirty(true)
+                      setCompanyInfoForm({ ...companyInfoForm, location: e.target.value })
+                    }}
                     required={!isWingaPlan}
                     className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
                   />
@@ -1228,7 +1254,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     type="text"
                     placeholder={isWingaPlan ? "Enter your business phone number" : "Enter your office phone number"}
                     value={companyInfoForm.officeNumber}
-                    onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, officeNumber: e.target.value })}
+                    onChange={(e) => {
+                      setCompanyInfoFormDirty(true)
+                      setCompanyInfoForm({ ...companyInfoForm, officeNumber: e.target.value })
+                    }}
                     required
                     className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
                   />
@@ -1246,7 +1275,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                       <div className="grid grid-cols-2 gap-3">
                         <Select
                           value={companyInfoForm.registrationType}
-                          onValueChange={(value) => setCompanyInfoForm({ ...companyInfoForm, registrationType: value })}
+                          onValueChange={(value) => {
+                            setCompanyInfoFormDirty(true)
+                            setCompanyInfoForm({ ...companyInfoForm, registrationType: value })
+                          }}
                           required
                         >
                           <SelectTrigger className={cn(themeClasses.cardBorder, themeClasses.cardBg)}>
@@ -1263,7 +1295,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                           type="text"
                           placeholder="Enter registration number"
                           value={companyInfoForm.businessRegistrationNumber ?? ''}
-                          onChange={(e) => setCompanyInfoForm({ ...companyInfoForm, businessRegistrationNumber: e.target.value })}
+                          onChange={(e) => {
+                            setCompanyInfoFormDirty(true)
+                            setCompanyInfoForm({ ...companyInfoForm, businessRegistrationNumber: e.target.value })
+                          }}
                           required
                           disabled={!companyInfoForm.registrationType}
                           className={cn(themeClasses.cardBorder, themeClasses.cardBg)}
@@ -1280,7 +1315,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                       </p>
                       <Select
                         value={companyInfoForm.region}
-                        onValueChange={(value) => setCompanyInfoForm({ ...companyInfoForm, region: value })}
+                        onValueChange={(value) => {
+                          setCompanyInfoFormDirty(true)
+                          setCompanyInfoForm({ ...companyInfoForm, region: value })
+                        }}
                         required
                       >
                         <SelectTrigger
@@ -1332,21 +1370,32 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                               Upload a clear photo or scan of your Business TIN Certificate. This is required for account verification.
                             </p>
                             <div className="flex items-center gap-4">
-                              <div className="relative">
+                              <div className="relative flex flex-col items-center gap-2">
                                 {businessTinCertificate ? (
-                                  <div className="relative">
-                                    {businessTinCertificate.includes('.pdf') || businessTinCertificate.toLowerCase().includes('application/pdf') ? (
-                                      <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
-                                        <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
-                                      </div>
-                                    ) : (
-                                      <img
-                                        src={businessTinCertificate}
-                                        alt="Business TIN Certificate"
-                                        className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
-                                      />
-                                    )}
-                                  </div>
+                                  <>
+                                    <div className="relative">
+                                      {businessTinCertificate.includes('.pdf') || businessTinCertificate.toLowerCase().includes('application/pdf') ? (
+                                        <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                          <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                        </div>
+                                      ) : (
+                                        <img
+                                          src={businessTinCertificate}
+                                          alt="Business TIN Certificate"
+                                          className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                                        />
+                                      )}
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="xs"
+                                      className="mt-1 text-[10px] px-2 h-6"
+                                      onClick={() => window.open(businessTinCertificate, '_blank', 'noopener,noreferrer')}
+                                    >
+                                      Preview
+                                    </Button>
+                                  </>
                                 ) : (
                                   <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
                                     <FileCheck className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
@@ -1392,21 +1441,32 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                               Upload a clear photo or scan of your Company Registration Certificate. This is required for account verification.
                             </p>
                             <div className="flex items-center gap-4">
-                              <div className="relative">
+                              <div className="relative flex flex-col items-center gap-2">
                                 {companyCertificate ? (
-                                  <div className="relative">
-                                    {companyCertificate.includes('.pdf') || companyCertificate.toLowerCase().includes('application/pdf') ? (
-                                      <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
-                                        <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
-                                      </div>
-                                    ) : (
-                                      <img
-                                        src={companyCertificate}
-                                        alt="Company Certificate"
-                                        className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
-                                      />
-                                    )}
-                                  </div>
+                                  <>
+                                    <div className="relative">
+                                      {companyCertificate.includes('.pdf') || companyCertificate.toLowerCase().includes('application/pdf') ? (
+                                        <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
+                                          <FileText className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
+                                        </div>
+                                      ) : (
+                                        <img
+                                          src={companyCertificate}
+                                          alt="Company Certificate"
+                                          className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
+                                        />
+                                      )}
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="xs"
+                                      className="mt-1 text-[10px] px-2 h-6"
+                                      onClick={() => window.open(companyCertificate, '_blank', 'noopener,noreferrer')}
+                                    >
+                                      Preview
+                                    </Button>
+                                  </>
                                 ) : (
                                   <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
                                     <FileCheck className={cn("w-6 h-6", themeClasses.textNeutralSecondary)} />
@@ -1510,7 +1570,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                       </div>
                       <div className="flex items-center gap-4">
                         {nidaCardPhoto ? (
-                          <div className="relative">
+                          <div className="relative flex flex-col items-center gap-2">
                             <Image
                               src={nidaCardPhoto}
                               alt="NIDA Card"
@@ -1518,6 +1578,15 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                               height={64}
                               className={cn("w-16 h-16 object-cover border rounded-md", themeClasses.cardBorder, themeClasses.cardBg)}
                             />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="xs"
+                              className="mt-1 text-[10px] px-2 h-6"
+                              onClick={() => window.open(nidaCardPhoto, '_blank', 'noopener,noreferrer')}
+                            >
+                              Preview
+                            </Button>
                           </div>
                         ) : (
                           <div className={cn("w-16 h-16 border rounded-md flex items-center justify-center", themeClasses.cardBorder, themeClasses.cardBg)}>
@@ -1525,38 +1594,55 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                           </div>
                         )}
                         <div className="flex-1">
-                          <input
-                            type="file"
-                            id="modal-nida-card-photo"
-                            accept=".png,.jpg,.jpeg,.gif,.webp"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0]
-                              if (file) {
-                                const reader = new FileReader()
-                                reader.onload = (event) => {
-                                  setNidaCardPhoto(event.target?.result as string)
+                          {!nidaCardPhoto ? (
+                            <>
+                              <input
+                                type="file"
+                                id="modal-nida-card-photo"
+                                accept=".png,.jpg,.jpeg,.gif,.webp"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0]
+                                  if (file) {
+                                    const reader = new FileReader()
+                                    reader.onload = (event) => {
+                                      setNidaCardPhoto(event.target?.result as string)
+                                    }
+                                    reader.readAsDataURL(file)
+                                  }
+                                }}
+                                className="hidden"
+                                disabled={uploadingDocument === 'nida_card'}
+                              />
+                              <Label
+                                htmlFor="modal-nida-card-photo"
+                                className={cn(
+                                  "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
+                                  themeClasses.cardBorder,
+                                  themeClasses.cardBg,
+                                  uploadingDocument === 'nida_card' && "opacity-50 cursor-not-allowed"
+                                )}
+                              >
+                                <Upload className="h-4 w-4" />
+                                <span>{uploadingDocument === 'nida_card' ? "Uploading..." : "Upload NIDA Card Photo"}</span>
+                              </Label>
+                              <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                                PNG, JPG (max 10MB) - Required for account activation
+                              </p>
+                            </>
+                          ) : (
+                            <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
+                              NIDA card photo is already uploaded.{" "}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  router.push('/supplier/support?subject=Update%20NIDA%20Card%20Photo&category=verification')
                                 }
-                                reader.readAsDataURL(file)
-                              }
-                            }}
-                            className="hidden"
-                            disabled={uploadingDocument === 'nida_card'}
-                          />
-                          <Label
-                            htmlFor="modal-nida-card-photo"
-                            className={cn(
-                              "cursor-pointer inline-flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-opacity-80 transition-colors text-sm",
-                              themeClasses.cardBorder,
-                              themeClasses.cardBg,
-                              uploadingDocument === 'nida_card' && "opacity-50 cursor-not-allowed"
-                            )}
-                          >
-                            <Upload className="h-4 w-4" />
-                            <span>{uploadingDocument === 'nida_card' ? "Uploading..." : nidaCardPhoto ? "Change Photo" : "Upload NIDA Card Photo"}</span>
-                          </Label>
-                          <p className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
-                            PNG, JPG (max 10MB) - Required for account activation
-                          </p>
+                                className="underline text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                              >
+                                Please contact support if you need to update it.
+                              </button>
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>

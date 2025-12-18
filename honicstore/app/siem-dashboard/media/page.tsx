@@ -541,7 +541,7 @@ export default function AdminMedia() {
 
       {/* Upload Dialog */}
       <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className={cn("max-w-2xl shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
           <DialogHeader>
             <DialogTitle>Upload Variant Image</DialogTitle>
           </DialogHeader>

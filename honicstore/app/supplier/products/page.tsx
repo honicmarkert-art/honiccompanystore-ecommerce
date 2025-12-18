@@ -334,7 +334,7 @@ function SupplierProductsContent() {
               <span className="hidden sm:inline">Add Product</span>
               <span className="sm:hidden">Add</span>
             </Button>
-            <DialogContent className="max-w-[calc(100vw-1rem)] sm:max-w-2xl lg:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+            <DialogContent className={cn("max-w-[calc(100vw-1rem)] sm:max-w-2xl lg:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6 shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
               <DialogHeader className="space-y-2">
                 <DialogTitle className="text-base sm:text-lg">
                   {editingProduct ? "Edit Product" : "Add New Product"}

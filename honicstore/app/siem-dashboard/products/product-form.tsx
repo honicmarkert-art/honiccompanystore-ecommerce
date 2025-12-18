@@ -29,9 +29,10 @@ interface ProductFormProps {
   autoCloseOnSave?: boolean
   hideImportChina?: boolean // Hide "Import from China" field for suppliers
   restrictVariantType?: boolean // Restrict variant type to primary-dependent for suppliers
+  hideAttributesAndVariants?: boolean // Hide Product Attributes & Variant Configuration sections (for suppliers)
 }
 
-export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, hideImportChina = false, restrictVariantType = false }: ProductFormProps) {
+export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, hideImportChina = false, restrictVariantType = false, hideAttributesAndVariants = false }: ProductFormProps) {
   const { themeClasses } = useTheme()
   const { toast } = useToast()
   const { categories: rawCategories, isLoading: categoriesLoading, error: categoriesError } = useCategories()
@@ -434,21 +435,67 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
   }
 
   const addVariant = () => {
-    setFormData(prev => ({
-      ...prev,
-      variants: [
-        ...prev.variants,
-        {
-          id: prev.variants.length + 1, // Use simple sequential ID
-          price: prev.price || 0, // Set default price to product price
-          image: "",
-          sku: "",
-          attributes: {},
-          primaryValues: [],
-          quantities: {}
+    setFormData(prev => {
+      // Ensure primary-dependent logic is active by default when adding variants
+      let nextVariantConfig = prev.variantConfig
+
+      if (restrictVariantType) {
+        // Force primary-dependent for suppliers
+        nextVariantConfig = {
+          ...nextVariantConfig,
+          type: 'primary-dependent'
         }
-      ]
-    }))
+      } else if (!nextVariantConfig.type) {
+        // Fallback for admin if type was unset
+        nextVariantConfig = {
+          ...nextVariantConfig,
+          type: 'primary-dependent'
+        }
+      }
+
+      // If there are selected attributes but no primary attribute yet, default to the first one
+      if (
+        selectedAttributes.length > 0 &&
+        !nextVariantConfig.primaryAttribute &&
+        (!nextVariantConfig.primaryAttributes || nextVariantConfig.primaryAttributes.length === 0)
+      ) {
+        nextVariantConfig = {
+          ...nextVariantConfig,
+          primaryAttribute: selectedAttributes[0],
+          primaryAttributes: nextVariantConfig.primaryAttributes ?? [selectedAttributes[0]]
+        }
+      }
+
+      // Build initial primaryValues for suppliers so fields show immediately
+      const newVariantPrimaryValues =
+        restrictVariantType && nextVariantConfig.primaryAttribute
+          ? [
+              {
+                attribute: nextVariantConfig.primaryAttribute,
+                value: '',
+                price: prev.price || 0,
+                quantity: ''
+              }
+            ]
+          : []
+
+      return {
+        ...prev,
+        variantConfig: nextVariantConfig,
+        variants: [
+          ...prev.variants,
+          {
+            id: prev.variants.length + 1, // Use simple sequential ID
+            price: prev.price || 0, // Set default price to product price
+            image: "",
+            sku: "",
+            attributes: {},
+            primaryValues: newVariantPrimaryValues,
+            quantities: {}
+          }
+        ]
+      }
+    })
   }
 
   const updateVariant = (index: number, field: string, value: any) => {
@@ -1391,7 +1438,8 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
             </div>
           </div>
 
-                     {/* Attribute Management */}
+          {/* Attribute Management - hidden for supplier product form */}
+          {!hideAttributesAndVariants && (
            <Card>
              <CardHeader className="p-4 sm:p-6">
                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
@@ -1463,8 +1511,10 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                </div>
              </CardContent>
            </Card>
+          )}
 
-          {/* Variant Configuration */}
+          {/* Variant Configuration - hidden for supplier product form */}
+          {!hideAttributesAndVariants && (
           <Card>
             <CardHeader>
               <CardTitle>Variant Configuration</CardTitle>
@@ -1642,8 +1692,32 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
               </div>
             </CardContent>
           </Card>
+          )}
 
-          {/* Variants */}
+          {/* Simple attribute name input for suppliers (manual) */}
+          {hideAttributesAndVariants && restrictVariantType && (
+            <div className="mb-3 sm:mb-4">
+              <Label className="text-xs sm:text-sm font-medium">
+                Variant Attribute Name
+              </Label>
+              <Input
+                value={formData.variantConfig.primaryAttribute || ''}
+                onChange={(e) =>
+                  handleInputChange('variantConfig', {
+                    ...formData.variantConfig,
+                    primaryAttribute: e.target.value,
+                  })
+                }
+                placeholder="e.g. Color, Size, Package"
+                className="mt-1 text-sm sm:text-base h-9 sm:h-10"
+              />
+              <p className="mt-1 text-[10px] sm:text-xs text-muted-foreground">
+                This name will be used for your variant options (for example: Color or Size).
+              </p>
+            </div>
+          )}
+
+          {/* Variants (still visible for suppliers; only attribute/variant config sections are hidden) */}
           <Card>
             <CardHeader className="p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
@@ -1736,7 +1810,9 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                                      {/* Dynamic Attributes */}
                    {(selectedAttributes.length > 0 || variant.attributes || variant.primaryValues) && (
                      <div className="space-y-2 sm:space-y-3">
-                       <Label className="text-xs sm:text-sm font-medium">Attributes</Label>
+                       <Label className="text-xs sm:text-sm font-medium">
+                         {hideAttributesAndVariants && restrictVariantType ? 'Variant Options' : 'Attributes'}
+                       </Label>
                        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                          {(selectedAttributes.length > 0 ? selectedAttributes : Object.keys(variant.attributes || {})).filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw') && !attribute.endsWith('_quantity') && attribute !== 'quantities' && attribute !== '_quantities' && !attribute.startsWith('_')).map(attribute => {
                            const isPrimary = attribute === formData.variantConfig.primaryAttribute || 
@@ -2268,7 +2344,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
 
     {/* Variant Image Dialog */}
     <Dialog open={showVariantImageDialog} onOpenChange={setShowVariantImageDialog}>
-      <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+      <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6 shadow-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700">
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-base sm:text-lg">Add Variant Image</DialogTitle>
           <DialogDescription className="text-xs sm:text-sm">

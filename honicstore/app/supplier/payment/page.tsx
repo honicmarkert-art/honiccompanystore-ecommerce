@@ -18,6 +18,7 @@ interface PremiumPlan {
   price: number
   currency: string
   description: string
+  yearlyPrice?: number | null
 }
 
 export default function SupplierPaymentPage() {
@@ -40,6 +41,7 @@ function SupplierPaymentPageContent() {
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'failed' | null>(null)
   const [paymentReferenceId, setPaymentReferenceId] = useState<string | null>(null)
   const [paymentFailureReason, setPaymentFailureReason] = useState<string | null>(null)
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly')
 
   useEffect(() => {
     // Wait a bit for auth check to complete before redirecting
@@ -147,7 +149,8 @@ function SupplierPaymentPageContent() {
           slug: premiumPlan.slug,
           price: premiumPlan.price,
           currency: premiumPlan.currency || 'TZS',
-          description: premiumPlan.description || 'Premium plan features'
+          description: premiumPlan.description || 'Premium plan features',
+          yearlyPrice: premiumPlan.yearly_price ?? null
         })
       } else {
         setError('Failed to load plan details. Please try again.')
@@ -219,7 +222,7 @@ function SupplierPaymentPageContent() {
         credentials: 'include',
         body: JSON.stringify({
           planId: plan.id,
-          amount: plan.price
+          billingCycle
         })
       })
 
@@ -319,13 +322,30 @@ function SupplierPaymentPageContent() {
     )
   }
 
+  const basePrice = plan.price || 0
+  const isYearly = billingCycle === 'yearly'
+  const yearlyPrice = plan.yearlyPrice != null ? plan.yearlyPrice : null
+  const displayPrice = isYearly && yearlyPrice != null ? yearlyPrice : basePrice
+  const billingLabel = isYearly ? '/year' : '/month'
+
   return (
-    <div className={cn("min-h-screen p-4 md:p-8", themeClasses.bg)}>
-      <div className="max-w-2xl mx-auto space-y-6">
-        <div>
-          <h1 className={cn("text-3xl font-bold mb-2", themeClasses.mainText)}>Complete Your Premium Plan Payment</h1>
-          <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-            Complete your payment to activate your premium plan features
+    <div
+      className={cn(
+        "min-h-screen p-4 md:p-8 flex items-center justify-center",
+        "bg-gradient-to-b from-orange-50 via-white to-white dark:from-zinc-950 dark:via-black dark:to-black"
+      )}
+    >
+      <div className="max-w-3xl w-full mx-auto space-y-6">
+        <div className="text-center space-y-3">
+          <div className="inline-flex items-center gap-2 rounded-full bg-orange-100/70 px-3 py-1 text-xs font-medium text-orange-700 dark:bg-orange-500/10 dark:text-orange-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-pulse" />
+            Premium Supplier Upgrade
+          </div>
+          <h1 className={cn("text-3xl md:text-4xl font-extrabold tracking-tight", themeClasses.mainText)}>
+            Complete Your Premium Plan Payment
+          </h1>
+          <p className={cn("text-sm md:text-base max-w-2xl mx-auto", themeClasses.textNeutralSecondary)}>
+            Unlock powerful tools to grow your business: more visibility, advanced insights, and priority support.
           </p>
         </div>
 
@@ -368,51 +388,147 @@ function SupplierPaymentPageContent() {
           </Alert>
         )}
 
-        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-          <CardHeader>
-            <CardTitle className={cn(themeClasses.mainText)}>Premium Plan Details</CardTitle>
-            <CardDescription className={cn(themeClasses.textNeutralSecondary)}>
-              Review your plan details before proceeding
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className={cn("font-medium", themeClasses.mainText)}>Plan Name:</span>
-                <span className={cn("font-semibold", themeClasses.mainText)}>{plan.name}</span>
+        <Card className={cn("shadow-lg border-orange-100/60 dark:border-zinc-800/80", themeClasses.cardBg, themeClasses.cardBorder)}>
+          <CardHeader className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className={cn("flex items-center gap-2 text-xl md:text-2xl", themeClasses.mainText)}>
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-orange-500/10 text-orange-500">
+                    <CreditCard className="h-4 w-4" />
+                  </span>
+                  Premium Plan Details
+                </CardTitle>
+                <CardDescription className={cn("mt-1", themeClasses.textNeutralSecondary)}>
+                  Review your plan details before proceeding
+                </CardDescription>
               </div>
-              <div className="flex justify-between items-center">
-                <span className={cn("font-medium", themeClasses.mainText)}>Price:</span>
-                <span className={cn("text-2xl font-bold text-orange-500", themeClasses.mainText)}>
-                  {formatPrice(plan.price, plan.currency)}
+              <div className="hidden sm:flex flex-col items-end text-xs">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-emerald-600 dark:text-emerald-300">
+                  <CheckCircle className="h-3 w-3" />
+                  Most popular for growing sellers
                 </span>
               </div>
             </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-start">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className={cn("font-medium", themeClasses.mainText)}>Plan Name</span>
+                    <span className={cn("font-semibold", themeClasses.mainText)}>{plan.name}</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <span className={cn("font-medium", themeClasses.mainText)}>Billing</span>
+                    <div className="inline-flex items-center gap-1 rounded-full bg-neutral-100/80 p-1 text-xs dark:bg-zinc-900/80">
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle('monthly')}
+                        className={cn(
+                          "flex-1 rounded-full px-3 py-1.5 font-semibold transition-all",
+                          !isYearly
+                            ? "bg-white text-orange-600 shadow-sm dark:bg-zinc-800"
+                            : "text-neutral-500 dark:text-neutral-400"
+                        )}
+                      >
+                        Monthly
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle('yearly')}
+                        className={cn(
+                          "flex-1 rounded-full px-3 py-1.5 font-semibold transition-all",
+                          isYearly
+                            ? "bg-orange-500 text-white shadow-sm"
+                            : "text-neutral-500 dark:text-neutral-400"
+                        )}
+                      >
+                        Yearly
+                      </button>
+                    </div>
+                    <p className={cn("text-[11px] md:text-xs", themeClasses.textNeutralSecondary)}>
+                      {isYearly
+                        ? "You save around 20% compared to paying every month."
+                        : "Switch to yearly billing and save around 20%."}
+                    </p>
+                  </div>
+                </div>
 
-            <div className={cn("border-t pt-4", themeClasses.border)}>
-              <h3 className={cn("font-semibold mb-2", themeClasses.mainText)}>Premium Features Include:</h3>
-              <ul className={cn("space-y-2 text-sm", themeClasses.textNeutralSecondary)}>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  Unlimited product listings
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  Advanced analytics and reporting
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  Priority customer support
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  Featured product listings
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  Custom branding options
-                </li>
-              </ul>
+                <div className="rounded-xl border border-dashed border-orange-200/80 bg-orange-50/60 px-4 py-3 text-xs md:text-sm dark:border-orange-500/30 dark:bg-orange-950/20">
+                  <p className={cn("font-medium mb-1 text-orange-800 dark:text-orange-200")}>
+                    Premium Features Include:
+                  </p>
+                  <ul className={cn("grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1", themeClasses.textNeutralSecondary)}>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      Unlimited product listings
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      Advanced analytics & reporting
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      Priority customer support
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      Featured product listings
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      Custom branding options
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="space-y-4 rounded-2xl border border-orange-200/80 bg-white/80 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/80">
+                <p className={cn("text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400")}>
+                  Total due today
+                </p>
+                <div className="space-y-3">
+                  <div className="flex flex-col items-center text-center">
+                    <span className="text-3xl md:text-4xl font-extrabold text-orange-500">
+                      {formatPrice(displayPrice, plan.currency)}
+                    </span>
+                    {isYearly && (
+                      <p className="mt-1 text-[11px] md:text-xs text-emerald-600 dark:text-emerald-400">
+                        You’re saving around 20% with yearly billing.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-center gap-2">
+                    <span className={cn("text-xs md:text-sm font-medium", themeClasses.textNeutralSecondary)}>
+                      {billingLabel}
+                    </span>
+                    {!isYearly && (
+                      <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+                        Cancel anytime
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1 text-[11px] md:text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
+                      <CheckCircle className="h-3 w-3" />
+                    </span>
+                    <span className={themeClasses.textNeutralSecondary}>
+                      Secure ClickPesa payment • Encrypted & protected
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-neutral-200/80 text-neutral-600 dark:bg-zinc-800 dark:text-neutral-300 text-[9px] font-semibold">
+                      i
+                    </span>
+                    <span className={cn("text-[11px]", themeClasses.textNeutralSecondary)}>
+                      You’ll get a receipt and confirmation email after payment.
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {paymentStatus === 'paid' ? (
@@ -495,8 +611,8 @@ function SupplierPaymentPageContent() {
             </Button>
             )}
 
-            <p className={cn("text-xs text-center", themeClasses.textNeutralSecondary)}>
-              You will be redirected to our secure payment gateway to complete your purchase
+            <p className={cn("text-[11px] md:text-xs text-center", themeClasses.textNeutralSecondary)}>
+              You will be redirected to our secure payment gateway (ClickPesa) to complete your purchase.
             </p>
           </CardContent>
         </Card>
