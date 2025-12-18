@@ -47,6 +47,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
   const [loading, setLoading] = useState(true)
   const [isOpen, setIsOpen] = useState(false)
   const deletedNotificationIdsRef = useRef<Set<string>>(new Set())
+  const lastAccountStatusTriggerAtRef = useRef<number>(0)
 
   // Fetch notifications
   const fetchNotifications = useCallback(async (silent = false) => {
@@ -94,14 +95,17 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
         setUnreadCount(data.unreadCount || 0)
         
         // Check if there are any new account status change notifications
-        // and trigger status refresh if needed
-        const accountStatusNotifications = newNotifications.filter(
+        // and trigger status refresh if needed. Throttle to avoid spamming.
+        const now = Date.now()
+        const recentAccountStatusNotifications = newNotifications.filter(
           (n: Notification) => 
             (n.type === 'account_activated' || n.type === 'account_deactivated') && 
-            !n.is_read
+            !n.is_read &&
+            new Date(n.created_at).getTime() > lastAccountStatusTriggerAtRef.current
         )
         
-        if (accountStatusNotifications.length > 0) {
+        if (recentAccountStatusNotifications.length > 0 && now - lastAccountStatusTriggerAtRef.current >= 5000) {
+          lastAccountStatusTriggerAtRef.current = now
           console.log('🔄 Account status notification found, triggering status refresh')
           window.dispatchEvent(new CustomEvent('account-status-changed'))
         }
@@ -133,10 +137,10 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
     fetchNotifications()
     
     // Set up polling as a fallback in case real-time doesn't work immediately
-    // Poll every 5 seconds for quick updates (will be used until real-time is fully working)
+    // Poll every 30 seconds to avoid excessive network usage
     const pollInterval = setInterval(() => {
       fetchNotifications(true) // Silent fetch (no loading spinner)
-    }, 5000) // 5 seconds for immediate updates
+    }, 30000)
     
     return () => {
       clearInterval(pollInterval)
@@ -152,11 +156,11 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
   // Listen for account status changes and other events that should trigger notification refresh
   useEffect(() => {
     const handleAccountStatusChange = () => {
-      fetchNotifications()
+      fetchNotifications(true)
     }
     
     const handleCompanyInfoUpdate = () => {
-      fetchNotifications()
+      fetchNotifications(true)
     }
 
     window.addEventListener('account-status-changed', handleAccountStatusChange)
@@ -659,4 +663,3 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
     </Popover>
   )
 }
-

@@ -122,6 +122,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const [userCompanyName, setUserCompanyName] = useState<string | null>(null)
   const [userCompanyLogo, setUserCompanyLogo] = useState<string | null>(null)
   const [companyInfoComplete, setCompanyInfoComplete] = useState<boolean | null>(null)
+  const [isCheckingCompanyInfo, setIsCheckingCompanyInfo] = useState(false)
+  const [shouldShowCompanyInfoModal, setShouldShowCompanyInfoModal] = useState(false)
   const [companyInfoForm, setCompanyInfoForm] = useState({
     companyName: '',
     location: '',
@@ -225,15 +227,29 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   }, [user?.id, isAuthenticated]) // Only depend on user.id, not entire user object
 
   // Fetch supplier status, company name, and check if company info is complete
-  // This will auto-detect and show modal if info is incomplete
+  // This will auto-detect and show modal if info is incomplete (with throttling)
   const statusFetchedRef = useRef(false)
   const lastCheckKeyRef = useRef<string>('')
-  
+  const lastModalCheckAtRef = useRef<number>(0)
+  const companyInfoCompleteRef = useRef<boolean | null>(null)
+  const isCheckingCompanyInfoRef = useRef<boolean>(false)
+
+  // Keep refs in sync with state for timers
+  useEffect(() => {
+    companyInfoCompleteRef.current = companyInfoComplete
+  }, [companyInfoComplete])
+
+  useEffect(() => {
+    isCheckingCompanyInfoRef.current = isCheckingCompanyInfo
+  }, [isCheckingCompanyInfo])
+
   // Auto-detect and check company info completeness on mount, route change, and plan change
   useEffect(() => {
     if (!user?.id || !isAuthenticated) {
       setCompanyInfoComplete(null)
       statusFetchedRef.current = false
+      setIsCheckingCompanyInfo(false)
+      setShouldShowCompanyInfoModal(false)
       return
     }
 
@@ -250,6 +266,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     statusFetchedRef.current = true
 
     const fetchSupplierStatus = async () => {
+      setIsCheckingCompanyInfo(true)
       try {
         // First fetch current plan to check if user is Winga
         const planResponse = await fetch('/api/user/current-plan', {
@@ -351,10 +368,31 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         console.error('Error fetching supplier status:', error)
         // If error fetching, assume incomplete to show modal
         setCompanyInfoComplete(false)
+      } finally {
+        setIsCheckingCompanyInfo(false)
+
+        // Decide whether to show the modal, with a small delay and rate limiting
+        const now = Date.now()
+        const timeSinceLast = now - (lastModalCheckAtRef.current || 0)
+
+        // Only consider showing the modal at most twice per minute (every 30s)
+        if (timeSinceLast >= 30000 && companyInfoCompleteRef.current === false) {
+          const timeoutId = setTimeout(() => {
+            if (!isCheckingCompanyInfoRef.current && companyInfoCompleteRef.current === false) {
+              lastModalCheckAtRef.current = Date.now()
+              setShouldShowCompanyInfoModal(true)
+            }
+          }, 2000)
+
+          ;(fetchSupplierStatus as any)._lastTimeoutId = timeoutId
+        }
       }
     }
 
     fetchSupplierStatus()
+
+    // Periodic re-check (every 30s); decision to show modal is still throttled above
+    const intervalId = setInterval(fetchSupplierStatus, 30000)
     
     // Listen for company info updates
     const handleCompanyInfoUpdate = () => {
@@ -382,6 +420,9 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       window.removeEventListener('company-info-updated', handleCompanyInfoUpdate)
       window.removeEventListener('plan-updated', handleCompanyInfoUpdate)
       window.removeEventListener('account-status-changed', handleAccountStatusChange)
+      clearInterval(intervalId)
+      const tId = (fetchSupplierStatus as any)._lastTimeoutId
+      if (tId) clearTimeout(tId)
     }
   }, [user?.id, isAuthenticated, pathname, currentPlan?.slug]) // Re-check on route change and plan change
 
@@ -1093,7 +1134,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         {/* Main content */}
         <div className="flex flex-1 flex-col" suppressHydrationWarning>
           {/* Mandatory Company Info Modal */}
-          <Dialog open={companyInfoComplete === false} modal={true}>
+          <Dialog open={shouldShowCompanyInfoModal} modal={true}>
             <DialogContent className={cn("sm:max-w-[600px] max-h-[90vh] overflow-y-auto", isWingaPlan && "sm:max-w-[700px]")} onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
               <DialogHeader>
                 <div className="flex items-center justify-between mb-2">
@@ -1759,7 +1800,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           </Dialog>
 
           {/* Page content */}
-          <main className={cn("flex-1 overflow-y-auto pt-16 sm:pt-20", companyInfoComplete === false && "pointer-events-none opacity-50")} suppressHydrationWarning>
+          <main className={cn("flex-1 overflow-y-auto pt-16 sm:pt-20", shouldShowCompanyInfoModal && "pointer-events-none opacity-50")} suppressHydrationWarning>
             <div className="py-4 sm:py-6" suppressHydrationWarning>
               <div className="mx-auto max-w-7xl px-3 sm:px-4 lg:px-2" suppressHydrationWarning>
                 {children}
