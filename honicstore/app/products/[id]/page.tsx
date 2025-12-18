@@ -2759,7 +2759,7 @@ function ProductDetailPageContent() {
           </div>
 
           {/* Right Side Actions */}
-          <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0 ml-auto">
+          <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0 ml-auto text-[13px] leading-5">
             {/* AI Sourcing */}
             <OptimizedLink 
               href="/"
@@ -3115,10 +3115,10 @@ function ProductDetailPageContent() {
         </div>
       )}
 
-      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-2 sm:px-4 lg:px-12 xl:px-16 2xl:px-20", themeClasses.mainBg, !fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
+      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-3 sm:px-6 lg:px-16 xl:px-24 2xl:px-32", themeClasses.mainBg, !fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
         {/* Skeleton Loading State */}
         {isLoading || isOptimizedLoading ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-12 xl:gap-16">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-2 lg:gap-2 xl:gap-3">
             {/* Product Image Gallery Skeleton */}
             <ProductImageSkeleton />
             
@@ -3134,9 +3134,9 @@ function ProductDetailPageContent() {
           </div>
         ) : (
           <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-4 lg:gap-4 xl:gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-2 lg:gap-2 xl:gap-3">
           {/* Product Image Gallery */}
-          <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:gap-6">
+          <div className="flex flex-col-reverse gap-3 sm:gap-4 lg:flex-row lg:gap-6">
             {/* Mobile: Horizontal Thumbnails (Top on SM screens) */}
             <div className="flex flex-col gap-2 lg:hidden">
               <div
@@ -3192,7 +3192,7 @@ function ProductDetailPageContent() {
                 className={cn(
                   "bg-transparent rounded-lg flex-shrink-0 relative",
                   "lg:w-24 xl:w-28 lg:h-[550px]",
-                  "flex flex-col gap-2 p-2",
+                  "flex flex-col gap-2 px-1 py-2",
                   "overflow-y-auto",
                   "scrollbar-hide",
                   "[&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]",
@@ -3245,7 +3245,7 @@ function ProductDetailPageContent() {
             </div>
 
             {/* Main Product Image (Right on LG screens, Bottom on SM screens) */}
-            <div className="flex-1 flex flex-col gap-3 sm:gap-4 items-center lg:items-start">
+            <div className="flex-1 flex flex-col gap-[5px] sm:gap-[5px] items-center lg:items-start">
               {/* Supplier Company Name with Logo */}
               <div className="flex flex-col gap-1 mb-1">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -3316,8 +3316,8 @@ function ProductDetailPageContent() {
                   "relative aspect-square overflow-hidden rounded-lg border",
                   themeClasses.cardBorder,
                   themeClasses.cardBg,
-                  "max-w-[calc(100%-20px)] max-h-[calc(100%-20px)]",
-                  "w-full mx-auto lg:mx-0",
+                  "max-w-[calc(85%-20px)] max-h-[calc(85%-20px)]",
+                  "w-[85%] mx-auto lg:mx-0",
                 )}
               >
                 {/* Main Image View */}
@@ -3559,7 +3559,7 @@ function ProductDetailPageContent() {
                 )}
                       </div>
               {/* Video and 360° View Controls */}
-              <div className="flex items-center justify-center gap-8 mt-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="flex items-center justify-center gap-8 mt-2 p-4 bg-gray-50 dark:bg-black rounded-lg w-[85%] mx-auto lg:mx-0">
                 {/* Always show video button */}
                 <Button
                   variant="outline"
@@ -3614,7 +3614,7 @@ function ProductDetailPageContent() {
           </div>
 
           {/* Product Details Container */}
-          <div className="flex flex-col gap-4 h-[650px] overflow-y-scroll scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] rounded-lg p-4">
+          <div className="flex flex-col gap-4 h-[650px] overflow-y-scroll scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] rounded-lg pl-4 pt-4 pb-4 pr-2">
             <div className="flex items-center gap-2">
               <span className={cn(
                 "text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1",
@@ -5872,53 +5872,70 @@ function ProductDetailPageContent() {
               </Button>
               <Button
                 onClick={async () => {
+                  // Basic client-side validation
                   if (reviewFormData.rating === 0) {
                     alert('Please select a rating')
                     return
                   }
-                  
+
                   setSubmittingReview(true)
                   try {
-                    const { createClient } = await import('@supabase/supabase-js')
-                    const supabase = createClient(
-                      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-                      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-                    )
-                    const { data: { session } } = await supabase.auth.getSession()
-                    
-                    if (!session) {
-                      openAuthModal()
+                    // Use app auth state first
+                    if (!isAuthenticated) {
+                      alert('Please log in to submit a review.')
+                      openAuthModal('login')
                       return
                     }
-                    
-                    const response = await fetch(`/api/products/${product?.id}/reviews`, {
+
+                    // Debug log to see exactly what is being sent
+                    // eslint-disable-next-line no-console
+                    console.log('[submit review] sending', {
+                      productId: product?.id,
+                      rating: reviewFormData.rating,
+                      comment: reviewFormData.comment,
+                      imagesCount: reviewFormData.images?.length || 0,
+                    })
+
+                    const response = await fetch('/api/contact/send', {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${session.access_token}`
                       },
                       body: JSON.stringify({
-                        rating: reviewFormData.rating,
-                        comment: reviewFormData.comment,
-                        images: reviewFormData.images
+                        name: user?.name || user?.email || 'Unknown user',
+                        email: user?.email || 'no-email@unknown.com',
+                        phone: user?.profile?.phone || '',
+                        subject: `New product review for ID ${product?.id}`,
+                        message: [
+                          `Product ID: ${product?.id}`,
+                          `Product Name: ${product?.name}`,
+                          '',
+                          `Rating: ${reviewFormData.rating} / 5`,
+                          '',
+                          'Comment:',
+                          reviewFormData.comment || '(no comment provided)',
+                          '',
+                          reviewFormData.images?.length
+                            ? `Attached image URLs:\n${reviewFormData.images.join('\n')}`
+                            : 'No images attached.'
+                        ].join('\n'),
+                        inquiryType: 'support'
                       })
                     })
-                    
+
                     if (response.ok) {
-                      // Refetch reviews
-                      const reviewsResponse = await fetch(`/api/products/${product?.id}/reviews`)
-                      if (reviewsResponse.ok) {
-                        const data = await reviewsResponse.json()
-                        setReviews(data.reviews || [])
-                      }
-                      
-                      // Product rating/reviews count will be updated on next page load
-                      
                       setIsReviewModalOpen(false)
                       setReviewFormData({ rating: 0, comment: '', images: [] })
+                      toast({
+                        title: 'Thank you!',
+                        description: 'Your review has been sent to our team via email.',
+                      })
                     } else {
-                      const error = await response.json()
-                      alert(error.message || 'Failed to submit review')
+                      const error = await response.json().catch(() => null)
+                      const message =
+                        error?.message ||
+                        `Failed to submit review (status ${response.status}). Please try again.`
+                      alert(message)
                     }
                   } catch (error) {
                     console.error('Error submitting review:', error)

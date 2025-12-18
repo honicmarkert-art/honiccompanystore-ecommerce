@@ -72,7 +72,7 @@ export function InfiniteScrollTrigger({
       <div
         ref={elementRef}
         className={cn(
-          "flex flex-col items-center justify-center py-8",
+          "flex flex-col items-center justify-center py-2",
           className
         )}
       >

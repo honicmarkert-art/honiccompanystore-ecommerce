@@ -145,11 +145,12 @@ export async function GET(request: NextRequest) {
       `)
     } else if (enriched) {
       // Enriched data for list views - includes most fields needed for product cards
+      // IMPORTANT: include is_new so frontend badge logic can respect DB flag
       queryBuilder = queryBuilder.select(`
         id, name, price, original_price, description, 
         image, category, brand, rating, reviews, 
         in_stock, stock_quantity, free_delivery, same_day_delivery, import_china,
-        created_at, updated_at, variant_config, sold_count,
+        is_new, created_at, updated_at, variant_config, sold_count,
         product_variants (*)
       `)
     } else {
@@ -781,14 +782,10 @@ export async function GET(request: NextRequest) {
         is_new: product.is_new, // For "New" badge calculation
         is_featured: product.is_featured || false, // For "Featured" badge (may not exist if migration hasn't run)
         updated_at: product.updated_at, // For "New" badge calculation
-        // Generate deterministic random sold_count if not present (for now)
-        // Uses product ID as seed for consistency
-        sold_count: (product as any).sold_count || (() => {
-          // Deterministic random based on product ID (consistent per product)
-          const seed = product.id
-          const random = ((seed * 9301 + 49297) % 233280) / 233280
-          return Math.floor(random * 5000) + 100 // Random between 100-5100
-        })(),
+        // Use real database sold_count (fallback to 0 if null/undefined)
+        sold_count: typeof (product as any).sold_count === 'number'
+          ? (product as any).sold_count
+          : Number((product as any).sold_count) || 0,
       }
 
       // Always include variant data for auto-selection functionality

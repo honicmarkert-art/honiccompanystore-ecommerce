@@ -57,7 +57,7 @@ export function ImagePreviewModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-7xl max-h-[90vh] p-0 bg-black/95 border-gray-800">
+      <DialogContent className="max-w-[1088px] w-[85vw] h-[85vw] max-h-[76.5vh] aspect-square p-0 bg-black/95 border-gray-800">
         <DialogHeader className="p-4 border-b border-gray-800">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-white text-lg">{title}</DialogTitle>
@@ -124,9 +124,9 @@ export function ImagePreviewModal({
               <Image
                 src={imageUrl}
                 alt={imageAlt}
-                width={1200}
-                height={600}
-                className="max-w-full max-h-full object-contain rounded-lg"
+                width={1088}
+                height={1088}
+                className="max-w-full max-h-full object-contain rounded-lg aspect-square"
                 priority
               />
             </div>

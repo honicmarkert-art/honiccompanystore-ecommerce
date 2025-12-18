@@ -474,7 +474,8 @@ async function handleClickPesaWebhook(request: NextRequest) {
       )
     }
 
-    // If payment is successful, reduce stock quantities (only if not already reduced)
+    // If payment is successful, reduce stock quantities
+    // (sold_count and buyers_count are now handled by a DB trigger)
     if (paymentStatus === 'paid' && order.payment_status !== 'paid' && order.payment_status !== 'success') {
       try {
         logger.log('📦 Reducing stock for paid order via payment webhook:', order.id)
@@ -560,7 +561,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
                         }
                       }
 
-                      // Update product total stock
+                      // Update product total stock (sold_count and buyers_count via DB trigger)
                       const { error: productUpdateError } = await supabase
                         .from('products')
                         .update({
@@ -586,7 +587,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
                   .eq('id', item.product_id)
                   .single()
 
-                if (fetchError) {
+                if (fetchError || !product) {
                   console.error('❌ Error fetching product for stock reduction:', item.product_id, fetchError)
                   continue
                 }

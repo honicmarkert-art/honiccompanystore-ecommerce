@@ -37,28 +37,44 @@ export const calculateDiscountPercentage = (price: number, originalPrice: number
 }
 
 /**
- * Check if product is new based on update date or is_new flag
- * 
- * Logic:
- * 1. If is_new = true (explicitly marked as new) → Always show "New"
- * 2. If is_new = false but updated within threshold → Show "New" 
- * 3. If is_new = false and old update → No "New" badge
+ * Check if product is new based ONLY on the is_new flag.
+ *
+ * Behaviour:
+ * - If DB provides is_new (any non-null/undefined value), we trust it:
+ *   - truthy  → ALWAYS show "New"
+ *   - falsy   → NEVER show "New"
+ * - If is_new is missing (null/undefined), we treat as NOT new
+ *   and DO NOT auto-mark by updated_at date.
  */
 export const isProductNew = (product: Product, daysThreshold: number = 30): boolean => {
-  
-  // Check explicit is_new flag first (highest priority)
-  if (product.is_new === true) {
-    return true
+  const flag = (product as any).is_new
+
+  // If DB explicitly sent an is_new value (including 0 / 1 / "0" / "1"),
+  // use its truthiness and skip automatic date-based detection.
+  if (flag !== undefined && flag !== null) {
+    // Normalize different possible representations coming from DB / API
+    if (flag === true) return true
+    if (flag === false) return false
+
+    if (typeof flag === 'number') {
+      return flag === 1
+    }
+
+    if (typeof flag === 'string') {
+      const normalized = flag.trim().toLowerCase()
+      if (normalized === 'true' || normalized === '1') return true
+      if (normalized === 'false' || normalized === '0' || normalized === '') return false
+      // Any other non-empty string should be treated as false to avoid
+      // accidentally showing "New" when the DB flag is effectively false.
+      return false
+    }
+
+    // Fallback: for any other type, be conservative and treat as false
+    return false
   }
-  
-  // Check update date for automatic "new" detection
-  if (product.updated_at) {
-    const updatedDate = new Date(product.updated_at)
-    const thresholdDate = new Date(Date.now() - daysThreshold * 24 * 60 * 60 * 1000)
-    const isNewByDate = updatedDate > thresholdDate
-    return isNewByDate
-  }
-  
+
+  // If is_new is missing (undefined/null), do NOT auto-mark as new by date.
+  // This gives you FULL manual control via the DB flag.
   return false
 }
 

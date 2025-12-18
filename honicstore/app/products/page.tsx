@@ -1,10 +1,11 @@
 "use client"
 
-import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
+import React, { useState, useMemo, useEffect, useRef, useCallback, Suspense } from "react"
 import { createPortal } from 'react-dom'
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { logger } from '@/lib/logger'
 import { BuyerRouteGuard } from '@/components/buyer-route-guard'
+import { EmailVerificationBanner } from '@/components/email-verification-banner'
 
 // Extend window object for search timeout
 declare global {
@@ -24,10 +25,15 @@ import { useCategoryFiltering } from "@/hooks/use-category-filtering"
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger"
 import { SearchModal } from "@/components/search-modal"
 import { SearchSuggestions } from "@/components/search-suggestions"
-import {
-  Search,
-  ShoppingCart,
-  User,
+import { 
+  ProductGridSkeleton, 
+  FilterSidebarSkeleton, 
+  SearchBarSkeleton 
+} from "@/components/ui/skeleton"
+import { 
+  Search, 
+  ShoppingCart, 
+  User, 
   Menu,
   Palette,
   DollarSign,
@@ -68,6 +74,10 @@ import {
   Ticket,
   Settings,
   MoreHorizontal,
+  ArrowRight,
+  Moon,
+  Sun,
+  UserPlus,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -79,6 +89,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
 import {
   Sheet,
@@ -97,7 +108,6 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { ProductGridSkeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
@@ -124,6 +134,10 @@ function ProductsPageContent() {
   const { toast } = useToast() // Initialize toast
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
   
+  // China image format fallback - tries png, jpg, jpeg, webp
+  const [chinaImageSrc, setChinaImageSrc] = useState('/china.png?v=2')
+  const chinaFormats = ['/china.png?v=2', '/china.jpg?v=2', '/china.jpeg?v=2', '/china.webp?v=2']
+  
   // China import modal state
   const [showChinaImportModal, setShowChinaImportModal] = useState(false)
   const [pendingCartItem, setPendingCartItem] = useState<{
@@ -144,7 +158,6 @@ function ProductsPageContent() {
   const { navigateWithPrefetch } = useOptimizedNavigation() // Optimized navigation
   const [searchTerm, setSearchTerm] = useState("")
   const [activeBrand, setActiveBrand] = useState<string | null>(null)
-  const [urlSupplier, setUrlSupplier] = useState<string | null>(null)
   // Categories scroll state
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
   const [showLeftArrow, setShowLeftArrow] = useState(false)
@@ -152,10 +165,29 @@ function ProductsPageContent() {
   // Initialize search state from URL query ?search= on mount and when URL changes
   const urlSearchParams = useSearchParams()
   
-  // Debug: Log current URL state
+
+
+  // On hard refresh only, clear filter query params to normalize URL
   useEffect(() => {
-    const currentUrl = `${pathname}${urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : ''}`
-  }, [pathname, urlSearchParams])
+    if (typeof window === 'undefined') return
+    const navEntries: any = (typeof performance !== 'undefined') ? performance.getEntriesByType('navigation') : []
+    const navType = navEntries && navEntries[0] ? navEntries[0].type : undefined
+    const legacyNav: any = (typeof performance !== 'undefined' && (performance as any).navigation) ? (performance as any).navigation : undefined
+    const isReload = navType === 'reload' || legacyNav?.type === 1
+    if (!isReload) return
+
+    const params = new URLSearchParams(window.location.search)
+    const hadFilters = params.has('mainCategory') || params.has('subCategories') || params.has('search')
+    if (!hadFilters) return
+
+    params.delete('mainCategory')
+    params.delete('subCategories')
+    params.delete('search')
+    const next = params.toString()
+    // Normalize URL to /products (or keep other non-filter params)
+    router.replace(next ? `/products?${next}` : '/products')
+  }, [])
+  
 
 
   useEffect(() => {
@@ -166,19 +198,20 @@ function ProductsPageContent() {
     }
     
     // Initialize category state from URL
+    // Read again after potential cleanup above
     const urlMainCategory = urlSearchParams?.get('mainCategory') || null
-    const urlSubCategories = urlSearchParams?.get('subCategories')?.split(',') || []
-    const supplierParam = urlSearchParams?.get('supplier') || null
-    setUrlSupplier(supplierParam)
+    // Support both subCategory (singular) and subCategories (plural, comma-separated)
+    const urlSubCategory = urlSearchParams?.get('subCategory')
+    const urlSubCategoriesParam = urlSearchParams?.get('subCategories')
+    const urlSubCategories = urlSubCategory 
+      ? [urlSubCategory] 
+      : (urlSubCategoriesParam?.split(',') || [])
     
     // Only set selectedMainCategory if it's different AND we're not in the middle of a checkbox operation
     // The checkbox should only set selectedSubCategories, not selectedMainCategory
     if (urlMainCategory && urlMainCategory !== selectedMainCategory) {
-      // Only set selectedMainCategory if there are no subcategories in URL
-      // This means it was clicked from the category name, not the checkbox
-      if (urlSubCategories.length === 0) {
-        setSelectedMainCategory(urlMainCategory)
-      }
+      // Set selectedMainCategory when mainCategory is in URL
+      setSelectedMainCategory(urlMainCategory)
     }
     
     if (urlSubCategories.length > 0 && JSON.stringify(urlSubCategories) !== JSON.stringify(selectedSubCategories)) {
@@ -270,13 +303,13 @@ function ProductsPageContent() {
     // Handle different response formats
     let categoriesArray: any[] = []
     if (categories && !categoriesError) {
-      if (Array.isArray(categories)) {
-        categoriesArray = categories
-      } else if (categories && typeof categories === 'object' && 'categories' in categories && Array.isArray((categories as any).categories)) {
-        categoriesArray = (categories as any).categories
-      } else if (categories && typeof categories === 'object' && 'success' in categories && Array.isArray((categories as any).categories)) {
-        // Handle API response format: { success: true, categories: [...] }
-        categoriesArray = (categories as any).categories
+    if (Array.isArray(categories)) {
+      categoriesArray = categories
+    } else if (categories && typeof categories === 'object' && 'categories' in categories && Array.isArray((categories as any).categories)) {
+      categoriesArray = (categories as any).categories
+    } else if (categories && typeof categories === 'object' && 'success' in categories && Array.isArray((categories as any).categories)) {
+      // Handle API response format: { success: true, categories: [...] }
+      categoriesArray = (categories as any).categories
       }
     }
 
@@ -293,16 +326,29 @@ function ProductsPageContent() {
       id: cat.id,
       name: cat.name,
       slug: cat.slug,
+      image_url: cat.image_url || null,
       parent_id: cat.parent_id,
       parent_name: cat.parent?.name,
       is_main: !cat.parent_id,
       is_sub: !!cat.parent_id,
       product_count: cat.product_count || 0,
-      image_url: cat.image_url || null
+      display_order: cat.display_order ?? 999 // Preserve display_order, default to 999 if missing
     }))
 
-    const mainCategories = allCategories.filter(cat => cat.is_main)
-    const subCategories = allCategories.filter(cat => cat.is_sub)
+    // Sort by display_order to maintain admin-set order
+    const sortedCategories = [...allCategories].sort((a, b) => {
+      // Ensure display_order is treated as a number
+      const orderA = Number(a.display_order) ?? 999
+      const orderB = Number(b.display_order) ?? 999
+      if (orderA !== orderB) {
+        return orderA - orderB
+      }
+      // If display_order is the same, sort by name
+      return (a.name || '').localeCompare(b.name || '')
+    })
+
+    const mainCategories = sortedCategories.filter(cat => cat.is_main)
+    const subCategories = sortedCategories.filter(cat => cat.is_sub)
 
     // If no main categories found, use fallback
     if (mainCategories.length === 0) {
@@ -392,6 +438,9 @@ function ProductsPageContent() {
   const [isCategoryNavOpen, setIsCategoryNavOpen] = useState(false)
   const [selectedMainCategory, setSelectedMainCategory] = useState<string | null>(null)
   const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>([])
+  const [isCategoryMegaMenuOpen, setIsCategoryMegaMenuOpen] = useState(false)
+  const [hoveredMegaCategory, setHoveredMegaCategory] = useState<string | null>(null)
+  const categoryMegaMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [showMoreCategories, setShowMoreCategories] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const moreButtonRef = useRef<HTMLDivElement>(null)
@@ -400,6 +449,7 @@ function ProductsPageContent() {
   const [visibleCategories, setVisibleCategories] = useState<any[]>([])
   const [overflowCategories, setOverflowCategories] = useState<any[]>([])
   const mobileCategoriesContainerRef = useRef<HTMLDivElement>(null)
+  const categoryItemRefs = useRef<Map<number, HTMLAnchorElement>>(new Map())
   
   // Desktop navigation overflow state
   const [desktopVisibleCategories, setDesktopVisibleCategories] = useState<any[]>([])
@@ -408,6 +458,61 @@ function ProductsPageContent() {
   const [desktopDropdownPosition, setDesktopDropdownPosition] = useState({ top: 0, left: 0 })
   const desktopMoreButtonRef = useRef<HTMLDivElement>(null)
   const desktopCategoriesContainerRef = useRef<HTMLDivElement>(null)
+  const openCategoryMegaMenu = useCallback(() => {
+    if (categoryMegaMenuTimeoutRef.current) {
+      clearTimeout(categoryMegaMenuTimeoutRef.current)
+    }
+    // Add 400ms delay before opening
+    categoryMegaMenuTimeoutRef.current = setTimeout(() => {
+    if (!isCategoryMegaMenuOpen) {
+      setIsCategoryMegaMenuOpen(true)
+    }
+    }, 400)
+  }, [isCategoryMegaMenuOpen])
+
+  const closeCategoryMegaMenu = useCallback(() => {
+    if (categoryMegaMenuTimeoutRef.current) {
+      clearTimeout(categoryMegaMenuTimeoutRef.current)
+    }
+    categoryMegaMenuTimeoutRef.current = setTimeout(() => {
+      setIsCategoryMegaMenuOpen(false)
+    }, 120)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (categoryMegaMenuTimeoutRef.current) {
+        clearTimeout(categoryMegaMenuTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const hoveredMegaCategoryData = useMemo(() => {
+    if (!hoveredMegaCategory) return null
+    return categoriesData.mainCategories.find((cat: any) => cat.slug === hoveredMegaCategory) || null
+  }, [hoveredMegaCategory, categoriesData.mainCategories])
+
+  const megaMenuSubCategories = useMemo(() => {
+    if (!hoveredMegaCategoryData) return []
+    return categoriesData.subCategories.filter((sub: any) => sub.parent_id === hoveredMegaCategoryData.id)
+  }, [hoveredMegaCategoryData, categoriesData.subCategories])
+
+  const chunkedMegaMenuSubCategories = useMemo(() => {
+    const chunkSize = 6
+    const chunks = []
+    for (let i = 0; i < megaMenuSubCategories.length; i += chunkSize) {
+      chunks.push(megaMenuSubCategories.slice(i, i + chunkSize))
+    }
+    return chunks
+  }, [megaMenuSubCategories])
+
+  const recommendedMegaMenuSubCategories = useMemo(() => megaMenuSubCategories.slice(0, 12), [megaMenuSubCategories])
+
+  useEffect(() => {
+    if (!hoveredMegaCategory && categoriesData.mainCategories.length > 0) {
+      setHoveredMegaCategory(categoriesData.mainCategories[0]?.slug || null)
+    }
+  }, [categoriesData.mainCategories, hoveredMegaCategory])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -421,6 +526,16 @@ function ProductsPageContent() {
           setShowMoreCategories(false)
         }
       }
+      
+      if (showDesktopMoreCategories) {
+        const target = event.target as Element
+        if (
+          !target.closest('.desktop-more-categories-dropdown') &&
+          !target.closest('.desktop-more-categories-portal')
+        ) {
+          setShowDesktopMoreCategories(false)
+        }
+      }
     }
 
     const handleResize = () => {
@@ -428,6 +543,15 @@ function ProductsPageContent() {
         const rect = moreButtonRef.current.getBoundingClientRect()
         
         setDropdownPosition({
+          top: rect.bottom + 8,
+          left: rect.left
+        })
+      }
+      
+      if (showDesktopMoreCategories && desktopMoreButtonRef.current) {
+        const rect = desktopMoreButtonRef.current.getBoundingClientRect()
+        
+        setDesktopDropdownPosition({
           top: rect.bottom + 8,
           left: rect.left
         })
@@ -441,87 +565,36 @@ function ProductsPageContent() {
       document.removeEventListener('mousedown', handleClickOutside)
       window.removeEventListener('resize', handleResize)
     }
-  }, [showMoreCategories])
+  }, [showMoreCategories, showDesktopMoreCategories])
   
-  // Calculate which categories fit in the mobile row
+  // Show only first 6 categories (mobile)
   useEffect(() => {
-    const calculateVisibleCategories = () => {
-      if (!mobileCategoriesContainerRef.current || categoriesData.mainCategories.length === 0) {
-        return
-      }
-      
-      const container = mobileCategoriesContainerRef.current
-      const containerWidth = container.clientWidth
-      const gap = 12 // gap-3 = 12px
-      const moreButtonWidth = 70 // Approximate width of "More" button with icon
-      
-      // Get all main categories
-      const allCategories = categoriesData.mainCategories
-      let totalWidth = 0
-      const visible: any[] = []
-      const overflow: any[] = []
-      
-      // Reserve space for China button - measure if possible, otherwise estimate
-      const chinaButton = container.querySelector('a[href="/china"]')
-      const chinaButtonWidth = chinaButton ? (chinaButton as HTMLElement).offsetWidth : 50
-      totalWidth += chinaButtonWidth + gap
-      
-      // Create a temporary element to measure text width
-      const measureElement = document.createElement('span')
-      measureElement.style.position = 'absolute'
-      measureElement.style.visibility = 'hidden'
-      measureElement.style.whiteSpace = 'nowrap'
-      measureElement.style.fontSize = '0.875rem' // text-sm
-      measureElement.style.fontWeight = '500' // font-medium
-      measureElement.style.padding = '0'
-      document.body.appendChild(measureElement)
-      
-      // Calculate width for each category
-      for (let i = 0; i < allCategories.length; i++) {
-        const category = allCategories[i]
-        const firstWord = category.name.split(' ')[0]
-        
-        // Measure actual text width
-        measureElement.textContent = firstWord
-        const textWidth = measureElement.offsetWidth
-        const categoryWidth = textWidth + 8 // Add some padding
-        
-        // Check if this category fits (including More button space if needed)
-        const hasMoreCategories = i < allCategories.length - 1
-        const spaceNeeded = totalWidth + categoryWidth + gap + (hasMoreCategories ? moreButtonWidth + gap : 0)
-        
-        if (spaceNeeded <= containerWidth) {
-          visible.push(category)
-          totalWidth += categoryWidth + gap
-        } else {
-          // This and remaining categories go to overflow
-          overflow.push(...allCategories.slice(i))
-          break
-        }
-      }
-      
-      // Clean up
-      document.body.removeChild(measureElement)
-      
-      setVisibleCategories(visible)
-      setOverflowCategories(overflow)
+    if (categoriesData.mainCategories.length === 0) {
+      return
     }
     
-    // Calculate on mount, when categories load, and on resize
-    const timeoutId = setTimeout(calculateVisibleCategories, 150)
-    window.addEventListener('resize', calculateVisibleCategories)
-    
-    return () => {
-      clearTimeout(timeoutId)
-      window.removeEventListener('resize', calculateVisibleCategories)
+    // Simply show first 6 categories
+    const first6Categories = categoriesData.mainCategories.slice(0, 6)
+    setVisibleCategories(first6Categories)
+    setOverflowCategories([])
+  }, [categoriesData.mainCategories])
+
+  // Show maximum 6 categories (no More button)
+  useEffect(() => {
+    if (categoriesData.mainCategories.length === 0) {
+      return
     }
+    
+    // Show maximum 6 categories
+    const maxCategories = categoriesData.mainCategories.slice(0, 6)
+    setDesktopVisibleCategories(maxCategories)
+    setDesktopOverflowCategories([])
   }, [categoriesData.mainCategories])
   
   const [sortOrder, setSortOrder] = useState('price-low')
 
   // Pagination state - URL-based page number
   const [currentPage, setCurrentPage] = useState(1)
-  const [isPageTransitioning, setIsPageTransitioning] = useState(false)
   const PRODUCTS_PER_PAGE = 120
   const BATCH_SIZE = 24 // Load 24 at a time with infinite scroll
 
@@ -532,6 +605,10 @@ function ProductsPageContent() {
     categoriesData
   })
 
+  const isCategoryFilterActive = !!selectedMainCategory || selectedSubCategories.length > 0
+  const noCategoryMatches = isCategoryFilterActive && allCategoryIds.length === 0
+
+  // Build dynamic no-results reason and details
   const selectedMainName = useMemo(() => {
     if (!selectedMainCategory) return null
     const m = categoriesData.mainCategories.find(c => c.slug === selectedMainCategory)
@@ -543,9 +620,6 @@ function ProductsPageContent() {
     const map = new Map(categoriesData.subCategories.map(s => [s.slug, s.name]))
     return selectedSubCategories.map(s => map.get(s) || s)
   }, [selectedSubCategories, categoriesData.subCategories])
-
-  const isCategoryFilterActive = !!selectedMainCategory || selectedSubCategories.length > 0
-  const noCategoryMatches = isCategoryFilterActive && allCategoryIds.length === 0
 
   const noResultsReason = useMemo(() => {
     if (searchTerm) return 'search'
@@ -580,11 +654,10 @@ function ProductsPageContent() {
     brand: activeBrand || undefined,
     search: searchTerm || undefined,
     categories: isCategoryFilterActive ? allCategoryIds : undefined,
-    sortBy: sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
-    sortOrder: sortOrder === 'price-high' ? 'desc' : 'asc',
+    sortBy: sortOrder === 'featured' ? 'featured' : sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
+    sortOrder: sortOrder === 'featured' ? 'desc' : sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
-    supplier: urlSupplier || undefined,
     useOptimized: true,
     useMaterializedView: false,
     enabled: !categoriesLoading && !noCategoryMatches // Disable fetching if filter has no matching category IDs
@@ -601,7 +674,7 @@ function ProductsPageContent() {
   // Reset products immediately when any filter changes to prevent showing old products
   useEffect(() => {
     infiniteReset()
-  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, urlSupplier, infiniteReset])
+  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, infiniteReset])
   
   // Get page from URL on mount
   useEffect(() => {
@@ -610,51 +683,6 @@ function ProductsPageContent() {
       setCurrentPage(page)
     }
   }, [urlSearchParams])
-
-  // Client-side page navigation - keeps same page structure, only changes products
-  const goToPage = useCallback((newPage: number) => {
-    if (newPage < 1 || isPageTransitioning) return
-    
-    // Start page transition - keep current products visible with loading overlay
-    setIsPageTransitioning(true)
-    
-    // Scroll to top smoothly
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-    
-    // Build URL with current filters
-    const params = new URLSearchParams()
-    params.set('page', newPage.toString())
-    
-    if (activeBrand) params.set('brand', activeBrand)
-    if (searchTerm) params.set('search', searchTerm)
-    if (sortOrder !== 'featured') params.set('sort', sortOrder)
-    if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
-    if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
-    if (selectedMainCategory) params.set('category', selectedMainCategory)
-    if (selectedSubCategories.length > 0) params.set('sub', selectedSubCategories.join(','))
-    if (urlSupplier) params.set('supplier', urlSupplier)
-    
-    // Update URL without full page reload
-    router.push(`/products?${params.toString()}`, { scroll: false })
-    
-    // Update page state
-    setCurrentPage(newPage)
-    
-    // Reset infinite scroll to load products for new page
-    infiniteReset()
-  }, [activeBrand, searchTerm, sortOrder, priceRange, selectedMainCategory, selectedSubCategories, urlSupplier, router, infiniteReset, isPageTransitioning])
-
-  // End page transition when products finish loading
-  useEffect(() => {
-    if (isPageTransitioning && !infiniteLoading && infiniteProducts.length > 0) {
-      setIsPageTransitioning(false)
-    }
-  }, [isPageTransitioning, infiniteLoading, infiniteProducts.length])
-
-  // Calculate total pages
-  const totalPages = useMemo(() => {
-    return Math.ceil(infiniteTotalCount / PRODUCTS_PER_PAGE) || 1
-  }, [infiniteTotalCount])
 
   // Infinite scroll products hook for enhanced performance
 
@@ -685,9 +713,9 @@ function ProductsPageContent() {
         setAdsLoading(true)
         
         // Check cache for advertisements (placement-specific)
-        const cachedAds = localStorage.getItem('ads_cache_products')
-        const cachedRotation = localStorage.getItem('ads_rotation_cache_products')
-        const cacheTimestamp = localStorage.getItem('ads_cache_timestamp_products')
+        const cachedAds = localStorage.getItem('ads_cache_home')
+        const cachedRotation = localStorage.getItem('ads_rotation_cache_home')
+        const cacheTimestamp = localStorage.getItem('ads_cache_timestamp_home')
         const now = Date.now()
         const cacheAge = cacheTimestamp ? now - parseInt(cacheTimestamp) : Infinity
         
@@ -709,48 +737,52 @@ function ProductsPageContent() {
         const cacheBust = typeof window !== 'undefined' ? (localStorage.getItem('settings_cache_bust') || Date.now()) : Date.now()
         
         const [adsResponse, rotationResponse] = await Promise.all([
-          fetch(`/api/advertisements?placement=products&cb=${cacheBust}`, { cache: 'no-store' })
-            .catch(() => ({ ok: false, status: 500 })),
+          fetch(`/api/advertisements?placement=home&cb=${cacheBust}`, { cache: 'no-store' }),
           fetch(`/api/advertisements/rotation-time?cb=${cacheBust}`, { cache: 'no-store' })
-            .catch(() => ({ ok: false, status: 500 }))
         ])
         
-        if (adsResponse.ok && adsResponse instanceof Response) {
+        if (adsResponse.ok) {
           const data = await adsResponse.json()
           // Filter out China page ads
           const filteredData = (data || []).filter((ad: any) => ad.placement !== 'china')
-          setAdvertisements(filteredData)
-          localStorage.setItem('ads_cache_products', JSON.stringify(filteredData))
-        } else if ('status' in adsResponse && adsResponse.status === 429) {
+          // If no ads with placement=home, try fetching without placement filter as fallback
+          if (filteredData && filteredData.length > 0) {
+            setAdvertisements(filteredData)
+            localStorage.setItem('ads_cache_home', JSON.stringify(filteredData))
+          } else {
+            // Fallback: fetch all active ads (excluding china)
+            const fallbackResponse = await fetch(`/api/advertisements?cb=${cacheBust}`, { cache: 'no-store' })
+            if (fallbackResponse.ok) {
+              const fallbackData = await fallbackResponse.json()
+              // Filter out China page ads from fallback
+              const filteredFallback = (fallbackData || []).filter((ad: any) => ad.placement !== 'china')
+              setAdvertisements(filteredFallback)
+              localStorage.setItem('ads_cache_home', JSON.stringify(filteredFallback))
+            } else {
+              setAdvertisements([])
+            }
+          }
+        } else if (adsResponse.status === 429) {
           if (cachedAds) {
             const cachedData = JSON.parse(cachedAds)
             // Filter out China page ads from cache
             const filteredCached = (cachedData || []).filter((ad: any) => ad.placement !== 'china')
             setAdvertisements(filteredCached)
           }
-        } else {
-          // Use cached data or empty array on error
-          if (cachedAds) {
-            const cachedData = JSON.parse(cachedAds)
-            // Filter out China page ads from cache
-            const filteredCached = (cachedData || []).filter((ad: any) => ad.placement !== 'china')
-            setAdvertisements(filteredCached)
           }
-        }
-        
-        if (rotationResponse.ok && rotationResponse instanceof Response) {
+          
+        if (rotationResponse.ok) {
           const rotationData = await rotationResponse.json()
           setAdRotationTime(rotationData.rotationTime || 10)
-          localStorage.setItem('ads_rotation_cache_products', (rotationData.rotationTime || 10).toString())
-        } else if ('status' in rotationResponse && rotationResponse.status === 429) {
+          localStorage.setItem('ads_rotation_cache_home', (rotationData.rotationTime || 10).toString())
+        } else if (rotationResponse.status === 429) {
           if (cachedRotation) {
             setAdRotationTime(parseInt(cachedRotation))
           }
-        } else {
-        }
+          }
         
         // Update cache timestamp
-        localStorage.setItem('ads_cache_timestamp_products', now.toString())
+        localStorage.setItem('ads_cache_timestamp_home', now.toString())
         
       } catch (error) {
       } finally {
@@ -759,7 +791,7 @@ function ProductsPageContent() {
     }
     fetchAds()
   }, [])
-  
+
   // Rotate advertisements based on admin-configured time
   useEffect(() => {
     if (advertisements.length <= 1) return // No need to rotate if only one ad
@@ -770,6 +802,15 @@ function ProductsPageContent() {
     
     return () => clearInterval(interval)
   }, [advertisements.length, adRotationTime])
+
+  // Reset currentAdIndex when advertisements change or become empty
+  useEffect(() => {
+    if (advertisements.length === 0) {
+      setCurrentAdIndex(0)
+    } else if (currentAdIndex >= advertisements.length) {
+      setCurrentAdIndex(0)
+    }
+  }, [advertisements.length, currentAdIndex])
 
   // Rotate promotional text with fade animation
   useEffect(() => {
@@ -856,6 +897,7 @@ function ProductsPageContent() {
     freeDelivery: product.free_delivery,
     sameDayDelivery: product.same_day_delivery,
     is_new: product.is_new, // For "New" badge calculation
+    is_featured: (product as any).is_featured || false, // For "Featured" badge
     updated_at: product.updated_at, // For "New" badge calculation
     variants: product.product_variants || [],
     gallery: product.image ? [product.image] : [],
@@ -867,8 +909,6 @@ function ProductsPageContent() {
   const products = imageSearchResults.length > 0 ? imageSearchResults : adaptedInfiniteProducts as any
 
   // Old shuffling system removed - now using smart shuffling system above
-  const isLoading = infiniteLoading // Only show loading for infinite scroll
-  const error = infiniteError
 
   // Smart Product Shuffling System
   const [shuffledProducts, setShuffledProducts] = useState<any[]>([])
@@ -950,6 +990,31 @@ function ProductsPageContent() {
     })
     return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
   }, [products, shuffledProducts, PRODUCTS_PER_PAGE, searchTerm, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, infiniteLoading])
+
+  // Track initial load state - more aggressive loading
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
+  const [hasDataLoaded, setHasDataLoaded] = useState(false)
+  const [showSkeleton, setShowSkeleton] = useState(true)
+  
+  useEffect(() => {
+    // Set initial load to false after a longer delay
+    const timer = setTimeout(() => setIsInitialLoad(false), 3000) // 3 seconds
+    return () => clearTimeout(timer)
+  }, [])
+  
+  // Track when we have actual data
+  useEffect(() => {
+    if (displayedProducts.length > 0) {
+      setHasDataLoaded(true)
+      // Hide skeleton after data loads and a short delay
+      setTimeout(() => setShowSkeleton(false), 1000)
+    }
+  }, [displayedProducts.length])
+  
+  // More aggressive loading condition
+  const isLoading = infiniteLoading || categoriesLoading || isInitialLoad || !hasDataLoaded
+  const error = infiniteError
+  
 
   // Handle user activity detection
   const handleUserActivity = useCallback(() => {
@@ -1037,52 +1102,57 @@ function ProductsPageContent() {
   const hasNextPage = infiniteTotalCount > PRODUCTS_PER_PAGE || (displayedProducts.length >= PRODUCTS_PER_PAGE && infiniteHasMore)
   const currentPageProductCount = displayedProducts.length
   
+  // Build next page URL with current filters
+  const buildNextPageUrl = useCallback(() => {
+    const params = new URLSearchParams()
+    params.set('page', (currentPage + 1).toString())
+    
+    if (activeBrand) params.set('brand', activeBrand)
+    if (searchTerm) params.set('search', searchTerm)
+    // Sort parameter removed - use default sorting
+    if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
+    if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
+    
+    return `/products?${params.toString()}`
+  }, [currentPage, activeBrand, searchTerm, priceRange])
 
   // Track prefetched products to avoid duplicate requests
   const prefetchedProductsRef = useRef<Set<number>>(new Set())
-  const abortControllersRef = useRef<Map<number | string, AbortController>>(new Map())
+  const abortControllersRef = useRef<Map<number, AbortController>>(new Map())
 
-  // Optimized intelligent prefetching for visible products (batch mode)
+  // Optimized intelligent prefetching for visible products
   useEffect(() => {
     if (displayedProducts.length === 0) return
-    
-    // Don't prefetch when searching or when there are image search results
-    if (searchTerm || imageSearchResults.length > 0) return
 
-    // Collect first 24 products that haven't been prefetched yet
+    // Only prefetch first 6 products that haven't been prefetched yet
     const productsToPrefetch = displayedProducts
+      .slice(0, 6)
       .filter((product: any) => !prefetchedProductsRef.current.has(product.id))
-      .slice(0, 24)
 
-    if (productsToPrefetch.length === 0) return
-
-    // Mark all as prefetched immediately to prevent duplicates
-    productsToPrefetch.forEach((product: any) => {
+    productsToPrefetch.forEach((product: any, index: number) => {
+      // Mark as prefetched immediately to prevent duplicates
       prefetchedProductsRef.current.add(product.id)
+      
+      // Stagger prefetch requests to avoid overwhelming the server
+      setTimeout(() => {
+        const controller = new AbortController()
+        abortControllersRef.current.set(product.id, controller)
+        
+        fetch(`/api/products/${product.id}?minimal=false`, { 
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal
+        })
+          .catch(() => {}) // Silent fail for prefetch
+          .finally(() => {
+            abortControllersRef.current.delete(product.id)
+          })
+      }, index * 100) // 100ms delay between each prefetch
     })
-    
-    // Make a single batch API call with all IDs
-    const productIds = productsToPrefetch.map((p: any) => p.id).join(',')
-    
-    const controller = new AbortController()
-    abortControllersRef.current.set('batch', controller)
-    
-    fetch(`/api/products?ids=${productIds}&minimal=false`, { 
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal
-    })
-      .catch(() => {}) // Silent fail for prefetch
-      .finally(() => {
-        abortControllersRef.current.delete('batch')
-      })
-  }, [displayedProducts, searchTerm, imageSearchResults])
+  }, [displayedProducts])
 
   // Optimized scroll-based prefetching (observer created once, not on every render)
   useEffect(() => {
-    // Don't prefetch when searching or when there are image search results
-    if (searchTerm || imageSearchResults.length > 0) return
-    
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -1126,7 +1196,7 @@ function ProductsPageContent() {
       abortControllersRef.current.forEach((controller: AbortController) => controller.abort())
       abortControllersRef.current.clear()
     }
-  }, [displayedProducts, searchTerm, imageSearchResults])
+  }, [displayedProducts])
 
   // Old loadMoreProducts logic removed - now using InfiniteScrollTrigger component with useInfiniteProducts hook
 
@@ -1226,6 +1296,7 @@ function ProductsPageContent() {
     // Update URL to remove category parameters
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
+    params.delete('subCategory')
     params.delete('subCategories')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
     router.push(nextUrl)
@@ -1250,8 +1321,9 @@ function ProductsPageContent() {
     
     setSelectedSubCategories(newSubCategories)
     
-    // Update URL
+    // Update URL - clean up both subCategory (singular) and subCategories (plural)
     const params = new URLSearchParams(urlSearchParams?.toString())
+    params.delete('subCategory') // Remove singular form
     if (newSubCategories.length > 0) {
       params.set('subCategories', newSubCategories.join(','))
     } else {
@@ -1268,6 +1340,7 @@ function ProductsPageContent() {
     // Update URL
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
+    params.delete('subCategory')
     params.delete('subCategories')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
     router.push(nextUrl)
@@ -1280,6 +1353,7 @@ function ProductsPageContent() {
     // Update URL
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
+    params.delete('subCategory')
     params.delete('subCategories')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
     router.push(nextUrl)
@@ -1473,8 +1547,6 @@ function ProductsPageContent() {
     addItem(productId, quantity, undefined, {}, minPrice)
   }
 
-
-
   return (
     <div className={cn("flex flex-col min-h-screen w-full overflow-x-hidden", themeClasses.mainBg, themeClasses.mainText)} suppressHydrationWarning>
       {/* Preload first few product images for better performance */}
@@ -1501,10 +1573,39 @@ function ProductsPageContent() {
       </div>
 
       <header
-        className="fixed top-0 z-40 w-full bg-white dark:bg-black/50 backdrop-blur-sm border-b border-white dark:border-gray-800 shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
+        className="fixed top-6 sm:top-0 z-40 w-full bg-white dark:bg-black/50 backdrop-blur-sm border-b border-white dark:border-gray-800 shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
+        onMouseEnter={(e) => {
+          e.stopPropagation()
+          // Close mega menu when cursor enters header area (regardless of how it was opened)
+          if (isCategoryMegaMenuOpen) {
+            if (categoryMegaMenuTimeoutRef.current) {
+              clearTimeout(categoryMegaMenuTimeoutRef.current)
+            }
+            setIsCategoryMegaMenuOpen(false)
+          }
+        }}
+        onMouseLeave={(e) => {
+          e.stopPropagation()
+        }}
+        suppressHydrationWarning
+      >
+        <div 
+          className="flex items-center h-10 sm:h-16 px-2 sm:px-3 md:px-4 lg:px-6 xl:px-8 2xl:px-10 w-full max-w-full" 
+          onMouseEnter={(e) => {
+            e.stopPropagation()
+            // Close mega menu when cursor enters header content area (regardless of how it was opened)
+            if (isCategoryMegaMenuOpen) {
+              if (categoryMegaMenuTimeoutRef.current) {
+                clearTimeout(categoryMegaMenuTimeoutRef.current)
+              }
+              setIsCategoryMegaMenuOpen(false)
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.stopPropagation()
+          }}
           suppressHydrationWarning
         >
-        <div className="flex items-center h-10 sm:h-16 px-2 sm:px-3 md:px-4 lg:px-6 xl:px-8 2xl:px-10 w-full max-w-full" suppressHydrationWarning>
           {/* Mobile Hamburger Menu Button */}
           <Button
             variant="ghost"
@@ -1522,12 +1623,12 @@ function ProductsPageContent() {
             className="flex items-center gap-1 sm:hidden text-sm font-semibold flex-shrink-0 min-w-0 ml-0.5 text-gray-900 dark:text-white"
               suppressHydrationWarning
           >
-            <Image
-              src={displayLogo}
-              alt={`${companyName} Logo`}
-              width={32}
-              height={32}
-                className="w-8 h-8 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
+                <Image 
+                  src={displayLogo} 
+                  alt={`${companyName} Logo`} 
+                  width={32} 
+                  height={32} 
+                  className="w-8 h-8 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)] dark:[box-shadow:0_2px_8px_rgba(255,255,255,0.5),0_1px_4px_rgba(255,255,255,0.4)]"
                 suppressHydrationWarning
             />
           </Link>
@@ -1543,7 +1644,7 @@ function ProductsPageContent() {
               alt={`${companyName} Logo`}
               width={48}
               height={48}
-                className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
+                className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.15)] dark:[box-shadow:0_2px_8px_rgba(255,255,255,0.5),0_1px_4px_rgba(255,255,255,0.4)]"
                 suppressHydrationWarning
             />
                               <div className="hidden sm:flex flex-col">
@@ -1553,21 +1654,35 @@ function ProductsPageContent() {
                                   suppressHydrationWarning
                                 >
                                   {companyName}
-                                </span>
-                              </div>
+                  </span>
+                </div>
           </Link>
 
 
-          {/* All Categories Button */}
-              <Button
-            onClick={() => setIsCategoryNavOpen(true)}
-            variant="outline"
-            size="sm"
-            className="hidden sm:flex items-center gap-2 ml-3 text-xs sm:text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+          {/* All Categories Button with Mega Menu */}
+          <div
+            className="hidden sm:block ml-3"
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              openCategoryMegaMenu()
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation()
+              closeCategoryMegaMenu()
+            }}
+            onFocusCapture={openCategoryMegaMenu}
+            onBlurCapture={closeCategoryMegaMenu}
           >
-            <Package className="w-4 h-4" />
-            All Categories
-              </Button>
+            <Button
+              onClick={() => setIsCategoryNavOpen(true)}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 text-xs sm:text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              <Package className="w-4 h-4" />
+              All Categories
+            </Button>
+          </div>
 
           {/* Search Bar Container - Moved to start */}
           <div className="flex-1 min-w-0 mx-2 sm:mx-3 md:mx-4 lg:mx-6 xl:mx-8 2xl:mx-10 flex items-center relative" suppressHydrationWarning>
@@ -1739,44 +1854,119 @@ function ProductsPageContent() {
                 >
                   <Settings className="w-3 h-3 text-white group-hover:text-black transition-colors" />
                   <span className="text-sm font-medium text-white group-hover:text-black transition-colors" suppressHydrationWarning>
-                    Services
+                    Service
                   </span>
-                  <span className="sr-only" suppressHydrationWarning>Services Menu</span>
+                  <span className="sr-only" suppressHydrationWarning>Service Menu</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
                 className="w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg"
               >
+                <DropdownMenuLabel className="text-base font-semibold px-3 py-2">
+                  Other Service
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/buyer-central'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
-                  <Settings className="w-4 h-4 mr-2" /> Our Services
+                  <Settings className="w-4 h-4 mr-2" /> Education Tools
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/electronics-supply'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
-                  <Package className="w-4 h-4 mr-2" /> Electronics Supply
+                  <Package className="w-4 h-4 mr-2" /> Electronic Manufacturing
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/prototyping'}
-                >
-                  <Settings className="w-4 h-4 mr-2" /> Prototyping Services
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/pcb-printing'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
                   <Laptop className="w-4 h-4 mr-2" /> PCB Printing
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/ai-consultancy'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    const newWindow = window.open('', '_blank')
+                    if (newWindow) {
+                      newWindow.document.write(`
+                        <html>
+                          <head><title>Coming Soon</title></head>
+                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                            </div>
+                          </body>
+                        </html>
+                      `)
+                      newWindow.document.close()
+                    }
+                  }}
                 >
-                  <TrendingUp className="w-4 h-4 mr-2" /> AI Consultancy
+                  <TrendingUp className="w-4 h-4 mr-2" /> Project Development
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                  asChild
+                >
+                  <Link href="/become-supplier" className="flex items-center">
+                    <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                  </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1785,7 +1975,7 @@ function ProductsPageContent() {
           {/* Right Side Actions */}
           <div className="flex items-center gap-1 sm:gap-2 lg:gap-3 flex-shrink-0 min-w-0" suppressHydrationWarning>
             {/* Mobile Cart Button - Always Visible */}
-            <Link href="/cart" className="sm:hidden">
+            <Link href="/cart" className="sm:hidden flex items-center">
               <Button
                 variant="outline"
                 size="icon"
@@ -1795,117 +1985,6 @@ function ProductsPageContent() {
                 <ShoppingCart className="w-3 h-3" />
                 <span className="sr-only">Shopping Cart</span>
                 <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground" suppressHydrationWarning>
-                  {cartUniqueProducts}
-                </span>
-              </Button>
-            </Link>
-
-
-
-            {/* Theme Switcher Dropdown - Hidden on Mobile */}
-            <div className="hidden sm:block">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                      "flex items-center gap-1 border-yellow-500 bg-transparent hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs",
-                      darkHeaderFooterClasses.buttonGhostText,
-                  )}
-                    suppressHydrationWarning
-                >
-                    <span className="text-sm font-medium" suppressHydrationWarning>
-                      Theme
-                    </span>
-                    <span className="sr-only" suppressHydrationWarning>Change Background Color ({backgroundColor})</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className={cn(
-                  themeClasses.cardBg,
-                  themeClasses.mainText,
-                  themeClasses.cardBorder,
-                )}
-              >
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("dark")}
-                  className={cn("hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors", backgroundColor === "dark" && "bg-yellow-500 text-white")}
-                  suppressHydrationWarning
-                >
-                  Dark {backgroundColor === "dark" && "✓"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("gray")}
-                  className={cn("hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors", backgroundColor === "gray" && "bg-yellow-500 text-white")}
-                  suppressHydrationWarning
-                >
-                  Gray {backgroundColor === "gray" && "✓"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setBackgroundColor("white")}
-                  className={cn("hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors", backgroundColor === "white" && "bg-yellow-500 text-white")}
-                  suppressHydrationWarning
-                >
-                  White {backgroundColor === "white" && "✓"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            </div>
-
-            <div className="hidden sm:block">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    "flex items-center gap-1 border-yellow-500 bg-transparent hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs",
-                    darkHeaderFooterClasses.buttonGhostText,
-                  )}
-                  suppressHydrationWarning
-                >
-                  {currency === "USD" ? <DollarSign className="w-3 h-3" /> : <Landmark className="w-3 h-3" />}
-                  {currency}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className={cn(
-                  themeClasses.cardBg,
-                  themeClasses.mainText,
-                  themeClasses.cardBorder,
-                )}
-              >
-                <DropdownMenuItem
-                  onClick={() => setCurrency("USD")}
-                  className="hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors"
-                  suppressHydrationWarning
-                >
-                  <DollarSign className="w-4 h-4 mr-2" /> USD
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setCurrency("TZS")}
-                  className="hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors"
-                  suppressHydrationWarning
-                >
-                  <Landmark className="w-4 h-4 mr-2" /> TZS
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            </div>
-
-            <Link href="/cart" className="hidden sm:block">
-              <Button
-                variant="outline"
-                size="icon"
-                className="relative bg-white text-neutral-950 border-yellow-500 hover:bg-yellow-500 hover:text-white hover:border-yellow-500 rounded-full transition-colors"
-                suppressHydrationWarning
-              >
-                <ShoppingCart className="w-5 h-5" />
-                <span className="sr-only">Shopping Cart</span>
-                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground" suppressHydrationWarning>
                   {cartUniqueProducts}
                 </span>
               </Button>
@@ -1929,13 +2008,13 @@ function ProductsPageContent() {
                       if (!name || name === '') return 'User';
                       return name.length > 5 ? name.substring(0, 5) + '...' : name;
                     })()}
-                  </span>
-                </div>
-              ) : (
+                    </span>
+                  </div>
+                ) : (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
+                    <Button 
+                      variant="ghost" 
                       className={cn(
                         "flex items-center gap-1 h-8 w-8 p-0 ml-1 cursor-pointer",
                         "hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors",
@@ -1956,21 +2035,21 @@ function ProductsPageContent() {
                   >
                     <div className="p-2 flex flex-col gap-2">
                       <Button 
-                        onClick={() => openAuthModal('login')}
+                      onClick={() => openAuthModal('login')}
                         className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                      >
-                        Sign in
-                      </Button>
+                    >
+                      Sign in
+                    </Button>
                       <button
-                        onClick={() => openAuthModal('register')}
+                      onClick={() => openAuthModal('register')}
                         className={cn(
                           "text-center text-sm hover:underline",
                           darkHeaderFooterClasses.textNeutralSecondaryFixed,
                         )}
-                      >
+                    >
                         Register
                       </button>
-                    </div>
+                  </div>
                     <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
                     <DropdownMenuItem 
                       className={darkHeaderFooterClasses.dropdownItemHoverBg}
@@ -2013,11 +2092,102 @@ function ProductsPageContent() {
               )}
             </div>
 
+
+
+            {/* Theme Toggle Button - Switch between White and Dark (Black) */}
+          <div className="hidden sm:block">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                // Toggle between white and dark (black) only
+                const newTheme = (backgroundColor === 'white' || backgroundColor === 'gray') ? 'dark' : 'white'
+                setBackgroundColor(newTheme)
+              }}
+              className={cn(
+                "flex items-center gap-2",
+                "border-gray-300 dark:border-gray-600",
+                "hover:bg-gray-50 dark:hover:bg-gray-800"
+              )}
+              title={(backgroundColor === 'white' || backgroundColor === 'gray') ? 'Switch to dark theme' : 'Switch to light theme'}
+              suppressHydrationWarning
+            >
+              {(backgroundColor === 'white' || backgroundColor === 'gray') ? (
+                <>
+                  <Moon className="w-4 h-4" />
+                  <span className="hidden sm:inline" suppressHydrationWarning>Dark</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-4 h-4" />
+                  <span className="hidden sm:inline" suppressHydrationWarning>Light</span>
+                </>
+              )}
+            </Button>
+          </div>
+
+            <div className="hidden sm:block">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "flex items-center gap-1 border-yellow-500 bg-transparent hover:bg-yellow-500/10 hover:text-yellow-600 hover:border-yellow-600 transition-colors text-xs",
+                    darkHeaderFooterClasses.buttonGhostText,
+                  )}
+                  suppressHydrationWarning
+                >
+                  {currency === "USD" ? <DollarSign className="w-3 h-3" /> : <Landmark className="w-3 h-3" />}
+                  {currency}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className={cn(
+                  themeClasses.cardBg,
+                  themeClasses.mainText,
+                  themeClasses.cardBorder,
+                )}
+              >
+                <DropdownMenuItem
+                  onClick={() => setCurrency("USD")}
+                  className="hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors"
+                  suppressHydrationWarning
+                >
+                  <DollarSign className="w-4 h-4 mr-2" /> USD
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setCurrency("TZS")}
+                  className="hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors"
+                  suppressHydrationWarning
+                >
+                  <Landmark className="w-4 h-4 mr-2" /> TZS
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+              </div>
+
+            <Link href="/cart" className="hidden sm:block">
+              <Button
+                variant="outline"
+                size="icon"
+                className="relative bg-white text-neutral-950 border-yellow-500 hover:bg-yellow-500 hover:text-white hover:border-yellow-500 rounded-full transition-colors"
+                suppressHydrationWarning
+              >
+                <ShoppingCart className="w-5 h-5" />
+                <span className="sr-only">Shopping Cart</span>
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground" suppressHydrationWarning>
+                  {cartUniqueProducts}
+                </span>
+              </Button>
+            </Link>
+
             {/* User Profile - Desktop */}
             <div className="hidden sm:block">
               {isAuthenticated ? (
                 <div className="flex flex-col items-center">
-                <UserProfile />
+                  <UserProfile />
                   <span className="text-xs text-black dark:text-white mt-1">
                     {(() => {
                       // Extract name from various sources (handles Google OAuth users)
@@ -2045,7 +2215,7 @@ function ProductsPageContent() {
                       <div className="hidden sm:flex flex-col items-start text-[10px]" suppressHydrationWarning>
                         <span className="group-hover:text-yellow-500 transition-colors">Welcome</span>
                         <span className="font-semibold group-hover:text-yellow-500 transition-colors">Sign in / Register</span>
-                      </div>
+                    </div>
                       <span className="sr-only">User Menu</span>
                     </Button>
                   </DropdownMenuTrigger>
@@ -2074,8 +2244,8 @@ function ProductsPageContent() {
                         onClick={() => openAuthModal('register')}
                       >
                         Register
-                      </Button>
-                    </div>
+                    </Button>
+                  </div>
                     <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
                     <DropdownMenuItem 
                       className={darkHeaderFooterClasses.dropdownItemHoverBg}
@@ -2139,20 +2309,43 @@ function ProductsPageContent() {
             </div>
 
           </div>
-        </div>
+              </div>
 
         {/* Second Row - Main Categories */}
         <div 
           ref={desktopCategoriesContainerRef}
-          className="hidden lg:flex items-center justify-start gap-4 xl:gap-6 py-3 pl-[50px] pr-0 overflow-hidden"
+          className="hidden lg:flex items-center justify-between gap-2 xl:gap-3 py-3 px-5 overflow-hidden"
         >
           {/* Import from China Link */}
-          <div style={{ marginLeft: '30px', marginRight: '10px' }}>
+          <div 
+            style={{ marginLeft: '10px', marginRight: '4px' }} 
+            className="flex-shrink-0"
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              if (isCategoryMegaMenuOpen) {
+                setIsCategoryMegaMenuOpen(false)
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation()
+            }}
+          >
             <Button
               variant="ghost"
               size="sm"
+              onMouseEnter={(e) => {
+                e.stopPropagation()
+                if (isCategoryMegaMenuOpen) {
+                  setIsCategoryMegaMenuOpen(false)
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.stopPropagation()
+              }}
               onClick={(e) => {
                 e.preventDefault()
+                e.stopPropagation()
+                setIsCategoryMegaMenuOpen(false)
                 toast({
                   title: "Coming Soon",
                   description: "This feature is coming soon. Stay tuned!",
@@ -2160,53 +2353,114 @@ function ProductsPageContent() {
                 })
               }}
               className={cn(
-                "flex items-center gap-1 border-2 border-white bg-black hover:border-yellow-600 transition-colors text-xs text-white relative",
+                 "flex items-center gap-1 transition-colors text-xs text-black dark:text-white relative px-3 py-2 h-8",
                 darkHeaderFooterClasses.buttonGhostText,
-                "cursor-pointer"
+                "cursor-pointer",
+                "[box-shadow:0_4px_6px_-1px_rgba(0,0,0,0.3),0_2px_4px_-1px_rgba(0,0,0,0.25)]",
+                "hover:[box-shadow:0_10px_15px_-3px_rgba(0,0,0,0.4),0_4px_6px_-2px_rgba(0,0,0,0.3)]",
+                "dark:[box-shadow:0_4px_6px_-1px_rgba(255,255,255,0.5),0_2px_4px_-1px_rgba(255,255,255,0.4)]",
+                "dark:hover:[box-shadow:0_10px_15px_-3px_rgba(255,255,255,0.6),0_4px_6px_-2px_rgba(255,255,255,0.5)]"
               )}
-              style={{ borderRadius: '20px' }}
+              style={{ 
+                borderRadius: '16px',
+                backgroundImage: 'url(/button.jpg)',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat'
+              }}
               suppressHydrationWarning
             >
-              <span className="text-sm font-medium text-yellow-500 flex items-center gap-1.5" suppressHydrationWarning>
-                From China
+               <span className="text-xs font-medium text-black dark:text-white flex items-center gap-1.5" suppressHydrationWarning>
+             <Image src={chinaImageSrc} alt="China" width={24} height={15} className="object-cover flex-shrink-0" suppressHydrationWarning onError={() => { const currentIndex = chinaFormats.indexOf(chinaImageSrc); if (currentIndex < chinaFormats.length - 1) setChinaImageSrc(chinaFormats[currentIndex + 1]); }} />
+             Buy from China
                 <Badge className="bg-yellow-500 text-black text-[8px] px-1 py-0 h-3 leading-none font-semibold" suppressHydrationWarning>
                   Soon
                 </Badge>
               </span>
-              <span className="sr-only" suppressHydrationWarning>From China</span>
+               <span className="sr-only" suppressHydrationWarning>Buy from China</span>
             </Button>
           </div>
           
-          {/* Main Categories */}
-          {categoriesData.mainCategories.map((cat: any) => (
-            <Link 
-              key={cat.id}
-              href={`/products?mainCategory=${cat.slug}`} 
-              className={cn(
-                "text-base font-medium transition-colors hover:text-yellow-500 whitespace-nowrap",
-                selectedMainCategory === cat.slug ? 'text-yellow-500' : themeClasses.mainText
-              )}
-              prefetch={false}
-              scroll={false}
+          {/* Visible Main Categories - Flex to fill space */}
+          <div className="flex items-center justify-between flex-1 gap-2 xl:gap-3 ml-2">
+            {desktopVisibleCategories.map((cat: any) => (
+            <div
+                key={cat.id}
+                className="relative flex-1"
+                onMouseEnter={() => {
+                  if (categoryMegaMenuTimeoutRef.current) {
+                    clearTimeout(categoryMegaMenuTimeoutRef.current)
+                  }
+                  setHoveredMegaCategory(cat.slug)
+                  openCategoryMegaMenu()
+                }}
+                onMouseLeave={() => {
+                  // Don't close immediately, let the mega menu handle it
+                }}
             >
-              {cat.name}
-            </Link>
-          ))}
-        </div>
+              <Link 
+                href={`/products?mainCategory=${cat.slug}`} 
+                className={cn(
+                    "text-base font-medium whitespace-nowrap flex-1 text-center inline-flex items-center justify-center gap-1",
+                    "transition-all duration-300 ease-in-out",
+                    "transform hover:scale-110",
+                    selectedMainCategory === cat.slug 
+                      ? 'text-yellow-500 hover:text-yellow-600' 
+                      : cn(themeClasses.mainText, "hover:text-yellow-500")
+                )}
+                prefetch={false}
+                scroll={false}
+                onClick={(e) => {
+                  e.preventDefault()
+                  router.push(`/?mainCategory=${cat.slug}`)
+                  setIsCategoryMegaMenuOpen(false)
+                }}
+              >
+                  {cat.name}
+                  <ChevronDown className="w-3 h-3 flex-shrink-0 transition-transform duration-300 group-hover:rotate-180" />
+              </Link>
+            </div>
+            ))}
+            
+          </div>
+              </div>
 
         {/* Mobile Categories Row */}
         <div 
           ref={mobileCategoriesContainerRef}
-          className="lg:hidden flex items-center justify-start gap-1 py-3 px-2 overflow-x-hidden overflow-y-visible" 
+          className="lg:hidden flex items-center justify-between gap-0 sm:gap-1 py-3 px-0 overflow-x-hidden overflow-y-visible" 
           suppressHydrationWarning
         >
           {/* Import from China Link */}
-          <div style={{ marginLeft: '30px', marginRight: '10px' }}>
+          <div 
+            className="flex-shrink-0" 
+            style={{ marginLeft: '4px', marginRight: '2px' }}
+            onMouseEnter={(e) => {
+              e.stopPropagation()
+              if (isCategoryMegaMenuOpen) {
+                setIsCategoryMegaMenuOpen(false)
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.stopPropagation()
+            }}
+          >
             <Button
               variant="ghost"
               size="sm"
+              onMouseEnter={(e) => {
+                e.stopPropagation()
+                if (isCategoryMegaMenuOpen) {
+                  setIsCategoryMegaMenuOpen(false)
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.stopPropagation()
+              }}
               onClick={(e) => {
                 e.preventDefault()
+                e.stopPropagation()
+                setIsCategoryMegaMenuOpen(false)
                 toast({
                   title: "Coming Soon",
                   description: "This feature is coming soon. Stay tuned!",
@@ -2214,83 +2468,499 @@ function ProductsPageContent() {
                 })
               }}
               className={cn(
-                "flex items-center gap-1 border border-white bg-black hover:border-yellow-600 transition-colors text-[10px] text-white flex-shrink-0 h-6 px-2 py-1 relative",
+                 "flex items-center gap-1 border-[1.5px] border-black hover:border-yellow-600 transition-colors text-[10px] px-[5px] py-1 h-6 text-black dark:border-white dark:text-black flex-shrink-0 relative",
                 darkHeaderFooterClasses.buttonGhostText,
                 "cursor-pointer"
               )}
-              style={{ borderRadius: '12px' }}
+               style={{ 
+                 borderRadius: '12px',
+                 backgroundImage: 'url(/button.jpg)',
+                 backgroundSize: 'cover',
+                 backgroundPosition: 'center',
+                 backgroundRepeat: 'no-repeat'
+               }}
               suppressHydrationWarning
             >
-              <span className="text-[10px] font-medium text-red-400 whitespace-nowrap flex items-center gap-1" suppressHydrationWarning>
-                China
+               <span className="text-[10px] font-medium text-[var(--tw-ring-offset-color)] flex items-center gap-1" suppressHydrationWarning>
+             <Image src={chinaImageSrc} alt="China" width={20} height={12} className="object-cover flex-shrink-0" suppressHydrationWarning onError={() => { const currentIndex = chinaFormats.indexOf(chinaImageSrc); if (currentIndex < chinaFormats.length - 1) setChinaImageSrc(chinaFormats[currentIndex + 1]); }} />
+             Buy from China
                 <Badge className="bg-yellow-500 text-black text-[7px] px-0.5 py-0 h-2.5 leading-none font-semibold" suppressHydrationWarning>
                   Soon
                 </Badge>
-              </span>
-              <span className="sr-only" suppressHydrationWarning>China</span>
+                </span>
+               <span className="sr-only" suppressHydrationWarning>Buy from China</span>
             </Button>
           </div>
           
-          {/* Visible Categories */}
-          {visibleCategories.map((category) => {
-            const firstWord = category.name.split(' ')[0]
-            return (
-              <Link 
-                key={category.id}
-                href={`/products?mainCategory=${category.slug}`} 
-                className={cn(
-                  "text-xs font-medium transition-colors hover:text-yellow-500 whitespace-nowrap flex-shrink-0",
-                  selectedMainCategory === category.slug ? 'text-yellow-500' : themeClasses.mainText
-                )}
-                prefetch={false}
-                scroll={false}
-              >
-                {firstWord}
-              </Link>
-            )
-          })}
-          
-          {/* More Button - Only show if there are overflow categories */}
-          {overflowCategories.length > 0 && (
-            <div ref={moreButtonRef} className="relative flex-shrink-0 more-categories-dropdown">
+          {/* All Categories Button - Mobile */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.preventDefault()
+              setIsCategoryMegaMenuOpen(!isCategoryMegaMenuOpen)
+            }}
+            className={cn(
+              "flex items-center gap-1.5 border-0 bg-white hover:bg-gray-50 dark:bg-black dark:hover:bg-gray-800 transition-colors text-[10px] px-2.5 py-1 h-6 flex-shrink-0 ml-0 sm:ml-1",
+              isCategoryMegaMenuOpen && "bg-gray-100 dark:bg-gray-800"
+            )}
+            style={{ borderRadius: '12px' }}
+          >
+            <Package className="w-3 h-3 flex-shrink-0" />
+            <span className="font-medium text-black dark:text-white">All Categories</span>
+            <ChevronDown className={cn(
+              "w-2.5 h-2.5 flex-shrink-0 transition-transform",
+              isCategoryMegaMenuOpen && "rotate-180"
+            )} />
+          </Button>
+
+          {/* Service Button - Mobile with Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
+                className="flex items-center gap-1.5 border-0 bg-white hover:bg-gray-50 dark:bg-black dark:hover:bg-gray-800 transition-colors text-[10px] px-2.5 py-1 h-6 flex-shrink-0 ml-0"
+                style={{ borderRadius: '12px' }}
+              >
+                <Settings className="w-3 h-3 flex-shrink-0" />
+                <span className="font-medium text-black dark:text-white">Service</span>
+                <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 ml-0.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg"
+            >
+              <DropdownMenuLabel className="text-base font-semibold px-3 py-2">
+                Other Service
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
                 onClick={(e) => {
                   e.preventDefault()
-                  e.stopPropagation()
-                  
-                  if (moreButtonRef.current) {
-                    const rect = moreButtonRef.current.getBoundingClientRect()
-                    const dropdownWidth = 280 // match max-w-[280px]
-                    const pageMargin = 5 // requested 5px right margin
-                    
-                    setDropdownPosition({
-                      top: rect.bottom + 8,
-                      left: Math.min(rect.left, window.innerWidth - dropdownWidth - pageMargin)
-                    })
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
                   }
-                  
-                  setShowMoreCategories(prev => {
-                    return !prev
-                  })
                 }}
-                className="flex items-center gap-1 text-sm font-medium hover:text-yellow-500 px-2 py-1 h-auto"
               >
-                More
-                <MoreHorizontal className="w-3 h-3" />
-              </Button>
+                <Settings className="w-4 h-4 mr-2" /> Education Tools
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                onClick={(e) => {
+                  e.preventDefault()
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
+                  }
+                }}
+              >
+                <Package className="w-4 h-4 mr-2" /> Electronic Manufacturing
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                onClick={(e) => {
+                  e.preventDefault()
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
+                  }
+                }}
+              >
+                <Laptop className="w-4 h-4 mr-2" /> PCB Printing
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                onClick={(e) => {
+                  e.preventDefault()
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>Coming Soon</title></head>
+                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
+                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
+                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
+                          </div>
+                        </body>
+                      </html>
+                    `)
+                    newWindow.document.close()
+                  }
+                }}
+              >
+                <TrendingUp className="w-4 h-4 mr-2" /> Project Development
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className={darkHeaderFooterClasses.dropdownItemHoverBg}
+                asChild
+              >
+                <Link href="/become-supplier" className="flex items-center">
+                  <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Backdrop for Mobile Mega Menu */}
+        {isCategoryMegaMenuOpen && (
+          <div 
+            className="fixed inset-0 bg-black/20 dark:bg-black/40 z-40 lg:hidden"
+            onClick={() => setIsCategoryMegaMenuOpen(false)}
+          />
+        )}
+
+        {/* Mega Menu Dropdown - Full Width Below Nav */}
+        {isCategoryMegaMenuOpen && categoriesData.mainCategories.length > 0 && (
+          <div 
+            className="absolute left-0 top-full w-full bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl z-50 max-h-[calc(100vh-200px)] overflow-y-auto"
+            onMouseEnter={openCategoryMegaMenu}
+            onMouseLeave={closeCategoryMegaMenu}
+            onClick={(e) => {
+              // On mobile, clicking inside the menu should not close it
+              e.stopPropagation()
+            }}
+          >
+            <div className="max-w-full px-3 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 py-3 sm:py-6">
+              <div className="grid grid-cols-12 gap-3 sm:gap-4">
+                <div className="col-span-12 lg:col-span-3 border-r-0 lg:border-r border-gray-100 dark:border-gray-800 lg:pr-4 pb-3 lg:pb-0 max-h-[300px] sm:max-h-[360px] overflow-y-auto">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
+                    Main Categories
+                  </p>
+                  <div className="space-y-1">
+                    {categoriesData.mainCategories.map((category: any) => {
+                      const isActive = hoveredMegaCategory === category.slug
+                      return (
+                        <button
+                          key={category.id}
+                          className={cn(
+                            'w-full text-left px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2',
+                            'transition-all duration-300 ease-in-out transform hover:scale-105',
+                            isActive
+                              ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-yellow-500'
+                          )}
+                          onMouseEnter={() => setHoveredMegaCategory(category.slug)}
+                          onFocus={() => setHoveredMegaCategory(category.slug)}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            // On mobile, just set the hovered category to show subcategories
+                            // On desktop, navigate and close menu
+                            if (window.innerWidth >= 1024) {
+                              router.push(`/?mainCategory=${category.slug}`)
+                              setIsCategoryMegaMenuOpen(false)
+                            } else {
+                              // Mobile: just select the category to show subcategories
+                              setHoveredMegaCategory(category.slug)
+                            }
+                          }}
+                        >
+                          {category.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="col-span-12 lg:col-span-9 mt-3 lg:mt-0">
+                  {hoveredMegaCategoryData ? (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-2">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Subcategories
+                          </p>
+                          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                            {hoveredMegaCategoryData.name}
+                          </h3>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-orange-600 hover:text-orange-700 dark:text-orange-400"
+                          onClick={() => {
+                            router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}`)
+                            setIsCategoryMegaMenuOpen(false)
+                          }}
+                        >
+                          View all
+                        </Button>
+                      </div>
+
+                      {recommendedMegaMenuSubCategories.length > 0 && (
+                        <div className="mb-4">
+                          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                            Recommended
+                          </p>
+                          {/* Mobile: Show 4 items, Desktop: Show 12 items */}
+                          <div className="flex flex-row gap-2 sm:gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-6 xl:grid-cols-12 lg:gap-3 lg:overflow-x-visible lg:pb-0">
+                            {/* Mobile: Show first 4 items */}
+                            {recommendedMegaMenuSubCategories.slice(0, 4).map((sub: any) => (
+                              <Link
+                                key={sub.id}
+                                href={`/products?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
+                                className="flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110 flex-shrink-0 min-w-[80px] sm:min-w-[90px] lg:min-w-0"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                  setIsCategoryMegaMenuOpen(false)
+                                }}
+                              >
+                                <div className="w-16 h-16 sm:w-20 sm:h-20 lg:w-16 lg:h-16 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
+                                  {sub.image_url ? (
+                                    <LazyImage
+                                      src={sub.image_url}
+                                      alt={sub.name}
+                                      width={64}
+                                      height={64}
+                                      className="w-full h-full object-cover rounded-lg"
+                                    />
+                                  ) : (
+                                    <Package className="w-6 h-6 sm:w-7 sm:h-7 lg:w-6 lg:h-6 text-orange-600 dark:text-orange-300" />
+                                  )}
+                                </div>
+                                <span className="text-[9px] sm:text-[10px] font-medium text-center text-gray-700 dark:text-gray-200 line-clamp-2 mt-1">
+                                  {sub.name}
+                                </span>
+                              </Link>
+                            ))}
+                            {/* Desktop: Show additional 8 items (total 12) */}
+                            {recommendedMegaMenuSubCategories.slice(4, 12).map((sub: any) => (
+                              <Link
+                                key={sub.id}
+                                href={`/products?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
+                                className="hidden lg:flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                  setIsCategoryMegaMenuOpen(false)
+                                }}
+                              >
+                                <div className="w-16 h-16 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
+                                  {sub.image_url ? (
+                                    <LazyImage
+                                      src={sub.image_url}
+                                      alt={sub.name}
+                                      width={64}
+                                      height={64}
+                                      className="w-full h-full object-cover rounded-lg"
+                                    />
+                                  ) : (
+                                    <Package className="w-6 h-6 text-orange-600 dark:text-orange-300" />
+                                  )}
+                                </div>
+                                <span className="text-[10px] font-medium text-center text-gray-700 dark:text-gray-200 line-clamp-2 mt-1">
+                                  {sub.name}
+                                </span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {chunkedMegaMenuSubCategories.length > 0 ? (
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                          {chunkedMegaMenuSubCategories.map((subGroup, idx) => (
+                            <div key={idx} className="space-y-2">
+                              {subGroup.map((sub: any) => (
+                                <Link
+                                  key={sub.id}
+                                  href={`/products?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
+                                  className="group flex items-center justify-between py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-300 ease-in-out transform hover:scale-105"
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                    setIsCategoryMegaMenuOpen(false)
+                                  }}
+                                >
+                                  <span>{sub.name}</span>
+                                  <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </Link>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                          No subcategories available yet.
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      Select a main category to view subcategories.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* Ads Container - Right after category nav (Mobile) */}
+      {currentPage < 2 && (
+      <div className="lg:hidden w-full overflow-x-hidden" style={{ minHeight: '1px', marginTop: '114px', position: 'relative' }}>
+        <div 
+          className="relative overflow-hidden rounded-none"
+          style={{ 
+            width: '100vw', 
+            marginLeft: 'calc(50% - 50vw)', 
+            marginRight: 'calc(50% - 50vw)',
+            position: 'relative'
+          }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {/* Previous Arrow */}
+          {!adsLoading && advertisements.length > 1 && (
+          <button
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.preventDefault()
+                setCurrentAdIndex((prev: number) => prev === 0 ? advertisements.length - 1 : prev - 1)
+              }}
+              className="absolute left-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
+              aria-label="Previous ad"
+            >
+              <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          )}
+          
+          {/* Next Arrow */}
+          {!adsLoading && advertisements.length > 1 && (
+            <button
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.preventDefault()
+                setCurrentAdIndex((prev: number) => (prev + 1) % advertisements.length)
+              }}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 z-30 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 sm:p-3 transition-all duration-200 shadow-lg hover:shadow-xl"
+              aria-label="Next ad"
+            >
+              <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          )}
+
+          {adsLoading ? (
+            <div className="block h-48 sm:h-64 md:h-80 relative z-0">
+              <div className="relative overflow-hidden rounded-none h-full bg-gray-200 dark:bg-gray-700 animate-pulse flex items-center justify-center">
+                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Loading advertisement...</p>
+              </div>
+            </div>
+          ) : advertisements.length > 0 && advertisements[currentAdIndex] ? (
+            <Link 
+              href={advertisements[currentAdIndex].link_url || "/products"}
+              className="block cursor-pointer h-48 sm:h-64 md:h-80 relative z-0"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <div className="relative overflow-hidden rounded-none h-full bg-gray-100 dark:bg-gray-800">
+                {advertisements[currentAdIndex].media_type === 'image' ? (
+                  <LazyImage
+                    src={advertisements[currentAdIndex].media_url}
+                    alt={advertisements[currentAdIndex].title}
+                    fill
+                    className="object-contain transition-opacity duration-500"
+                    priority={currentAdIndex === 0}
+                    quality={85}
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 100vw, 1200px"
+                  />
+                ) : (
+                  <video
+                    key={currentAdIndex}
+                    src={advertisements[currentAdIndex].media_url}
+                    className="w-full h-full object-contain transition-opacity duration-500"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                  />
+                )}
+                {/* Ad Title Overlay */}
+                {advertisements[currentAdIndex].title && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                    <p className="text-white text-xs sm:text-sm font-medium truncate" suppressHydrationWarning>
+                      {advertisements[currentAdIndex].title}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </Link>
+          ) : (
+            <div className="block h-48 sm:h-64 md:h-80 relative z-0">
+              <div className="relative overflow-hidden rounded-none h-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>No advertisements available</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Ad Navigation Dots */}
+          {!adsLoading && advertisements.length > 1 && (
+            <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-10">
+              {advertisements.map((_: any, index: number) => (
+                <button
+                  key={index}
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    e.preventDefault()
+                    setCurrentAdIndex(index)
+                  }}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    index === currentAdIndex 
+                      ? 'bg-white w-6' 
+                      : 'bg-white/50 hover:bg-white/75'
+                  }`}
+                  aria-label={`Go to ad ${index + 1}`}
+                />
+              ))}
             </div>
           )}
         </div>
-      </header>
+      </div>
+      )}
 
-
-      <main className={cn("flex-1 pt-24 xs:pt-24 sm:pt-24", themeClasses.mainBg)} suppressHydrationWarning>
-
-        {/* Ads Container - Above filter buttons */}
-        {!adsLoading && advertisements.length > 0 && (
-          <div className="w-full overflow-x-hidden mt-8" style={{ minHeight: '1px' }}>
+      {/* Ads Container - Right after category nav (Desktop) */}
+      {currentPage < 2 && (
+      <div className="hidden lg:block w-full overflow-x-hidden" style={{ minHeight: '1px', marginTop: '125px' }}>
             <div 
               className="relative overflow-hidden rounded-none"
               style={{ 
@@ -2303,7 +2973,7 @@ function ProductsPageContent() {
               onTouchEnd={handleTouchEnd}
             >
               {/* Previous Arrow */}
-              {advertisements.length > 1 && (
+              {!adsLoading && advertisements.length > 1 && (
               <button
                   onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                     e.preventDefault()
@@ -2317,7 +2987,7 @@ function ProductsPageContent() {
               )}
               
               {/* Next Arrow */}
-              {advertisements.length > 1 && (
+              {!adsLoading && advertisements.length > 1 && (
                 <button
                   onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                     e.preventDefault()
@@ -2330,7 +3000,13 @@ function ProductsPageContent() {
               </button>
               )}
 
-              {advertisements[currentAdIndex] && (
+              {adsLoading ? (
+                <div className="block h-48 sm:h-64 md:h-80 relative z-0">
+                  <div className="relative overflow-hidden rounded-none h-full bg-gray-200 dark:bg-gray-700 animate-pulse flex items-center justify-center">
+                    <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Loading advertisement...</p>
+                  </div>
+                </div>
+              ) : advertisements.length > 0 && advertisements[currentAdIndex] ? (
                 <Link 
                   href={advertisements[currentAdIndex].link_url || "/products"}
                   className="block cursor-pointer h-48 sm:h-64 md:h-80 relative z-0"
@@ -2365,14 +3041,20 @@ function ProductsPageContent() {
                         <p className="text-white text-xs sm:text-sm font-medium truncate" suppressHydrationWarning>
                           {advertisements[currentAdIndex].title}
                         </p>
-                      </div>
+        </div>
                     )}
                   </div>
                 </Link>
+              ) : (
+                <div className="block h-48 sm:h-64 md:h-80 relative z-0">
+                  <div className="relative overflow-hidden rounded-none h-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                    <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>No advertisements available</p>
+                  </div>
+                </div>
               )}
               
               {/* Ad Navigation Dots */}
-              {advertisements.length > 1 && (
+              {!adsLoading && advertisements.length > 1 && (
                 <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-10">
                   {advertisements.map((_: any, index: number) => (
                     <button
@@ -2389,14 +3071,27 @@ function ProductsPageContent() {
                       aria-label={`Go to ad ${index + 1}`}
                     />
             ))}
-          </div>
+              </div>
               )}
             </div>
           </div>
-        )}
+      )}
+
+      <main className={cn(
+        "flex-1", 
+        currentPage >= 2 
+          ? "pt-[114px] sm:pt-[114px] lg:pt-[125px]" // Start right after category nav (matches ad section positioning)
+          : "pt-24 xs:pt-24 sm:pt-24 -mt-12 lg:-mt-16", 
+        themeClasses.mainBg
+      )} suppressHydrationWarning>
+        <div className="container mx-auto px-4 pt-0 pb-0">
+          <div className="-mb-4">
+            <EmailVerificationBanner />
+          </div>
+        </div>
 
         {/* Filter and Sort Section */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 px-1 sm:px-2 lg:px-3 mt-2" suppressHydrationWarning>
           {/* Left Side - Filter Buttons and Product Count */}
           <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto" suppressHydrationWarning>
             {/* Filter Buttons */}
@@ -2443,9 +3138,9 @@ function ProductsPageContent() {
                   <Button
                         onClick={() => setPriceRange([0, 100000])}
                     variant="outline"
-                        size="sm"
+                    size="sm"
                         className="flex-1"
-                      >
+                  >
                         Reset
                   </Button>
                   <Button
@@ -2455,8 +3150,8 @@ function ProductsPageContent() {
                   >
                         Apply
                   </Button>
-                    </div>
-                  </div>
+                </div>
+              </div>
                 </DialogContent>
               </Dialog>
 
@@ -2482,19 +3177,17 @@ function ProductsPageContent() {
             </div>
 
             {/* Product Count */}
-            {(infiniteTotalCount > 0 || products.length > 0) && (
-              <span className={cn("text-xs sm:text-sm whitespace-nowrap flex items-center gap-1", themeClasses.textNeutralSecondary)}>
-                <Package className={cn("w-3 h-3 sm:w-4 sm:h-4", themeClasses.textNeutralSecondary)} />
-                {Math.min(displayedProducts.length, infiniteTotalCount > 0 ? infiniteTotalCount : products.length)} of {infiniteTotalCount > 0 ? infiniteTotalCount : products.length} products
-              </span>
-            )}
+            <span className={cn("text-xs sm:text-sm whitespace-nowrap flex items-center gap-1", themeClasses.textNeutralSecondary)}>
+              <Package className={cn("w-3 h-3 sm:w-4 sm:h-4", themeClasses.textNeutralSecondary)} />
+              {Math.min(displayedProducts.length, infiniteTotalCount > 0 ? infiniteTotalCount : products.length)} of {infiniteTotalCount > 0 ? infiniteTotalCount : products.length} products
+            </span>
           </div>
 
           {/* Right Side - Sort Dropdown */}
           <div className="hidden sm:flex items-center gap-2 w-full sm:w-auto" suppressHydrationWarning>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
+                <Button
                 variant="outline"
                 size="sm"
                 className={cn(
@@ -2511,7 +3204,7 @@ function ProductsPageContent() {
                               sortOrder === 'best-selling' ? 'Best Selling' : 'Price: Low to High'}
                 </span>
                 <ChevronDown className="w-3 h-3 sm:w-4 sm:h-4 group-hover:text-yellow-500 transition-colors" />
-              </Button>
+                </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -2549,11 +3242,11 @@ function ProductsPageContent() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          </div>
-        </div>
+              </div>
+            </div>
 
         {/* Main Categories Thumbnails (images only) */}
-        {categoriesData.mainCategories.length > 0 && (
+        {categoriesData.mainCategories.length > 0 && currentPage < 2 && (
           <div className="px-1 sm:px-2 lg:px-3 mt-2 mb-4 relative">
             <div className={cn("text-lg sm:text-xl font-bold mb-2 text-center", themeClasses.mainText)}>
               Shop by Categories
@@ -2669,10 +3362,7 @@ function ProductsPageContent() {
           </div>
         </div>
 
-        {/* Loading State */}
-        {isLoading && (
-          <ProductGridSkeleton count={24} />
-        )}
+        {/* Loading State - Removed for faster UX */}
 
         {/* Error State (Rate limiting and other errors) */}
         {infiniteError && !infiniteLoading && (
@@ -2702,19 +3392,55 @@ function ProductsPageContent() {
                   >
                 Refresh Page
                   </Button>
+                    </div>
+            </div>
+          )}
+
+                {/* Image Search Results Indicator */}
+        {imageSearchResults.length > 0 && (
+          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <span className="text-blue-800 dark:text-blue-200 font-medium">
+                  Image Search Results ({imageSearchResults.length} products found)
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  setImageSearchResults([])
+                  setImageSearchKeywords([])
+                }}
+                className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+                  </div>
+            {imageSearchKeywords.length > 0 && (
+              <div className="mt-2">
+                <span className="text-sm text-blue-700 dark:text-blue-300">Keywords: </span>
+                <span className="text-sm text-blue-600 dark:text-blue-400">
+                  {imageSearchKeywords.join(', ')}
+                </span>
                 </div>
+            )}
               </div>
         )}
 
-        {/* No Products Found - Only show when not loading and no products */}
-        {!isLoading && !error && displayedProducts.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-            <Package className="w-16 h-16 text-gray-400 mb-4" />
+                {/* Products Grid */}
+        {showSkeleton || isLoading ? (
+          // Skeleton Loading State
+          <div className="px-1 sm:px-2 lg:px-3">
+            <ProductGridSkeleton count={24} />
+          </div>
+        ) : (noCategoryMatches || displayedProducts.length === 0) ? (
+          <div className="px-4 py-10 text-center">
+            <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
               No products found
             </h3>
             {(searchTerm || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
-              <div className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
+              <div className={cn("text-sm mb-6 max-w-md mx-auto", themeClasses.textNeutralSecondary)}>
                 <p className="mb-2">Selected filters:</p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   {searchTerm && (
@@ -2745,65 +3471,24 @@ function ProductsPageContent() {
                 </div>
               </div>
             )}
-            <Button
-              onClick={handleClearAllFilters}
-              className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-            >
-              Clear All Filters
-            </Button>
-          </div>
-        )}
-
-                {/* Image Search Results Indicator */}
-        {imageSearchResults.length > 0 && (
-          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Camera className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span className="text-blue-800 dark:text-blue-200 font-medium">
-                  Image Search Results ({imageSearchResults.length} products found)
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  setImageSearchResults([])
-                  setImageSearchKeywords([])
-                }}
-                className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
+            {(searchTerm || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
+              <Button
+                onClick={clearFilters}
+                className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
               >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {imageSearchKeywords.length > 0 && (
-              <div className="mt-2">
-                <span className="text-sm text-blue-700 dark:text-blue-300">Keywords: </span>
-                <span className="text-sm text-blue-600 dark:text-blue-400">
-                  {imageSearchKeywords.join(', ')}
-                </span>
-              </div>
+                Clear All Filters
+              </Button>
             )}
           </div>
-        )}
-
-                {/* Products Grid */}
-        {!isLoading && !error && displayedProducts.length > 0 && (
-          <div className="relative">
-            {/* Page Transition Overlay - keeps layout stable during pagination */}
-            {isPageTransitioning && (
-              <div className="absolute inset-0 bg-white/60 dark:bg-neutral-950/60 backdrop-blur-sm z-10 flex items-center justify-center min-h-[200px]">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-8 h-8 border-3 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className={cn("text-sm font-medium", themeClasses.mainText)}>Loading page {currentPage}...</p>
-                </div>
-              </div>
-            )}
-            <InfiniteScrollTrigger
-              onLoadMore={infiniteLoadMore}
-              hasMore={hasMoreProducts}
-              loading={infiniteLoadingMore}
-              error={infiniteError}
-            >
-              <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-8 3xl:grid-cols-12 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+        ) : !error ? (
+          <InfiniteScrollTrigger
+            onLoadMore={infiniteLoadMore}
+            hasMore={hasMoreProducts}
+            loading={infiniteLoadingMore}
+            error={infiniteError}
+          >
+            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-8 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+            {displayedProducts.length > 0 && (
               <>
                 
                 {/* All Product Cards */}
@@ -2881,7 +3566,7 @@ function ProductsPageContent() {
                   )}
                   {/* Corner decoration */}
                   <div className="absolute top-0 right-0 w-0 h-0 border-l-[20px] border-l-transparent border-t-[20px] border-t-orange-500 z-20"></div>
-                  
+
                   {/* Badges - Separate left and right badge systems */}
                   {(() => {
                     const leftBadge = getLeftBadge(product)
@@ -2900,20 +3585,20 @@ function ProductsPageContent() {
                             <span className={leftBadge.className} suppressHydrationWarning>
                               {leftBadge.text}
                       </span>
-                          </div>
+        </div>
                         )}
                         
                         {/* Right side badge (New vs Discount) */}
                         {rightBadge.type !== 'none' && (
                           <div className="absolute top-0 right-0 sm:top-0 sm:right-1.5 z-10" suppressHydrationWarning>
-                            <span 
+                  <span 
                               className={rightBadge.className} 
                               style={rightBadge.customStyle}
                               suppressHydrationWarning
-                            >
+                  >
                               {rightBadge.text}
-                            </span>
-                  </div>
+                  </span>
+                </div>
                         )}
                         
                         {/* China badge - Right side, below New/Discount badge */}
@@ -2924,8 +3609,8 @@ function ProductsPageContent() {
                               suppressHydrationWarning
                             >
                               China
-                            </span>
-                          </div>
+                  </span>
+                </div>
                         )}
                       </>
                     )
@@ -2952,14 +3637,14 @@ function ProductsPageContent() {
                   )}
                   <div
                     className={cn(
-                      "flex items-center gap-1 text-[10px] mt-0.5 sm:text-xs",
+                      "flex flex-wrap items-center gap-1 text-[10px] mt-0.5 sm:text-xs min-h-[1.5rem]",
                       themeClasses.textNeutralSecondary,
                     )}
                         suppressHydrationWarning
                   >
                     {/* Sold count - inline on desktop */}
                     {product.sold_count && (
-                      <span className="hidden sm:inline text-xs" suppressHydrationWarning>
+                      <span className="hidden sm:inline text-xs whitespace-nowrap" suppressHydrationWarning>
                         {product.sold_count >= 1000 
                           ? `${(product.sold_count / 1000).toFixed(1)}k+` 
                           : `${product.sold_count}+`} sold
@@ -2968,10 +3653,11 @@ function ProductsPageContent() {
                     {product.sold_count && (
                       <span className="hidden sm:inline mx-0.5" suppressHydrationWarning>•</span>
                     )}
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
                     {Array.from({ length: 5 }).map((_, i) => (
                       <Star
                         key={i}
-                        className={`w-3 h-3 ${
+                          className={`w-3 h-3 flex-shrink-0 ${
                           i < Math.floor(product.rating)
                             ? "fill-yellow-400 text-yellow-400"
                             : themeClasses.textNeutralSecondary
@@ -2979,7 +3665,8 @@ function ProductsPageContent() {
                         suppressHydrationWarning
                       />
                     ))}
-                    <span suppressHydrationWarning>({product.reviews})</span>
+                      <span className="whitespace-nowrap" suppressHydrationWarning>({product.reviews})</span>
+                    </div>
                   </div>
                   {hasFreeShipping && (
                     <div
@@ -3001,14 +3688,14 @@ function ProductsPageContent() {
                       <>
                             <div className={cn("text-[10px] line-through sm:text-xs", themeClasses.textNeutralSecondary)} suppressHydrationWarning>
                               {formatPrice(testOriginalPrice)}
-                        </div>
+                </div>
                             <div className="text-[10px] font-medium text-green-600" suppressHydrationWarning>
                           {discountPercentage.toFixed(0)}% OFF
-                        </div>
+                </div>
                       </>
                     )}
-                  </div>
-                      
+              </div>
+
 
                 </CardContent>
                     <CardFooter className="px-1 pb-1 pt-0 flex flex-col gap-1" suppressHydrationWarning>
@@ -3031,113 +3718,29 @@ function ProductsPageContent() {
             )
                 })}
               </>
+            )}
               </div>
-            </InfiniteScrollTrigger>
-          </div>
-        )}
+          </InfiniteScrollTrigger>
+        ) : null}
 
-        {/* Pagination Controls */}
-        {(currentPage > 1 || hasNextPage) && displayedProducts.length > 0 && (
-          <div className="flex flex-col items-center justify-center py-8 px-4 gap-4" suppressHydrationWarning>
-            {/* Page Info */}
+        {/* Next Page Navigation */}
+        {!hasMoreProducts && currentPageProductCount >= PRODUCTS_PER_PAGE && hasNextPage && (
+          <div className="flex flex-col items-center justify-center py-2 px-4 gap-2" suppressHydrationWarning>
             <div className="text-center">
               <p className={cn("text-sm mb-2", themeClasses.textNeutralSecondary)}>
-                Page {currentPage} of {totalPages > 0 ? totalPages : '...'} 
-                {infiniteTotalCount > 0 && ` • ${infiniteTotalCount.toLocaleString()} total products`}
+                {infiniteTotalCount > PRODUCTS_PER_PAGE 
+                  ? `${infiniteTotalCount - currentPageProductCount} more products available` 
+                  : 'More products available'}
               </p>
-              {!hasMoreProducts && hasNextPage && (
-                <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                  {infiniteTotalCount > PRODUCTS_PER_PAGE 
-                    ? `${Math.max(0, infiniteTotalCount - (currentPage * PRODUCTS_PER_PAGE))} more products on next pages` 
-                    : 'More products available'}
-                </p>
-              )}
             </div>
-            
-            {/* Pagination Buttons */}
-            <div className="flex items-center gap-3">
-              {/* Previous Page Button */}
-              {currentPage > 1 && (
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => goToPage(currentPage - 1)}
-                  disabled={isPageTransitioning}
-                  className={cn("px-6 py-3 text-base font-medium", themeClasses.cardBorder, isPageTransitioning && "opacity-50 cursor-not-allowed")}
-                >
-                  {isPageTransitioning ? "Loading..." : "← Previous"}
-                </Button>
-              )}
-              
-              {/* Page Numbers (show up to 5 pages) */}
-              {totalPages > 1 && (
-                <div className="hidden sm:flex items-center gap-1">
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    // Calculate which page numbers to show
-                    let pageNum: number
-                    if (totalPages <= 5) {
-                      pageNum = i + 1
-                    } else if (currentPage <= 3) {
-                      pageNum = i + 1
-                    } else if (currentPage >= totalPages - 2) {
-                      pageNum = totalPages - 4 + i
-                    } else {
-                      pageNum = currentPage - 2 + i
-                    }
-                    
-                    return (
-                      <Button
-                        key={pageNum}
-                        size="sm"
-                        variant={currentPage === pageNum ? "default" : "outline"}
-                        onClick={() => goToPage(pageNum)}
-                        disabled={isPageTransitioning || currentPage === pageNum}
-                        className={cn(
-                          "w-10 h-10 p-0 text-sm font-medium",
-                          currentPage === pageNum 
-                            ? "bg-yellow-500 text-neutral-950 hover:bg-yellow-600" 
-                            : themeClasses.cardBorder,
-                          isPageTransitioning && "opacity-50 cursor-not-allowed"
-                        )}
-                      >
-                        {pageNum}
-                      </Button>
-                    )
-                  })}
-                  {totalPages > 5 && currentPage < totalPages - 2 && (
-                    <>
-                      <span className={cn("px-1", themeClasses.textNeutralSecondary)}>...</span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => goToPage(totalPages)}
-                        disabled={isPageTransitioning}
-                        className={cn("w-10 h-10 p-0 text-sm font-medium", themeClasses.cardBorder, isPageTransitioning && "opacity-50 cursor-not-allowed")}
-                      >
-                        {totalPages}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              )}
-              
-              {/* Next Page Button */}
-              {hasNextPage && !hasMoreProducts && (
-                <Button
-                  size="lg"
-                  onClick={() => goToPage(currentPage + 1)}
-                  disabled={isPageTransitioning}
-                  className={cn("bg-yellow-500 text-neutral-950 hover:bg-yellow-600 px-6 py-3 text-base font-semibold", isPageTransitioning && "opacity-50 cursor-not-allowed")}
-                >
-                  {isPageTransitioning ? "Loading..." : "Next →"}
-                </Button>
-              )}
-            </div>
-            
-            {/* Mobile: Simple page indicator */}
-            <p className={cn("text-xs sm:hidden", themeClasses.textNeutralSecondary)}>
-              Showing page {currentPage}
-            </p>
+            <Link href={buildNextPageUrl()} target="_blank" rel="noopener noreferrer">
+              <Button
+                size="lg"
+                className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600 px-8 py-4 text-base font-semibold"
+              >
+                Next Page ({currentPage + 1}) →
+              </Button>
+            </Link>
           </div>
         )}
         
@@ -3145,8 +3748,9 @@ function ProductsPageContent() {
         {!hasMoreProducts && !hasNextPage && products.length > 0 && (
           <div className="flex justify-center py-8" suppressHydrationWarning>
             <p className={cn("text-lg", themeClasses.textNeutralSecondary)}>You've reached the end of the list!</p>
-          </div>
+            </div>
         )}
+        
       </main>
 
 
@@ -3154,7 +3758,7 @@ function ProductsPageContent() {
 
       {/* Category Navigation Modal */}
       <Sheet open={isCategoryNavOpen} onOpenChange={setIsCategoryNavOpen}>
-        <SheetContent side="left" className={cn("bg-white dark:bg-gray-900", themeClasses.mainText, "w-80 sm:w-96")}>
+        <SheetContent side="left" className={cn(themeClasses.cardBg, themeClasses.mainText, "w-80 sm:w-96", "bg-white dark:bg-neutral-900")}> 
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Package className="w-5 h-5" />
@@ -3179,7 +3783,7 @@ function ProductsPageContent() {
                   >
                     Clear All
                   </Button>
-                </div>
+              </div>
                 <div className="space-y-1">
                   {categoriesData.mainCategories.map((category: any) => {
                     const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
@@ -3238,7 +3842,7 @@ function ProductsPageContent() {
                             checked={isMainCategorySelected}
                             onCheckedChange={() => {}} // Handled by parent div onClick
                           />
-                        </div>
+            </div>
                         <div 
                           className="flex-1 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2"
                           onClick={() => handleOpenSubcategoriesView(category.slug)}
@@ -3250,14 +3854,14 @@ function ProductsPageContent() {
                               <span className="text-xs text-muted-foreground">
                                 {subcategoriesUnderMain.length} subcategories
                               </span>
+          </div>
+                </div>
               </div>
-                          </div>
-                        </div>
-                      </div>
+                </div>
                     )
                   })}
                 </div>
-              </div>
+                </div>
             )}
 
             {/* Subcategories View */}
@@ -3303,7 +3907,7 @@ function ProductsPageContent() {
                             checked={areAllSelected}
                             onCheckedChange={() => {}} // Handled by parent div onClick
                           />
-                        </div>
+            </div>
                         <div 
                           className="flex-1 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2"
                       onClick={() => {
@@ -3319,8 +3923,8 @@ function ProductsPageContent() {
                       <div className="flex flex-col">
                               <span className="font-medium">All Subcategories</span>
                               <span className="text-xs text-muted-foreground">Select all subcategories</span>
-                      </div>
-                          </div>
+          </div>
+        </div>
                         </div>
                       </div>
                     )
@@ -3343,7 +3947,7 @@ function ProductsPageContent() {
                             checked={selectedSubCategories.includes(subCategory.slug)}
                             onCheckedChange={() => {}} // Handled by parent div onClick
                           />
-              </div>
+                </div>
                         <div 
                           className="flex-1 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2"
                           onClick={() => handleSubCategoryToggle(subCategory.slug)}
@@ -3355,15 +3959,15 @@ function ProductsPageContent() {
                               <span className="text-xs text-muted-foreground">
                                 {subCategory.product_count || 0} products
                               </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                     ))}
+              </div>
                 </div>
               </div>
-            )}
+            </div>
+                     ))}
           </div>
+        </div>
+            )}
+      </div>
 
           {/* Footer Actions */}
           <div className="mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -3453,7 +4057,7 @@ function ProductsPageContent() {
                 <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Quick Actions</h3>
                 <div className="grid grid-cols-2 gap-3">
                   <Link 
-                    href="/cart" 
+                    href="/cart"
                     className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
                     onClick={() => setIsHamburgerMenuOpen(false)}
                   >
@@ -3497,7 +4101,7 @@ function ProductsPageContent() {
                         <User className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
                         <span className="text-white font-medium">My Account</span>
                         <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-            </Link>
+                      </Link>
                       <Link 
                         href="/account/orders"
                         className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
@@ -3591,6 +4195,22 @@ function ProductsPageContent() {
                 </div>
           </div>
 
+              {/* Navigation */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Navigation</h3>
+                <div className="space-y-2">
+                  <Link 
+                    href="/"
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
+                    onClick={() => setIsHamburgerMenuOpen(false)}
+                  >
+                    <Settings className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
+                    <span className="text-white font-medium">Service</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
+                  </Link>
+                </div>
+              </div>
+
               {/* Settings */}
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Settings</h3>
@@ -3646,7 +4266,7 @@ function ProductsPageContent() {
               >
                       <Landmark className="w-3 h-3 mr-1" /> TZS
               </Button>
-                  </div>
+                    </div>
                 </div>
               </div>
             </div>
@@ -3660,9 +4280,18 @@ function ProductsPageContent() {
                   <span className="text-black font-bold text-sm">
                     {user?.email?.charAt(0).toUpperCase() || 'U'}
                   </span>
-            </div>
+                </div>
                 <div className="flex-1">
-                  <p className="text-white font-medium text-sm">{user?.email}</p>
+                  <p className="text-white font-medium text-sm">
+                    {user?.email ? (() => {
+                      const [localPart, domain] = user.email.split('@')
+                      if (!domain) return user.email
+                      const maskedLocal = localPart.length > 2 
+                        ? `${localPart.substring(0, 2)}${'*'.repeat(Math.min(localPart.length - 2, 4))}`
+                        : '***'
+                      return `${maskedLocal}@${domain}`
+                    })() : 'User'}
+                  </p>
                   <p className="text-white/60 text-xs">Welcome back!</p>
                 </div>
               </div>
@@ -3682,38 +4311,6 @@ function ProductsPageContent() {
         initialTab={searchModalInitialTab}
       />
 
-      {/* Portal Dropdown for More Categories */}
-      {showMoreCategories && moreButtonRef.current && (
-        <div 
-          className="fixed more-categories-portal bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-2xl z-[99999] min-w-[180px] max-w-[280px] ring-1 ring-black/5"
-          style={{
-            top: dropdownPosition.top,
-            left: dropdownPosition.left,
-          }}
-        >
-          {/* Dropdown Arrow */}
-          <div 
-            className="absolute -top-1 w-2 h-2 bg-white dark:bg-gray-800 border-l border-t border-gray-200 dark:border-gray-700 transform rotate-45"
-            style={{
-              left: moreButtonRef.current ? 
-                Math.min(16, moreButtonRef.current.getBoundingClientRect().width / 2 - 4) : 16
-            }}
-          ></div>
-          <div className="p-2">
-            {overflowCategories.map((category) => (
-              <Link
-                key={category.id}
-                href={`/products?mainCategory=${category.slug}`}
-                className="block px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors rounded"
-                onClick={() => setShowMoreCategories(false)}
-                scroll={false}
-              >
-                {category.name}
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* China Import Modal */}
       {showChinaImportModal && (
@@ -3756,7 +4353,10 @@ function ProductsPageContent() {
 export default function ProductsPage() {
   return (
     <BuyerRouteGuard>
-      <ProductsPageContent />
+      <EmailVerificationBanner />
+      <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
+        <ProductsPageContent />
+      </Suspense>
     </BuyerRouteGuard>
   )
-}
+} 
