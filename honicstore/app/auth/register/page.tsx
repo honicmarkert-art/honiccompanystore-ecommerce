@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/contexts/auth-context"
 import { useTheme } from "@/hooks/use-theme"
+import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, Loader2, CheckCircle, XCircle, Store } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -42,6 +43,7 @@ export default function RegisterPage() {
   const { signUp } = useAuth()
   const { themeClasses } = useTheme()
   const router = useRouter()
+  const { openAuthModal } = useGlobalAuthModal()
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
@@ -129,6 +131,19 @@ export default function RegisterPage() {
         // Error is already shown by the auth context
         return
       }
+
+      // If registration succeeded but user needs to verify email, open login modal with email pre-filled
+      if (result.success && !(result as any).autoLoggedIn) {
+        // Store email in sessionStorage for the login modal to pick up
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('pending_verification_email', formData.email)
+        }
+        
+        // Open login modal after a short delay
+        setTimeout(() => {
+          openAuthModal('login')
+        }, 500)
+      }
     } catch (error) {
     } finally {
       setIsSubmitting(false)
@@ -189,9 +204,9 @@ export default function RegisterPage() {
               <div className="flex items-center gap-2 ml-4">
                 <div className="text-right hidden sm:block">
                   <p className="text-xs text-muted-foreground">Want to sell?</p>
-                  <p className="text-xs text-muted-foreground">Join as supplier</p>
+                  <p className="text-xs text-muted-foreground">Join as seller</p>
                 </div>
-                <Link href="/become-supplier">
+                <Link href="/become-supplier" target="_blank" rel="noopener noreferrer">
                   <Button
                     type="button"
                     variant="outline"
@@ -199,7 +214,7 @@ export default function RegisterPage() {
                     className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black whitespace-nowrap"
                   >
                     <Store className="mr-1.5 h-3.5 w-3.5" />
-                    Become Supplier
+                    Become Seller
                   </Button>
                 </Link>
               </div>

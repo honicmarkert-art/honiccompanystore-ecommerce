@@ -141,7 +141,7 @@ export async function GET(request: NextRequest) {
       queryBuilder = queryBuilder.select(`
         id, name, price, original_price, image, category, brand, 
         rating, reviews, in_stock, stock_quantity, free_delivery, same_day_delivery, import_china,
-        is_new, updated_at, variant_config, sold_count, product_variants (*)
+        is_new, updated_at, variant_config, sold_count, supplier_verified, product_variants (*)
       `)
     } else if (enriched) {
       // Enriched data for list views - includes most fields needed for product cards
@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
         id, name, price, original_price, description, 
         image, category, brand, rating, reviews, 
         in_stock, stock_quantity, free_delivery, same_day_delivery, import_china,
-        is_new, created_at, updated_at, variant_config, sold_count,
+        is_new, created_at, updated_at, variant_config, sold_count, supplier_verified,
         product_variants (*)
       `)
     } else {
@@ -786,6 +786,7 @@ export async function GET(request: NextRequest) {
         sold_count: typeof (product as any).sold_count === 'number'
           ? (product as any).sold_count
           : Number((product as any).sold_count) || 0,
+        supplier_verified: !!(product as any).supplier_verified, // For verified seller badge
       }
 
       // Always include variant data for auto-selection functionality

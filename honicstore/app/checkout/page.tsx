@@ -37,6 +37,7 @@ import { useCurrency } from "@/contexts/currency-context"
 import { useComingSoonModal } from "@/components/coming-soon-modal"
 import { useToast } from "@/hooks/use-toast"
 import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
+import { CheckoutPageSkeleton } from "@/components/ui/skeleton"
 import { 
   getSiteUrl, 
   buildReturnUrl, 
@@ -110,13 +111,25 @@ function CheckoutPageContent() {
     
     try { 
       const raw = safeSessionStorage.getItem('selected_cart_items')
-      if (raw) selectedIds = JSON.parse(raw) 
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        // Validate that parsed data is an array of numbers
+        if (Array.isArray(parsed) && parsed.every((id: any) => typeof id === 'number' && id > 0)) {
+          selectedIds = parsed
+        }
+      }
       
       const buyNowModeRaw = safeSessionStorage.getItem('buy_now_mode')
       if (buyNowModeRaw === 'true') buyNowMode = true
       
       const buyNowDataRaw = safeSessionStorage.getItem('buy_now_item_data')
-      if (buyNowDataRaw) buyNowItemData = JSON.parse(buyNowDataRaw)
+      if (buyNowDataRaw) {
+        const parsed = JSON.parse(buyNowDataRaw)
+        // Validate buyNowItemData structure
+        if (parsed && typeof parsed === 'object' && parsed.productId && typeof parsed.productId === 'number') {
+          buyNowItemData = parsed
+        }
+      }
     } catch {}
     
     // If this is a "Buy Now" action, use the stored item data
@@ -178,7 +191,14 @@ function CheckoutPageContent() {
     try {
       const promoData = safeSessionStorage.getItem('applied_promotion')
       if (promoData) {
-        setAppliedPromotion(JSON.parse(promoData))
+        const parsed = JSON.parse(promoData)
+        // Validate promotion data structure
+        if (parsed && typeof parsed === 'object' && 
+            typeof parsed.code === 'string' && 
+            typeof parsed.discountAmount === 'number' && 
+            parsed.discountAmount >= 0) {
+          setAppliedPromotion(parsed)
+        }
       }
     } catch {}
   }, [])
@@ -314,7 +334,16 @@ function CheckoutPageContent() {
       // Stock validation will be handled server-side during order processing
       // Get selected items for order
       let selectedIds: number[] = []
-      try { const raw = sessionStorage.getItem('selected_cart_items'); if (raw) selectedIds = JSON.parse(raw) } catch {}
+      try { 
+        const raw = safeSessionStorage.getItem('selected_cart_items')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          // Validate that parsed data is an array of numbers
+          if (Array.isArray(parsed) && parsed.every((id: any) => typeof id === 'number' && id > 0)) {
+            selectedIds = parsed
+          }
+        }
+      } catch {}
 
       // Generate unique order ID
       const orderId = `ORD-${Date.now()}`
@@ -409,7 +438,7 @@ function CheckoutPageContent() {
         })
 
     } catch (error: any) {
-      console.error('Payment initiation error:', error)
+      logger.error('Payment initiation error:', error)
       const errorMessage = error.message || 'Failed to initiate payment. Please try again.'
       setPaymentError(errorMessage)
       setIsProcessingPayment(false)
@@ -1848,10 +1877,9 @@ function CheckoutPageContent() {
 
   if (!isClient) {
     return (
-      <div className="min-h-screen flex items-center justify-center" suppressHydrationWarning>
-        <div className="flex flex-col items-center" suppressHydrationWarning>
-          <div className="animate-spin rounded-full h-10 w-10 border-2 border-yellow-500 border-t-transparent mb-3"></div>
-          <span className="text-sm text-neutral-500" suppressHydrationWarning>Loading checkout…</span>
+      <div className={cn("min-h-screen", themeClasses.mainBg)}>
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <CheckoutPageSkeleton />
         </div>
       </div>
     )

@@ -114,6 +114,77 @@ import {
 } from "@/components/ui/skeleton"
 
 
+// Component for navigation links that hide on screens below 13 inches
+function NavigationLinks13InchProductDetail({ darkHeaderFooterClasses }: { darkHeaderFooterClasses: any }) {
+  const [isBelow13Inch, setIsBelow13Inch] = useState(false)
+
+  useEffect(() => {
+    const checkScreenSize = () => {
+      // Hide on screens below 13 inches (typically < 1366px width)
+      setIsBelow13Inch(
+        typeof window !== 'undefined' && 
+        window.innerWidth < 1366
+      )
+    }
+    
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    
+    return () => {
+      window.removeEventListener('resize', checkScreenSize)
+    }
+  }, [])
+
+  if (isBelow13Inch) {
+    return null
+  }
+
+  return (
+    <>
+      <OptimizedLink 
+        href="/"
+        prefetch="hover"
+        priority="low"
+        className={cn(
+          "hidden sm:flex items-center gap-1",
+          darkHeaderFooterClasses.buttonGhostText,
+        )}
+      >
+        <Sparkles className="w-5 h-5" />
+        <span className="hidden sm:inline hover:opacity-80 transition-opacity">AI Sourcing</span>
+      </OptimizedLink>
+      
+      <OptimizedLink 
+        href="/discover"
+        prefetch="hover"
+        priority="low"
+        className={cn(
+          "hidden sm:flex items-center gap-1",
+          darkHeaderFooterClasses.buttonGhostText,
+        )}
+      >
+        <Compass className="w-5 h-5" />
+        <span className="hidden sm:inline hover:opacity-80 transition-opacity">Discovery</span>
+      </OptimizedLink>
+      
+      <OptimizedLink 
+        href="/become-supplier"
+        target="_blank"
+        rel="noopener noreferrer"
+        prefetch="hover"
+        priority="low"
+        className={cn(
+          "hidden sm:flex items-center gap-1",
+          darkHeaderFooterClasses.buttonGhostText,
+        )}
+      >
+        <UserPlus className="w-5 h-5" />
+        <span className="hidden sm:inline hover:opacity-80 transition-opacity">Become Seller</span>
+      </OptimizedLink>
+    </>
+  )
+}
+
 function ProductDetailPageContent() {
   const params = useParams()
   const router = useRouter()
@@ -2760,48 +2831,7 @@ function ProductDetailPageContent() {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0 ml-auto text-[13px] leading-5">
-            {/* AI Sourcing */}
-            <OptimizedLink 
-              href="/"
-              prefetch="hover"
-              priority="low"
-              className={cn(
-                "hidden sm:flex items-center gap-1",
-                darkHeaderFooterClasses.buttonGhostText,
-              )}
-            >
-              <Sparkles className="w-5 h-5" />
-              <span className="hidden sm:inline hover:opacity-80 transition-opacity">AI Sourcing</span>
-            </OptimizedLink>
-            
-            {/* Discovery */}
-            <OptimizedLink 
-              href="/discover"
-              prefetch="hover"
-              priority="low"
-              className={cn(
-                "hidden sm:flex items-center gap-1",
-                darkHeaderFooterClasses.buttonGhostText,
-              )}
-            >
-              <Compass className="w-5 h-5" />
-              <span className="hidden sm:inline hover:opacity-80 transition-opacity">Discovery</span>
-            </OptimizedLink>
-            
-            {/* Become Supplier */}
-            <OptimizedLink 
-              href="/become-supplier"
-              prefetch="hover"
-              priority="low"
-              className={cn(
-                "hidden sm:flex items-center gap-1",
-                darkHeaderFooterClasses.buttonGhostText,
-              )}
-            >
-              <UserPlus className="w-5 h-5" />
-              <span className="hidden sm:inline hover:opacity-80 transition-opacity">Become Supplier</span>
-            </OptimizedLink>
-            
+            <NavigationLinks13InchProductDetail darkHeaderFooterClasses={darkHeaderFooterClasses} />
             {/* Service Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -2926,8 +2956,8 @@ function ProductDetailPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   asChild
                 >
-                  <Link href="/become-supplier" className="flex items-center">
-                    <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                  <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className="flex items-center">
+                    <UserPlus className="w-4 h-4 mr-2" /> Become Seller
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -3246,70 +3276,83 @@ function ProductDetailPageContent() {
 
             {/* Main Product Image (Right on LG screens, Bottom on SM screens) */}
             <div className="flex-1 flex flex-col gap-[5px] sm:gap-[5px] items-center lg:items-start">
-              {/* Supplier Company Name with Logo */}
-              <div className="flex flex-col gap-1 mb-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {(supplierInfo?.companyLogo || displayLogo) && (
-                    <Image
-                      src={supplierInfo?.companyLogo || displayLogo}
-                      alt={`${supplierInfo?.companyName || 'Honic Company Limited'} Logo`}
-                      width={20}
-                      height={20}
-                      className="w-5 h-5 object-contain flex-shrink-0"
-                    />
-                  )}
-                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                    {supplierInfo?.companyName || 'Honic Company Limited'}
-                  </span>
-                  {/* Verified Badge - Show if verified */}
-                  {supplierInfo?.isVerified && (
-                    <div className="flex items-center gap-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 rounded">
-                      <CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" />
-                      <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Verified</span>
-                    </div>
-                  )}
-                  {/* View Seller Products - Mobile: Inline, Desktop: Link */}
-                  {supplierInfo?.supplierId && (
-                    <>
-                      <span className="text-xs text-gray-600 dark:text-gray-400 sm:hidden">
-                        ({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'}) view
+              {/* Supplier Company Name with Logo - Only show if supplierInfo exists */}
+              {supplierInfo && (
+                <div className="flex flex-col gap-1 mb-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {supplierInfo?.companyLogo && (
+                      <Image
+                        src={supplierInfo.companyLogo}
+                        alt={`${supplierInfo?.companyName || ''} Logo`}
+                        width={20}
+                        height={20}
+                        className="w-5 h-5 object-contain flex-shrink-0"
+                      />
+                    )}
+                    {supplierInfo?.companyName && (
+                      <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                        {supplierInfo.companyName}
                       </span>
-                      <Link
-                        href={`/products?supplier=${supplierInfo.supplierId}`}
-                        className="hidden sm:inline-flex text-xs text-blue-600 dark:text-blue-400 hover:underline items-center gap-1 ml-1"
-                      >
-                        <span>({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'})</span>
-                        <span>view seller products</span>
-                      </Link>
-                    </>
-                  )}
-                </div>
-                {/* Always show rating and detail sentence section if supplier info exists */}
-                {supplierInfo && (
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    {/* Company Rating - Show even if 0 or null */}
-                    <div className="flex items-center gap-0.5">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <Star
-                          key={i}
-                          className={`w-3 h-3 ${
-                            supplierInfo.rating && supplierInfo.rating > 0 && i < Math.floor(supplierInfo.rating)
-                              ? "fill-yellow-400 text-yellow-400"
-                              : "text-gray-300 dark:text-gray-600"
-                          }`}
-                        />
-                      ))}
-                      <span className="font-medium ml-0.5">{supplierInfo.rating || 0}</span>
-                      {supplierInfo.reviewCount && supplierInfo.reviewCount > 0 && (
-                        <span className="text-gray-400">({supplierInfo.reviewCount >= 1000 ? `${(supplierInfo.reviewCount / 1000).toFixed(1)}k` : supplierInfo.reviewCount})</span>
+                    )}
+                    {/* Verified Badge - Show if verified */}
+                    {supplierInfo?.isVerified && (
+                      <div className="flex items-center gap-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 rounded">
+                        <CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" />
+                        <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Verified</span>
+                      </div>
+                    )}
+                    {/* View Seller Products - Mobile: Inline, Desktop: Link */}
+                    {supplierInfo?.supplierId && (
+                      <>
+                        <span className="text-xs text-gray-600 dark:text-gray-400 sm:hidden">
+                          ({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'}) view
+                        </span>
+                        <Link
+                          href={`/products?supplier=${supplierInfo.supplierId}`}
+                          className="hidden sm:inline-flex text-xs text-blue-600 dark:text-blue-400 hover:underline items-center gap-1 ml-1"
+                        >
+                          <span>({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'})</span>
+                          <span>view seller products</span>
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                  {/* Rating and detail sentence section - Only show if supplier info exists */}
+                  {(supplierInfo?.rating || supplierInfo?.reviewCount || supplierInfo?.detailSentence) && (
+                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                      {/* Company Rating - Only show if rating exists */}
+                      {(supplierInfo.rating || supplierInfo.reviewCount) && (
+                        <div className="flex items-center gap-0.5">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star
+                              key={i}
+                              className={`w-3 h-3 ${
+                                supplierInfo.rating && supplierInfo.rating > 0 && i < Math.floor(supplierInfo.rating)
+                                  ? "fill-yellow-400 text-yellow-400"
+                                  : "text-gray-300 dark:text-gray-600"
+                              }`}
+                            />
+                          ))}
+                          {supplierInfo.rating && (
+                            <span className="font-medium ml-0.5">{supplierInfo.rating}</span>
+                          )}
+                          {supplierInfo.reviewCount && supplierInfo.reviewCount > 0 && (
+                            <span className="text-gray-400">({supplierInfo.reviewCount >= 1000 ? `${(supplierInfo.reviewCount / 1000).toFixed(1)}k` : supplierInfo.reviewCount})</span>
+                          )}
+                        </div>
+                      )}
+                      {/* Only show separator if both rating and detail sentence exist */}
+                      {(supplierInfo.rating || supplierInfo.reviewCount) && supplierInfo.detailSentence && (
+                        <span>|</span>
+                      )}
+                      {/* Detail Sentence - Only show if it exists */}
+                      {supplierInfo.detailSentence && (
+                        <span>{supplierInfo.detailSentence}</span>
                       )}
                     </div>
-                    <span>|</span>
-                    {/* Small Detail Sentence - Show default if empty */}
-                    <span>{supplierInfo.detailSentence || "Shop quality products with confidence"}</span>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
               
               <div
                 className={cn(

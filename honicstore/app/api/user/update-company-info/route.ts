@@ -231,7 +231,7 @@ export async function POST(request: NextRequest) {
     const isFirstTimeSubmission = !previousProfile?.company_name || previousProfile.company_name.trim() === ''
     
     // Update profile with company information and set account to inactive for review
-    // Also set is_supplier to true if coming from become-supplier registration flow
+    // Also set is_supplier to true if coming from become-seller registration flow
     const { data, error } = await adminSupabase
       .from('profiles')
       .update(updateData)

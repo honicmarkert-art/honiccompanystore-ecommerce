@@ -60,6 +60,9 @@ import { UserProfile } from '@/components/user-profile'
 import { useAuth } from '@/contexts/auth-context'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
 import { useCart } from '@/hooks/use-cart'
+import { useTheme } from '@/hooks/use-theme'
+import { Switch } from '@/components/ui/switch'
+import { Moon, Sun } from 'lucide-react'
 
 // Helper function to detect if a file is a video
 const isVideoFile = (url: string): boolean => {
@@ -93,6 +96,7 @@ export default function LandingPage() {
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
   const { cartUniqueProducts } = useCart()
+  const { backgroundColor, setBackgroundColor } = useTheme()
   const [searchTerm, setSearchTerm] = useState('')
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const [email, setEmail] = useState('')
@@ -382,21 +386,9 @@ export default function LandingPage() {
 
             {/* Mobile Navigation Menu - Single Row */}
             <div className="flex items-center justify-between text-xs mt-2">
-              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/')}>
-                <Bot className="w-3 h-3" />
-                <span className="text-[10px]">AI Sourcing</span>
-              </div>
-              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/')}>
-                <Eye className="w-3 h-3" />
-                <span className="text-[10px]">Discovery</span>
-              </div>
               <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/services')}>
                 <Layers className="w-3 h-3" />
                 <span className="text-[10px]">Our Service</span>
-              </div>
-              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => window.open('/become-supplier', '_blank', 'noopener,noreferrer')}>
-                <Building2 className="w-3 h-3" />
-                <span className="text-[10px]">Become Supplier</span>
               </div>
             </div>
           </div>
@@ -479,25 +471,12 @@ export default function LandingPage() {
             </div>
           </div>
 
-            {/* Second Row - AI Sourcing, Discovery, Become Supplier */}
+            {/* Second Row - Navigation Links */}
             <div className="flex items-center justify-between mt-2">
               <div className="flex items-center gap-2 lg:gap-3">
                 <span className="text-white text-xs sm:text-sm hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/featured')}>Featured selections</span>
               </div>
               <div className="flex items-center gap-2 lg:gap-3 text-xs sm:text-sm">
-                <span className="text-white cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/ai-agent')}>
-                  <span className="flex items-center space-x-1">
-                    <Bot className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
-                    <span className="text-white">AI Sourcing</span>
-                  </span>
-              </span>
-              <span 
-                  className="text-white hover:text-orange-400 cursor-pointer flex items-center space-x-1 transition-colors"
-                onClick={() => router.push('/discover')}
-              >
-                <Eye className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
-                  <span className="text-white">Discovery</span>
-                </span>
                 <span className="text-white cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/support')}>Help</span>
                 <span className="text-white hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/buyer-central')}>Buyer Central</span>
                 <span className="text-white hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/app')}>App & extension</span>
@@ -697,7 +676,7 @@ export default function LandingPage() {
                 onClick={() => {
                   if (feature.title === 'Logistics Solutions') {
                     router.push('/logistics')
-                  } else if (feature.title === 'Become Supplier') {
+                  } else if (feature.title === 'Become Seller') {
                     window.open('/become-supplier', '_blank', 'noopener,noreferrer')
                   }
                 }}
@@ -1199,8 +1178,27 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Footer with User Info */}
-          <div className="p-6 border-t border-white/10 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
+          {/* Footer with Theme Toggle and User Info */}
+          <div className="p-6 border-t border-white/10 bg-gradient-to-r from-yellow-500/5 to-orange-500/5 space-y-4">
+            {/* Theme Toggle Switch - Mobile Only */}
+            <div className="flex items-center justify-between p-3 rounded-xl bg-white/10">
+              <div className="flex items-center gap-3">
+                {backgroundColor === 'dark' ? (
+                  <Moon className="w-5 h-5 text-white" />
+                ) : (
+                  <Sun className="w-5 h-5 text-white" />
+                )}
+                <span className="text-white font-medium text-sm">Theme</span>
+              </div>
+              <Switch
+                checked={backgroundColor === 'dark'}
+                onCheckedChange={(checked) => {
+                  setBackgroundColor(checked ? 'dark' : 'white')
+                }}
+                className="data-[state=checked]:bg-yellow-500"
+              />
+            </div>
+            
             {user && (
               <div className="flex items-center gap-3 p-3 rounded-xl bg-white/10">
                 <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center">

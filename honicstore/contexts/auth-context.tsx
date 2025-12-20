@@ -501,10 +501,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               description: result.message || 'Please check your email to verify your account. You can log in after verification.',
               duration: 6000
             })
-            // Close auth modal - user needs to verify email first
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('close-auth-modal'))
-            }
+            // Don't close auth modal - let it switch to login tab with email pre-filled
+            // The auth-modal component will handle switching to login tab
           }
           return { 
             success: true, 

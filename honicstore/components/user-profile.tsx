@@ -141,13 +141,6 @@ export function UserProfile() {
             <ShoppingBag className="mr-2 h-4 w-4" />
             <span>My Orders</span>
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => router.push('/account/coins')}>
-            <div className="mr-2 h-4 w-4 flex items-center justify-center">
-              <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-              <div className="w-3 h-3 bg-yellow-500 rounded-full -ml-1"></div>
-            </div>
-            <span>My Coins</span>
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => router.push('/account/messages')}>
             <div className="mr-2 h-4 w-4 flex items-center justify-center">
               <div className="w-3 h-3 bg-blue-500 rounded-full"></div>

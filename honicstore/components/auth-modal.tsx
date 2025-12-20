@@ -55,6 +55,16 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     }
   }, [defaultTab, isOpen, isSupplierFlow])
 
+  // Pre-fill login email when registeredEmail is set
+  useEffect(() => {
+    if (registeredEmail && currentTab === 'login' && isOpen) {
+      setLoginForm(prev => ({
+        ...prev,
+        email: registeredEmail
+      }))
+    }
+  }, [registeredEmail, currentTab, isOpen])
+
   // Check for pending verification email when modal opens on login tab
   useEffect(() => {
     if (isOpen && currentTab === 'login') {
@@ -144,9 +154,11 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
   }, [isOpen, defaultTab])
 
   // Listen for close-auth-modal event (for auto-login after registration)
+  // Only close if we're not in the middle of switching to login tab after registration
   useEffect(() => {
     const handleCloseModal = () => {
-      if (isOpen) {
+      if (isOpen && !registeredEmail) {
+        // Only close if we don't have a registered email (meaning we're not switching to login)
         console.log('📢 Received close-auth-modal event')
         setTimeout(() => {
           onClose()
@@ -160,7 +172,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
         window.removeEventListener('close-auth-modal', handleCloseModal)
       }
     }
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, registeredEmail])
 
   // Login form state
   const [loginForm, setLoginForm] = useState({
@@ -334,8 +346,12 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
             router.refresh()
           }, 1500)
         } else {
-          // No auto-login - show success message, clear form, but stay on register tab
+          // No auto-login - show success message, switch to login tab, and pre-fill email
           setAuthError("")
+          
+          // Store the registered email to pre-fill login form
+          const registeredEmailValue = registerForm.email
+          setRegisteredEmail(registeredEmailValue)
           
           // Clear registration form
           setRegisterForm({
@@ -347,8 +363,15 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
           })
           setAgreeToTerms(false)
           
-          // Stay on register tab and show success message (don't switch to login, don't close)
-          setAuthSuccess("Account created! Please verify your email to use account features. Check your inbox for the verification link.")
+          // Switch to login tab and pre-fill email
+          setCurrentTab('login')
+          setLoginForm({
+            email: registeredEmailValue,
+            password: ''
+          })
+          
+          // Don't show duplicate success message - the verification card will show the message
+          // setAuthSuccess("Account created! Please verify your email to use account features. Check your inbox for the verification link.")
         }
       } else {
         // Show specific error message
@@ -490,10 +513,8 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                           >
                             {isResendingVerification ? 'Sending...' : 'Resend Email'}
                           </Button>
-                          <Button
+                          <button
                             type="button"
-                            size="sm"
-                            variant="outline"
                             onClick={() => {
                               // Close modal and redirect to supplier registration page
                               setShowVerificationMessage(false)
@@ -505,52 +526,10 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                               onClose()
                               router.push('/become-supplier')
                             }}
-                            className="border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 text-xs h-7"
+                            className="text-xs text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300 underline"
                           >
                             Create Different Account
-                          </Button>
-                        </div>
-                        <div className="flex justify-center pt-2 border-t border-orange-200 dark:border-orange-800">
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={async () => {
-                              // Check if email is already verified
-                              try {
-                                const response = await fetch('/api/auth/check-verification-status', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ email: pendingVerificationEmail })
-                                })
-                                
-                                const result = await response.json()
-                                
-                                if (result.isVerified) {
-                                  // Email is verified - close message and allow login
-                                  toast({
-                                    title: 'Email Verified',
-                                    description: 'Your email has been verified! You can now log in.',
-                                    duration: 3000
-                                  })
-                                  setShowVerificationMessage(false)
-                                  setPendingVerificationEmail("")
-                                  if (typeof window !== 'undefined') {
-                                    sessionStorage.removeItem('pending_verification_email')
-                                  }
-                                } else {
-                                  // Email not verified yet - just close message to allow login attempt
-                                  setShowVerificationMessage(false)
-                                }
-                              } catch (error) {
-                                // If check fails, just close message to allow login attempt
-                                console.error('Error checking verification status:', error)
-                                setShowVerificationMessage(false)
-                              }
-                            }}
-                            className="bg-orange-500 hover:bg-orange-600 text-white text-xs h-7"
-                          >
-                            Already verified? Proceed to login
-                          </Button>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -576,7 +555,6 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                         }
                       }}
                       className="pl-10 h-8 text-sm"
-                      disabled={showVerificationMessage}
                       required
                     />
                   </div>
@@ -600,7 +578,6 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       }}
                       className="pl-10 pr-10 h-8 text-sm"
                       autoComplete="current-password"
-                      disabled={showVerificationMessage}
                       required
                     />
                     <Button
@@ -645,7 +622,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                   </Button>
                 </div>
 
-                <Button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 h-8 text-sm" disabled={isLoading || showVerificationMessage}>
+                <Button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 h-8 text-sm" disabled={isLoading}>
                   {isLoading ? 'Signing In...' : 'Sign In'}
                 </Button>
               </form>
@@ -729,9 +706,9 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                 <div className="flex items-center gap-1.5 ml-2">
                   <div className="text-right hidden sm:block">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">Want to sell?</p>
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">Join as supplier</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">Join as seller</p>
                   </div>
-                  <Link href="/become-supplier" onClick={onClose}>
+                  <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" onClick={onClose}>
                     <Button
                       type="button"
                       variant="outline"
@@ -739,7 +716,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black h-7 text-[10px] px-2 whitespace-nowrap"
                     >
                       <Store className="mr-1 h-2.5 w-2.5" />
-                      Supplier
+                      Seller
                     </Button>
                   </Link>
                 </div>

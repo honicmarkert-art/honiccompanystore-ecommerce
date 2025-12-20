@@ -19,7 +19,7 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, user } = useAuth()
 
   // Restore persisted state to avoid disappearing on re-renders/refreshes
-  // But only if user is not authenticated and not on callback page
+  // But only if user is not authenticated and not on callback page (unless supplier flow)
   useEffect(() => {
     if (typeof window === 'undefined') return
     
@@ -33,8 +33,13 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
       return
     }
     
-    if (isAuthenticated && user) {
-      // Clear persisted state if user is authenticated
+    // Check if this is a supplier flow
+    const isSupplierFlow = redirectUrl?.startsWith('/supplier') || 
+                           (typeof window !== 'undefined' && sessionStorage.getItem('supplier_registration') === 'true')
+    
+    // For supplier flows, allow modal to open even if authenticated (to switch accounts)
+    if (isAuthenticated && user && !isSupplierFlow) {
+      // Clear persisted state if user is authenticated (and not supplier flow)
       try {
         sessionStorage.removeItem('auth-modal-open')
         sessionStorage.removeItem('auth-modal-tab')
@@ -55,11 +60,16 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch {}
-  }, [isAuthenticated, user])
+  }, [isAuthenticated, user, redirectUrl])
 
   const openAuthModal = (tab: 'login' | 'register' = 'login', redirectUrl?: string) => {
-    // Don't open modal if user is already authenticated
-    if (isAuthenticated && user) {
+    // Allow opening modal for supplier flows even if already authenticated
+    // This allows users to switch accounts or log in with a different supplier account
+    const isSupplierFlow = redirectUrl?.startsWith('/supplier') || 
+                           (typeof window !== 'undefined' && sessionStorage.getItem('supplier_registration') === 'true')
+    
+    // Don't open modal if user is already authenticated (unless it's a supplier flow)
+    if (isAuthenticated && user && !isSupplierFlow) {
       console.log('User is already authenticated, skipping auth modal')
       return
     }
@@ -71,13 +81,21 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
       try {
         sessionStorage.setItem('auth-modal-open', 'true')
         sessionStorage.setItem('auth-modal-tab', tab)
+        // Set supplier registration flag if it's a supplier flow
+        if (isSupplierFlow) {
+          sessionStorage.setItem('supplier_registration', 'true')
+        }
       } catch {}
     }
   }
   
-  // Close modal automatically if user becomes authenticated
+  // Close modal automatically if user becomes authenticated (unless it's a supplier flow)
   useEffect(() => {
-    if (isAuthenticated && user && isOpen) {
+    const isSupplierFlow = redirectUrl?.startsWith('/supplier') || 
+                           (typeof window !== 'undefined' && sessionStorage.getItem('supplier_registration') === 'true')
+    
+    // Don't auto-close for supplier flows - allow user to switch accounts
+    if (isAuthenticated && user && isOpen && !isSupplierFlow) {
       console.log('User authenticated, closing auth modal')
       setIsOpen(false)
       setRedirectUrl(undefined)
@@ -88,7 +106,7 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
         } catch {}
       }
     }
-  }, [isAuthenticated, user, isOpen])
+  }, [isAuthenticated, user, isOpen, redirectUrl])
 
   const closeAuthModal = () => {
     setIsOpen(false)

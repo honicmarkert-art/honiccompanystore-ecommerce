@@ -45,7 +45,7 @@ export const sessionStorage = {
     try {
       return window.sessionStorage.getItem(key)
     } catch (error) {
-      console.error(`Error reading sessionStorage key "${key}":`, error)
+      // Silently handle storage errors
       return null
     }
   },
@@ -56,7 +56,7 @@ export const sessionStorage = {
       window.sessionStorage.setItem(key, value)
       return true
     } catch (error) {
-      console.error(`Error writing sessionStorage key "${key}":`, error)
+      // Silently handle storage errors
       return false
     }
   },
@@ -78,7 +78,7 @@ export const sessionStorage = {
       window.sessionStorage.clear()
       return true
     } catch (error) {
-      console.error('Error clearing sessionStorage:', error)
+      // Silently handle storage errors
       return false
     }
   },

@@ -68,6 +68,9 @@ import {
   Settings,
   MoreHorizontal,
   Home,
+  Sparkles,
+  Compass,
+  UserPlus,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -113,6 +116,46 @@ import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { UserProfile } from "@/components/user-profile"
 
 // Category icons mapping - simplified
+
+// Component for navigation links that hide on screens below 13 inches
+function NavigationLinks13InchChina({ themeClasses }: { themeClasses: any }) {
+  const [isBelow13Inch, setIsBelow13Inch] = useState(false)
+
+  useEffect(() => {
+    const checkScreenSize = () => {
+      // Hide on screens below 13 inches (typically < 1366px width)
+      setIsBelow13Inch(
+        typeof window !== 'undefined' && 
+        window.innerWidth < 1366
+      )
+    }
+    
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    
+    return () => {
+      window.removeEventListener('resize', checkScreenSize)
+    }
+  }, [])
+
+  if (isBelow13Inch) {
+    return null
+  }
+
+  return (
+    <>
+      <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+        AI Sourcing
+      </Link>
+      <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+        Discovery
+      </Link>
+      <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm")}>
+        Become Seller
+      </Link>
+    </>
+  )
+}
 
 function ChinaPageContent() {
   const router = useRouter()
@@ -612,8 +655,15 @@ function ChinaPageContent() {
       measureElement.style.padding = '0'
       document.body.appendChild(measureElement)
       
+      // Detect screens below 13 inches (typically < 1366px width)
+      const isBelow13Inch = typeof window !== 'undefined' && 
+        window.innerWidth < 1366
+      
+      // Use 4 categories for screens below 13 inches, 6 for 13 inches and above
+      const maxCategories = isBelow13Inch ? 4 : 6
+      
       // Calculate width for each category
-      for (let i = 0; i < allCategories.length; i++) {
+      for (let i = 0; i < Math.min(allCategories.length, maxCategories); i++) {
         const category = allCategories[i]
         const categoryName = category.name
         
@@ -623,10 +673,10 @@ function ChinaPageContent() {
         const categoryWidth = textWidth + 8 // Add some padding
         
         // Check if this category fits (including More button space if needed)
-        const hasMoreCategories = i < allCategories.length - 1
+        const hasMoreCategories = i < Math.min(allCategories.length, maxCategories) - 1
         const spaceNeeded = totalWidth + categoryWidth + gap + (hasMoreCategories ? moreButtonWidth + gap : 0)
         
-        if (spaceNeeded <= containerWidth) {
+        if (spaceNeeded <= containerWidth && visible.length < maxCategories) {
           visible.push(category)
           totalWidth += categoryWidth + gap
         } else {
@@ -634,6 +684,11 @@ function ChinaPageContent() {
           overflow.push(...allCategories.slice(i))
           break
         }
+      }
+      
+      // Add remaining categories beyond max 4 to overflow
+      if (allCategories.length > maxCategories) {
+        overflow.push(...allCategories.slice(maxCategories))
       }
       
       document.body.removeChild(measureElement)
@@ -1798,15 +1853,7 @@ function ChinaPageContent() {
 
           {/* Navigation Links - Near Search Bar */}
           <div className="hidden lg:flex items-center gap-2 xl:gap-3 ml-2 xl:ml-3">
-            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
-              AI Sourcing
-            </Link>
-            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
-              Discovery
-            </Link>
-            <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
-              Become Supplier
-            </Link>
+            <NavigationLinks13InchChina themeClasses={themeClasses} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1946,12 +1993,6 @@ function ChinaPageContent() {
                       onClick={() => openAuthModal('login')}
                     >
                       <Package className="w-4 h-4 mr-2" /> My Orders
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <Coins className="w-4 h-4 mr-2" /> My Coins
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className={darkHeaderFooterClasses.dropdownItemHoverBg}
@@ -2153,12 +2194,6 @@ function ChinaPageContent() {
                       onClick={() => router.push('/account/orders')}
                     >
                       <Package className="w-4 h-4 mr-2" /> My Orders
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => router.push('/account/coins')}
-                    >
-                      <Package className="w-4 h-4 mr-2" /> My Coins
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className={darkHeaderFooterClasses.dropdownItemHoverBg}
@@ -3410,15 +3445,6 @@ function ChinaPageContent() {
                       >
                         <CreditCard className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
                         <span className="text-white font-medium">Payment</span>
-                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                      </Link>
-                      <Link 
-                        href="/account/coins"
-                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                        onClick={() => setIsHamburgerMenuOpen(false)}
-                      >
-                        <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                        <span className="text-white font-medium">My Coins</span>
                         <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
                       </Link>
                       <Link 

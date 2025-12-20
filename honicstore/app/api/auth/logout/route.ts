@@ -10,7 +10,15 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   try {
-    // Create Supabase client
+    const isProd = process.env.NODE_ENV === 'production'
+    
+    // Create response first so we can set cookies on it
+    const response = NextResponse.json({
+      success: true,
+      message: 'Logged out successfully'
+    }, { status: 200 })
+
+    // Create Supabase client with proper cookie handling that writes to response
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
@@ -20,16 +28,18 @@ export async function POST(request: NextRequest) {
             return request.cookies.get(name)?.value
           },
           set(name: string, value: string, options: any) {
-            // This will be handled by the response
+            // Write cookies to the response so they're actually set
+            response.cookies.set(name, value, options)
           },
           remove(name: string, options: any) {
-            // This will be handled by the response
+            // Remove cookies from the response
+            response.cookies.set(name, '', { ...options, maxAge: 0 })
           },
         },
       }
     )
 
-    // Sign out from Supabase (this invalidates the refresh token)
+    // Sign out from Supabase (this invalidates the refresh token and clears session)
     const { error } = await supabase.auth.signOut()
     
     if (error) {
@@ -37,18 +47,10 @@ export async function POST(request: NextRequest) {
       // Continue with cookie cleanup even if Supabase signOut fails
     }
 
-    const isProd = process.env.NODE_ENV === 'production'
-
     // Get project ref to clear Supabase SSR cookies
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
     const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
     const supabaseAuthCookieName = projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
-
-    // Create response
-    const response = NextResponse.json({
-      success: true,
-      message: 'Logged out successfully'
-    }, { status: 200 })
 
     // Set explicit logout flag to prevent auto-login
     response.cookies.set('explicit-logout', 'true', {
@@ -119,14 +121,38 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Logout error:', error)
     
-    // Even if there's an error, clear the cookies
+    // Even if there's an error, clear the cookies and session
+    const isProd = process.env.NODE_ENV === 'production'
     const response = NextResponse.json({
       success: true,
       message: 'Logged out successfully'
     }, { status: 200 })
 
+    // Try to sign out from Supabase even in error case
+    try {
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        {
+          cookies: {
+            get(name: string) {
+              return request.cookies.get(name)?.value
+            },
+            set(name: string, value: string, options: any) {
+              response.cookies.set(name, value, options)
+            },
+            remove(name: string, options: any) {
+              response.cookies.set(name, '', { ...options, maxAge: 0 })
+            },
+          },
+        }
+      )
+      await supabase.auth.signOut()
+    } catch (signOutError) {
+      console.error('Error during signOut in catch block:', signOutError)
+    }
+
     // Clear cookies regardless of error
-    const isProd = process.env.NODE_ENV === 'production'
     const cookieOptions = {
       httpOnly: true,
       secure: isProd,
@@ -139,6 +165,15 @@ export async function POST(request: NextRequest) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
     const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
     const supabaseAuthCookieName = projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
+
+    // Set explicit logout flag
+    response.cookies.set('explicit-logout', 'true', {
+      httpOnly: false,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365 // 1 year
+    })
 
     // Clear Supabase SSR cookies
     if (projectRef) {

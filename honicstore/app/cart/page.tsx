@@ -482,9 +482,15 @@ function CartPageContent() {
       return
     }
     try { 
-      sessionStorage.setItem('selected_cart_items', JSON.stringify(selectedIds))
+      // Validate selectedIds before storing
+      if (Array.isArray(selectedIds) && selectedIds.every(id => typeof id === 'number' && id > 0)) {
+        sessionStorage.setItem('selected_cart_items', JSON.stringify(selectedIds))
+      }
       // Store applied promotion if any
-      if (appliedPromotion) {
+      if (appliedPromotion && 
+          typeof appliedPromotion.code === 'string' && 
+          typeof appliedPromotion.discountAmount === 'number' && 
+          appliedPromotion.discountAmount >= 0) {
         sessionStorage.setItem('applied_promotion', JSON.stringify({
           code: appliedPromotion.code,
           discountAmount: appliedPromotion.discountAmount
@@ -719,9 +725,6 @@ function CartPageContent() {
                   <DropdownMenuSeparator className={darkHeaderFooterClasses.dropdownSeparator} />
                   <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
                     <ClipboardList className="w-4 h-4 mr-2" /> My Orders
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
-                    <Coins className="w-4 h-4 mr-2" /> My Coins
                   </DropdownMenuItem>
                   <DropdownMenuItem className={darkHeaderFooterClasses.dropdownItemHoverBg}>
                       <MessageSquare className="w-4 h-4 mr-2" /> Message Center
@@ -1749,15 +1752,6 @@ function CartPageContent() {
                       >
                         <CreditCard className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
                         <span className="text-white font-medium">Payment</span>
-                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                      </Link>
-                      <Link 
-                        href="/account/coins"
-                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                        onClick={() => setIsHamburgerMenuOpen(false)}
-                      >
-                        <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                        <span className="text-white font-medium">My Coins</span>
                         <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
                       </Link>
                       <Link 

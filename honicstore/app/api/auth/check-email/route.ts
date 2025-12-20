@@ -65,63 +65,24 @@ export async function GET(request: NextRequest) {
 
     // Method 2: ALWAYS check auth users (critical - email might exist in auth but not in profiles yet)
     try {
-      const { data: authUser, error: getUserError } = await adminSupabase.auth.admin.getUserByEmail(validatedEmail)
+      // Use listUsers (getUserByEmail doesn't exist in Supabase admin API)
+      const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
       
-      if (authUser?.user) {
-        logger.log('🔍 Email found in auth.users:', { email: validatedEmail, userId: authUser.user.id })
-        return NextResponse.json({
-          exists: true,
-          message: 'An account with this email address already exists. Please use a different email or try logging in.',
-          accountId: authUser.user.id,
-          createdAt: authUser.user.created_at
-        })
-      }
-      
-      // If getUserByEmail returns no error but no user, email doesn't exist
-      if (getUserError) {
-        logger.warn('⚠️ Error checking auth users with getUserByEmail, trying listUsers fallback:', getUserError)
-        
-        // Fallback: Use listUsers if getUserByEmail fails
-        try {
-          const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
-          
-          if (!listError && authUsers?.users) {
-            const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === validatedEmail.toLowerCase())
-            if (existingAuthUser) {
-              logger.log('🔍 Email found in auth.users (via listUsers):', { email: validatedEmail, userId: existingAuthUser.id })
-              return NextResponse.json({
-                exists: true,
-                message: 'An account with this email address already exists. Please use a different email or try logging in.',
-                accountId: existingAuthUser.id,
-                createdAt: existingAuthUser.created_at
-              })
-            }
-          }
-        } catch (listError) {
-          logger.error('❌ Error checking auth users with listUsers:', listError)
+      if (!listError && authUsers?.users) {
+        const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === validatedEmail.toLowerCase())
+        if (existingAuthUser) {
+          logger.log('🔍 Email found in auth.users (via listUsers):', { email: validatedEmail, userId: existingAuthUser.id })
+          return NextResponse.json({
+            exists: true,
+            message: 'An account with this email address already exists. Please use a different email or try logging in.',
+            accountId: existingAuthUser.id,
+            createdAt: existingAuthUser.created_at
+          })
         }
       }
     } catch (authError: any) {
-      // If getUserByEmail throws an error, try listUsers as fallback
-      logger.warn('⚠️ getUserByEmail threw error, trying listUsers fallback:', authError)
-      try {
-        const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
-        
-        if (!listError && authUsers?.users) {
-          const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === validatedEmail.toLowerCase())
-          if (existingAuthUser) {
-            logger.log('🔍 Email found in auth.users (via listUsers fallback):', { email: validatedEmail, userId: existingAuthUser.id })
-            return NextResponse.json({
-              exists: true,
-              message: 'An account with this email address already exists. Please use a different email or try logging in.',
-              accountId: existingAuthUser.id,
-              createdAt: existingAuthUser.created_at
-            })
-          }
-        }
-      } catch (listError) {
-        logger.error('❌ Error checking auth users with listUsers fallback:', listError)
-      }
+      // If listUsers fails, log but continue (email check will return false)
+      logger.warn('⚠️ Error checking auth users with listUsers:', authError)
     }
 
     // Email not found in either profiles or auth.users

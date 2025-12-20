@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json()
     } catch (parseError) {
-      console.error('ClickPesa API: Failed to parse request body:', parseError)
+      logger.error('ClickPesa API: Failed to parse request body:', parseError)
       return NextResponse.json({
         success: false,
         error: "Invalid JSON in request body",
@@ -65,11 +65,12 @@ export async function POST(request: NextRequest) {
       customerDetails
     } = body
 
-    logger.log('ClickPesa API: Parsed request body:', { action, amount, currency, orderId })
+    // Log without sensitive order data
+    logger.log('ClickPesa API: Request received', { action, currency })
 
     // Check if ClickPesa is properly configured
     if (!isClickPesaConfigured()) {
-      console.error("ClickPesa Configuration Status:", getConfigStatus())
+      logger.error("ClickPesa Configuration Status:", getConfigStatus())
       return NextResponse.json(
         { 
           success: false, 
@@ -202,27 +203,10 @@ export async function POST(request: NextRequest) {
       // Use order currency if available, otherwise use provided currency
       const finalCurrency = (order.currency || currency) as 'TZS' | 'USD'
       
-      logger.log('✅ Order validation passed:', {
-        orderId: order.id,
-        referenceId: order.reference_id,
-        orderTotal: orderTotal,
-        providedAmount: numAmount,
-        currency: finalCurrency,
-        paymentStatus: order.payment_status
-      })
+      // Order validation passed (not logging sensitive order details)
 
       try {
-        // Log customer details for debugging
-        logger.log('ClickPesa: Customer details received:', {
-          fullName: customerDetails.fullName,
-          email: customerDetails.email,
-          phone: customerDetails.phone,
-          firstName: customerDetails.firstName,
-          lastName: customerDetails.lastName,
-          address: customerDetails.address,
-          city: customerDetails.city,
-          country: customerDetails.country
-        })
+        // Customer details received (not logged for security)
 
         // Prepare ClickPesa checkout link request
         // ClickPesa supports multiple payment methods: mobile money, cards, bank transfers
@@ -231,7 +215,7 @@ export async function POST(request: NextRequest) {
                        (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined)
         
         if (!baseUrl) {
-          console.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
+          logger.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
           return NextResponse.json(
             { error: 'Server configuration error: Base URL not configured. Please set NEXT_PUBLIC_SITE_URL or NEXT_PUBLIC_APP_URL environment variable.' },
             { status: 500 }
@@ -304,7 +288,7 @@ export async function POST(request: NextRequest) {
         })
 
       } catch (error) {
-        console.error("ClickPesa API Error:", error)
+        logger.error("ClickPesa API Error:", error instanceof Error ? error.message : String(error))
         
         return NextResponse.json(
           { 
@@ -331,7 +315,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error("ClickPesa Route Error:", error)
+    logger.error("ClickPesa Route Error:", error)
     
     return NextResponse.json(
       { 
@@ -372,7 +356,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
                      request.headers.get('authorization')
     
     if (!signature) {
-      console.error('ClickPesa webhook: Missing signature')
+      logger.error('ClickPesa webhook: Missing signature')
       return NextResponse.json(
         { success: false, error: "Missing webhook signature" },
         { status: 401 }
@@ -386,7 +370,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
     const isValidSignature = validateWebhook(payload, signature, process.env.CLICKPESA_WEBHOOK_SECRET || '')
     
     if (!isValidSignature) {
-      console.error('ClickPesa webhook: Invalid signature', { signature, payload })
+      logger.error('ClickPesa webhook: Invalid signature', { signature, payload })
       return NextResponse.json(
         { success: false, error: "Invalid webhook signature" },
         { status: 401 }
@@ -396,7 +380,8 @@ async function handleClickPesaWebhook(request: NextRequest) {
     // Parse and validate webhook payload
     const webhookData = parseWebhookPayload(payload)
     
-    logger.log('ClickPesa webhook received:', webhookData)
+    // Log webhook receipt without sensitive data
+    logger.log('ClickPesa webhook received', { status: webhookData.status })
 
     // Initialize Supabase client
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -411,7 +396,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
       .single()
 
     if (orderError || !order) {
-      console.error('ClickPesa webhook: Order not found', { orderReference: webhookData.orderReference, error: orderError })
+      logger.error('ClickPesa webhook: Order not found', { orderReference: webhookData.orderReference, error: orderError })
       return NextResponse.json(
         { success: false, error: "Order not found" },
         { status: 404 }
@@ -455,7 +440,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
         break
       
       default:
-        console.warn('ClickPesa webhook: Unknown status', webhookData.status)
+        logger.warn('ClickPesa webhook: Unknown status', webhookData.status)
         newStatus = 'pending'
         paymentStatus = 'pending'
     }
@@ -467,7 +452,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
       .eq('id', order.id)
 
     if (updateError) {
-      console.error('ClickPesa webhook: Failed to update order', { orderId: order.id, error: updateError })
+      logger.error('ClickPesa webhook: Failed to update order', { orderId: order.id, error: updateError })
       return NextResponse.json(
         { success: false, error: "Failed to update order" },
         { status: 500 }
@@ -487,7 +472,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
           .eq('order_id', order.id)
 
         if (itemsError) {
-          console.error('❌ Error fetching order items for stock reduction:', itemsError)
+          logger.error('❌ Error fetching order items for stock reduction:', itemsError)
         } else if (orderItems && orderItems.length > 0) {
           // Reduce stock for each item
           for (const item of orderItems) {
@@ -501,7 +486,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
                   .eq('product_id', item.product_id)
 
                 if (variantsError || !variants || variants.length === 0) {
-                  console.error('❌ Error fetching variants for stock reduction:', item.product_id, variantsError)
+                  logger.error('❌ Error fetching variants for stock reduction', { productId: item.product_id, error: variantsError?.message })
                   continue
                 }
 
@@ -523,7 +508,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
                       const currentQty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
                       const newQty = Math.max(0, currentQty - item.quantity)
                       updated = true
-                      logger.log(`✅ Reducing attribute stock: ${pv.attribute}="${pv.value}" by ${item.quantity} (${currentQty} -> ${newQty})`)
+                      // Stock reduction logged at product level only
                       return { ...pv, quantity: newQty }
                     }
                     return pv
@@ -537,11 +522,11 @@ async function handleClickPesaWebhook(request: NextRequest) {
                       .eq('id', variant.id)
 
                     if (variantUpdateError) {
-                      console.error(`❌ Error updating variant ${variant.id}:`, variantUpdateError)
+                      logger.error(`❌ Error updating variant ${variant.id}:`, variantUpdateError)
                       continue
                     }
 
-                    logger.log(`✅ Variant ${variant.id} updated with new primary_values`)
+                    // Variant updated successfully
 
                     // Recalculate total stock from ALL variants for this product
                     const { data: allVariants, error: allVariantsError } = await supabase
@@ -572,7 +557,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
                         .eq('id', item.product_id)
 
                       if (productUpdateError) {
-                        console.error(`❌ Error updating product stock:`, productUpdateError)
+                        logger.error(`❌ Error updating product stock:`, productUpdateError)
                       } else {
                         logger.log(`✅ Product ${item.product_id} total stock updated to: ${totalStock}`)
                       }
@@ -588,7 +573,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
                   .single()
 
                 if (fetchError || !product) {
-                  console.error('❌ Error fetching product for stock reduction:', item.product_id, fetchError)
+                  logger.error('❌ Error fetching product for stock reduction:', item.product_id, fetchError)
                   continue
                 }
 
@@ -606,18 +591,18 @@ async function handleClickPesaWebhook(request: NextRequest) {
                   .eq('id', item.product_id)
 
                 if (stockUpdateError) {
-                  console.error('❌ Error updating stock for product:', item.product_id, stockUpdateError)
+                  logger.error('❌ Error updating stock for product:', item.product_id, stockUpdateError)
                 } else {
-                  logger.log('✅ Stock reduced for product:', item.product_id, 'by', item.quantity, `(${currentStock} -> ${newStock})`)
+                  logger.log('✅ Stock reduced for product', { productId: item.product_id, quantity: item.quantity })
                 }
               }
             } catch (stockError) {
-              console.error('❌ Error in stock reduction for product:', item.product_id, stockError)
+              logger.error('❌ Error in stock reduction for product', { productId: item.product_id, error: stockError instanceof Error ? stockError.message : String(stockError) })
             }
           }
         }
       } catch (stockReductionError) {
-        console.error('❌ Error in stock reduction process:', stockReductionError)
+        logger.error('❌ Error in stock reduction process:', stockReductionError)
       }
     }
 
@@ -628,7 +613,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
     }
 
     // Log successful webhook processing
-    logger.log(`ClickPesa webhook processed successfully: Order ${order.id} -> Status: ${newStatus}`)
+    logger.log('ClickPesa webhook processed successfully', { status: newStatus })
 
     return NextResponse.json({
       success: true,
@@ -638,7 +623,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('ClickPesa webhook error:', error)
+    logger.error('ClickPesa webhook error:', error)
     
     return NextResponse.json(
       { 

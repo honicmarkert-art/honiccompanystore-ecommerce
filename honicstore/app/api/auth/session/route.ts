@@ -22,8 +22,22 @@ function copyCookies(source: NextResponse, target: NextResponse) {
 export async function GET(request: NextRequest) {
   try {
     
-    // Read explicit logout but only honor it if no active session is found
+    // Read explicit logout flag - if set, user explicitly logged out, so don't auto-login
     const explicitLogout = request.cookies.get('explicit-logout')?.value === 'true'
+    
+    // If user explicitly logged out, return unauthenticated immediately
+    // This prevents auto-login after logout
+    if (explicitLogout) {
+      const response = NextResponse.json({
+        success: false,
+        authenticated: false,
+        message: 'User explicitly logged out'
+      }, { status: 401 })
+      
+      // Clear the explicit-logout flag after checking it
+      response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 })
+      return response
+    }
     
     // Log incoming cookies for debugging
     // Note: Supabase SSR uses its own cookie format (sb-{project-ref}-auth-token)
@@ -276,7 +290,6 @@ export async function GET(request: NextRequest) {
       }
     }, { status: 200 })
     
-    if (explicitLogout) successResponse.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 })
     copyCookies(response, successResponse)
     return successResponse
 

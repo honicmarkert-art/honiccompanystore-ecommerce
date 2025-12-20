@@ -161,7 +161,7 @@ function ProductCardSkeleton({ className }: { className?: string }) {
 // Product grid skeleton for product list
 function ProductGridSkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 gap-1 px-1 sm:px-2 lg:px-3">
+    <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 gap-1 px-1 sm:px-2 lg:px-3">
       {Array.from({ length: count }).map((_, i) => (
         <ProductCardSkeleton key={i} />
       ))}
@@ -290,6 +290,92 @@ function OrdersListSkeleton({ count = 3 }: { count?: number }) {
   )
 }
 
+// Checkout page skeleton
+function CheckoutPageSkeleton() {
+  return (
+    <div className="space-y-6">
+      {/* Header skeleton */}
+      <div className="space-y-4">
+        <ShimmerSkeleton className="h-8 w-48" />
+        <ShimmerSkeleton className="h-4 w-64" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left column - Order summary */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Shipping address section */}
+          <div className="space-y-4">
+            <ShimmerSkeleton className="h-6 w-40" />
+            <div className="space-y-3">
+              <ShimmerSkeleton className="h-10 w-full" />
+              <ShimmerSkeleton className="h-10 w-full" />
+              <div className="grid grid-cols-2 gap-3">
+                <ShimmerSkeleton className="h-10 w-full" />
+                <ShimmerSkeleton className="h-10 w-full" />
+              </div>
+              <ShimmerSkeleton className="h-10 w-full" />
+            </div>
+          </div>
+
+          {/* Payment method section */}
+          <div className="space-y-4">
+            <ShimmerSkeleton className="h-6 w-32" />
+            <div className="space-y-3">
+              <ShimmerSkeleton className="h-16 w-full rounded-md" />
+              <ShimmerSkeleton className="h-16 w-full rounded-md" />
+            </div>
+          </div>
+
+          {/* Order items section */}
+          <div className="space-y-4">
+            <ShimmerSkeleton className="h-6 w-36" />
+            <div className="space-y-3">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="flex gap-4">
+                  <ShimmerSkeleton className="h-20 w-20 rounded-md" />
+                  <div className="flex-1 space-y-2">
+                    <ShimmerSkeleton className="h-4 w-3/4" />
+                    <ShimmerSkeleton className="h-4 w-1/2" />
+                    <ShimmerSkeleton className="h-4 w-1/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right column - Order summary card */}
+        <div className="lg:col-span-1">
+          <div className="space-y-4 p-6 border rounded-lg">
+            <ShimmerSkeleton className="h-6 w-32" />
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <ShimmerSkeleton className="h-4 w-24" />
+                <ShimmerSkeleton className="h-4 w-20" />
+              </div>
+              <div className="flex justify-between">
+                <ShimmerSkeleton className="h-4 w-20" />
+                <ShimmerSkeleton className="h-4 w-16" />
+              </div>
+              <div className="flex justify-between">
+                <ShimmerSkeleton className="h-4 w-16" />
+                <ShimmerSkeleton className="h-4 w-12" />
+              </div>
+              <div className="border-t pt-3">
+                <div className="flex justify-between">
+                  <ShimmerSkeleton className="h-5 w-24" />
+                  <ShimmerSkeleton className="h-5 w-28" />
+                </div>
+              </div>
+              <ShimmerSkeleton className="h-12 w-full rounded-md mt-4" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export { 
   Skeleton, 
   ShimmerSkeleton, 
@@ -304,5 +390,6 @@ export {
   PaginationSkeleton,
   SearchBarSkeleton,
   OrderCardSkeleton,
-  OrdersListSkeleton
+  OrdersListSkeleton,
+  CheckoutPageSkeleton
 }

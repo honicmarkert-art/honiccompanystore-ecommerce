@@ -220,7 +220,7 @@ export default function BecomeSupplierPage() {
                 )}
               >
                 <Package className="w-4 h-4 inline mr-1" />
-                Become Supplier
+                Become Seller
               </Link>
             </nav>
 
@@ -1039,7 +1039,7 @@ export default function BecomeSupplierPage() {
                   registrationForm.password,
                   registrationForm.confirmPassword,
                   registrationForm.phone,
-                  true, // Set isSupplier to true for registrations from become-supplier page
+                  true, // Set isSupplier to true for registrations from become-seller page
                   true, // Skip opening login modal since we're doing auto-login
                   selectedPlan?.id as string | undefined // Pass planId to assign during registration
                 )
@@ -1087,13 +1087,13 @@ export default function BecomeSupplierPage() {
                       acceptedPrivacyPolicy: false
                     })
                     
-                    // Store email for verification message
+                    // Store email for verification message and pre-fill in login form
                     if (typeof window !== 'undefined') {
                       sessionStorage.setItem('pending_verification_email', registrationForm.email)
                       sessionStorage.setItem('supplier_registration', 'true')
                     }
                     
-                    // Auto-open login form after a short delay
+                    // Auto-open login form after a short delay (email will be auto-filled from sessionStorage)
                     setTimeout(() => {
                       openAuthModal('login', '/supplier/dashboard')
                     }, 500)

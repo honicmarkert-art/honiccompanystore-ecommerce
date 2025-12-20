@@ -40,7 +40,25 @@ export function LazyImage({
   const [isLoaded, setIsLoaded] = useState(false)
   const [isInView, setIsInView] = useState(priority)
   const [hasError, setHasError] = useState(false)
+  const [imageSrc, setImageSrc] = useState(src)
+  const [useProxy, setUseProxy] = useState(false)
+  const [useUnoptimized, setUseUnoptimized] = useState(false)
   const imgRef = useRef<HTMLDivElement>(null)
+  
+  // Check if it's a Supabase image - use unoptimized to avoid timeout issues
+  const isSupabaseImage = typeof src === 'string' && (
+    src.includes('supabase.co') || 
+    src.includes('/storage/v1/object/public/')
+  )
+
+  // Update imageSrc when src prop changes
+  useEffect(() => {
+    setImageSrc(src)
+    setUseProxy(false)
+    setUseUnoptimized(isSupabaseImage) // Use unoptimized for Supabase images to avoid timeout
+    setHasError(false)
+    setIsLoaded(false)
+  }, [src, isSupabaseImage])
 
   useEffect(() => {
     if (priority) return
@@ -71,6 +89,14 @@ export function LazyImage({
   }
 
   const handleError = () => {
+    // If error and we haven't tried proxy yet, and it's a Supabase image, try proxy
+    if (!useProxy && imageSrc.includes('supabase.co')) {
+      setUseProxy(true)
+      setImageSrc(`/api/images/proxy?url=${encodeURIComponent(imageSrc)}`)
+      setHasError(false) // Reset error to try again with proxy
+      return
+    }
+    // If proxy also failed or not a Supabase image, show error
     setHasError(true)
     onError?.()
   }
@@ -102,7 +128,7 @@ export function LazyImage({
       {/* Actual Image */}
       {isInView && !hasError && (
         <Image
-          src={src}
+          src={imageSrc}
           alt={alt}
           width={fill ? undefined : width}
           height={fill ? undefined : height}
@@ -119,6 +145,7 @@ export function LazyImage({
           style={style}
           onLoad={handleLoad}
           onError={handleError}
+          unoptimized={useUnoptimized || useProxy} // Use unoptimized for Supabase images and proxy to avoid timeout/optimization issues
         />
       )}
       

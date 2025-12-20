@@ -121,89 +121,35 @@ export async function POST(request: NextRequest) {
       // Method 2: ALWAYS check auth users (critical - email might exist in auth but not in profiles yet)
       console.log('🔍 Checking Auth users (Method 2 - always check):', email)
       try {
-        // First try getUserByEmail (more efficient)
-        const { data: authUser, error: getUserError } = await adminSupabase.auth.admin.getUserByEmail(email.toLowerCase())
-        
-        if (authUser?.user) {
-          emailExists = true
-          logger.log('🚨 Registration blocked - email already exists in Auth (getUserByEmail):', { 
-            email, 
-            userId: authUser.user.id,
-            createdAt: authUser.user.created_at 
-          })
-          console.error('🚨 BLOCKING REGISTRATION - Email already exists in Auth:', email)
-          return NextResponse.json(
-            {
-              success: false,
-              error: 'An account with this email address already exists. Please use a different email or try logging in.',
-              type: 'EMAIL_ALREADY_EXISTS'
-            },
-            { status: 409 }
-          )
-        }
-        
-        // If getUserByEmail fails, try listUsers as fallback
-        if (getUserError) {
-          console.log('⚠️ getUserByEmail failed, trying listUsers fallback:', getUserError)
-          const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
+        // Use listUsers (getUserByEmail doesn't exist in Supabase admin API)
+        const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
           
-          if (!listError && authUsers?.users) {
-            const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
-            if (existingAuthUser) {
-              emailExists = true
-              logger.log('🚨 Registration blocked - email already exists in Auth (listUsers):', { 
-                email, 
-                userId: existingAuthUser.id,
-                createdAt: existingAuthUser.created_at 
-              })
-              console.error('🚨 BLOCKING REGISTRATION - Email already exists in Auth:', email)
-              return NextResponse.json(
-                {
-                  success: false,
-                  error: 'An account with this email address already exists. Please use a different email or try logging in.',
-                  type: 'EMAIL_ALREADY_EXISTS'
-                },
-                { status: 409 }
-              )
-            }
+        if (!listError && authUsers?.users) {
+          const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
+          if (existingAuthUser) {
+            emailExists = true
+            logger.log('🚨 Registration blocked - email already exists in Auth (listUsers):', { 
+              email, 
+              userId: existingAuthUser.id,
+              createdAt: existingAuthUser.created_at 
+            })
+            console.error('🚨 BLOCKING REGISTRATION - Email already exists in Auth:', email)
+            return NextResponse.json(
+              {
+                success: false,
+                error: 'An account with this email address already exists. Please use a different email or try logging in.',
+                type: 'EMAIL_ALREADY_EXISTS'
+              },
+              { status: 409 }
+            )
           }
         }
       } catch (authCheckError: any) {
-        // If getUserByEmail throws, try listUsers
-        logger.warn('⚠️ getUserByEmail threw error, trying listUsers:', {
+        // If listUsers fails, log but continue (Supabase signUp will validate as final check)
+        logger.warn('⚠️ listUsers failed (proceeding - Supabase signUp will validate):', {
           error: authCheckError?.message || authCheckError
         })
-        console.warn('⚠️ Auth users check error, trying listUsers:', authCheckError)
-        try {
-          const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
-          
-          if (!listError && authUsers?.users) {
-            const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
-            if (existingAuthUser) {
-              emailExists = true
-              logger.log('🚨 Registration blocked - email already exists in Auth (listUsers fallback):', { 
-                email, 
-                userId: existingAuthUser.id,
-                createdAt: existingAuthUser.created_at 
-              })
-              console.error('🚨 BLOCKING REGISTRATION - Email already exists in Auth:', email)
-              return NextResponse.json(
-                {
-                  success: false,
-                  error: 'An account with this email address already exists. Please use a different email or try logging in.',
-                  type: 'EMAIL_ALREADY_EXISTS'
-                },
-                { status: 409 }
-              )
-            }
-          }
-        } catch (listError) {
-          logger.warn('⚠️ Both getUserByEmail and listUsers failed (proceeding - Supabase signUp will validate):', {
-            getUserError: authCheckError?.message || authCheckError,
-            listError: listError?.message || listError
-          })
-          console.warn('⚠️ Both auth check methods failed:', { getUserError: authCheckError, listError })
-        }
+        console.warn('⚠️ Auth users check error (proceeding - Supabase signUp will validate):', authCheckError)
       }
       
       // Email not found in profiles or auth - available for registration

@@ -78,6 +78,8 @@ import {
   Moon,
   Sun,
   UserPlus,
+  Sparkles,
+  Compass,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -109,6 +111,7 @@ import { Slider } from "@/components/ui/slider"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 // import { useProducts } from "@/hooks/use-products" // Removed - using useProductsOptimized instead
@@ -124,6 +127,47 @@ import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { UserProfile } from "@/components/user-profile"
 
 // Category icons mapping - simplified
+
+// Component for navigation links that hide on screens below 13 inches
+function NavigationLinks13Inch() {
+  const { themeClasses } = useTheme()
+  const [isBelow13Inch, setIsBelow13Inch] = useState(false)
+
+  useEffect(() => {
+    const checkScreenSize = () => {
+      // Hide on screens below 13 inches (typically < 1366px width)
+      setIsBelow13Inch(
+        typeof window !== 'undefined' && 
+        window.innerWidth < 1366
+      )
+    }
+    
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    
+    return () => {
+      window.removeEventListener('resize', checkScreenSize)
+    }
+  }, [])
+
+  if (isBelow13Inch) {
+    return null
+  }
+
+  return (
+    <>
+      <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+        AI Sourcing
+      </Link>
+      <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
+        Discovery
+      </Link>
+      <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm")}>
+        Become Seller
+      </Link>
+    </>
+  )
+}
 
 function ProductsPageContent() {
   const router = useRouter()
@@ -239,7 +283,7 @@ function ProductsPageContent() {
     // keep other filters; drop returnTo to avoid loops
     params.delete('returnTo')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl)
+    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping when updating search
   }, [router, urlSearchParams, searchTerm])
 
 
@@ -268,7 +312,7 @@ function ProductsPageContent() {
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.set('search', suggestion)
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl)
+    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping when selecting suggestion
   }, [router, urlSearchParams])
 
   // Removed useRobustProducts hook - was causing duplicate API calls!
@@ -401,13 +445,69 @@ function ProductsPageContent() {
   const [currentAdIndex, setCurrentAdIndex] = useState(0)
   const [adRotationTime, setAdRotationTime] = useState(10)
   
-  // Rotating promotional text
+  // Rotating promotional text with animation types
   const promotionalTexts = [
-    "More To Love",
-    "Mega Choice For You Up To 40% Off",
-    "What Are You Waiting For"
+    { text: "More To Love", animation: "bounce", decoration: "heart" },
+    { text: "Mega Choice For You Up To 40% Off", animation: "pulse", decoration: "badge" },
+    { text: "What Are You Waiting For", animation: "slide", decoration: "arrow" },
+    { text: "Flash Sale: 50% Off", animation: "flash", decoration: "lightning" },
+    { text: "Free Shipping Today", animation: "float", decoration: "truck" },
+    { text: "New Arrivals", animation: "fade", decoration: "star" },
+    { text: "Buy More, Save More", animation: "scale", decoration: "tag" },
+    { text: "Weekend Special: 25% Off", animation: "wiggle", decoration: "gift" },
+    { text: "Best Prices", animation: "glow", decoration: "check" },
+    { text: "Exclusive: 30% Off", animation: "shimmer", decoration: "crown" }
   ]
-  const [currentPromoIndex, setCurrentPromoIndex] = useState(0)
+  
+  // Shuffle promotional texts order for random rotation
+  const shuffledPromoOrder = useMemo(() => {
+    const order = Array.from({ length: promotionalTexts.length }, (_, i) => i)
+    // Fisher-Yates shuffle algorithm
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]]
+    }
+    return order
+  }, []) // Only shuffle once on mount
+  
+  // Animation classes mapping
+  const getAnimationClass = (animation: string) => {
+    const animations: Record<string, string> = {
+      bounce: "animate-bounce",
+      pulse: "animate-pulse",
+      slide: "animate-[slide_1s_ease-in-out_infinite]",
+      flash: "animate-[flash_1.5s_ease-in-out_infinite]",
+      float: "animate-[float_3s_ease-in-out_infinite]",
+      fade: "animate-[fade_2s_ease-in-out_infinite]",
+      scale: "animate-[scale_1.5s_ease-in-out_infinite]",
+      wiggle: "animate-[wiggle_1s_ease-in-out_infinite]",
+      glow: "animate-[glow_2s_ease-in-out_infinite]",
+      shimmer: "relative overflow-hidden bg-gradient-to-r from-yellow-400 via-yellow-200 to-yellow-400 bg-clip-text text-transparent bg-[length:200%_auto] animate-[shimmer-text_2s_linear_infinite]"
+    }
+    return animations[animation] || ""
+  }
+  
+  // Decoration component
+  const getDecoration = (decoration: string): React.ReactElement | null => {
+    const decorations: Record<string, React.ReactElement> = {
+      heart: <span className="text-red-500 animate-pulse">❤️</span>,
+      badge: <span className="inline-block bg-blue-500 text-white px-2 py-0.5 rounded-full text-xs sm:text-sm font-bold animate-pulse">OFFER</span>,
+      arrow: <span className="text-green-500 animate-bounce">→</span>,
+      lightning: <span className="text-yellow-500 animate-[flash_1s_ease-in-out_infinite]">⚡</span>,
+      truck: <span className="text-blue-500 animate-[float_2s_ease-in-out_infinite]">🚚</span>,
+      star: <span className="text-yellow-400 animate-spin">⭐</span>,
+      tag: <span className="text-red-500 animate-[scale_1.5s_ease-in-out_infinite]">🏷️</span>,
+      gift: <span className="text-purple-500 animate-[wiggle_1s_ease-in-out_infinite]">🎁</span>,
+      check: <span className="text-green-500 animate-pulse">✓</span>,
+      crown: <span className="text-yellow-500 animate-[shimmer_2s_ease-in-out_infinite]">👑</span>
+    }
+    return decorations[decoration] || null
+  }
+  
+  // Random starting index in shuffled order
+  const [currentPromoIndex, setCurrentPromoIndex] = useState(() => 
+    Math.floor(Math.random() * promotionalTexts.length)
+  )
   const [isFading, setIsFading] = useState(false)
   
   // Touch swipe state for advertisements
@@ -441,6 +541,7 @@ function ProductsPageContent() {
   const [isCategoryMegaMenuOpen, setIsCategoryMegaMenuOpen] = useState(false)
   const [hoveredMegaCategory, setHoveredMegaCategory] = useState<string | null>(null)
   const categoryMegaMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const categoryMegaMenuRef = useRef<HTMLDivElement>(null)
   const [showMoreCategories, setShowMoreCategories] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
   const moreButtonRef = useRef<HTMLDivElement>(null)
@@ -486,6 +587,32 @@ function ProductsPageContent() {
       }
     }
   }, [])
+
+  // Close mega menu when clicking outside
+  useEffect(() => {
+    if (!isCategoryMegaMenuOpen) return
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        categoryMegaMenuRef.current &&
+        !categoryMegaMenuRef.current.contains(event.target as Node) &&
+        // Don't close if clicking on category navigation items
+        !(event.target as HTMLElement).closest('[data-category-nav]')
+      ) {
+        setIsCategoryMegaMenuOpen(false)
+      }
+    }
+
+    // Add event listener with a small delay to avoid closing immediately when opening
+    const timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside)
+    }, 100)
+
+    return () => {
+      clearTimeout(timeoutId)
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isCategoryMegaMenuOpen])
 
   const hoveredMegaCategoryData = useMemo(() => {
     if (!hoveredMegaCategory) return null
@@ -579,16 +706,33 @@ function ProductsPageContent() {
     setOverflowCategories([])
   }, [categoriesData.mainCategories])
 
-  // Show maximum 6 categories (no More button)
+  // Show maximum 4 categories for screens below 13 inches, 6 for 13 inches and above
   useEffect(() => {
     if (categoriesData.mainCategories.length === 0) {
       return
     }
     
-    // Show maximum 6 categories
-    const maxCategories = categoriesData.mainCategories.slice(0, 6)
-    setDesktopVisibleCategories(maxCategories)
-    setDesktopOverflowCategories([])
+    const updateCategories = () => {
+      // Detect screens below 13 inches (typically < 1366px width)
+      const isBelow13Inch = typeof window !== 'undefined' && 
+        window.innerWidth < 1366
+      
+      // Use 4 categories for screens below 13 inches, 6 for 13 inches and above
+      const maxCategories = isBelow13Inch ? 4 : 6
+      const visibleCategories = categoriesData.mainCategories.slice(0, maxCategories)
+      setDesktopVisibleCategories(visibleCategories)
+      setDesktopOverflowCategories([])
+    }
+    
+    // Update on mount and when categories change
+    updateCategories()
+    
+    // Update on window resize
+    window.addEventListener('resize', updateCategories)
+    
+    return () => {
+      window.removeEventListener('resize', updateCategories)
+    }
   }, [categoriesData.mainCategories])
   
   const [sortOrder, setSortOrder] = useState('price-low')
@@ -672,9 +816,15 @@ function ProductsPageContent() {
   }, [allCategoryIds, categoriesLoading, infiniteReset])
 
   // Reset products immediately when any filter changes to prevent showing old products
+  // But only if we have valid category IDs or no category filter is active
   useEffect(() => {
+    // Don't reset if category filter is active but category IDs aren't ready yet
+    if (isCategoryFilterActive && allCategoryIds.length === 0 && !categoriesLoading) {
+      // Category filter is active but no matching IDs - this is expected, don't reset
+      return
+    }
     infiniteReset()
-  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, infiniteReset])
+  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, infiniteReset, isCategoryFilterActive, allCategoryIds.length, categoriesLoading])
   
   // Get page from URL on mount
   useEffect(() => {
@@ -812,18 +962,18 @@ function ProductsPageContent() {
     }
   }, [advertisements.length, currentAdIndex])
 
-  // Rotate promotional text with fade animation
+  // Rotate promotional text with fade animation (using shuffled order)
   useEffect(() => {
     const interval = setInterval(() => {
       setIsFading(true)
       setTimeout(() => {
-        setCurrentPromoIndex((prevIndex) => (prevIndex + 1) % promotionalTexts.length)
+        setCurrentPromoIndex((prevIndex) => (prevIndex + 1) % shuffledPromoOrder.length)
         setIsFading(false)
       }, 300) // Half of animation duration
     }, 3000) // Change text every 3 seconds
     
     return () => clearInterval(interval)
-  }, [promotionalTexts.length])
+  }, [shuffledPromoOrder.length])
 
 
   // Touch swipe handlers for advertisements
@@ -937,13 +1087,19 @@ function ProductsPageContent() {
   // Keep shuffled list in sync when new products arrive (append-only to preserve current order)
   useEffect(() => {
     if (products.length === 0) return
+    // Filter out out-of-stock products
+    const inStockProducts = products.filter((p: any) => {
+      const isInStock = p.inStock !== false && p.in_stock !== false
+      return isInStock
+    })
+    
     if (shuffledProducts.length === 0) {
-      setShuffledProducts(products)
+      setShuffledProducts(inStockProducts)
       return
     }
-    if (products.length > shuffledProducts.length) {
+    if (inStockProducts.length > shuffledProducts.length) {
       const existingIds = new Set(shuffledProducts.map((p: any) => p.id))
-      const newOnes = products.filter((p: any) => !existingIds.has(p.id))
+      const newOnes = inStockProducts.filter((p: any) => !existingIds.has(p.id))
       if (newOnes.length > 0) {
         setShuffledProducts((prev: any[]) => [...prev, ...newOnes])
       }
@@ -974,7 +1130,9 @@ function ProductsPageContent() {
       const uniqueProducts = products.filter((product: any) => {
         if (seen.has(product.id)) return false
         seen.add(product.id)
-        return true
+        // Filter out out-of-stock products
+        const isInStock = product.inStock !== false && product.in_stock !== false
+        return isInStock
       })
       return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
     }
@@ -986,7 +1144,9 @@ function ProductsPageContent() {
     const uniqueProducts = baseList.filter((product: any) => {
       if (seen.has(product.id)) return false
       seen.add(product.id)
-      return true
+      // Filter out out-of-stock products
+      const isInStock = product.inStock !== false && product.in_stock !== false
+      return isInStock
     })
     return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
   }, [products, shuffledProducts, PRODUCTS_PER_PAGE, searchTerm, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, infiniteLoading])
@@ -1289,17 +1449,25 @@ function ProductsPageContent() {
 
 
   const handleClearAllFilters = () => {
+    // Clear category state first
     setSelectedMainCategory(null)
     setSelectedSubCategories([])
+    
+    // Clear other filters
     clearFilters()
     
-    // Update URL to remove category parameters
+    // Update URL to remove all filter parameters
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
     params.delete('subCategory')
     params.delete('subCategories')
+    params.delete('search')
+    params.delete('brand')
+    params.delete('minPrice')
+    params.delete('maxPrice')
+    params.delete('page')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl)
+    router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
   }
 
   // Category navigation handlers
@@ -1330,33 +1498,38 @@ function ProductsPageContent() {
       params.delete('subCategories')
     }
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl)
+    router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
   }
 
   const handleBackToMainCategories = () => {
     setSelectedMainCategory(null)
-    setSelectedSubCategories([])
+    // Don't clear subcategories when going back - keep the selection
+    // setSelectedSubCategories([])
     
-    // Update URL
+    // Update URL - only remove mainCategory, keep subCategories if they exist
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
-    params.delete('subCategory')
-    params.delete('subCategories')
+    params.delete('subCategory') // Remove singular form
+    // Keep subCategories in URL if they exist
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl)
+    router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
   }
 
   const handleClearCategoryFilters = () => {
+    // Clear category state
     setSelectedMainCategory(null)
     setSelectedSubCategories([])
     
-    // Update URL
+    // Also clear other filters to return to default state
+    clearFilters()
+    
+    // Update URL to remove all category parameters
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('mainCategory')
     params.delete('subCategory')
     params.delete('subCategories')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl)
+    router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
   }
 
   const handleSortChange = (newSortOrder: string) => {
@@ -1709,7 +1882,11 @@ function ProductsPageContent() {
                 type="text"
                 placeholder="Search for products..."
                 className={cn(
-                    "w-full pl-8 sm:pl-10 pr-32 sm:pr-40 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
+                    "w-full pl-8 sm:pl-10 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
+                    // Adjust padding-right based on whether there's text and screen size
+                    searchTerm.trim() 
+                      ? "pr-8 sm:pr-44 md:pr-48" // Less padding on mobile when typing
+                      : "pr-20 sm:pr-44 md:pr-48", // Reduced padding on mobile when empty to show placeholder
                     darkHeaderFooterClasses.inputBg,
                     darkHeaderFooterClasses.inputBorder,
                     darkHeaderFooterClasses.textNeutralPrimary,
@@ -1727,7 +1904,7 @@ function ProductsPageContent() {
                     params.delete('search')
                     params.delete('returnTo')
                     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                    router.push(nextUrl)
+                    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping
                   }
                   // Debouncing is now handled by useEffect
                 }}
@@ -1777,7 +1954,7 @@ function ProductsPageContent() {
                 }}
                 disabled={!searchTerm.trim()}
                 className={cn(
-                  "absolute right-6 sm:right-8 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors",
+                  "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors z-10",
                   searchTerm.trim() 
                     ? cn(darkHeaderFooterClasses.textNeutralSecondaryFixed, "hover:bg-neutral-200 dark:hover:bg-neutral-700")
                     : "text-gray-400 dark:text-gray-600 cursor-not-allowed"
@@ -1787,20 +1964,22 @@ function ProductsPageContent() {
                 <Search className="w-3 h-3 sm:w-4 sm:h-4" />
               </button>
               
-              {/* Image Search Button */}
+              {/* Image Search Button - Hidden on mobile when typing */}
               <button
                 onClick={() => {
                   setSearchModalInitialTab('image')
                   setIsSearchModalOpen(true)
                 }}
                 className={cn(
-                  "absolute right-12 sm:right-16 top-1/2 -translate-y-1/2 px-2 py-1 rounded flex items-center justify-center text-xs sm:text-sm text-yellow-500 hover:text-yellow-600",
-                  "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors whitespace-nowrap"
+                  "absolute right-8 sm:right-10 md:right-12 top-1/2 -translate-y-1/2 px-1.5 sm:px-2 py-1 rounded flex items-center justify-center text-xs sm:text-sm text-yellow-500 hover:text-yellow-600 z-10",
+                  "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors whitespace-nowrap",
+                  // Hide on mobile when there's text in search input
+                  searchTerm.trim() ? "hidden sm:flex" : "flex"
                 )}
                 title="Search by image"
               >
-                <Camera className="w-4 h-4 sm:hidden" />
-                <span className="hidden sm:inline">Search by image</span>
+                <Camera className="w-3.5 h-3.5 sm:h-4 sm:w-4 sm:hidden" />
+                <span className="hidden sm:inline text-xs sm:text-sm">Search by image</span>
               </button>
               
               {/* Clear Search Button */}
@@ -1813,11 +1992,15 @@ function ProductsPageContent() {
                     params.delete('search')
                     params.delete('returnTo')
                     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                    router.push(nextUrl)
+                    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping
                   }}
                   className={cn(
-                    "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center",
-                        darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                    // Adjust position: closer on mobile when camera button is hidden
+                    "absolute top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center z-10",
+                    searchTerm.trim() 
+                      ? "right-2 sm:right-10 md:right-12" // Position when typing (camera button hidden on mobile)
+                      : "right-20 sm:right-10 md:right-12", // Position when empty (camera button visible)
+                    darkHeaderFooterClasses.textNeutralSecondaryFixed,
                     "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
                   )}
                 >
@@ -1831,15 +2014,7 @@ function ProductsPageContent() {
 
           {/* Navigation Links - Near Search Bar */}
           <div className="hidden lg:flex items-center gap-2 xl:gap-3 ml-2 xl:ml-3">
-            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
-              AI Sourcing
-            </Link>
-            <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
-              Discovery
-            </Link>
-            <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm")}>
-              Become Supplier
-            </Link>
+            <NavigationLinks13Inch />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1964,8 +2139,8 @@ function ProductsPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   asChild
                 >
-                  <Link href="/become-supplier" className="flex items-center">
-                    <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                  <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className="flex items-center">
+                    <UserPlus className="w-4 h-4 mr-2" /> Become Seller
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -2056,12 +2231,6 @@ function ProductsPageContent() {
                       onClick={() => openAuthModal('login')}
                     >
                       <Package className="w-4 h-4 mr-2" /> My Orders
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => openAuthModal('login')}
-                    >
-                      <Coins className="w-4 h-4 mr-2" /> My Coins
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className={darkHeaderFooterClasses.dropdownItemHoverBg}
@@ -2255,12 +2424,6 @@ function ProductsPageContent() {
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                      onClick={() => router.push('/account/coins')}
-                    >
-                      <Package className="w-4 h-4 mr-2" /> My Coins
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      className={darkHeaderFooterClasses.dropdownItemHoverBg}
                       onClick={() => router.push('/account/messages')}
                     >
                       <Package className="w-4 h-4 mr-2" /> Message Center
@@ -2382,11 +2545,39 @@ function ProductsPageContent() {
           </div>
           
           {/* Visible Main Categories - Flex to fill space */}
-          <div className="flex items-center justify-between flex-1 gap-2 xl:gap-3 ml-2">
+          <div className="flex items-center justify-between flex-1 gap-2 xl:gap-3 ml-2" data-category-nav>
+            {/* AI Sourcing and Discovery buttons for tablet only */}
+            <div className="hidden md:flex lg:hidden items-center gap-2 xl:gap-3 flex-shrink-0">
+              <Link 
+                href="/" 
+                className={cn(
+                  "text-sm md:text-xs lg:text-base font-medium whitespace-nowrap inline-flex items-center justify-center gap-1",
+                  "transition-all duration-300 ease-in-out",
+                  "transform hover:scale-110",
+                  cn(themeClasses.mainText, "hover:text-yellow-500")
+                )}
+              >
+                <Sparkles className="w-3 h-3 md:w-3.5 md:h-3.5 lg:w-4 lg:h-4" />
+                AI Sourcing
+              </Link>
+              <Link 
+                href="/discover" 
+                className={cn(
+                  "text-sm md:text-xs lg:text-base font-medium whitespace-nowrap inline-flex items-center justify-center gap-1",
+                  "transition-all duration-300 ease-in-out",
+                  "transform hover:scale-110",
+                  cn(themeClasses.mainText, "hover:text-yellow-500")
+                )}
+              >
+                <Compass className="w-3 h-3 md:w-3.5 md:h-3.5 lg:w-4 lg:h-4" />
+                Discovery
+              </Link>
+            </div>
             {desktopVisibleCategories.map((cat: any) => (
             <div
                 key={cat.id}
                 className="relative flex-1"
+                data-category-nav
                 onMouseEnter={() => {
                   if (categoryMegaMenuTimeoutRef.current) {
                     clearTimeout(categoryMegaMenuTimeoutRef.current)
@@ -2412,7 +2603,23 @@ function ProductsPageContent() {
                 scroll={false}
                 onClick={(e) => {
                   e.preventDefault()
-                  router.push(`/?mainCategory=${cat.slug}`)
+                  // Set category state and update URL without full navigation
+                  setSelectedMainCategory(cat.slug)
+                  // Get all subcategories for this main category
+                  const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === cat.id)
+                  const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
+                  setSelectedSubCategories(allSubSlugs)
+                  
+                  // Update URL
+                  const params = new URLSearchParams(urlSearchParams?.toString())
+                  params.set('mainCategory', cat.slug)
+                  if (allSubSlugs.length > 0) {
+                    params.set('subCategories', allSubSlugs.join(','))
+                  } else {
+                    params.delete('subCategories')
+                  }
+                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                  router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
                   setIsCategoryMegaMenuOpen(false)
                 }}
               >
@@ -2481,7 +2688,7 @@ function ProductsPageContent() {
                }}
               suppressHydrationWarning
             >
-               <span className="text-[10px] font-medium text-[var(--tw-ring-offset-color)] flex items-center gap-1" suppressHydrationWarning>
+               <span className="text-[10px] font-medium text-black dark:text-white flex items-center gap-1" suppressHydrationWarning>
              <Image src={chinaImageSrc} alt="China" width={20} height={12} className="object-cover flex-shrink-0" suppressHydrationWarning onError={() => { const currentIndex = chinaFormats.indexOf(chinaImageSrc); if (currentIndex < chinaFormats.length - 1) setChinaImageSrc(chinaFormats[currentIndex + 1]); }} />
              Buy from China
                 <Badge className="bg-yellow-500 text-black text-[7px] px-0.5 py-0 h-2.5 leading-none font-semibold" suppressHydrationWarning>
@@ -2633,8 +2840,8 @@ function ProductsPageContent() {
                 className={darkHeaderFooterClasses.dropdownItemHoverBg}
                 asChild
               >
-                <Link href="/become-supplier" className="flex items-center">
-                  <UserPlus className="w-4 h-4 mr-2" /> Become Supplier
+                  <Link href="/become-supplier" className="flex items-center">
+                    <UserPlus className="w-4 h-4 mr-2" /> Become Seller
                 </Link>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -2652,6 +2859,7 @@ function ProductsPageContent() {
         {/* Mega Menu Dropdown - Full Width Below Nav */}
         {isCategoryMegaMenuOpen && categoriesData.mainCategories.length > 0 && (
           <div 
+            ref={categoryMegaMenuRef}
             className="absolute left-0 top-full w-full bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-2xl z-50 max-h-[calc(100vh-200px)] overflow-y-auto"
             onMouseEnter={openCategoryMegaMenu}
             onMouseLeave={closeCategoryMegaMenu}
@@ -2687,7 +2895,21 @@ function ProductsPageContent() {
                             // On mobile, just set the hovered category to show subcategories
                             // On desktop, navigate and close menu
                             if (window.innerWidth >= 1024) {
-                              router.push(`/?mainCategory=${category.slug}`)
+                              // Set category state and update URL
+                              setSelectedMainCategory(category.slug)
+                              const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
+                              const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
+                              setSelectedSubCategories(allSubSlugs)
+                              
+                              const params = new URLSearchParams(urlSearchParams?.toString())
+                              params.set('mainCategory', category.slug)
+                              if (allSubSlugs.length > 0) {
+                                params.set('subCategories', allSubSlugs.join(','))
+                              } else {
+                                params.delete('subCategories')
+                              }
+                              const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                              router.replace(nextUrl, { scroll: false })
                               setIsCategoryMegaMenuOpen(false)
                             } else {
                               // Mobile: just select the category to show subcategories
@@ -2719,7 +2941,21 @@ function ProductsPageContent() {
                           size="sm"
                           className="text-xs text-orange-600 hover:text-orange-700 dark:text-orange-400"
                           onClick={() => {
-                            router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}`)
+                            // Set category state and update URL
+                            setSelectedMainCategory(hoveredMegaCategoryData.slug)
+                            const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === hoveredMegaCategoryData.id)
+                            const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
+                            setSelectedSubCategories(allSubSlugs)
+                            
+                            const params = new URLSearchParams(urlSearchParams?.toString())
+                            params.set('mainCategory', hoveredMegaCategoryData.slug)
+                            if (allSubSlugs.length > 0) {
+                              params.set('subCategories', allSubSlugs.join(','))
+                            } else {
+                              params.delete('subCategories')
+                            }
+                            const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                            router.replace(nextUrl, { scroll: false })
                             setIsCategoryMegaMenuOpen(false)
                           }}
                         >
@@ -2742,7 +2978,16 @@ function ProductsPageContent() {
                                 className="flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110 flex-shrink-0 min-w-[80px] sm:min-w-[90px] lg:min-w-0"
                                 onClick={(e) => {
                                   e.preventDefault()
-                                  router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                  // Set subcategory state and update URL
+                                  setSelectedMainCategory(hoveredMegaCategoryData.slug)
+                                  setSelectedSubCategories([sub.slug])
+                                  
+                                  const params = new URLSearchParams(urlSearchParams?.toString())
+                                  params.set('mainCategory', hoveredMegaCategoryData.slug)
+                                  params.set('subCategories', sub.slug)
+                                  params.delete('subCategory') // Remove singular form
+                                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                                  router.replace(nextUrl, { scroll: false })
                                   setIsCategoryMegaMenuOpen(false)
                                 }}
                               >
@@ -2772,7 +3017,16 @@ function ProductsPageContent() {
                                 className="hidden lg:flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110"
                                 onClick={(e) => {
                                   e.preventDefault()
-                                  router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                  // Set subcategory state and update URL
+                                  setSelectedMainCategory(hoveredMegaCategoryData.slug)
+                                  setSelectedSubCategories([sub.slug])
+                                  
+                                  const params = new URLSearchParams(urlSearchParams?.toString())
+                                  params.set('mainCategory', hoveredMegaCategoryData.slug)
+                                  params.set('subCategories', sub.slug)
+                                  params.delete('subCategory') // Remove singular form
+                                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                                  router.replace(nextUrl, { scroll: false })
                                   setIsCategoryMegaMenuOpen(false)
                                 }}
                               >
@@ -2809,7 +3063,16 @@ function ProductsPageContent() {
                                   className="group flex items-center justify-between py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-300 ease-in-out transform hover:scale-105"
                                   onClick={(e) => {
                                     e.preventDefault()
-                                    router.push(`/?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`)
+                                    // Set subcategory state and update URL
+                                  setSelectedMainCategory(hoveredMegaCategoryData.slug)
+                                  setSelectedSubCategories([sub.slug])
+                                  
+                                  const params = new URLSearchParams(urlSearchParams?.toString())
+                                  params.set('mainCategory', hoveredMegaCategoryData.slug)
+                                  params.set('subCategories', sub.slug)
+                                  params.delete('subCategory') // Remove singular form
+                                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                                  router.replace(nextUrl, { scroll: false })
                                     setIsCategoryMegaMenuOpen(false)
                                   }}
                                 >
@@ -3179,7 +3442,11 @@ function ProductsPageContent() {
             {/* Product Count */}
             <span className={cn("text-xs sm:text-sm whitespace-nowrap flex items-center gap-1", themeClasses.textNeutralSecondary)}>
               <Package className={cn("w-3 h-3 sm:w-4 sm:h-4", themeClasses.textNeutralSecondary)} />
-              {Math.min(displayedProducts.length, infiniteTotalCount > 0 ? infiniteTotalCount : products.length)} of {infiniteTotalCount > 0 ? infiniteTotalCount : products.length} products
+              {infiniteLoading && infiniteTotalCount === 0 && displayedProducts.length === 0 ? (
+                "Loading products..."
+              ) : (
+                `${Math.min(displayedProducts.length, infiniteTotalCount > 0 ? infiniteTotalCount : products.length)} of ${infiniteTotalCount > 0 ? infiniteTotalCount : (products.length > 0 ? products.length : displayedProducts.length)} products`
+              )}
             </span>
           </div>
 
@@ -3351,13 +3618,26 @@ function ProductsPageContent() {
               }`}
               style={{ minHeight: '1.5em' }}
             >
-              {currentPromoIndex === 1 ? (
-                <>
-                  Mega Choice For You Up To <span className="text-blue-500 dark:text-blue-400" style={{ fontFamily: "'Times New Roman', serif" }}>40%</span> Off
-                </>
-              ) : (
-                promotionalTexts[currentPromoIndex]
-              )}
+              {(() => {
+                const currentTextIndex = shuffledPromoOrder[currentPromoIndex]
+                const promoItem = promotionalTexts[currentTextIndex]
+                const isMegaChoiceText = promoItem.text === "Mega Choice For You Up To 40% Off"
+                const animationClass = getAnimationClass(promoItem.animation)
+                const decoration = getDecoration(promoItem.decoration)
+                
+                return (
+                  <span className={`inline-flex items-center gap-2 ${animationClass}`}>
+                    {decoration && <span className="flex-shrink-0">{decoration}</span>}
+                    {isMegaChoiceText ? (
+                      <>
+                        Mega Choice For You Up To <span className="text-blue-500 dark:text-blue-400" style={{ fontFamily: "'Times New Roman', serif" }}>40%</span> Off
+                      </>
+                    ) : (
+                      <span>{promoItem.text}</span>
+                    )}
+                  </span>
+                )
+              })()}
             </h2>
           </div>
         </div>
@@ -3433,7 +3713,7 @@ function ProductsPageContent() {
           <div className="px-1 sm:px-2 lg:px-3">
             <ProductGridSkeleton count={24} />
           </div>
-        ) : (noCategoryMatches || displayedProducts.length === 0) ? (
+        ) : (noCategoryMatches || (displayedProducts.length === 0 && !infiniteLoading)) ? (
           <div className="px-4 py-10 text-center">
             <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
@@ -3487,7 +3767,7 @@ function ProductsPageContent() {
             loading={infiniteLoadingMore}
             error={infiniteError}
           >
-            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-8 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-8 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
             {displayedProducts.length > 0 && (
               <>
                 
@@ -3616,25 +3896,39 @@ function ProductsPageContent() {
                     )
                   })()}
                     </OptimizedLink>
-                    <CardContent className="p-1 flex-1 flex flex-col justify-between" suppressHydrationWarning>
+                    <CardContent className="p-1 md:p-0.5 lg:p-1 flex-1 flex flex-col justify-between" suppressHydrationWarning>
                       <OptimizedLink 
                         href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}` || window.location.href)}`}
                         className="block"
                         prefetch={false}
                         priority="low"
                       >
-                        <h3 className="text-xs font-semibold sm:text-sm lg:text-base hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 transition-all duration-300 line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
+                        <h3 className="text-xs font-semibold sm:text-xs md:text-[11px] lg:text-base hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 transition-all duration-300 line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
                       </OptimizedLink>
-                  {/* Sold count - on new line above ratings on mobile */}
-                  {product.sold_count && (
-                    <div className="sm:hidden text-[10px] mt-0.5" suppressHydrationWarning>
-                      <span className={themeClasses.textNeutralSecondary} suppressHydrationWarning>
-                        {product.sold_count >= 1000 
-                          ? `${(product.sold_count / 1000).toFixed(1)}k+` 
-                          : `${product.sold_count}+`} sold out
-                      </span>
-                    </div>
-                  )}
+                  {/* Stock/Sold status - on new line above ratings on mobile */}
+                  <div className="sm:hidden text-[10px] mt-0.5" suppressHydrationWarning>
+                    {(() => {
+                      const isOutOfStock = !product.inStock && !product.in_stock
+                      const hasSoldCount = product.sold_count && product.sold_count > 0
+                      
+                      if (isOutOfStock) {
+                        return (
+                          <span className="text-red-600 dark:text-red-400 font-semibold" suppressHydrationWarning>
+                            Out of Stock
+                          </span>
+                        )
+                      } else if (hasSoldCount) {
+                        return (
+                          <span className={themeClasses.textNeutralSecondary} suppressHydrationWarning>
+                            {product.sold_count >= 1000 
+                              ? `${(product.sold_count / 1000).toFixed(1)}k+` 
+                              : `${product.sold_count}+`} sold
+                          </span>
+                        )
+                      }
+                      return null
+                    })()}
+                  </div>
                   <div
                     className={cn(
                       "flex flex-wrap items-center gap-1 text-[10px] mt-0.5 sm:text-xs min-h-[1.5rem]",
@@ -3642,31 +3936,50 @@ function ProductsPageContent() {
                     )}
                         suppressHydrationWarning
                   >
-                    {/* Sold count - inline on desktop */}
-                    {product.sold_count && (
-                      <span className="hidden sm:inline text-xs whitespace-nowrap" suppressHydrationWarning>
-                        {product.sold_count >= 1000 
-                          ? `${(product.sold_count / 1000).toFixed(1)}k+` 
-                          : `${product.sold_count}+`} sold
-                      </span>
+                    {/* Stock/Sold status - inline on desktop */}
+                    {(() => {
+                      const isOutOfStock = !product.inStock && !product.in_stock
+                      const hasSoldCount = product.sold_count && product.sold_count > 0
+                      
+                      if (isOutOfStock) {
+                        return (
+                          <span className="hidden sm:inline text-xs whitespace-nowrap text-red-600 dark:text-red-400 font-semibold" suppressHydrationWarning>
+                            Out of Stock
+                          </span>
+                        )
+                      } else if (hasSoldCount) {
+                        return (
+                          <>
+                            <span className="hidden sm:inline text-xs whitespace-nowrap" suppressHydrationWarning>
+                              {product.sold_count >= 1000 
+                                ? `${(product.sold_count / 1000).toFixed(1)}k+` 
+                                : `${product.sold_count}+`} sold
+                            </span>
+                            <span className="hidden sm:inline mx-0.5" suppressHydrationWarning>•</span>
+                          </>
+                        )
+                      }
+                      return null
+                    })()}
+                    {/* Only show rating/reviews if rating > 0 or reviews > 0 */}
+                    {((product.rating && product.rating > 0) || (product.reviews && product.reviews > 0)) && (
+                      <div className="flex items-center gap-0.5 flex-shrink-0">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star
+                            key={i}
+                            className={`w-3 h-3 flex-shrink-0 ${
+                              i < Math.floor(product.rating || 0)
+                                ? "fill-yellow-400 text-yellow-400"
+                                : themeClasses.textNeutralSecondary
+                            }`}
+                            suppressHydrationWarning
+                          />
+                        ))}
+                        {product.reviews && product.reviews > 0 && (
+                          <span className="whitespace-nowrap" suppressHydrationWarning>({product.reviews})</span>
+                        )}
+                      </div>
                     )}
-                    {product.sold_count && (
-                      <span className="hidden sm:inline mx-0.5" suppressHydrationWarning>•</span>
-                    )}
-                    <div className="flex items-center gap-0.5 flex-shrink-0">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Star
-                        key={i}
-                          className={`w-3 h-3 flex-shrink-0 ${
-                          i < Math.floor(product.rating)
-                            ? "fill-yellow-400 text-yellow-400"
-                            : themeClasses.textNeutralSecondary
-                        }`}
-                        suppressHydrationWarning
-                      />
-                    ))}
-                      <span className="whitespace-nowrap" suppressHydrationWarning>({product.reviews})</span>
-                    </div>
                   </div>
                   {hasFreeShipping && (
                     <div
@@ -3679,7 +3992,7 @@ function ProductsPageContent() {
                   )}
                       <div className="flex flex-wrap items-baseline gap-x-2 mt-0.5" suppressHydrationWarning>
                         {/* Main Price */}
-                        <div className="text-sm font-bold sm:text-base lg:text-lg" suppressHydrationWarning>
+                        <div className="text-sm font-bold sm:text-sm md:text-xs lg:text-lg" suppressHydrationWarning>
                           {formatPrice(effectivePrice)}
                         </div>
                         
@@ -3699,6 +4012,15 @@ function ProductsPageContent() {
 
                 </CardContent>
                     <CardFooter className="px-1 pb-1 pt-0 flex flex-col gap-1" suppressHydrationWarning>
+                  {/* Verified Badge - Hidden for now */}
+                  {/* {product.supplier_verified && (
+                    <div className="flex items-center justify-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 rounded-t-sm border-b border-blue-200 dark:border-blue-800">
+                      <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                        <Check className="w-3.5 h-3.5 text-green-500 dark:text-green-400" />
+                        <span className="text-xs font-semibold">Verified Seller</span>
+                      </div>
+                    </div>
+                  )} */}
                   <Button
                     className={cn(
                       "w-full text-xs py-1 h-auto sm:text-sm lg:text-base rounded-b-sm rounded-t-none transform transition-all duration-200 hover:scale-105 hover:shadow-md",
@@ -3815,7 +4137,7 @@ function ProductsPageContent() {
                               params.delete('mainCategory')
                               params.delete('subCategories')
                               const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                              router.push(nextUrl)
+                              router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
                             } else {
                               // Select main category and all its subcategories WITHOUT opening subcategories view
                               // Don't set selectedMainCategory here - that opens the view
@@ -3834,7 +4156,7 @@ function ProductsPageContent() {
                                 params.delete('subCategories')
                               }
                               const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                              router.push(nextUrl)
+                              router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
                             }
                           }}
                         >
@@ -4139,15 +4461,6 @@ function ProductsPageContent() {
                         <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
                       </Link>
                       <Link 
-                        href="/account/coins"
-                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                        onClick={() => setIsHamburgerMenuOpen(false)}
-                      >
-                        <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                        <span className="text-white font-medium">My Coins</span>
-                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                      </Link>
-                      <Link 
                         href="/account/coupons"
                         className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
                         onClick={() => setIsHamburgerMenuOpen(false)}
@@ -4215,58 +4528,51 @@ function ProductsPageContent() {
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Settings</h3>
                 
-                {/* Theme Selection */}
-            <div className="space-y-2">
+                {/* Theme Toggle Switch */}
+                <div className="space-y-2">
                   <p className="text-xs text-white/70">Theme</p>
-                  <div className="grid grid-cols-3 gap-2">
-              <Button
-                variant="ghost"
-                      size="sm"
-                      className={`h-10 text-xs ${backgroundColor === 'dark' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
-                onClick={() => setBackgroundColor('dark')}
-              >
-                      Dark
-              </Button>
-              <Button
-                variant="ghost"
-                      size="sm"
-                      className={`h-10 text-xs ${backgroundColor === 'gray' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
-                onClick={() => setBackgroundColor('gray')}
-              >
-                      Gray
-              </Button>
-              <Button
-                variant="ghost"
-                      size="sm"
-                      className={`h-10 text-xs ${backgroundColor === 'white' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
-                onClick={() => setBackgroundColor('white')}
-              >
-                      Light
-              </Button>
-            </div>
-          </div>
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-white/10">
+                    <div className="flex items-center gap-3">
+                      {backgroundColor === 'dark' ? (
+                        <Moon className="w-5 h-5 text-white" />
+                      ) : (
+                        <Sun className="w-5 h-5 text-white" />
+                      )}
+                      <span className="text-white font-medium text-sm">
+                        {backgroundColor === 'dark' ? 'Dark' : 'Light'}
+                      </span>
+                    </div>
+                    <Switch
+                      checked={backgroundColor === 'dark'}
+                      onCheckedChange={(checked) => {
+                        setBackgroundColor(checked ? 'dark' : 'white')
+                      }}
+                      className="data-[state=checked]:bg-yellow-500"
+                    />
+                  </div>
+                </div>
 
                 {/* Currency Selection */}
-            <div className="space-y-2">
+                <div className="space-y-2">
                   <p className="text-xs text-white/70">Currency</p>
                   <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant="ghost"
+                    <Button
+                      variant="ghost"
                       size="sm"
                       className={`h-10 text-xs ${currency === 'USD' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
-                onClick={() => setCurrency('USD')}
-              >
+                      onClick={() => setCurrency('USD')}
+                    >
                       <DollarSign className="w-3 h-3 mr-1" /> USD
-              </Button>
-              <Button
-                variant="ghost"
+                    </Button>
+                    <Button
+                      variant="ghost"
                       size="sm"
                       className={`h-10 text-xs ${currency === 'TZS' ? 'bg-yellow-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
-                onClick={() => setCurrency('TZS')}
-              >
+                      onClick={() => setCurrency('TZS')}
+                    >
                       <Landmark className="w-3 h-3 mr-1" /> TZS
-              </Button>
-                    </div>
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
