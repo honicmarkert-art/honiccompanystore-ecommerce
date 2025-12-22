@@ -73,6 +73,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 import {
@@ -317,7 +318,6 @@ function ProductDetailPageContent() {
         }
       })
       .catch(error => {
-        console.error('Error tracking product view:', error)
         // Remove from ref on error so it can retry if needed
         viewTrackingRef.current.delete(productId)
       })
@@ -376,7 +376,7 @@ function ProductDetailPageContent() {
           setReviews(data.reviews || [])
         }
       } catch (error) {
-        console.error('Error fetching reviews:', error)
+        // Error fetching reviews
       } finally {
         setReviewsLoading(false)
       }
@@ -401,7 +401,7 @@ function ProductDetailPageContent() {
           })
         }
       } catch (error) {
-        console.error('Error fetching sold count:', error)
+        // Error fetching sold count
       } finally {
         setSoldCountLoading(false)
       }
@@ -420,14 +420,12 @@ function ProductDetailPageContent() {
         const response = await fetch(`/api/products/${product.id}/supplier-info`)
         
         if (!response.ok) {
-          console.error('Failed to fetch supplier info:', response.statusText)
           return
         }
         
         const data = await response.json()
         
         if (data.error) {
-          console.error('Error fetching supplier info:', data.error)
           return
         }
         
@@ -445,7 +443,7 @@ function ProductDetailPageContent() {
         })
         setSupplierCompanyName(data.companyName || null)
       } catch (error) {
-        console.error('Error fetching supplier info:', error)
+        // Error fetching supplier info
       }
     }
     
@@ -642,87 +640,6 @@ function ProductDetailPageContent() {
   }, [productIdNumber, fetchVariantImages, isLoadingVariantImages])
 
 
-  // Function to find matching variant image based on selected attributes
-  const findMatchingVariantImage = useCallback((selectedAttributes: Record<string, any>) => {
-    if (!variantImages.length || !Object.keys(selectedAttributes).length) {
-      return null
-    }
-
-
-    // Score each variant image based on how many attributes match
-    const scoredImages = variantImages.map((variantImage: any) => {
-      let score = 0
-      let totalAttributes = 0
-
-      // Check single attribute (legacy format)
-      if (variantImage.attribute) {
-        const { name: attrName, value: attrValue } = variantImage.attribute
-        const selectedValue = selectedAttributes[attrName]
-        
-        if (selectedValue) {
-          totalAttributes++
-          let matches = false
-          
-          if (Array.isArray(selectedValue)) {
-            matches = selectedValue.includes(attrValue)
-          } else {
-            matches = selectedValue === attrValue
-          }
-          
-          if (matches) {
-            score++
-          }
-        }
-      }
-
-      // Check multiple attributes (new format)
-      if (variantImage.attributes && variantImage.attributes.length > 0) {
-        variantImage.attributes.forEach(({ name: attrName, value: attrValue }: {name: string, value: string}) => {
-          const selectedValue = selectedAttributes[attrName]
-          
-          if (selectedValue) {
-            totalAttributes++
-            let matches = false
-            
-            if (Array.isArray(selectedValue)) {
-              matches = selectedValue.includes(attrValue)
-            } else {
-              matches = selectedValue === attrValue
-            }
-            
-            if (matches) {
-              score++
-            }
-          }
-        })
-      }
-
-      return {
-        variantImage,
-        score,
-        totalAttributes,
-        matchRatio: totalAttributes > 0 ? score / totalAttributes : 0
-      }
-    })
-
-    // Find the best match (highest score, then highest match ratio)
-    const bestMatch = scoredImages
-      .filter(item => item.score > 0) // Only consider images with at least one match
-      .sort((a, b) => {
-        // First sort by score (number of matching attributes)
-        if (b.score !== a.score) {
-          return b.score - a.score
-        }
-        // Then by match ratio (percentage of attributes that match)
-        return b.matchRatio - a.matchRatio
-      })[0]
-
-    if (bestMatch) {
-      return bestMatch.variantImage.imageUrl
-    }
-
-    return null
-  }, [variantImages])
 
   // Use full product data if available, otherwise fall back to minimal product data
   const displayProduct = useMemo(() => {
@@ -731,7 +648,14 @@ function ProductDetailPageContent() {
 
     // Normalize variants from either JSON column or relation
     const normalizedVariants = Array.isArray(base.variants) && base.variants.length > 0
-      ? base.variants
+      ? base.variants.map((variant: any) => ({
+          ...variant,
+          // Ensure variant_name is preserved
+          variant_name: variant.variant_name || null,
+          stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
+          stockQuantity: variant.stockQuantity || variant.stock_quantity || 0,
+          in_stock: variant.in_stock !== undefined ? variant.in_stock : (variant.inStock !== undefined ? variant.inStock : true)
+        }))
       : (Array.isArray(base.product_variants)
           ? base.product_variants.map((variant: any) => {
               // Parse primary_values if it's a JSON string
@@ -757,6 +681,11 @@ function ProductDetailPageContent() {
                 primaryValues: Array.isArray(primaryValues) ? primaryValues : [],
                 // Also preserve snake_case for compatibility
                 primary_values: Array.isArray(primaryValues) ? primaryValues : [],
+                // Include simplified variant fields
+                variant_name: variant.variant_name,
+                stock_quantity: variant.stock_quantity,
+                stockQuantity: variant.stock_quantity,
+                in_stock: variant.in_stock,
               }
             })
           : [])
@@ -918,9 +847,14 @@ function ProductDetailPageContent() {
   }, [navigateWithPrefetch, returnTo])
 
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
-  const [selectedAttributes, setSelectedAttributes] = useState<{ [key: string]: string | string[] | undefined }>({})
-  const [variantSelectionStep, setVariantSelectionStep] = useState<number>(0) // For multi-dependent logic
-  const [hasAutoSelected, setHasAutoSelected] = useState(false) // Track if we've auto-selected on mount
+
+  // Simplified variant image matching - use selected variant image if available
+  const findMatchingVariantImage = useCallback(() => {
+    if (selectedVariant?.image) {
+      return selectedVariant.image
+    }
+    return null
+  }, [selectedVariant])
 
   // New states for video and 360° view dialogs
   const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false)
@@ -931,24 +865,14 @@ function ProductDetailPageContent() {
   
   
   // Selection preview dialog state
-  const [isSelectionPreviewOpen, setIsSelectionPreviewOpen] = useState(false)
   
-  // Individual quantity controls for each combination
-  const [individualQuantities, setIndividualQuantities] = useState<{ [key: string]: number }>({})
-  
-  // Calculate total stock from attribute quantities
+  // Calculate total stock from simplified variants
   const calculateTotalStock = useCallback(() => {
     let total = 0
     if (displayProduct?.variants) {
       displayProduct.variants.forEach((variant: any) => {
-        if (Array.isArray(variant.primaryValues)) {
-          variant.primaryValues.forEach((pv: any) => {
-            const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-            total += qty
-          })
-        } else if (typeof variant.stockQuantity === 'number') {
-          total += variant.stockQuantity
-        }
+        const qty = variant.stock_quantity || variant.stockQuantity || 0
+        total += typeof qty === 'number' ? qty : parseInt(String(qty)) || 0
       })
     }
     // Fallback to product-level stock if no variant quantities
@@ -1064,38 +988,6 @@ function ProductDetailPageContent() {
   }
 
 
-  // Variant selection logic
-  const attributeTypes = useMemo(() => {
-    
-    if (!displayProduct?.variants || displayProduct.variants.length === 0) {
-      return []
-    }
-    
-    const types = new Set<string>()
-    
-    // Add primary attribute if it exists
-    if (displayProduct.variantConfig?.primaryAttribute) {
-      types.add(displayProduct.variantConfig.primaryAttribute)
-    }
-    
-    // Add attributes from attribute order
-    if (displayProduct.variantConfig?.attributeOrder) {
-      displayProduct.variantConfig.attributeOrder.forEach((attr: string) => types.add(attr))
-    }
-    
-    // Extract from variants
-    displayProduct.variants.forEach((variant: any, index: number) => {
-      
-      // Extract from regular attributes
-      Object.keys(variant.attributes || {}).filter(key => !/^\d+$/.test(key)).forEach(key => {
-        types.add(key)
-      })
-      
-    })
-    
-    const result = Array.from(types)
-    return result
-  }, [displayProduct?.variants, displayProduct?.variantConfig])
 
   // Get all unique values for a specific attribute type
   const getAttributeValues = (type: string): string[] => {
@@ -1385,458 +1277,52 @@ function ProductDetailPageContent() {
     return true
   }
 
-  // Get available variants based on current selections
+  // Get available variants - simplified (no filtering needed)
   const getAvailableVariants = (): ProductVariant[] => {
     if (!displayProduct?.variants) return []
-    
-    if (displayProduct.variantConfig?.type === 'simple' && !displayProduct.variantConfig.primaryAttribute) {
-      return displayProduct.variants
-    }
-    
-    if (displayProduct.variantConfig?.type === 'primary-dependent') {
-      const primaryAttribute = displayProduct.variantConfig.primaryAttribute
-      const primaryAttributes = displayProduct.variantConfig.primaryAttributes || []
-      
-      // For primary-dependent with multiple primary attributes (suppliers),
-      // filter variants based on ALL selected primary attributes
-      if (primaryAttributes.length > 0) {
-        // Check if any primary attributes are selected
-        const selectedPrimaryAttrs = primaryAttributes.filter((attr: string) => selectedAttributes[attr])
-        if (selectedPrimaryAttrs.length === 0) {
-          return displayProduct.variants
-        }
-        
-        // Return variants that match ALL selected primary attribute values
-        return displayProduct.variants.filter((variant: any) => {
-          return selectedPrimaryAttrs.every((attr: string) => {
-            const selectedValue = selectedAttributes[attr]
-            if (!selectedValue) return true
-            
-            // Check primaryValues (camelCase)
-            if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
-              const hasMatch = variant.primaryValues.some((pv: any) => 
-                pv.value === selectedValue && (pv.attribute === attr || pv.attributeName === attr)
-              )
-              if (hasMatch) return true
-            }
-            
-            // Check primary_values (snake_case)
-            if (variant.primary_values && Array.isArray(variant.primary_values)) {
-              const hasMatch = variant.primary_values.some((pv: any) => {
-                if (typeof pv === 'string') return pv === selectedValue
-                return pv.value === selectedValue && (pv.attribute === attr || pv.attributeName === attr)
-              })
-              if (hasMatch) return true
-            }
-            
-            // Fallback to attributes object
-            return variant.attributes && variant.attributes[attr] === selectedValue
-          })
-        })
-      }
-      
-      // Original logic for single primary attribute
-      if (!primaryAttribute || !selectedAttributes[primaryAttribute]) {
-        return displayProduct.variants
-      }
-      
-      // For primary-dependent logic, return variants that have the selected primary value
-      return displayProduct.variants.filter((variant: any) => {
-        // Check primaryValues (camelCase)
-        if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
-          const hasMatch = variant.primaryValues.some((pv: any) => 
-            pv.value === selectedAttributes[primaryAttribute] && 
-            (pv.attribute === primaryAttribute || pv.attributeName === primaryAttribute)
-          )
-          if (hasMatch) return true
-        }
-        
-        // Check primary_values (snake_case)
-        if (variant.primary_values && Array.isArray(variant.primary_values)) {
-          const hasMatch = variant.primary_values.some((pv: any) => {
-            if (typeof pv === 'string') return pv === selectedAttributes[primaryAttribute]
-            return pv.value === selectedAttributes[primaryAttribute] && 
-                   (pv.attribute === primaryAttribute || pv.attributeName === primaryAttribute)
-          })
-          if (hasMatch) return true
-        }
-        
-        // Fallback to attributes object
-        return variant.attributes && variant.attributes[primaryAttribute] === selectedAttributes[primaryAttribute]
-      })
-    }
-    
-    if (displayProduct.variantConfig?.type === 'simple' && displayProduct.variantConfig.primaryAttribute) {
-      const primaryAttribute = displayProduct.variantConfig.primaryAttribute
-      if (!selectedAttributes[primaryAttribute]) {
-        return displayProduct.variants
-      }
-      
-      // For simple logic with primaryValues, return variants that have the selected primary value
-      return displayProduct.variants.filter((variant: any) => {
-        if (variant.primaryValues) {
-          return variant.primaryValues.some((primaryValue: any) => 
-            primaryValue.value === selectedAttributes[primaryAttribute]
-          )
-        }
-        return variant.attributes && variant.attributes[primaryAttribute] === selectedAttributes[primaryAttribute]
-      })
-    }
-    
-    if (displayProduct.variantConfig?.type === 'multi-dependent') {
-      return displayProduct.variants.filter((variant: any) => {
-        if (typeof variant.stockQuantity === 'number' && variant.stockQuantity <= 0) return false
-        return Object.entries(selectedAttributes).every(([key, value]) => {
-          if (Array.isArray(value)) {
-            return value.some(v => variant.attributes && variant.attributes[key] === v)
-          }
-          return variant.attributes && variant.attributes[key] === value
-        })
-      })
-    }
-    
     return displayProduct.variants
   }
 
   // Calculate quantity based on selected attributes
-  const calculateQuantityFromSelections = (): number => {
-    // SINGLE SELECTION ONLY: No need to multiply by selections
-    // Each attribute can only have one value selected
-    return 1
-  }
-
-  // Helper function to generate cartesian product combinations
-  const generateCombinations = (selections: { [key: string]: string[] }): { [key: string]: string }[] => {
-    const attributes = Object.keys(selections)
-    if (attributes.length === 0) return []
-    
-    const generateCombinationsRecursive = (currentIndex: number, currentCombination: { [key: string]: string }): { [key: string]: string }[] => {
-      if (currentIndex === attributes.length) {
-        return [currentCombination]
-      }
-      
-      const attribute = attributes[currentIndex]
-      const values = selections[attribute]
-      const combinations: { [key: string]: string }[] = []
-      
-      values.forEach(value => {
-        const newCombination = { ...currentCombination, [attribute]: value }
-        combinations.push(...generateCombinationsRecursive(currentIndex + 1, newCombination))
-      })
-      
-      return combinations
-    }
-    
-    return generateCombinationsRecursive(0, {})
-  }
-
-  // Calculate total price for current selection (MEMOIZED for performance)
+  // Calculate total price for current selection - simplified
   const calculateTotalPrice = useMemo((): number => {
-    // Use the main quantity state if user has manually changed it, otherwise use calculated quantity
-    const selectedQuantity = quantity
-    
-    // For Multi-Dependent logic: calculate cartesian product of primary attribute prices
-    if (displayProduct?.variantConfig?.type === 'multi-dependent' && 
-        displayProduct.variantConfig.primaryAttributes) {
-      
-      // Get all selected primary attribute values
-      const primaryAttributeSelections: { [key: string]: string[] } = {}
-      let hasPrimarySelections = false
-      
-      displayProduct.variantConfig.primaryAttributes.forEach((primaryAttr: string) => {
-        const selectedValues = selectedAttributes[primaryAttr]
-        if (selectedValues) {
-          const values = Array.isArray(selectedValues) ? selectedValues : [selectedValues]
-          if (values.length > 0) {
-            primaryAttributeSelections[primaryAttr] = values
-            hasPrimarySelections = true
-          }
-        }
-      })
-      
-      if (hasPrimarySelections) {
-        // Generate all possible combinations (cartesian product)
-        const combinations = generateCombinations(primaryAttributeSelections)
-        
-        // Calculate total price for all combinations
-        let totalPrice = 0
-        combinations.forEach((combination: { [key: string]: string }) => {
-          let combinationPrice = 0
-          
-          Object.entries(combination).forEach(([attr, value]) => {
-            // Find the price for this attribute-value combination
-            const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-              variant.primaryValues?.some((pv: any) => 
-                pv.value === value && pv.attribute === attr
-              )
-            )
-            
-            if (variantWithPrimaryValue) {
-              const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => 
-                pv.value === value && pv.attribute === attr
-              )
-              if (primaryValueObj && (primaryValueObj as any).price) {
-                combinationPrice += parseFloat((primaryValueObj as any).price)
-              }
-            }
-          })
-          
-          totalPrice += combinationPrice
-        })
-        
-        return totalPrice
-      }
+    if (selectedVariant) {
+      return (selectedVariant.price || product?.price || 0) * quantity
     }
-    
-    // For Primary-Dependent logic: use single primary attribute price
-    if (displayProduct?.variantConfig?.type === 'primary-dependent' && 
-        displayProduct.variantConfig.primaryAttribute && 
-        selectedAttributes[displayProduct.variantConfig.primaryAttribute]) {
-      
-      const primaryValue = selectedAttributes[displayProduct.variantConfig.primaryAttribute] as string
-      const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-        variant.primaryValues?.some((pv: any) => pv.value === primaryValue)
-      )
-      
-      if (variantWithPrimaryValue) {
-        const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === primaryValue) as { attribute: string; value: string; price?: string } | undefined
-        if (primaryValueObj && primaryValueObj.price) {
-          return parseFloat(primaryValueObj.price) * selectedQuantity
-        }
-      }
-    }
-    
-    // For Simple logic with primaryValues: use single primary attribute price
-    if (displayProduct?.variantConfig?.type === 'simple' && 
-        displayProduct.variantConfig.primaryAttribute && 
-        selectedAttributes[displayProduct.variantConfig.primaryAttribute]) {
-      
-      const primaryValue = selectedAttributes[displayProduct.variantConfig.primaryAttribute] as string
-      const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-        variant.primaryValues?.some((pv: any) => pv.value === primaryValue)
-      )
-      
-      if (variantWithPrimaryValue) {
-        const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === primaryValue) as { attribute: string; value: string; price?: string } | undefined
-        if (primaryValueObj && primaryValueObj.price) {
-          return parseFloat(primaryValueObj.price) * selectedQuantity
-        }
-      }
-    }
-    
-    // If no primary attribute or no primary attribute selected, use main product price
-    return (product?.price || 0) * selectedQuantity
-  }, [displayProduct?.variantConfig, displayProduct?.variants, selectedAttributes, quantity, product?.price])
+    return (product?.price || 0) * quantity
+  }, [selectedVariant, quantity, product?.price])
 
-  // Initialize variant selection
+  // Initialize variant selection - simple system
   useEffect(() => {
     if (displayProduct?.variants && displayProduct.variants.length > 0) {
-      // For simple logic OR when variantConfig is missing, select the first variant
-      if (!displayProduct.variantConfig || displayProduct.variantConfig?.type === 'simple') {
+      // Select the first variant by default
         setSelectedVariant(displayProduct.variants[0])
-        // Convert object arrays to string values for selectedAttributes
-        const initialAttributes = displayProduct.variants[0].attributes || {}
-        const convertedAttributes: { [key: string]: string } = {}
-        
-        Object.entries(initialAttributes).forEach(([key, value]) => {
-          if (Array.isArray(value)) {
-            // For arrays, take the first value
-            const firstItem = value[0]
-            if (typeof firstItem === 'object' && firstItem.value) {
-              convertedAttributes[key] = firstItem.value
-            } else {
-              convertedAttributes[key] = String(firstItem)
-            }
-          } else {
-            convertedAttributes[key] = String(value)
-          }
-        })
-        
-        setSelectedAttributes(convertedAttributes)
-      }
-      // For other logic types, don't auto-select - let user choose
     }
-  }, [displayProduct?.variants, displayProduct?.variantConfig])
+  }, [displayProduct?.variants])
 
-  // Update selected variant when attributes change
-  useEffect(() => {
-    
-    if (!displayProduct?.variants || Object.keys(selectedAttributes).length === 0) {
-      return
-    }
-    
-    let matchingVariant = null
-    
-    // For primary-dependent logic, prioritize finding variant with primary attribute
-    if (displayProduct.variantConfig?.type === 'primary-dependent' && 
-        displayProduct.variantConfig.primaryAttribute && 
-        selectedAttributes[displayProduct.variantConfig.primaryAttribute]) {
-      
-      const primaryValue = selectedAttributes[displayProduct.variantConfig.primaryAttribute]
-      matchingVariant = displayProduct.variants.find((variant: any) => 
-        variant.primaryValues?.some((pv: any) => pv.value === primaryValue)
-      )
-    } else {
-      // For other logic types, match all attributes
-      matchingVariant = displayProduct.variants.find((variant: any) => {
-        return Object.entries(selectedAttributes).every(([key, value]) => {
-          // Handle array attributes
-          if (variant.attributes?.[key] && Array.isArray(variant.attributes[key])) {
-            return variant.attributes[key].some((item: any) => {
-              const v = typeof item === 'object' && item.value ? item.value : item
-              const cleanedValue = v.replace(/^["']|["']$/g, '').trim()
-              return cleanedValue === value
-            })
-          }
-          
-          // Handle multiple selections for non-primary attributes
-          if (Array.isArray(value)) {
-            return value.some(v => variant.attributes && variant.attributes[key] === v)
-          }
-          
-          return variant.attributes && variant.attributes[key] === value
-        })
-      })
-    }
-    
-    if (matchingVariant) {
-      setSelectedVariant(matchingVariant)
-      setMainImage(matchingVariant.image || null)
-    } else {
-      setSelectedVariant(null)
-    }
-  }, [selectedAttributes, displayProduct?.variants])
 
-  // Update quantity when selections change - DISABLED to prevent auto-quantity changes
-  // useEffect(() => {
-  //   const newQuantity = calculateQuantityFromSelections()
-  //   // For products under 500 TZS, ensure minimum quantity is 5
-  //   const finalQuantity = product && product.price < 500 ? Math.max(5, newQuantity) : newQuantity
-  //   setQuantity(finalQuantity)
-  // }, [selectedAttributes, product])
-
-  // Initialize individual quantities when attributes are selected
-  useEffect(() => {
-    const combinations = generateAttributeCombinations(selectedAttributes)
-    if (combinations.length > 1) {
-      const newIndividualQuantities: { [key: string]: number } = {}
-      combinations.forEach(combination => {
-        const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-        newIndividualQuantities[combinationKey] = quantity // Use the main quantity for each combination
-      })
-      setIndividualQuantities(newIndividualQuantities)
-    } else if (combinations.length === 1) {
-      // Clear individual quantities when only one item is selected
-      setIndividualQuantities({})
-    }
-  }, [selectedAttributes, quantity])
-
-  // Helper function to generate attribute combinations
-  const generateAttributeCombinations = (attributes: Record<string, any>): Record<string, string>[] => {
-    const entries = Object.entries(attributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
-    
-    if (entries.length === 0) return []
-    
-    // SINGLE SELECTION ONLY: Each attribute has only one value
-    // Convert to single combination
-    const combination: Record<string, string> = {}
-    entries.forEach(([key, value]) => {
-      // Handle both string values and arrays (for backward compatibility)
-      const singleValue = Array.isArray(value) ? value[0] : value
-      combination[key] = singleValue
-    })
-    
-    return [combination]
-  }
-
-  // Helper function to calculate price for a combination (MEMOIZED for performance)
-  const calculatePriceForCombination = useCallback((combination: Record<string, string>): number => {
-    // Check if any attribute is a primary attribute with price
-    for (const [attribute, value] of Object.entries(combination)) {
-      if (displayProduct.variantConfig?.primaryAttribute === attribute) {
-        const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-          variant.primaryValues?.some((pv: any) => pv.value === value)
-        )
-        if (variantWithPrimaryValue) {
-          const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === value) as { attribute: string; value: string; price?: string } | undefined
-          if (primaryValueObj?.price) {
-            return parseFloat(primaryValueObj.price)
-          }
-        }
-      }
-    }
-    
-    // Fallback to main product price
-    return displayProduct?.price || 0
-  }, [displayProduct?.variantConfig, displayProduct?.variants, displayProduct?.price])
-
-  const handleAttributeSelect = (attributeType: string, value: string) => {
-    setSelectedAttributes(prev => {
-      // ENFORCE SINGLE SELECTION FOR ALL ATTRIBUTES
-      // If the same value is clicked, deselect it
-        if (prev[attributeType] === value) {
-          const newAttributes = { ...prev }
-          delete newAttributes[attributeType]
-          return newAttributes
-        }
-      
-      // Select the new value (single selection only)
-        return {
-          ...prev,
-          [attributeType]: value
-      }
-    })
-    
-    // For multi-dependent logic, advance to next step
-    if (displayProduct?.variantConfig?.type === 'multi-dependent') {
-      const attributeOrder = displayProduct.variantConfig.attributeOrder || []
-      const currentStep = attributeOrder.indexOf(attributeType)
-      if (currentStep >= 0 && currentStep < attributeOrder.length - 1) {
-        setVariantSelectionStep(currentStep + 1)
-      }
+  // Simple variant selection handler
+  const handleVariantSelect = (variantId: string) => {
+    const variant = displayProduct?.variants?.find((v: any) => v.id?.toString() === variantId)
+    if (variant) {
+      setSelectedVariant(variant)
     }
   }
 
-  // Get current price, image, etc. based on selected variant
+  // Get current price based on selected variant
   const getCurrentPrice = (): number => {
-    
-    
-    if (!selectedVariant) {
-      const fallbackPrice = product?.price || 0
-      return fallbackPrice
+    if (selectedVariant) {
+      return selectedVariant.price || product?.price || 0
     }
-    
-    // For primary-dependent logic with primary values
-    if (displayProduct?.variantConfig?.type === 'primary-dependent' && 
-        displayProduct.variantConfig.primaryAttribute && 
-        selectedAttributes[displayProduct.variantConfig.primaryAttribute]) {
-      
-      const selectedPrimaryValue = selectedAttributes[displayProduct.variantConfig.primaryAttribute] as string
-      
-      // Find the variant that contains this primary value
-      const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-        variant.primaryValues?.some((pv: any) => pv.value === selectedPrimaryValue)
-      )
-      
-      
-      if (variantWithPrimaryValue) {
-        const primaryValue = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === selectedPrimaryValue) as { attribute: string; value: string; price?: string } | undefined
-        if (primaryValue && primaryValue.price) {
-          const primaryPrice = parseFloat(primaryValue.price) || variantWithPrimaryValue.price || product?.price || 0
-          return primaryPrice
-        }
-      }
-    }
-    
-    const finalPrice = selectedVariant.price || product?.price || 0
-    return finalPrice
+    return product?.price || 0
   }
 
   const currentPrice = getCurrentPrice() || 0
   const currentOriginalPrice = selectedVariant?.originalPrice || product?.originalPrice || 0
   
-  // Find matching variant image for the selected attributes
-  const matchingVariantImage = findMatchingVariantImage(selectedAttributes)
+  // No variant image matching needed - using simple variant system
+  // Find matching variant image for the selected variant
+  const matchingVariantImage = findMatchingVariantImage()
   
   // Get thumbnail images: use variant images if available, fill remaining with main product image
   const getAllThumbnailImages = useCallback(() => {
@@ -1883,8 +1369,8 @@ function ProductDetailPageContent() {
       return mainImage
     }
     
-    // If any attributes are selected, try to find a matching variant image
-    if (Object.keys(selectedAttributes).length > 0 && matchingVariantImage) {
+    // If variant is selected, use its image
+    if (matchingVariantImage) {
       return matchingVariantImage
     }
     
@@ -1903,32 +1389,26 @@ function ProductDetailPageContent() {
   
   // (helper declared once above)
   
-  // Reset manual selection when attributes change (allow auto-update again)
+  // Reset manual selection when variant changes (allow auto-update again)
   useEffect(() => {
     setIsManualImageSelection(false)
     setSelectedThumbnailIndex(null)
-  }, [selectedAttributes])
+  }, [selectedVariant])
 
-  // Auto-update main image when attributes or thumbnails change (but not when user manually selects a thumbnail)
+  // Auto-update main image when variant changes (but not when user manually selects a thumbnail)
   useEffect(() => {
     // Don't auto-update if user has manually selected an image
     if (isManualImageSelection) {
       return
     }
 
-    // If attributes are selected, try to find matching variant image
-    if (Object.keys(selectedAttributes).length > 0) {
+    // If variant is selected, use its image
       if (matchingVariantImage) {
-        // Auto-update to matching variant image
         setMainImage(matchingVariantImage)
-        // Find the index of the matching variant image in thumbnails
         const matchingIndex = thumbnailImages.findIndex(img => img === matchingVariantImage)
         setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : null)
-      }
-      // If no matching variant image found, keep current image (don't reset to main)
-    } else {
-      // No attributes selected: prefer first thumbnail, else main product image
-      if (thumbnailImages.length > 0) {
+    } else if (thumbnailImages.length > 0) {
+      // Prefer first thumbnail, else main product image
         setMainImage(thumbnailImages[0])
         setSelectedThumbnailIndex(0)
     } else if (product?.image) {
@@ -1938,45 +1418,11 @@ function ProductDetailPageContent() {
         setMainImage(null)
         setSelectedThumbnailIndex(null)
     }
-    }
-  }, [selectedAttributes, matchingVariantImage, product?.image, thumbnailImages, isManualImageSelection])
+  }, [matchingVariantImage, product?.image, thumbnailImages, isManualImageSelection, selectedVariant])
   
   const currentSKU = selectedVariant?.sku || product?.sku || ""
   const currentModel = selectedVariant?.model || product?.model || ""
 
-  // Check if all required attributes are selected
-  const isSelectionComplete = (): boolean => {
-    if (!displayProduct?.variants || displayProduct.variants.length === 0) return true
-    
-    if (displayProduct.variantConfig?.type === 'simple') {
-      return Object.keys(selectedAttributes).length > 0
-    }
-    
-    if (displayProduct.variantConfig?.type === 'primary-dependent') {
-      const primaryAttribute = displayProduct.variantConfig.primaryAttribute
-      return primaryAttribute ? !!selectedAttributes[primaryAttribute] : true
-    }
-    
-    if (displayProduct.variantConfig?.type === 'multi-dependent') {
-      const attributeOrder = displayProduct.variantConfig.attributeOrder || []
-      return attributeOrder.every((attr: string) => selectedAttributes[attr])
-    }
-    
-    return true
-  }
-
-  // Get the next attribute to select for multi-dependent logic
-  const getNextAttributeToSelect = (): string | null => {
-    if (displayProduct?.variantConfig?.type !== 'multi-dependent') return null
-    
-    const attributeOrder = displayProduct?.variantConfig?.attributeOrder || []
-    for (let i = 0; i < attributeOrder.length; i++) {
-      if (!selectedAttributes[attributeOrder[i]]) {
-        return attributeOrder[i]
-      }
-    }
-    return null
-  }
 
   // Check if the currently selected product/variant is in the cart
   const productInCart = useMemo(() => {
@@ -2013,150 +1459,13 @@ function ProductDetailPageContent() {
     })
   }
 
-  // Handle individual quantity changes for each combination
-  const handleIndividualQuantityChange = (combinationKey: string, delta: number) => {
-    setIndividualQuantities(prev => {
-      const currentQty = prev[combinationKey] || quantity
-      const newQty = currentQty + delta
-      
-      // For products under 500 TZS, minimum quantity is 5
-      const minQuantity = product && product.price < 500 ? 5 : 1
-      
-      // If trying to go below minimum for low-price products, show modal
-      if (product && product.price < 500 && newQty < 5 && delta < 0) {
-        setIsQuantityLimitModalOpen(true)
-        return prev // Don't change quantity
-      }
-      
-      const finalQty = Math.max(minQuantity, newQty)
-      const newQuantities = {
-        ...prev,
-        [combinationKey]: finalQty
-      }
-      
-      return newQuantities
-    })
-  }
 
-  // Get individual quantity for a combination
-  const getIndividualQuantity = (combinationKey: string): number => {
-    return individualQuantities[combinationKey] || quantity
-  }
-
-  // Calculate true total items based on individual quantities (MEMOIZED for performance)
-  const calculateTrueTotalItems = useMemo((): number => {
-    const selectedEntries = Object.entries(selectedAttributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
-    
-    if (selectedEntries.length === 0) return quantity
-    
-    // Calculate total combinations
-    let totalCombinations = 1
-    selectedEntries.forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        totalCombinations *= value.length
-      } else {
-        totalCombinations *= 1
-      }
-    })
-    
-    // If individual quantities are set, use them
-    if (Object.keys(individualQuantities).length > 0) {
-      const combinations = generateAttributeCombinations(selectedAttributes)
-      return combinations.reduce((total, combination) => {
-        const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-        return total + getIndividualQuantity(combinationKey)
-      }, 0)
-    }
-    
-    // For multiple combinations, each should have the same quantity (not multiplied)
-    return quantity
-  }, [selectedAttributes, quantity, individualQuantities])
-
-  // Auto-select the first option for each attribute on initial load
-  useEffect(() => {
-    if (!displayProduct?.variants || displayProduct.variants.length === 0) {
-      return
-    }
-    if (!attributeTypes || attributeTypes.length === 0) {
-      return
-    }
-    
-    // Only auto-select once
-    if (hasAutoSelected) {
-      return
-    }
-
-    // Only initialize once when nothing is selected yet
-    const hasAnySelection = Object.values(selectedAttributes).some(v => v !== undefined && v !== null && v !== '')
-    if (hasAnySelection) {
-      return
-    }
-
-    const initialSelection: { [key: string]: string | string[] } = {}
-    attributeTypes.forEach((attrType: string) => {
-      const values = getAttributeValues(attrType)
-      if (values.length > 0) {
-        initialSelection[attrType] = values[0]
-      }
-    })
-
-    if (Object.keys(initialSelection).length > 0) {
-      setSelectedAttributes(initialSelection)
-      setHasAutoSelected(true)
-    }
-  }, [displayProduct?.variants, attributeTypes, hasAutoSelected])
-
-  // Get the current unit price based on selected attributes (MEMOIZED for performance)
+  // Simplified unit price - use selected variant price
   const getCurrentUnitPrice = useMemo((): number => {
-    if (displayProduct?.variantConfig?.type === 'primary-dependent' && 
-        displayProduct.variantConfig.primaryAttribute && 
-        selectedAttributes[displayProduct.variantConfig.primaryAttribute]) {
-      const primaryValue = selectedAttributes[displayProduct.variantConfig.primaryAttribute] as string
-      const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-        variant.primaryValues?.some((pv: any) => pv.value === primaryValue)
-      )
-      if (variantWithPrimaryValue) {
-        const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === primaryValue) as { attribute: string; value: string; price?: string } | undefined
-        return primaryValueObj?.price ? parseFloat(primaryValueObj.price) : product?.price || 0
-      }
-    }
-    return product?.price || 0
-  }, [displayProduct?.variantConfig, displayProduct?.variants, selectedAttributes, product?.price])
-
-  // Calculate true total price based on individual quantities (MEMOIZED for performance)
-  const calculateTrueTotalPrice = useMemo((): number => {
-    const selectedEntries = Object.entries(selectedAttributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
-    
-    if (selectedEntries.length === 0) return calculateTotalPrice
-    
-    // Calculate total combinations
-    let totalCombinations = 1
-    selectedEntries.forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        totalCombinations *= value.length
-      } else {
-        totalCombinations *= 1
-      }
-    })
-    
-    // If individual quantities are set, use them
-    if (Object.keys(individualQuantities).length > 0) {
-      const combinations = generateAttributeCombinations(selectedAttributes)
-      return combinations.reduce((total, combination) => {
-        const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-        const qty = getIndividualQuantity(combinationKey)
-        const unitPrice = calculatePriceForCombination(combination)
-        return total + (unitPrice * qty)
-      }, 0)
-    }
-    
-    // Otherwise, calculate based on combinations
-    const unitPrice = getCurrentUnitPrice
-    return unitPrice * quantity
-  }, [selectedAttributes, calculateTotalPrice, individualQuantities, getCurrentUnitPrice, quantity, calculatePriceForCombination])
+    return getCurrentPrice()
+  }, [selectedVariant, product?.price])
 
   const handleAddToCart = (): boolean | undefined => {
-    
     // Check basic product stock first
     if (displayProduct) {
       const stockCheck = checkProductStock(displayProduct)
@@ -2173,221 +1482,52 @@ function ProductDetailPageContent() {
     
     // Check if this is a China import item first (skip modal if from China page)
     if (!fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
-      const currentPrice = getCurrentUnitPrice
+      const currentPrice = getCurrentPrice()
       setPendingCartAction({
         type: 'add',
         quantity,
         variantId: selectedVariant?.id?.toString(),
-        combination: selectedAttributes,
         price: currentPrice
       })
       setShowChinaImportModal(true)
       return false
     }
     
-    // Validate that selected attributes have sufficient quantity
-    if (displayProduct?.variants && Object.keys(selectedAttributes).length > 0) {
-      for (const [attrType, attrValue] of Object.entries(selectedAttributes)) {
-        if (attrValue && typeof attrValue === 'string') {
-          if (!isAttributeValueAvailable(attrType, attrValue)) {
+    // Check if variant is selected and has stock
+    if (displayProduct?.variants && displayProduct.variants.length > 0) {
+      if (!selectedVariant) {
             toast({
-              title: "Out of Stock",
-              description: `The selected option "${attrType}: ${attrValue}" is currently unavailable.`,
+          title: "Please Select a Variant",
+          description: "Please select a variant before adding to cart.",
               variant: "destructive",
             })
             return false
-          }
-        }
       }
-    }
-    
-    // Check if product has variants/attributes
-    const hasVariants = displayProduct?.variants && displayProduct.variants.length > 0
-    const hasAttributes = displayProduct?.variantConfig && Object.keys(displayProduct.variantConfig).length > 0
-    
-    
-    if (hasVariants || hasAttributes) {
-      // Product has variants/attributes - auto-select first options if none selected
-      const currentSelectedCount = Object.entries(selectedAttributes).filter(([key, value]) => 
-        value !== undefined && value !== null && value !== ''
-      ).length
       
-      
-      if (currentSelectedCount === 0) {
-        // If no attribute types available, treat as simple product
-        if (attributeTypes.length === 0) {
-          const fallbackPrice = getCurrentUnitPrice
-          
-          addItem(product.id, quantity, undefined, {}, fallbackPrice)
-          
-          return true
-        }
-        
-        // No attributes selected - auto-select first option for each attribute
-        const newSelectedAttributes: { [key: string]: string | string[] } = {}
-        
-        // Get all attribute types
-        // Auto-select first option for each attribute type
-        attributeTypes.forEach((attrType: string) => {
-          const values = getAttributeValues(attrType)
-          if (values.length > 0) {
-            newSelectedAttributes[attrType] = values[0] // Select first option
-          }
-        })
-        
-        // Update selected attributes
-        setSelectedAttributes(newSelectedAttributes)
-        
-        // Use the new attributes for adding to cart
-        const combinations = generateAttributeCombinations(newSelectedAttributes)
-        
-        if (combinations.length > 0) {
-          // Add the first combination to cart
-          const firstCombination = combinations[0]
-          const combinationKey = Object.entries(firstCombination).map(([key, value]) => `${key}:${value}`).join('-')
-          const unitPrice = calculatePriceForCombination(firstCombination)
-          const variantId = `combination-0-${combinationKey}`
-          
-          addItem(
-            product.id,
-            quantity,
-            variantId,
-            firstCombination,
-            unitPrice,
-            undefined, // sku
-            undefined  // image
-          )
-        }
-        return true
-      }
-    }
-    
-    // Check if selection is complete (for products with variants that have some selections)
-    if (!isSelectionComplete()) {
+      const stockQty = selectedVariant.stock_quantity || selectedVariant.stockQuantity || 0
+      if (stockQty < quantity) {
       toast({
-        title: "Selection Incomplete",
-        description: "Please select all required options before adding to cart.",
+          title: "Insufficient Stock",
+          description: `Only ${stockQty} units available for this variant.`,
         variant: "destructive",
       })
       return false
     }
-
-    // Check if we have individual quantities set (like in the dialog)
-    if (Object.keys(individualQuantities).length > 0) {
-      // Generate combinations just like the dialog does
-      const combinations = generateAttributeCombinations(selectedAttributes)
-      
-      let totalItemsAdded = 0
-      let totalPrice = 0
-      
-      // Add each combination as a separate cart item
-      combinations.forEach((combination, index) => {
-        const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-        const qty = getIndividualQuantity(combinationKey)
-        const unitPrice = calculatePriceForCombination(combination)
-        
-        if (qty > 0) {
-          // Create a unique variant ID for this combination
-          const variantId = `combination-${index}-${combinationKey}`
-          
-          // Convert attributes to object array format for cart storage
-          const cartAttributes: { [key: string]: any } = {}
-          Object.entries(combination).forEach(([key, value]) => {
-            // Check if this attribute has multiple values in the database
-            const hasMultipleValues = displayProduct.variants?.some((variant: any) => 
-              variant.attributes?.[key] && Array.isArray(variant.attributes[key]) && variant.attributes[key].length > 1
-            )
-            
-            if (hasMultipleValues && typeof value === 'string' && value.includes(',')) {
-              // Convert comma-separated string to object array
-              cartAttributes[key] = value.split(',').map(v => ({ value: v.trim() }))
-            } else {
-              // Keep as is for single values
-              cartAttributes[key] = value
-            }
-          })
-          
-          addItem(
-            product.id,
-            qty,
-            variantId,
-            cartAttributes,
-            unitPrice,
-            undefined, // sku
-            undefined  // image
-          )
-          
-          totalItemsAdded += qty
-          totalPrice += unitPrice * qty
-        }
-      })
-      
-      // Toast notification handled by cart hook
-      
-    } else {
-      // Check if this is a simple product with no variants/attributes
-      if (!hasVariants && !hasAttributes) {
-        // Simple product: add as single item with quantity
-        const fallbackPrice = getCurrentUnitPrice
-        
-        // Add to cart immediately (optimistic update)
-        addItem(product.id, quantity, undefined, {}, fallbackPrice)
-        
-        // Toast notification handled by cart hook
-        return true
-      }
-      
-      // Simple case: single item with base quantity
-      // If we have selected attributes, use them even if selectedVariant is null
-      if (Object.keys(selectedAttributes).length > 0) {
-        
-        const variantAttributes: { [key: string]: string | string[] } = {}
-        
-        // Add selected attributes
-        Object.entries(selectedAttributes).forEach(([key, value]) => {
-          if (value) {
-            variantAttributes[key] = value
-          }
-        })
-        
-        // Add variant-specific attributes if we have a selected variant
-        if (selectedVariant?.attributes) {
-          Object.entries(selectedVariant.attributes).forEach(([key, value]) => {
-            if (value && !variantAttributes[key]) {
-              variantAttributes[key] = String(value)
-            }
-          })
-        }
-        
-        const currentPrice = getCurrentUnitPrice
-        const combinationKey = Object.entries(variantAttributes).map(([key, value]) => `${key}:${value}`).join('-')
-        const variantId = selectedVariant?.id || `combination-0-${combinationKey}`
-        
-        
-        // Add to cart immediately (optimistic update)
+    }
+    
+    // Add to cart - simplified variant system
+    const currentPrice = getCurrentPrice()
+    const variantId = selectedVariant?.id?.toString()
+    
         addItem(
           product.id, 
           quantity, 
           variantId,
-          variantAttributes,
+      {}, // No complex attributes
           currentPrice,
           selectedVariant?.sku,
           selectedVariant?.image
         )
-        
-        
-        // Toast notification handled by cart hook
-      } else {
-        
-        const fallbackPrice = getCurrentUnitPrice
-        
-        // Fallback: add product without variant
-        // Add to cart immediately (optimistic update)
-        addItem(product.id, quantity, undefined, {}, fallbackPrice)
-        
-        // Toast notification handled by cart hook
-      }
-    }
     
     return true
   }
@@ -2520,7 +1660,6 @@ function ProductDetailPageContent() {
         })
       }
     } catch (error) {
-      console.error('Error setting price alert:', error)
       toast({
         title: "Error",
         description: "Failed to set price alert. Please try again.",
@@ -3877,539 +3016,42 @@ function ProductDetailPageContent() {
 
             
 
-            {/* Dynamic Variant Selection UI */}
-            {(() => {
-              
-              // Extract attribute types from variants - handle different data structures
-              const attributeTypes = displayProduct.variants?.reduce((types: string[], variant: any) => {
-                
-                // Check different possible attribute structures
-                if (variant.attributes && typeof variant.attributes === 'object') {
-                  Object.keys(variant.attributes).forEach(key => {
-                    // Exclude _quantity fields, _quantities, and any technical fields from being shown as separate attributes
-                    if (!key.endsWith('_quantity') && 
-                        key !== '_quantities' && 
-                        key !== 'quantities' &&
-                        !key.startsWith('_') &&
-                        !types.includes(key)) {
-                      types.push(key)
-                    }
-                  })
-                }
-                
-                // Also check if attributes are in a different format
-                if (variant.primary_attribute && !types.includes(variant.primary_attribute)) {
-                  types.push(variant.primary_attribute)
-                }
-                
-                // Extract ALL attributes from primary_values (for suppliers with multiple primary attributes)
-                if (variant.primary_values && Array.isArray(variant.primary_values)) {
-                  variant.primary_values.forEach((pv: any) => {
-                    const attr = pv.attribute || pv.attributeName
-                    if (attr && typeof attr === 'string' && !types.includes(attr)) {
-                      types.push(attr)
-                    }
-                  })
-                }
-                
-                // Also check primaryValues (camelCase format)
-                if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
-                  variant.primaryValues.forEach((pv: any) => {
-                    const attr = pv.attribute || pv.attributeName
-                    if (attr && typeof attr === 'string' && !types.includes(attr)) {
-                      types.push(attr)
-                    }
-                  })
-                }
-                
-                return types
-              }, []) || []
-
-              // If no attributes found in variants, try to get them from variantConfig
-              if (attributeTypes.length === 0 && displayProduct.variantConfig) {
-                if (displayProduct.variantConfig.attributeOrder) {
-                  attributeTypes.push(...displayProduct.variantConfig.attributeOrder)
-                }
-                if (displayProduct.variantConfig.primaryAttribute && !attributeTypes.includes(displayProduct.variantConfig.primaryAttribute)) {
-                  attributeTypes.push(displayProduct.variantConfig.primaryAttribute)
-                }
-              }
-
-              // Helper function to get unique values for an attribute type
-              const getAttributeValues = (type: string) => {
-                const values = new Set<string>()
-                
-                // Try to get values from variants
-                displayProduct.variants?.forEach((variant: any) => {
-                  if (variant.attributes && variant.attributes[type]) {
-                    values.add(variant.attributes[type])
-                  }
-                  // Also check primary_values - filter by attribute type
-                  if (variant.primary_values && Array.isArray(variant.primary_values)) {
-                    variant.primary_values.forEach((val: any) => {
-                      // Check if this primary_value belongs to the current attribute type
-                      const valAttribute = val.attribute || val.attributeName
-                      if (valAttribute === type) {
-                        if (typeof val === 'string') {
-                          values.add(val)
-                        } else if (val && val.value) {
-                          values.add(val.value)
-                        }
-                      }
-                    })
-                  }
-                  // Also check primaryValues (camelCase format)
-                  if (variant.primaryValues && Array.isArray(variant.primaryValues)) {
-                    variant.primaryValues.forEach((val: any) => {
-                      // Check if this primaryValue belongs to the current attribute type
-                      const valAttribute = val.attribute || val.attributeName
-                      if (valAttribute === type) {
-                        if (typeof val === 'string') {
-                          values.add(val)
-                        } else if (val && val.value) {
-                          values.add(val.value)
-                        }
-                      }
-                    })
-                  }
-                })
-                
-                // If no values found, try to get from variantConfig
-                if (values.size === 0 && displayProduct.variantConfig) {
-                  // Add some default values based on the attribute type
-                  if (type.toLowerCase().includes('color')) {
-                    values.add('Red')
-                    values.add('Blue')
-                    values.add('Green')
-                  } else if (type.toLowerCase().includes('size')) {
-                    values.add('Small')
-                    values.add('Medium')
-                    values.add('Large')
-                  } else {
-                    values.add('Option 1')
-                    values.add('Option 2')
-                    values.add('Option 3')
-                  }
-                }
-                
-                return Array.from(values)
-              }
-
-              // Helper function to handle attribute selection
-              const handleAttributeSelect = (type: string, value: string) => {
-                  setSelectedAttributes(prev => {
-                    const newState = {
-                  ...prev,
-                  [type]: value
-                    }
-                    return newState
-                  })
-              }
-
-              const hasVariants = displayProduct.variants && displayProduct.variants.length > 0
-              const hasAttributeTypes = attributeTypes.length > 0
-              
-              
-              return hasVariants && hasAttributeTypes
-            })() ? (
-              <div className="mt-4 space-y-2">
-                <div className="border-t border-neutral-200 pt-2">
-                  <h3 className={cn("text-lg font-semibold mb-0", "text-amber-700")}>
-                    {displayProduct.variantConfig?.type === 'multi-dependent' ? 'Configure Your Product' : 'Select Your Options'}
-                  </h3>
-                </div>
-                
-                {/* Simple Logic: All attributes are independent */}
-                {displayProduct.variantConfig?.type === 'simple' && (
-                  <div className="space-y-2">
-                    {attributeTypes.map((type) => (
-                      <div key={type} className="space-y-2">
-                        <Label className={cn("text-sm sm:text-base font-semibold capitalize flex items-center gap-2", themeClasses.mainText)}>
-                          <span>{type}</span>
-                            <span className={cn("text-xs italic text-gray-500", themeClasses.textNeutralSecondary)}>
-                              Select your {type.toLowerCase()}
-                            </span>
+            {/* Simple Variant Selection - List all variants */}
+            {displayProduct.variants && displayProduct.variants.length > 0 ? (
+              <div className="mt-4 space-y-4 sm:space-y-6">
+                <div className="border-t border-neutral-200 pt-4">
+                  <Label className={cn("text-lg font-semibold mb-3 block", themeClasses.mainText)}>
+                    Select product type
                         </Label>
-                        <div className="flex items-center gap-1 sm:gap-2 mt-2 flex-wrap">
-                          {getAttributeValues(type).map((value) => {
-                              const currentSelection = selectedAttributes[type]
-                              const isSelected = Array.isArray(currentSelection) 
-                                ? currentSelection.includes(value)
-                                : currentSelection === value
-                              const isAvailable = isAttributeValueAvailable(type, value)
-                              
-                              // Check if this is a primary attribute with price
-                              const isPrimary = displayProduct.variantConfig?.primaryAttribute === type ||
-                                displayProduct.variantConfig?.primaryAttributes?.includes(type)
-                              let actualPrice = null
-                              let hasPrice = false
-                              
-                              if (isPrimary) {
-                                const variantWithThisValue = displayProduct.variants?.find((v: any) => {
-                                  // Check primaryValues (camelCase)
-                                  if (v.primaryValues && Array.isArray(v.primaryValues)) {
-                                    return v.primaryValues.some((pv: any) => 
-                                      pv.value === value && (pv.attribute === type || pv.attributeName === type)
-                                    )
-                                  }
-                                  // Check primary_values (snake_case)
-                                  if (v.primary_values && Array.isArray(v.primary_values)) {
-                                    return v.primary_values.some((pv: any) => 
-                                      (typeof pv === 'object' && pv.value === value && (pv.attribute === type || pv.attributeName === type)) ||
-                                      (typeof pv === 'string' && pv === value)
-                                    )
-                                  }
-                                  return false
-                                })
-                                if (variantWithThisValue) {
-                                  // Find the matching primaryValue for this attribute type
-                                  const primaryValue = (variantWithThisValue.primaryValues || variantWithThisValue.primary_values || [])
-                                    .find((pv: any) => {
-                                      if (typeof pv === 'string') return pv === value
-                                      return pv.value === value && (pv.attribute === type || pv.attributeName === type)
-                                    }) as { attribute: string; value: string; price?: string } | undefined
-                                  if (primaryValue && primaryValue.price) {
-                                    actualPrice = parseFloat(primaryValue.price)
-                                    hasPrice = true
-                                  }
-                                }
-                              }
-                              
+                  <div className="flex flex-wrap gap-2 sm:gap-3">
+                    {displayProduct.variants.map((variant: any) => {
+                      const stockQty = variant.stock_quantity || variant.stockQuantity || 0
+                      const isInStock = stockQty > 0
+                      const isSelected = selectedVariant?.id === variant.id
                             return (
-                              <Button
-                                key={value}
-                                variant={isSelected ? "default" : "outline"}
-                                size="sm"
-                                onClick={() => isAvailable ? handleAttributeSelect(type, value) : undefined}
-                                disabled={!isAvailable}
+                        <button
+                          key={variant.id}
+                          type="button"
+                          onClick={() => handleVariantSelect(variant.id?.toString() || '')}
+                          disabled={!isInStock}
                                 className={cn(
-                                  "relative transition-all duration-200 text-xs px-2 py-1 h-7 border-orange-300 hover:border-orange-400",
+                            "px-4 py-2 rounded-md text-sm sm:text-base font-medium transition-all",
                                   isSelected 
-                                    ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700 shadow-md" 
-                                    : isAvailable
-                                      ? "hover:bg-blue-900 hover:text-white"
-                                      : "opacity-50 cursor-not-allowed"
-                                )}
-                              >
-                                <div className="flex items-center gap-1">
-                                  <span className="text-xs font-medium">{value}</span>
-                                  {isPrimary && hasPrice && actualPrice !== null && (
-                                    <span className={cn("text-xs font-bold", isSelected ? "text-blue-100" : "text-orange-600")}>
-                                      {formatPrice(actualPrice)}
-                                    </span>
-                                  )}
-                                  {!isAvailable && (
-                                    <span className="text-xs text-gray-400">(Unavailable)</span>
-                                  )}
-                                </div>
-                                {isSelected && (
-                                  <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white"></div>
-                                )}
-                              </Button>
+                              ? backgroundColor === "white"
+                                ? "bg-blue-600 text-white border-2 border-blue-700"
+                                : "bg-blue-700 text-white border-2 border-blue-500"
+                              : backgroundColor === "white"
+                                ? "bg-white text-gray-900 border-2 border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+                                : "bg-gray-800 text-gray-100 border-2 border-gray-600 hover:border-gray-500 hover:bg-gray-700",
+                            !isInStock && "opacity-50 cursor-not-allowed"
+                          )}
+                        >
+                          {variant.variant_name || `Variant ${variant.id}`}
+                        </button>
                             )
                           })}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Primary-Dependent Logic: One attribute controls pricing */}
-                {displayProduct.variantConfig?.type === 'primary-dependent' && (
-                  <div className="space-y-2">
-                    {attributeTypes.map((type) => {
-                      const isPrimary = type === displayProduct.variantConfig?.primaryAttribute ||
-                        displayProduct.variantConfig?.primaryAttributes?.includes(type)
-                      
-                      return (
-                        <div key={type} className="space-y-2">
-                          <Label className={cn("text-sm sm:text-base font-semibold capitalize flex items-center gap-2", themeClasses.mainText)}>
-                            <span>{type}</span>
-                            <span className={cn("text-xs italic text-gray-500", themeClasses.textNeutralSecondary)}>
-                              Select your {type.toLowerCase()}
-                              </span>
-                          </Label>
-                          <div className="flex items-center gap-1 sm:gap-2 mt-2 flex-wrap">
-                                                      {getAttributeValues(type).map((value) => {
-                            const isPrimary = type === displayProduct.variantConfig?.primaryAttribute ||
-                              displayProduct.variantConfig?.primaryAttributes?.includes(type)
-                            // SINGLE SELECTION ONLY: Check if this value is selected
-                            const isSelected = selectedAttributes[type] === value
-                            const isAvailable = isAttributeValueAvailable(type, value)
-                            
-                            // For primary attributes, find the actual price from primaryValues
-                            let actualPrice = null
-                            let hasPrice = false
-                              
-                              if (isPrimary) {
-                                const variantWithThisValue = displayProduct.variants?.find((v: any) => {
-                                  // Check primaryValues (camelCase)
-                                  if (v.primaryValues && Array.isArray(v.primaryValues)) {
-                                    return v.primaryValues.some((pv: any) => 
-                                      pv.value === value && (pv.attribute === type || pv.attributeName === type)
-                                    )
-                                  }
-                                  // Check primary_values (snake_case)
-                                  if (v.primary_values && Array.isArray(v.primary_values)) {
-                                    return v.primary_values.some((pv: any) => 
-                                      (typeof pv === 'object' && pv.value === value && (pv.attribute === type || pv.attributeName === type)) ||
-                                      (typeof pv === 'string' && pv === value)
-                                    )
-                                  }
-                                  return false
-                                })
-                                if (variantWithThisValue) {
-                                  // Find the matching primaryValue for this attribute type
-                                  const primaryValue = (variantWithThisValue.primaryValues || variantWithThisValue.primary_values || [])
-                                    .find((pv: any) => {
-                                      if (typeof pv === 'string') return pv === value
-                                      return pv.value === value && (pv.attribute === type || pv.attributeName === type)
-                                    }) as { attribute: string; value: string; price?: string } | undefined
-                                  if (primaryValue && primaryValue.price) {
-                                    actualPrice = parseFloat(primaryValue.price)
-                                    hasPrice = true
-                                  }
-                                }
-                              }
-                              
-                              return (
-                                <Button
-                                  key={value}
-                                  variant={isSelected ? "default" : "outline"}
-                                  size="sm"
-                                  onClick={() => isAvailable ? handleAttributeSelect(type, value) : undefined}
-                                  disabled={!isAvailable}
-                                  className={cn(
-                                    "relative transition-all duration-200 text-xs px-2 py-1 h-7 border-orange-300 hover:border-orange-400",
-                                    isSelected 
-                                      ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700 shadow-md" 
-                                      : isAvailable
-                                        ? "hover:bg-blue-900 hover:text-white"
-                                        : "opacity-50 cursor-not-allowed"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-xs font-medium">{value}</span>
-                                    {isPrimary && hasPrice && actualPrice !== null && (
-                                      <span className={cn("text-xs font-bold", isSelected ? "text-blue-100" : "text-orange-600")}>
-                                        {formatPrice(actualPrice)}
-                              </span>
-                                    )}
-                                    {!isAvailable && (
-                                      <span className="text-xs text-gray-400">(Unavailable)</span>
-                                    )}
-                                  </div>
-                                  {isSelected && (
-                                    <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white"></div>
-                            )}
-                        </Button>
-                              )
-                            })}
-                    </div>
-                  </div>
-                      )
-                    })}
-              </div>
-            )}
-
-                {/* Multi-Dependent Logic: Step-by-step selection */}
-                {displayProduct.variantConfig?.type === 'multi-dependent' && (
-                  <div className="space-y-2">
-                    {displayProduct.variantConfig.attributeOrder?.map((type: string, index: number) => {
-                      const isCurrentStep = index === variantSelectionStep
-                      const isCompleted = selectedAttributes[type]
-                      const isAvailable = isCurrentStep || isCompleted
-                      
-                      return (
-                        <div key={type} className={cn("space-y-2", !isAvailable && "opacity-50")}>
-                          <Label className={cn("text-sm sm:text-base font-semibold capitalize flex items-center gap-2", themeClasses.mainText)}>
-                            <span>{type}</span>
-                            <span className={cn("text-xs italic text-gray-500", themeClasses.textNeutralSecondary)}>
-                              Select your {type.toLowerCase()}
-                            </span>
-                            {isCurrentStep && <span className="text-xs text-blue-600 font-medium">(Select Next)</span>}
-                          </Label>
-                          <div className="flex items-center gap-1 sm:gap-2 mt-2 flex-wrap">
-                            {getAttributeValues(type).map((value) => {
-                              // SINGLE SELECTION ONLY: Check if this value is selected
-                              const isSelected = selectedAttributes[type] === value
-                              const isAvailable = isAttributeValueAvailable(type, value)
-                              const isPrimary = displayProduct.variantConfig?.primaryAttribute === type ||
-                                displayProduct.variantConfig?.primaryAttributes?.includes(type)
-                              
-                              // For primary attributes, find the price from primaryValues
-                              let actualPrice = null
-                              let hasPrice = false
-                              
-                              if (isPrimary) {
-                                const variantWithThisValue = displayProduct.variants?.find((v: any) => {
-                                  // Check primaryValues (camelCase)
-                                  if (v.primaryValues && Array.isArray(v.primaryValues)) {
-                                    return v.primaryValues.some((pv: any) => 
-                                      pv.value === value && (pv.attribute === type || pv.attributeName === type)
-                                    )
-                                  }
-                                  // Check primary_values (snake_case)
-                                  if (v.primary_values && Array.isArray(v.primary_values)) {
-                                    return v.primary_values.some((pv: any) => 
-                                      (typeof pv === 'object' && pv.value === value && (pv.attribute === type || pv.attributeName === type)) ||
-                                      (typeof pv === 'string' && pv === value)
-                                    )
-                                  }
-                                  return false
-                                })
-                                if (variantWithThisValue) {
-                                  // Find the matching primaryValue for this attribute type
-                                  const primaryValue = (variantWithThisValue.primaryValues || variantWithThisValue.primary_values || [])
-                                    .find((pv: any) => {
-                                      if (typeof pv === 'string') return pv === value
-                                      return pv.value === value && (pv.attribute === type || pv.attributeName === type)
-                                    }) as { attribute: string; value: string; price?: string } | undefined
-                                  if (primaryValue && primaryValue.price) {
-                                    actualPrice = parseFloat(primaryValue.price)
-                                    hasPrice = true
-                                  }
-                                }
-                              }
-                              
-                              return (
-                                <Button
-                                  key={value}
-                                  variant={isSelected ? "default" : "outline"}
-                                  size="sm"
-                                  onClick={() => isAvailable ? handleAttributeSelect(type, value) : undefined}
-                                  disabled={!isAvailable}
-                                  className={cn(
-                                    "relative transition-all duration-200 text-xs px-2 py-1 h-7 border-orange-300 hover:border-orange-400",
-                                    isSelected 
-                                      ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700 shadow-md" 
-                                      : isAvailable
-                                        ? "hover:bg-blue-900 hover:text-white"
-                                        : "opacity-50 cursor-not-allowed"
-                                  )}
-                                >
-                                  <span className="flex items-center gap-1">
-                                    {value}
-                                    {hasPrice && actualPrice !== null && (
-                                      <span className={cn("text-xs font-medium", isSelected ? "text-blue-100" : "text-orange-600")}>
-                                        {formatPrice(actualPrice)}
-                                      </span>
-                                    )}
-                                    {!isAvailable && (
-                                      <span className="text-xs text-gray-400">(Unavailable)</span>
-                                    )}
-                                  </span>
-                                  {isSelected && (
-                                    <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white"></div>
-                                  )}
-                                </Button>
-                              )
-                            })}
-                          </div>
-                          
-                          {!isAvailable && (
-                            <div className={cn("text-xs mt-1", themeClasses.textNeutralSecondary)}>
-                              Complete previous selections to see available options
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-
-              </div>
-            ) : displayProduct.variants && displayProduct.variants.length > 0 ? (
-              // Fallback: Show variants even if attribute extraction fails
-              <div className="mt-4 space-y-4 sm:space-y-6">
-                <div className="border-t border-neutral-200 pt-4">
-                  <h3 className={cn("text-lg font-semibold mb-3", themeClasses.mainText)}>
-                    Available Variants ({displayProduct.variants.length})
-                  </h3>
-                  <p className={cn("text-sm text-gray-600", themeClasses.textNeutralSecondary)}>
-                    Select a variant to add to cart
-                  </p>
-                </div>
-                
-                <div className="grid gap-3">
-                  {displayProduct.variants.map((variant: any, index: number) => (
-                    <div key={variant.id || index} className={cn(
-                      "p-3 rounded-lg border cursor-pointer hover:border-blue-500 transition-colors",
-                      themeClasses.cardBg,
-                      themeClasses.cardBorder,
-                      selectedVariant?.id === variant.id ? 
-                        (backgroundColor === "white" ? "border-blue-500 bg-blue-50" : "border-blue-500 bg-blue-900/20") : ""
-                    )}
-                    onClick={() => setSelectedVariant(variant)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {variant.image && (
-                            <Image
-                              src={variant.image}
-                              alt={`Variant ${index + 1}`}
-                              width={40}
-                              height={40}
-                              className="rounded-md object-cover"
-                            />
-                          )}
-                          <div>
-                            <p className={cn("font-medium", themeClasses.mainText)}>
-                              Variant {index + 1}
-                            </p>
-                            {variant.sku && (
-                              <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                                SKU: {variant.sku}
-                              </p>
-                            )}
-                            {variant.attributes && Object.keys(variant.attributes).length > 0 && (
-                              <div className="text-xs text-gray-500 mt-1">
-                                {Object.entries(variant.attributes || {}).filter(([key]) => !/^\d+$/.test(key) && key !== '_quantities').map(([key, value]) => {
-                                  // Handle object arrays properly
-                                  let displayValue = value
-                                  if (Array.isArray(value)) {
-                                    displayValue = value.map(item => 
-                                      typeof item === 'object' && item.value ? item.value : item
-                                    ).join(', ')
-                                  } else if (typeof value === 'object' && value && 'value' in value) {
-                                    displayValue = (value as any).value
-                                  }
-                                  return (
-                                  <span key={key} className="mr-2">
-                                      {key}: {String(displayValue)}
-                                  </span>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className={cn("font-semibold text-lg", themeClasses.mainText)}>
-                            {formatPrice(variant.price)}
-                          </p>
-                          {selectedVariant?.id === variant.id && (
-                            <div className="text-xs text-blue-600 mt-1">✓ Selected</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                
-                {selectedVariant && (
-                  <div className={cn(
-                    "mt-4 p-4 rounded-lg border",
-                    backgroundColor === "white" ? "bg-blue-50 border-blue-200" : "bg-blue-900/20 border-blue-700"
-                  )}>
-                    <p className={cn("font-medium mb-2", themeClasses.mainText)}>
-                      Selected: Variant with SKU {selectedVariant.sku}
-                    </p>
-                    <p className={cn("text-lg font-bold", themeClasses.mainText)}>
-                      Price: {formatPrice(selectedVariant.price)}
-                    </p>
-                  </div>
-                )}
               </div>
             ) : displayProduct.variants && displayProduct.variants.length === 0 ? (
               <div className="mt-4 space-y-4 sm:space-y-6">
@@ -4528,29 +3170,6 @@ function ProductDetailPageContent() {
                 </span>
               </Button>
               
-              {/* Preview Button - Only show when attributes are selected */}
-              {Object.keys(selectedAttributes).length > 0 && (
-                <Button
-                  onClick={() => setIsSelectionPreviewOpen(true)}
-                  className={cn(
-                    "flex items-center gap-1 group border border-transparent hover:border-white/20 hover:bg-transparent text-xs px-2 py-1 h-7",
-                    backgroundColor === "dark" 
-                      ? "text-blue-400 hover:text-blue-300" 
-                      : "text-blue-600 hover:bg-blue-50"
-                  )}
-                >
-                  <Eye className={cn(
-                    "w-3 h-3 group-hover:text-blue-300 transition-colors",
-                    backgroundColor === "dark" && "group-hover:text-blue-300"
-                  )} /> 
-                  <span className={cn(
-                    "group-hover:text-blue-300 transition-colors text-xs",
-                    backgroundColor === "dark" && "group-hover:text-blue-300"
-                  )}>
-                    Preview
-                  </span>
-                </Button>
-              )}
             </div>
 
           </div>
@@ -4576,12 +3195,11 @@ function ProductDetailPageContent() {
                 onClick={() => {
                   // Check if this is a China import item first (skip modal if from China page)
                   if (!fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china)) {
-                    const currentPrice = getCurrentUnitPrice
+                    const currentPrice = getCurrentPrice()
                     setPendingCartAction({
                       type: 'buy',
                       quantity,
                       variantId: selectedVariant?.id?.toString(),
-                      combination: selectedAttributes,
                       price: currentPrice
                     })
                     setShowChinaImportModal(true)
@@ -5044,7 +3662,7 @@ function ProductDetailPageContent() {
                                 }
                               }
                             } catch (error) {
-                              console.error('Error toggling helpful:', error)
+                              // Error toggling helpful
                             }
                           }}
                         >
@@ -5433,402 +4051,6 @@ function ProductDetailPageContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Selection Preview Dialog */}
-      <Dialog open={isSelectionPreviewOpen} onOpenChange={setIsSelectionPreviewOpen}>
-        <DialogContent className={cn("sm:max-w-[600px]", backgroundColor === "white" ? "bg-white border-gray-200" : "bg-gray-900 border-gray-700", themeClasses.mainText)}>
-          <DialogHeader>
-            <DialogTitle className={themeClasses.mainText}>Selection Details</DialogTitle>
-            <DialogDescription className={themeClasses.textNeutralSecondary}>
-              Review your selected options and pricing breakdown.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-6">
-            {/* Product Info */}
-            <div className={cn(
-              "flex items-center gap-4 p-4 border rounded-lg",
-              backgroundColor === "white" ? "bg-gray-50 border-gray-200" : "bg-gray-800 border-gray-600"
-            )}>
-              <div className="w-16 h-16 relative">
-                <Image
-                  src={product?.image || '/placeholder-image.jpg'}
-                  alt={product?.name || 'Product image'}
-                  fill
-                  className="object-cover rounded-md"
-                />
-              </div>
-              <div>
-                <h3 className={cn("font-semibold", themeClasses.mainText)}>{product?.name}</h3>
-                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>SKU: {currentSKU}</p>
-              </div>
-            </div>
-
-            {/* Selection Breakdown - Detailed Preview */}
-              <div className="space-y-2">
-              <h4 className={cn("font-semibold text-sm", themeClasses.mainText)}>Selection Breakdown:</h4>
-              <div className={cn(
-                "p-3 border rounded-lg",
-                backgroundColor === "white" ? "bg-gray-50 border-gray-200" : "bg-gray-800 border-gray-600"
-              )}>
-                <div className="space-y-2">
-                  <div className={cn(
-                    "text-xs italic",
-                    backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                  )}>
-                    Items to be added to cart:
-                      </div>
-                  
-                          {(() => {
-                    // Get all selected attributes
-                    const selectedEntries = Object.entries(selectedAttributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
-                    
-                    if (selectedEntries.length === 0) {
-                  return (
-                        <div className={cn(
-                          "text-sm",
-                          backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                        )}>
-                          Please select your options
-                        </div>
-                      )
-                    }
-                    
-                    // Handle all selections - both single and multiple
-                    const allItems: Array<{attribute: string, value: string, unitPrice: number}> = []
-                    
-                    selectedEntries.forEach(([attribute, value]) => {
-                      // Handle both single values and arrays of values
-                      const values = Array.isArray(value) ? value : [value]
-                      
-                      values.forEach(val => {
-                        const unitPrice = (() => {
-                          // Check if this is a primary attribute with price
-                          if (displayProduct.variantConfig?.primaryAttribute === attribute) {
-                            const variantWithPrimaryValue = displayProduct.variants?.find((variant: any) => 
-                              variant.primaryValues?.some((pv: any) => pv.value === val)
-                            )
-                            if (variantWithPrimaryValue) {
-                              const primaryValueObj = variantWithPrimaryValue.primaryValues?.find((pv: any) => pv.value === val) as { attribute: string; value: string; price?: string } | undefined
-                              return primaryValueObj?.price ? parseFloat(primaryValueObj.price) : displayProduct.price
-                            }
-                          }
-                          return displayProduct.price
-                        })()
-                        
-                        allItems.push({
-                          attribute,
-                          value: val || '',
-                          unitPrice
-                        })
-                      })
-                    })
-                    
-                    if (allItems.length === 0) {
-                      return (
-                        <div className={cn(
-                          "text-sm",
-                          backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                        )}>
-                          Please select your options
-                        </div>
-                      )
-                    }
-                    
-                    return allItems.map((item, index) => {
-                      const combinationKey = `${item.attribute}:${item.value}`
-                      const currentQty = getIndividualQuantity(combinationKey)
-                      return (
-                      <div key={`${item.attribute}-${item.value}-${index}`} className={cn(
-                        "flex items-center justify-between p-2 rounded border",
-                        backgroundColor === "white" ? "bg-gray-50 border-gray-200" : "bg-gray-700 border-gray-500"
-                      )}>
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "text-xs font-medium",
-                            backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                          )}>{index + 1}.</span>
-                          <div className="flex items-center gap-1">
-                            <span className={cn(
-                              "text-xs font-semibold capitalize",
-                              backgroundColor === "white" ? "text-blue-800" : "text-blue-300"
-                            )}>
-                              {item.attribute}: {item.value}
-                            </span>
-                            <span className={cn(
-                              "text-xs",
-                              backgroundColor === "white" ? "text-gray-500" : "text-gray-400"
-                            )}>
-                              {formatPrice(item.unitPrice)}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center border rounded">
-                            <Button variant="ghost" size="icon" className="h-6 w-6"
-                              onClick={() => setIndividualQuantities(prev => {
-                                const next = { ...prev }
-                                next[combinationKey] = Math.max(1, (prev[combinationKey] || 1) - 1)
-                                return next
-                              })}>-</Button>
-                            <input
-                              className={cn("w-10 text-center text-xs bg-transparent", backgroundColor === "white" ? "text-gray-800" : "text-gray-100")}
-                              type="number"
-                              min={1}
-                              value={currentQty}
-                              onChange={(e) => {
-                                const val = Math.max(1, parseInt(e.target.value) || 1)
-                                setIndividualQuantities(prev => ({ ...prev, [combinationKey]: val }))
-                              }}
-                            />
-                            <Button variant="ghost" size="icon" className="h-6 w-6"
-                              onClick={() => setIndividualQuantities(prev => ({
-                                ...prev,
-                                [combinationKey]: (prev[combinationKey] || 1) + 1
-                              }))}>+</Button>
-                          </div>
-                          <span className={cn(
-                            "text-xs font-semibold",
-                            backgroundColor === "white" ? "text-green-600" : "text-green-400"
-                          )}>
-                            {formatPrice(item.unitPrice * currentQty)}
-                          </span>
-                        </div>
-                      </div>)
-                    })
-                    
-                    // For products with multiple attributes, show combinations
-                    const combinations = generateAttributeCombinations(selectedAttributes)
-                    
-                    return combinations.map((combination, index) => {
-                      const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-                      const currentQty = getIndividualQuantity(combinationKey)
-                      const unitPrice = calculatePriceForCombination(combination)
-                  
-                  return (
-                        <div key={`${combinationKey}-${index}`} className={cn(
-                          "flex items-center justify-between p-2 rounded border",
-                          backgroundColor === "white" ? "bg-gray-50 border-gray-200" : "bg-gray-700 border-gray-500"
-                        )}>
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              "text-xs font-medium",
-                              backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                            )}>
-                              {index + 1}.
-                        </span>
-                            <div className="flex items-center gap-1">
-                              <span className={cn(
-                                "text-xs font-semibold",
-                                backgroundColor === "white" ? "text-blue-800" : "text-blue-300"
-                              )}>
-                                {Object.entries(combination).map(([key, value]) => {
-                                  const displayValue = (() => {
-                                    if (typeof value === 'object' && value !== null && 'value' in value) {
-                                      return String((value as { value: any }).value)
-                                    }
-                                    return String(value)
-                                  })()
-                                  return `${key}: ${displayValue}`
-                                }).join(', ')}
-                              </span>
-                              <span className={cn(
-                                "text-xs",
-                                backgroundColor === "white" ? "text-gray-500" : "text-gray-400"
-                              )}>
-                                {formatPrice(unitPrice)}
-                              </span>
-                      </div>
-                      </div>
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              "text-xs",
-                              backgroundColor === "white" ? "text-gray-600" : "text-gray-300"
-                            )}>Qty:</span>
-                            <div className={cn(
-                              "flex items-center border rounded",
-                              backgroundColor === "white" ? "border-gray-300" : "border-gray-500"
-                            )}>
-                              <button 
-                                className={cn(
-                                  "px-1.5 py-0.5 text-xs",
-                                  backgroundColor === "white" ? "hover:bg-gray-100 text-gray-700" : "hover:bg-gray-600 text-gray-300"
-                                )}
-                                onClick={() => handleIndividualQuantityChange(combinationKey, -1)}
-                              >
-                                -
-                              </button>
-                              <span className={cn(
-                                "px-1.5 py-0.5 text-xs min-w-[1.5rem] text-center",
-                                backgroundColor === "white" ? "text-gray-700" : "text-gray-300"
-                              )}>
-                                {currentQty}
-                              </span>
-                              <button 
-                                className={cn(
-                                  "px-1.5 py-0.5 text-xs",
-                                  backgroundColor === "white" ? "hover:bg-gray-100 text-gray-700" : "hover:bg-gray-600 text-gray-300"
-                                )}
-                                onClick={() => handleIndividualQuantityChange(combinationKey, 1)}
-                              >
-                                +
-                              </button>
-                        </div>
-                            <span className={cn(
-                              "text-xs font-semibold",
-                              backgroundColor === "white" ? "text-green-600" : "text-green-400"
-                            )}>
-                              {formatPrice(unitPrice * currentQty)}
-                            </span>
-                      </div>
-            </div>
-                  )
-                    })
-                })()}
-                  
-                  <div className={cn(
-                    "pt-3 border-t",
-                    backgroundColor === "white" ? "border-gray-200" : "border-gray-500"
-                  )}>
-                    <div className="flex justify-between items-center">
-                      <span className={cn(
-                        "text-sm font-semibold",
-                        backgroundColor === "white" ? "text-gray-800" : "text-gray-200"
-                      )}>
-                        Total Items: {(() => {
-                          const selectedEntries = Object.entries(selectedAttributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
-                          
-                          if (selectedEntries.length === 0) return 0
-                          
-                          // Calculate total combinations
-                          let totalCombinations = 1
-                          selectedEntries.forEach(([key, value]) => {
-                            if (Array.isArray(value)) {
-                              totalCombinations *= value.length
-                            } else {
-                              totalCombinations *= 1
-                            }
-                          })
-                          
-                          // If individual quantities are set, use them
-                          if (Object.keys(individualQuantities).length > 0) {
-                            const combinations = generateAttributeCombinations(selectedAttributes)
-                            return combinations.reduce((total, combination) => {
-                              const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-                              return total + getIndividualQuantity(combinationKey)
-                            }, 0)
-                          }
-                          
-                          // For multiple combinations, show quantity per item (not multiplied by combinations)
-                          return quantity
-                        })()}
-                      </span>
-                      <span className={cn(
-                        "text-lg font-bold",
-                        backgroundColor === "white" ? "text-green-600" : "text-green-400"
-                      )}>
-                        Total Price: {(() => {
-                          const selectedEntries = Object.entries(selectedAttributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
-                          
-                          if (selectedEntries.length === 0) return formatPrice(0)
-                          
-                          // Calculate total combinations
-                          let totalCombinations = 1
-                          selectedEntries.forEach(([key, value]) => {
-                            if (Array.isArray(value)) {
-                              totalCombinations *= value.length
-                            } else {
-                              totalCombinations *= 1
-                            }
-                          })
-                          
-                          // If individual quantities are set, use them
-                          if (Object.keys(individualQuantities).length > 0) {
-                            const combinations = generateAttributeCombinations(selectedAttributes)
-                            const total = combinations.reduce((total, combination) => {
-                              const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-                              const qty = getIndividualQuantity(combinationKey)
-                              const unitPrice = calculatePriceForCombination(combination)
-                              return total + (unitPrice * qty)
-                            }, 0)
-                            return formatPrice(total)
-                          }
-                          
-                          // For multiple combinations, calculate price per item
-                          const unitPrice = getCurrentUnitPrice
-                          return formatPrice(unitPrice * quantity)
-                        })()}
-                      </span>
-                      </div>
-                      </div>
-              </div>
-            </div>
-              </div>
-
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsSelectionPreviewOpen(false)}
-              className="mr-2"
-            >
-              Close
-            </Button>
-            <Button
-              onClick={() => {
-                try {
-                  const pid = product?.id || productIdNumber
-                  if (!pid) {
-                setIsSelectionPreviewOpen(false)
-                    return
-                  }
-
-                  const selectedEntries = Object.entries(selectedAttributes).filter(([key, value]) => value !== undefined && value !== null && value !== '')
-
-                  if (displayProduct?.variantConfig?.type === 'simple' && selectedEntries.length === 1) {
-                    // Single selection
-                    const [attribute, value] = selectedEntries[0]
-                    const unitPrice = getCurrentUnitPrice
-                    
-                    // Convert attributes to object array format for cart storage
-                    const cartAttributes: { [key: string]: any } = {}
-                    const hasMultipleValues = displayProduct.variants?.some((variant: any) => 
-                      variant.attributes?.[attribute] && Array.isArray(variant.attributes[attribute]) && variant.attributes[attribute].length > 1
-                    )
-                    
-                    if (hasMultipleValues && typeof value === 'string' && value.includes(',')) {
-                      // Convert comma-separated string to object array
-                      cartAttributes[attribute] = value.split(',').map(v => ({ value: v.trim() }))
-                    } else {
-                      // Keep as is for single values
-                      cartAttributes[attribute] = value
-                    }
-                    
-                    addItem(pid, quantity, undefined, cartAttributes, unitPrice, currentSKU, (mainImage as any) || product?.image)
-                  } else {
-                    // Multiple combinations
-                    const combinations = generateAttributeCombinations(selectedAttributes)
-                    combinations.forEach((combination) => {
-                      const key = Object.entries(combination).map(([k, v]) => `${k}:${v}`).join('-')
-                      const qty = getIndividualQuantity(key) || quantity
-                      const unitPrice = calculatePriceForCombination(combination)
-                      addItem(pid, qty, undefined, combination as any, unitPrice, currentSKU, (mainImage as any) || product?.image)
-                    })
-                  }
-                } finally {
-                  setIsSelectionPreviewOpen(false)
-                }
-              }}
-              className={cn(
-                "hover:bg-green-700 text-white",
-                backgroundColor === "white" ? "bg-green-600" : "bg-green-700"
-              )}
-            >
-              Add to Cart
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       
       {/* Search Modal */}
@@ -5930,15 +4152,6 @@ function ProductDetailPageContent() {
                       return
                     }
 
-                    // Debug log to see exactly what is being sent
-                    // eslint-disable-next-line no-console
-                    console.log('[submit review] sending', {
-                      productId: product?.id,
-                      rating: reviewFormData.rating,
-                      comment: reviewFormData.comment,
-                      imagesCount: reviewFormData.images?.length || 0,
-                    })
-
                     const response = await fetch('/api/contact/send', {
                       method: 'POST',
                       headers: {
@@ -5981,7 +4194,6 @@ function ProductDetailPageContent() {
                       alert(message)
                     }
                   } catch (error) {
-                    console.error('Error submitting review:', error)
                     alert('Failed to submit review. Please try again.')
                   } finally {
                     setSubmittingReview(false)

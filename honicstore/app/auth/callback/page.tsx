@@ -284,22 +284,60 @@ function AuthCallbackContent() {
 
               setMessage('Successfully signed in!')
             
-              // Google OAuth always redirects to home page (no supplier redirects)
-              // Remove any supplier-related flags
+              // Check if user is supplier and redirect accordingly
               if (typeof window !== 'undefined') {
                 sessionStorage.removeItem('oauth_redirect')
+                const isSupplierRegistration = sessionStorage.getItem('supplier_registration') === 'true'
                 sessionStorage.removeItem('supplier_registration')
+                
+                // Fetch profile to check if user is supplier
+                try {
+                  const { data: profile } = await supabaseClient
+                    .from('profiles')
+                    .select('is_supplier')
+                    .eq('id', data.user.id)
+                    .single()
+                  
+                  const isSupplier = profile?.is_supplier || isSupplierRegistration || false
+                  
+                  // Refresh auth context to update user state (don't wait for it)
+                  refreshUser().then(() => {
+                    console.log('✅ Auth context refreshed')
+                    
+                    // Redirect based on user type after auth context is refreshed
+                    setTimeout(() => {
+                      if (isSupplier) {
+                        router.push('/supplier/dashboard')
+                      } else {
+                        router.push('/products')
+                      }
+                    }, 500) // Small delay to ensure context is updated
+                  }).catch((refreshError) => {
+                    console.error('⚠️ Error refreshing auth context:', refreshError)
+                    // Still redirect based on user type
+                    if (isSupplier) {
+                      router.push('/supplier/dashboard')
+                    } else {
+                      router.push('/products')
+                    }
+                  })
+                } catch (profileError) {
+                  console.error('Error checking supplier status:', profileError)
+                  // Refresh auth context anyway
+                  refreshUser().catch((refreshError) => {
+                    console.error('⚠️ Error refreshing auth context:', refreshError)
+                  })
+                }
+              } else {
+                // Refresh auth context to update user state (don't wait for it)
+                refreshUser().then(() => {
+                  console.log('✅ Auth context refreshed')
+                }).catch((refreshError) => {
+                  console.error('⚠️ Error refreshing auth context:', refreshError)
+                })
               }
               
-              // Refresh auth context to update user state (don't wait for it)
-              refreshUser().then(() => {
-                console.log('✅ Auth context refreshed')
-              }).catch((refreshError) => {
-                console.error('⚠️ Error refreshing auth context:', refreshError)
-                // Continue anyway - session is valid
-              })
-              
-              // Don't auto-redirect - let user click "Go to Dashboard" button
+              // Don't auto-redirect - let user click "Go to Dashboard" button or wait for redirect
             } else {
               // Email verification successful - show success message instead of auto-redirecting
               setStatus('success')
@@ -394,14 +432,38 @@ function AuthCallbackContent() {
           try {
             const { data: { session } } = await supabaseClient.auth.getSession()
             if (session?.user) {
-              console.log('✅ User already authenticated, redirecting to home page...')
-              // Google OAuth always redirects to home page
-              if (typeof window !== 'undefined') {
-                sessionStorage.removeItem('oauth_redirect')
-                sessionStorage.removeItem('supplier_registration')
+              console.log('✅ User already authenticated, checking role for redirect...')
+              
+              // Check if user is supplier by fetching profile
+              try {
+                const { data: profile } = await supabaseClient
+                  .from('profiles')
+                  .select('is_supplier')
+                  .eq('id', session.user.id)
+                  .single()
+                
+                const isSupplier = profile?.is_supplier || false
+                
+                if (typeof window !== 'undefined') {
+                  sessionStorage.removeItem('oauth_redirect')
+                  sessionStorage.removeItem('supplier_registration')
+                }
+                
+                // Redirect suppliers to dashboard, others to products page
+                if (isSupplier) {
+                  console.log('✅ Supplier detected, redirecting to dashboard...')
+                  router.push('/supplier/dashboard')
+                } else {
+                  console.log('✅ Regular user, redirecting to products page...')
+                  router.push('/products')
+                }
+                return
+              } catch (profileError) {
+                console.error('Error fetching profile:', profileError)
+                // Fallback to home if profile check fails
+                router.push('/')
+                return
               }
-              router.push('/')
-              return
             }
           } catch (checkError) {
             console.error('Error checking session:', checkError)

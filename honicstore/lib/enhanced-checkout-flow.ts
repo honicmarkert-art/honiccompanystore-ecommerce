@@ -133,9 +133,15 @@ const handlePlaceOrder = async () => {
       if (resp.ok) {
         const clickpesaResult = await resp.json()
         if (clickpesaResult.success && clickpesaResult.checkoutUrl) {
-          // Redirect to ClickPesa
-          window.location.href = clickpesaResult.checkoutUrl
-          clickpesaRedirectSuccess = true
+          // Open ClickPesa in new tab
+          const popupWindow = window.open(clickpesaResult.checkoutUrl, '_blank', 'noopener,noreferrer')
+          if (popupWindow && !popupWindow.closed) {
+            clickpesaRedirectSuccess = true
+          } else {
+            // Fallback if popup blocked
+            window.location.href = clickpesaResult.checkoutUrl
+            clickpesaRedirectSuccess = true
+          }
         }
       }
     } catch (clickpesaError) {

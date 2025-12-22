@@ -20,7 +20,7 @@ function LoginPageContent() {
   const { signIn, isLoggingIn } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirectTo = searchParams.get('redirect') || '/'
+  const redirectTo = searchParams.get('redirect') || '/products'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -35,9 +35,8 @@ function LoginPageContent() {
       // Show redirecting state
       setIsRedirecting(true)
       logger.log('Login successful! AuthContext will handle redirect')
-    } else {
-      console.error('Login failed:', result.error)
     }
+    // Error handling is done by AuthContext - no need to log here
   }
 
   // Show redirecting state

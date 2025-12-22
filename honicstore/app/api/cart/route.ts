@@ -4,65 +4,293 @@ import { logger } from '@/lib/logger'
 
 // GET /api/cart - Return full cart with product details
 export async function GET(request: NextRequest) {
-  const { user, error: authError, response, supabase } = await validateAuth(request)
-  
-  if (authError || !user) {
-    logger.error('Cart API: Authentication error:', authError)
-    return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
-  }
+  try {
+    logger.log('🛒 [CART GET] ========== API ROUTE CALLED ==========')
+    const { user, error: authError, response, supabase } = await validateAuth(request)
+    
+    if (authError || !user) {
+      logger.error('Cart API: Authentication error:', authError)
+      return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
+    }
+    
+    logger.log('🛒 [CART GET] User authenticated:', { userId: user.id })
 
-  // Fetch cart items with product details
-  const { data, error: cartErr } = await supabase
-    .from('cart_items')
-    .select(`
-      id, 
-      product_id, 
-      variant_id, 
-      quantity, 
-      price,
-      currency,
-      applied_discount,
-      created_at,
-      updated_at,
-      products (
+    // Fetch cart items with product details, variant information, and supplier info
+    // Note: We can't directly join product_variants from cart_items, so we'll fetch it separately
+    let { data, error: cartErr } = await supabase
+      .from('cart_items')
+      .select(`
         id, 
-        name, 
-        image, 
+        product_id, 
+        variant_id, 
+        quantity, 
         price,
-        original_price,
-        in_stock,
-        stock_quantity
-      )
-    `)
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
+        currency,
+        applied_discount,
+        created_at,
+        updated_at,
+        products (
+          id, 
+          name, 
+          image, 
+          price,
+          original_price,
+          in_stock,
+          stock_quantity,
+          supplier_id,
+          user_id
+        )
+      `)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
 
-  if (cartErr) {
-    logger.error('Failed to fetch cart:', cartErr)
-    return NextResponse.json({ error: 'Failed to fetch cart' }, { status: 500 })
-  }
+    // Check for cart query error immediately
+    if (cartErr) {
+      logger.error('🛒 [CART GET] Failed to fetch cart:', cartErr)
+      // Sanitize error message to prevent JSON parsing issues
+      const errorMessage = cartErr?.message ? String(cartErr.message).substring(0, 200) : 'Database query failed'
+      return NextResponse.json({ 
+        error: 'Failed to fetch cart',
+        details: errorMessage
+      }, { status: 500 })
+    }
 
-  // Transform and group data for frontend consumption
-  const rawCartItems = (data || []).map((item: any) => ({
-    id: item.id,
-    productId: item.product_id,
-    variantId: item.variant_id,
-    quantity: item.quantity,
-    price: item.price,
-    currency: item.currency,
-    appliedDiscount: item.applied_discount,
-    createdAt: item.created_at,
-    updatedAt: item.updated_at,
-    product: item.products
-  }))
+    logger.log('🛒 [CART GET] Initial cart query result:', {
+      itemsCount: (data || []).length,
+      firstItem: data?.[0] ? {
+        id: data[0].id,
+        product_id: data[0].product_id,
+        variant_id: data[0].variant_id,
+        variant_idType: typeof data[0].variant_id,
+        products: data[0].products ? {
+          id: data[0].products.id,
+          name: data[0].products.name,
+          supplier_id: data[0].products.supplier_id,
+          user_id: data[0].products.user_id,
+          hasSupplierId: !!data[0].products.supplier_id,
+          hasUserId: !!data[0].products.user_id
+        } : null
+      } : null
+    })
 
-  // Group cart items by product ID
-  const groupedCartItems: { [key: number]: any } = {}
-  
-  rawCartItems.forEach((item: any) => {
+    // Validate all product IDs exist in database
+    const productIds = [...new Set((data || []).map((item: any) => item.product_id).filter((id: any) => id && !isNaN(Number(id))))]
+    if (productIds.length > 0) {
+      const { data: validProducts, error: productErr } = await supabase
+        .from('products')
+        .select('id')
+        .in('id', productIds)
+      
+      if (productErr) {
+        logger.error('Error validating products:', productErr)
+      } else {
+        const validProductIds = new Set((validProducts || []).map((p: any) => p.id))
+        const invalidProductIds = productIds.filter(id => !validProductIds.has(id))
+        if (invalidProductIds.length > 0) {
+          logger.error('Invalid product IDs found in cart:', invalidProductIds)
+          // Filter out invalid products
+          data = (data || []).filter((item: any) => validProductIds.has(item.product_id))
+        }
+      }
+    }
+
+    // Fetch variant names for numeric variant IDs
+    const allVariantIds = (data || []).map((item: any) => item.variant_id)
+    const variantIds = allVariantIds
+      .filter((id: any) => id !== null && id !== undefined && id !== 'default' && !String(id).startsWith('combination-') && !isNaN(Number(id)))
+      .map((id: any) => Number(id))
+
+    logger.log('🛒 [CART GET] Step 1: Extracted variant IDs from cart items', {
+      totalCartItems: (data || []).length,
+      allVariantIds: allVariantIds,
+      allVariantIdsTypes: allVariantIds.map((id: any) => ({ id, type: typeof id, asNumber: Number(id), isValid: !isNaN(Number(id)) })),
+      numericVariantIds: variantIds,
+      uniqueVariantIds: [...new Set(variantIds)]
+    })
+
+    let variantMap: { [key: number]: { variant_name: string | null } } = {}
+    if (variantIds.length > 0) {
+      logger.log('🛒 [CART GET] Step 2: Fetching variant names from database', {
+        variantIdsToFetch: variantIds
+      })
+      
+      logger.log('🛒 [CART GET] Step 2: About to query database', {
+        table: 'product_variants',
+        columns: ['id', 'variant_name'],
+        variantIdsToQuery: variantIds,
+        variantIdsType: variantIds.map(id => ({ id, type: typeof id }))
+      })
+      
+      const { data: variants, error: variantError } = await supabase
+        .from('product_variants')
+        .select('id, variant_name, product_id')
+        .in('id', variantIds)
+      
+      logger.log('🛒 [CART GET] Step 2 Result: Variants fetched from database', {
+        found: variants?.length || 0,
+        requestedCount: variantIds.length,
+        variants: variants?.map((v: any) => ({
+          id: v.id,
+          idType: typeof v.id,
+          variant_name: v.variant_name,
+          variant_nameType: typeof v.variant_name,
+          isNull: v.variant_name === null,
+          isEmpty: v.variant_name === '',
+          rawVariant: v
+        })) || [],
+        error: variantError?.message,
+        errorDetails: variantError
+      })
+      
+      if (variants) {
+        variants.forEach((v: any) => {
+          variantMap[v.id] = { variant_name: v.variant_name }
+        })
+      }
+      
+      logger.log('🛒 [CART GET] Step 2b: Variant map created', {
+        variantMapSize: Object.keys(variantMap).length,
+        variantMap: Object.entries(variantMap).map(([id, data]) => ({
+          id: Number(id),
+          variant_name: data.variant_name
+        }))
+      })
+    } else {
+      logger.log('🛒 [CART GET] Step 2: Skipped (no numeric variant IDs found)')
+    }
+    
+    // Fetch supplier information for products
+    const allSupplierIds = (data || []).map((item: any) => ({
+      productId: item.product_id,
+      supplier_id: item.products?.supplier_id,
+      user_id: item.products?.user_id,
+      extracted: item.products?.supplier_id || item.products?.user_id
+    }))
+    
+    logger.log('🛒 [CART GET] Step 2a: Extracting supplier IDs from products', {
+      allSupplierIds: allSupplierIds,
+      sampleProduct: data?.[0]?.products ? {
+        id: data[0].products.id,
+        name: data[0].products.name,
+        supplier_id: data[0].products.supplier_id,
+        user_id: data[0].products.user_id,
+        supplier_idType: typeof data[0].products.supplier_id,
+        user_idType: typeof data[0].products.user_id
+      } : null
+    })
+    
+    const supplierIds = [...new Set(allSupplierIds.map(item => item.extracted).filter(Boolean))]
+    let supplierMap: { [key: string]: { company_name?: string, is_verified?: boolean, location?: string, region?: string, nation?: string } } = {}
+    
+    logger.log('🛒 [CART GET] Step 2a: Fetching supplier info', {
+      supplierIdsCount: supplierIds.length,
+      supplierIds: supplierIds,
+      supplierIdsTypes: supplierIds.map(id => ({ id, type: typeof id }))
+    })
+    
+    if (supplierIds.length > 0) {
+      const { data: suppliers, error: supplierErr } = await supabase
+        .from('profiles')
+        .select('id, company_name, is_verified, location, region, nation, company_logo') // Fetch company_name, verification status, location, and logo
+        .in('id', supplierIds)
+      
+      if (supplierErr) {
+        logger.error('🛒 [CART GET] Error fetching suppliers:', supplierErr)
+      }
+      
+      if (suppliers) {
+        suppliers.forEach((s: any) => {
+          // Use string key to ensure consistent lookup
+          const supplierKey = String(s.id)
+          supplierMap[supplierKey] = {
+            company_name: s.company_name,
+            is_verified: s.is_verified || false,
+            location: s.location || null,
+            region: s.region || null,
+            nation: s.nation || null,
+            company_logo: s.company_logo || null
+          }
+        })
+        
+        logger.log('🛒 [CART GET] Step 2a Result: Supplier map created', {
+          suppliersFound: suppliers.length,
+          supplierMap: Object.keys(supplierMap).map(key => ({
+            id: key,
+            company_name: supplierMap[key].company_name
+          }))
+        })
+      } else {
+        logger.log('🛒 [CART GET] Step 2a Result: No suppliers found')
+      }
+    } else {
+      logger.log('🛒 [CART GET] Step 2a: Skipped (no supplier IDs found)')
+    }
+
+    // Transform and group data for frontend consumption
+    // SECURITY: Remove supplier_id and user_id (UUIDs) from product object before sending to client
+    // But keep them temporarily for server-side supplier lookup
+    const rawCartItems = (data || []).map((item: any) => {
+    const productData = item.products || {}
+    // Store supplierId temporarily for server-side lookup (will be removed before sending to client)
+    const supplierId = productData.supplier_id || productData.user_id
+    // Remove sensitive UUID fields from product before sending to client
+    const { supplier_id, user_id, ...productWithoutIds } = productData
+    
+    // Normalize variant_id: null -> 'default' for consistency
+    const normalizedVariantId = (item.variant_id === null || item.variant_id === undefined || String(item.variant_id).trim() === '')
+      ? 'default'
+      : String(item.variant_id)
+    
+    // Normalize currency: default to TZS if invalid
+    const normalizedCurrency = (item.currency === 'TZS' || item.currency === 'USD') 
+      ? item.currency 
+      : 'TZS' // Default to TZS
+    
+    return {
+      id: item.id,
+      productId: item.product_id,
+      variantId: normalizedVariantId,
+      quantity: item.quantity,
+      price: item.price,
+      currency: normalizedCurrency,
+      appliedDiscount: item.applied_discount,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+      product: productWithoutIds, // Product without supplier_id/user_id UUIDs
+      _supplierId: supplierId // Temporary server-side only field (will be removed)
+    }
+    })
+
+    // Group cart items by product ID
+    const groupedCartItems: { [key: number]: any } = {}
+    
+    // Use for...of loop instead of forEach to support async/await
+    for (const item of rawCartItems) {
     const productId = item.productId
     
     if (!groupedCartItems[productId]) {
+      // SECURITY: Get supplierId from temporary field (server-side only)
+      // We need supplierId server-side to lookup supplier info, but don't expose it to client
+      const supplierId = (item as any)._supplierId
+      // Use string key for consistent lookup
+      const supplierKey = supplierId ? String(supplierId) : null
+      const supplierInfo = supplierKey ? supplierMap[supplierKey] : null
+      
+      logger.log('🛒 [CART GET] Step 3: Setting supplier info for product', {
+        productId,
+        supplierId,
+        supplierIdType: typeof supplierId,
+        supplierKey,
+        supplierKeyInMap: supplierKey ? supplierKey in supplierMap : false,
+        supplierMapKeys: Object.keys(supplierMap),
+        supplierInfoFound: !!supplierInfo,
+        company_name: supplierInfo?.company_name || null,
+        is_verified: supplierInfo?.is_verified || false,
+        location: supplierInfo?.location || null,
+        region: supplierInfo?.region || null,
+        supplierMapSize: Object.keys(supplierMap).length
+      })
+      
       groupedCartItems[productId] = {
         id: item.id, // Use first item's ID as the group ID
         productId: productId,
@@ -73,74 +301,198 @@ export async function GET(request: NextRequest) {
         appliedDiscount: item.appliedDiscount,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
-        product: item.product
+        product: item.product,
+        // SECURITY: supplierId stored server-side only, will be removed before sending to client
+        _supplierId: supplierId,
+        supplierCompanyName: supplierInfo?.company_name || null,
+        supplierIsVerified: supplierInfo?.is_verified || false,
+        supplierLocation: supplierInfo?.location || null,
+        supplierRegion: supplierInfo?.region || null,
+        supplierNation: supplierInfo?.nation || null,
+        supplierCompanyLogo: supplierInfo?.company_logo || null
       }
     }
     
-    // Extract attributes from variant ID if it's a combination ID
-    let attributes = {}
-    if (item.variantId && item.variantId.startsWith('combination-')) {
-      // Parse combination ID like "combination-brand:Honic Uno-model:Arduino R3"
-      const attributeString = item.variantId.replace('combination-', '')
+    // Get variant name from database if variant_id is numeric
+    let variantName: string | null = null
+    logger.log('🛒 [CART GET] Step 3: Processing cart item', {
+      productId: item.productId,
+      variantId: item.variantId,
+      variantIdType: typeof item.variantId,
+      isDefault: item.variantId === 'default',
+      isCombination: item.variantId?.toString().startsWith('combination-'),
+      isNumeric: item.variantId && !isNaN(Number(item.variantId))
+    })
+    
+    if (item.variantId && item.variantId !== 'default' && !item.variantId.toString().startsWith('combination-')) {
+      const variantIdNum = Number(item.variantId)
+      logger.log('🛒 [CART GET] Step 3a: Looking up variant name', {
+        variantIdNum,
+        isInMap: !isNaN(variantIdNum) && variantMap[variantIdNum] !== undefined,
+        variantMapEntry: variantMap[variantIdNum]
+      })
       
-      // Split by pattern that looks for "-attributeName:" to handle spaces in values
-      const attributeMatches = attributeString.match(/([^:]+):([^-]+?)(?=-[^:]+:|$)/g)
-      
-      if (attributeMatches) {
-        attributeMatches.forEach((match: string) => {
-          // Remove leading dash if present
-          const cleanMatch = match.startsWith('-') ? match.substring(1) : match
-          const colonIndex = cleanMatch.indexOf(':')
-          if (colonIndex > 0) {
-            const key = cleanMatch.substring(0, colonIndex).trim()
-            const value = cleanMatch.substring(colonIndex + 1).trim()
-            if (key && value) {
-              (attributes as any)[key] = value
-            }
-          }
+      if (!isNaN(variantIdNum) && variantMap[variantIdNum]) {
+        variantName = variantMap[variantIdNum].variant_name
+        logger.log('🛒 [CART GET] Step 3a Result: Found variant name in map', {
+          variantId: variantIdNum,
+          variant_name: variantName,
+          variant_nameType: typeof variantName,
+          isNull: variantName === null,
+          isEmpty: variantName === ''
         })
+      } else {
+        logger.log('🛒 [CART GET] Step 3a Result: Variant name NOT found in map, trying direct fetch', {
+          variantId: variantIdNum,
+          variantMapKeys: Object.keys(variantMap).map(Number),
+          variantMapSize: Object.keys(variantMap).length,
+          reason: !isNaN(variantIdNum) ? 'Not in variantMap' : 'Not a number'
+        })
+        
+        // Fallback: Try to fetch directly from database if not in map
+        try {
+          const { data: directVariant, error: directError } = await supabase
+            .from('product_variants')
+            .select('id, variant_name')
+            .eq('id', variantIdNum)
+            .maybeSingle()
+          
+          logger.log('🛒 [CART GET] Step 3a Fallback: Direct fetch result', {
+            variantId: variantIdNum,
+            found: !!directVariant,
+            variant_name: directVariant?.variant_name || null,
+            error: directError?.message
+          })
+          
+          if (directVariant) {
+            variantName = directVariant.variant_name
+            // Also add to map for future lookups
+            variantMap[variantIdNum] = { variant_name: directVariant.variant_name }
+          }
+        } catch (fallbackError) {
+          logger.error('🛒 [CART GET] Step 3a Fallback: Error fetching variant:', fallbackError)
+        }
       }
+    } else {
+      logger.log('🛒 [CART GET] Step 3a: Skipped (default or combination variant)')
     }
     
     // Add variant to the group
-    groupedCartItems[productId].variants.push({
+    const variantToAdd = {
       variantId: item.variantId || 'default',
-      attributes: attributes,
+      variant_name: variantName,
       quantity: item.quantity,
       price: item.price,
       sku: undefined,
       image: undefined
+    }
+    
+    logger.log('🛒 [CART GET] Step 3b: Adding variant to group', {
+      productId,
+      variant: variantToAdd
     })
     
+    groupedCartItems[productId].variants.push(variantToAdd)
+    
     // Update totals
-    groupedCartItems[productId].totalQuantity += item.quantity
-    groupedCartItems[productId].totalPrice += item.price * item.quantity
-  })
-  
-  // Convert grouped items back to array
-  const cartItems = Object.values(groupedCartItems)
-
-  // Calculate totals manually
-  const totals = {
-    total_items: cartItems.reduce((sum, item) => sum + item.totalQuantity, 0),
-    subtotal: cartItems.reduce((sum, item) => sum + item.totalPrice, 0),
-    total_discount: cartItems.reduce((sum, item) => sum + ((item.appliedDiscount || 0) * item.totalQuantity), 0),
-    final_total: cartItems.reduce((sum, item) => sum + (item.totalPrice - ((item.appliedDiscount || 0) * item.totalQuantity)), 0)
-  }
-
-  const finalResponse = NextResponse.json({ 
-    items: cartItems,
-    totals
-  }, { 
-    status: 200,
-    headers: {
-      'Cache-Control': 'private, no-cache, no-store, must-revalidate',
-      'X-Cart-Items': cartItems.length.toString()
+      groupedCartItems[productId].totalQuantity += item.quantity
+      groupedCartItems[productId].totalPrice += item.price * item.quantity
     }
-  })
+    
+    // Convert grouped items back to array
+    const cartItems = Object.values(groupedCartItems)
 
-  copyCookies(response, finalResponse)
-  return finalResponse
+    logger.log('🛒 [CART GET] Step 4: Final cart items before sending', {
+    totalItems: cartItems.length,
+    items: cartItems.map((item: any) => ({
+      productId: item.productId,
+      supplierCompanyName: item.supplierCompanyName,
+      variants: (item.variants || []).map((v: any) => ({
+        variantId: v.variantId,
+        variant_name: v.variant_name,
+        variant_nameType: typeof v.variant_name,
+        isNull: v.variant_name === null,
+        isEmpty: v.variant_name === '',
+        quantity: v.quantity,
+        price: v.price
+      }))
+    }))
+    })
+
+    // Calculate totals manually
+    const totals = {
+      total_items: cartItems.reduce((sum, item) => sum + item.totalQuantity, 0),
+      subtotal: cartItems.reduce((sum, item) => sum + item.totalPrice, 0),
+      total_discount: cartItems.reduce((sum, item) => sum + ((item.appliedDiscount || 0) * item.totalQuantity), 0),
+      final_total: cartItems.reduce((sum, item) => sum + (item.totalPrice - ((item.appliedDiscount || 0) * item.totalQuantity)), 0)
+    }
+
+    // Ensure variant_name and supplier info are always included in response (even if null)
+    // SECURITY: Do NOT expose supplierId (UUID) or _supplierId to client - only send display name and safe info
+    const finalCartItems = cartItems.map((item: any) => {
+    const { supplierId, _supplierId, ...itemWithoutSupplierIds } = item // Remove all supplier UUIDs before sending to client
+    return {
+      ...itemWithoutSupplierIds,
+      supplierCompanyName: item.supplierCompanyName || null,
+      supplierIsVerified: item.supplierIsVerified || false,
+      supplierLocation: item.supplierLocation || null,
+      supplierRegion: item.supplierRegion || null,
+      supplierNation: item.supplierNation || null,
+      supplierCompanyLogo: item.supplierCompanyLogo || null,
+      variants: (item.variants || []).map((v: any) => ({
+        ...v,
+        variant_name: v.variant_name !== undefined ? v.variant_name : null
+      }))
+    }
+    })
+    
+    logger.log('🛒 [CART GET] Step 5: Final response being sent', {
+      status: 200,
+      itemsCount: finalCartItems.length,
+      sampleItem: finalCartItems[0] ? {
+        productId: finalCartItems[0].productId,
+        // supplierId removed from response for security (not exposed to client)
+        supplierCompanyName: finalCartItems[0].supplierCompanyName,
+        variants: (finalCartItems[0].variants || []).map((v: any) => ({
+          variantId: v.variantId,
+          variant_name: v.variant_name,
+          hasVariantName: !!v.variant_name
+        }))
+      } : null
+    })
+    
+    const finalResponse = NextResponse.json({ 
+      items: finalCartItems,
+      totals
+    }, { 
+      status: 200,
+      headers: {
+        'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+        'X-Cart-Items': finalCartItems.length.toString()
+      }
+    })
+    
+    logger.log('🛒 [CART GET] Step 6: Response sent to client', {
+      status: 200,
+      itemsCount: finalCartItems.length
+    })
+
+    copyCookies(response, finalResponse)
+    return finalResponse
+  } catch (error: any) {
+    logger.error('🛒 [CART GET] Unexpected error:', {
+      error: error?.message || error,
+      stack: error?.stack,
+      name: error?.name
+    })
+    // Sanitize error message to prevent JSON parsing issues
+    const errorMessage = error?.message ? String(error.message).substring(0, 200) : 'An unexpected error occurred'
+    const errorResponse = NextResponse.json({ 
+      error: 'Failed to fetch cart',
+      message: errorMessage
+    }, { status: 500 })
+    return errorResponse
+  }
 }
 
 // POST /api/cart - Add product (or increment if exists)
@@ -154,7 +506,14 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   logger.log('Cart POST request body:', body)
   
-  const { productId, variantId: rawVariantId, quantity, price: variantPrice, variantAttributes } = body
+  const { productId, variantId: rawVariantId, quantity, price: variantPrice } = body
+  
+  // Validate productId exists and is valid
+  if (!productId || isNaN(Number(productId))) {
+    logger.log('Validation failed: Invalid productId', { productId })
+    return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 })
+  }
+  
   // Normalize variantId
   // IMPORTANT: For simple products (no attributes/variant), persist a stable key 'default'
   // so the unique (user_id, product_id, variant_id) constraint merges quantities instead of creating rows with NULLs
@@ -168,27 +527,102 @@ export async function POST(request: NextRequest) {
     normalizedVariantId: variantId, 
     quantity,
     variantPrice,
-    variantAttributes,
     variantIdType: typeof variantId
   })
   
   logger.log('🛒 DEBUG: variantPrice received:', variantPrice, 'type:', typeof variantPrice)
-  logger.log('🛒 DEBUG: variantAttributes received:', variantAttributes)
   
   if (!productId || !quantity || quantity <= 0) {
     logger.log('Validation failed:', { productId, variantId, quantity })
     return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
   }
 
-  // Fetch authoritative pricing + stock from database
+  // Fetch authoritative pricing + stock from database - VALIDATE product exists
+  // Also fetch supplier_id/user_id to get supplier info
   const { data: product, error: pErr } = await supabase
     .from('products')
-    .select('id, price, original_price, in_stock, stock_quantity, return_time_type, return_time_value')
-    .eq('id', productId)
+    .select('id, price, original_price, in_stock, stock_quantity, return_time_type, return_time_value, supplier_id, user_id')
+    .eq('id', Number(productId))
     .single()
 
   if (pErr || !product) {
+    logger.error('Product validation failed:', { productId, error: pErr })
     return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+  }
+
+  // Fetch supplier information for this product (company_name, verification status, location, logo)
+  const supplierId = (product as any).supplier_id || (product as any).user_id
+  let supplierCompanyName: string | null = null
+  let supplierIsVerified: boolean = false
+  let supplierLocation: string | null = null
+  let supplierRegion: string | null = null
+  let supplierNation: string | null = null
+  let supplierCompanyLogo: string | null = null
+  
+  if (supplierId) {
+    logger.log('🛒 [CART POST] ========== FETCHING SUPPLIER INFO ==========', {
+      productId,
+      supplierId,
+      supplierIdType: typeof supplierId,
+      hasSupplierId: !!(product as any).supplier_id,
+      hasUserId: !!(product as any).user_id
+    })
+    
+    const { data: supplier, error: supplierErr } = await supabase
+      .from('profiles')
+      .select('company_name, is_verified, location, region, nation, company_logo')
+      .eq('id', supplierId)
+      .maybeSingle()
+    
+    if (!supplierErr && supplier) {
+      supplierCompanyName = supplier.company_name || null
+      supplierIsVerified = supplier.is_verified || false
+      supplierLocation = supplier.location || null
+      supplierRegion = supplier.region || null
+      supplierNation = supplier.nation || null
+      supplierCompanyLogo = supplier.company_logo || null
+      logger.log('🛒 [CART POST] ✅ SUPPLIER INFO FETCHED SUCCESSFULLY', {
+        productId,
+        supplierId,
+        company_name: supplierCompanyName,
+        is_verified: supplierIsVerified,
+        location: supplierLocation,
+        region: supplierRegion,
+        nation: supplierNation,
+        company_logo: supplierCompanyLogo
+      })
+    } else {
+      logger.log('🛒 [CART POST] ❌ SUPPLIER NOT FOUND OR ERROR', {
+        productId,
+        supplierId,
+        error: supplierErr?.message,
+        errorCode: supplierErr?.code,
+        errorDetails: supplierErr?.details
+      })
+    }
+  } else {
+    logger.log('🛒 [CART POST] ⚠️ NO SUPPLIER ID FOUND FOR PRODUCT', {
+      productId,
+      supplier_id: (product as any).supplier_id,
+      user_id: (product as any).user_id,
+      hasSupplierId: !!(product as any).supplier_id,
+      hasUserId: !!(product as any).user_id
+    })
+  }
+  
+  // Validate variant ID exists in database if it's numeric
+  if (variantId && variantId !== 'default' && !isNaN(Number(variantId))) {
+    const { data: variantExists, error: variantErr } = await supabase
+      .from('product_variants')
+      .select('id, product_id')
+      .eq('id', Number(variantId))
+      .eq('product_id', Number(productId))
+      .maybeSingle()
+    
+    if (variantErr || !variantExists) {
+      logger.error('Variant validation failed:', { variantId, productId, error: variantErr })
+      return NextResponse.json({ error: 'Variant not found or does not belong to this product' }, { status: 404 })
+    }
   }
 
   // Server-side quantity validation based on product price
@@ -266,56 +700,120 @@ export async function POST(request: NextRequest) {
     // Adjust quantity to available stock
     const adjustedQuantity = availableStock
     
-    // Add the maximum available quantity to cart
-    const payload: any = {
-      user_id: user.id,
-      product_id: productId,
-      quantity: adjustedQuantity,
-      price: product.price,
-      currency: 'USD'
-    }
-    payload.variant_id = variantId
-
-    // Try RPC for atomic quantity add
-    let upsertErr = null as any
-    try {
-      const { error } = await supabase
-        .rpc('upsert_cart_item', {
-          p_user_id: user.id,
-          p_product_id: productId,
-          p_variant_id: variantId,
-          p_quantity: adjustedQuantity,
-          p_price: product.price,
-          p_currency: 'USD'
-        })
-      upsertErr = error
-    } catch (e) {
-      upsertErr = e
+    // Fetch variant data from database (variant_name and price) - NEVER trust client-provided data
+    let newVariantNamePartial: string | null = null
+    let variantPriceFromDBPartial: number | null = null
+    
+    if (variantId && variantId !== 'default' && !isNaN(Number(variantId))) {
+      const { data: newVariantPartial } = await supabase
+        .from('product_variants')
+        .select('id, variant_name, price')
+        .eq('id', Number(variantId))
+        .single()
+      
+      if (newVariantPartial) {
+        newVariantNamePartial = newVariantPartial.variant_name
+        variantPriceFromDBPartial = parseFloat(newVariantPartial.price) || null
+      }
     }
 
-    if (upsertErr) {
+    // Check ALL existing cart items for this product
+    const { data: existingItemsPartial, error: checkErrorPartial } = await supabase
+      .from('cart_items')
+      .select('id, quantity, variant_id')
+      .eq('user_id', user.id)
+      .eq('product_id', productId)
+
+    // ALWAYS use database price - NEVER trust client-provided price
+    const finalPricePartial = variantPriceFromDBPartial !== null ? variantPriceFromDBPartial : parseFloat(product.price) || 0
+
+    // Find matching item by comparing both variant_id AND variant_name
+    let matchingItemPartial: any = null
+    
+    if (existingItemsPartial && existingItemsPartial.length > 0) {
+      // Fetch variant names for all existing items
+      const existingVariantIdsPartial = existingItemsPartial
+        .map((item: any) => item.variant_id)
+        .filter((id: any) => id && id !== 'default' && !isNaN(Number(id)))
+        .map((id: any) => Number(id))
       
-      const finalPrice = variantPrice || product.price
-      logger.log('🛒 DEBUG: Using price for database:', finalPrice, 'variantPrice:', variantPrice, 'product.price:', product.price)
+      let existingVariantMapPartial: { [key: number]: string | null } = {}
+      if (existingVariantIdsPartial.length > 0) {
+        const { data: existingVariantsPartial } = await supabase
+          .from('product_variants')
+          .select('id, variant_name')
+          .in('id', existingVariantIdsPartial)
+        
+        if (existingVariantsPartial) {
+          existingVariantsPartial.forEach((v: any) => {
+            existingVariantMapPartial[v.id] = v.variant_name
+          })
+        }
+      }
       
-      const { error: upsertFallbackErr } = await supabase
+      // Compare each existing item with the new one
+      for (const existingItemPartial of existingItemsPartial) {
+        const existingVariantIdPartial = String(existingItemPartial.variant_id || 'default')
+        const newVariantIdPartial = String(variantId || 'default')
+        
+        // First check variant_id
+        if (existingVariantIdPartial === newVariantIdPartial) {
+          // If variant_id matches, also check variant_name
+          let existingVariantNamePartial: string | null = null
+          if (existingItemPartial.variant_id && !isNaN(Number(existingItemPartial.variant_id))) {
+            existingVariantNamePartial = existingVariantMapPartial[Number(existingItemPartial.variant_id)] || null
+          }
+          
+          // Compare variant names (both must match or both must be null/empty)
+          const namesMatchPartial = (existingVariantNamePartial === newVariantNamePartial) || 
+                                    (!existingVariantNamePartial && !newVariantNamePartial)
+          
+          if (namesMatchPartial) {
+            matchingItemPartial = existingItemPartial
+            break
+          }
+        }
+      }
+    }
+
+    // Only update if item exists with same variant_id AND variant_name
+    if (matchingItemPartial) {
+      // Item exists with same variant - update to maximum available
+      const { error: updateError } = await supabase
         .from('cart_items')
-        .upsert({
+        .update({ quantity: adjustedQuantity })
+        .eq('id', matchingItemPartial.id)
+      
+      if (updateError) {
+        return NextResponse.json({ error: 'Failed to update cart item' }, { status: 500 })
+      }
+    } else {
+      // Item doesn't exist - insert new item
+      const { error: insertError } = await supabase
+        .from('cart_items')
+        .insert({
           user_id: user.id,
           product_id: productId,
           variant_id: variantId,
           quantity: adjustedQuantity,
-          price: finalPrice,
-          currency: 'USD'
-        }, {
-          onConflict: 'user_id,product_id,variant_id'
+          price: finalPricePartial,
+          currency: 'TZS'
         })
-
-      if (upsertFallbackErr) {
+      
+      if (insertError) {
         return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
       }
     }
 
+    // SECURITY: Only send supplier display names, never UUIDs
+    logger.log('🛒 [CART POST] ========== SENDING RESPONSE (PARTIAL STOCK - ADJUSTED) ==========', {
+      productId,
+      supplierCompanyName,
+      supplierIsVerified,
+      supplierLocation,
+      supplierRegion
+    })
+    
     const partialStockResponse = {
       success: true,
       message: `Added ${adjustedQuantity} items to cart (maximum available).`,
@@ -333,86 +831,387 @@ export async function POST(request: NextRequest) {
             hours: 'Monday-Friday 8AM-6PM EAT'
           }
         }
-      }
+      },
+      supplierCompanyName: supplierCompanyName || null,
+      supplierIsVerified: supplierIsVerified || false,
+      supplierLocation: supplierLocation || null,
+      supplierRegion: supplierRegion || null,
+      supplierNation: supplierNation || null,
+      supplierCompanyLogo: supplierCompanyLogo || null
     }
     
     logger.log('Sending partial stock response:', partialStockResponse)
     return NextResponse.json(partialStockResponse, { status: 200 })
   }
 
-  // Use UPSERT for atomic increment with quantity addition
-  const payload: any = {
-    user_id: user.id,
-    product_id: productId,
-    quantity,
-    price: variantPrice || product.price, // Use variant price if provided, otherwise fallback to product price
-    currency: 'USD' // Default currency
-  }
-
-  // Handle variant_id properly (null-safe)
-  payload.variant_id = variantId
-
-  // Try RPC for atomic quantity add; if missing, fallback to safe upsert
-  let upsertErr = null as any
-  let upsertResult = null as any
-  try {
-    logger.log('🔄 Attempting RPC upsert with params:', {
-      p_user_id: user.id,
-      p_product_id: productId,
-      p_variant_id: variantId,
-      p_quantity: quantity,
-      p_price: variantPrice || product.price,
-      p_currency: 'USD'
+  // Fetch variant data from database (variant_name and price) - NEVER trust client-provided data
+  let newVariantName: string | null = null
+  let variantPriceFromDB: number | null = null
+  
+  console.log('🛒 [CART ADD] Step 1: Fetching variant data from database', {
+    variantId,
+    variantIdType: typeof variantId,
+    isNumeric: variantId && !isNaN(Number(variantId)),
+    isDefault: variantId === 'default'
+  })
+  
+  if (variantId && variantId !== 'default' && !isNaN(Number(variantId))) {
+    const { data: newVariant, error: variantError } = await supabase
+      .from('product_variants')
+      .select('id, variant_name, price')
+      .eq('id', Number(variantId))
+      .single()
+    
+    console.log('🛒 [CART ADD] Step 1 Result:', {
+      variantId: Number(variantId),
+      found: !!newVariant,
+      variant_name: newVariant?.variant_name || null,
+      variant_price: newVariant?.price || null,
+      error: variantError?.message
     })
     
-    const { data, error } = await supabase
-      .rpc('upsert_cart_item', {
-        p_user_id: user.id,
-        p_product_id: productId,
-        p_variant_id: variantId,
-        p_quantity: quantity,
-        p_price: variantPrice || product.price,
-        p_currency: 'USD'
-      })
-    upsertErr = error
-    upsertResult = data
+    if (newVariant) {
+      newVariantName = newVariant.variant_name
+      variantPriceFromDB = parseFloat(newVariant.price) || null
+    }
+  } else {
+    console.log('🛒 [CART ADD] Step 1: Skipped (variant is default or not numeric)')
+  }
+  
+  // ALWAYS use database price - NEVER trust client-provided price
+  // Use variant price if available, otherwise use product price
+  const finalPrice = variantPriceFromDB !== null ? variantPriceFromDB : parseFloat(product.price) || 0
+  
+  logger.log('🛒 [CART ADD] Price determination:', {
+    clientProvidedPrice: variantPrice,
+    variantPriceFromDB,
+    productPrice: product.price,
+    finalPriceUsed: finalPrice,
+    source: variantPriceFromDB !== null ? 'variant' : 'product'
+  })
+
+  // Check ALL existing cart items for this product (not just one)
+  console.log('🛒 [CART ADD] Step 2: Fetching all existing cart items for product', {
+    productId,
+    userId: user.id
+  })
+  
+  const { data: existingItems, error: checkError } = await supabase
+    .from('cart_items')
+    .select('id, quantity, variant_id')
+    .eq('user_id', user.id)
+    .eq('product_id', productId)
+
+  console.log('🛒 [CART ADD] Step 2 Result: Existing cart items found', {
+    productId,
+    newVariantId: variantId,
+    newVariantName,
+    existingItemsCount: existingItems?.length || 0,
+    existingItems: existingItems?.map((item: any) => ({
+      id: item.id,
+      variant_id: item.variant_id,
+      variant_idType: typeof item.variant_id,
+      quantity: item.quantity
+    })) || [],
+    checkError: checkError?.message
+  })
+
+  // Find matching item by comparing both variant_id AND variant_name
+  let matchingItem: any = null
+  
+  console.log('🛒 [CART ADD] Step 3: Comparing existing items with new variant', {
+    existingItemsCount: existingItems?.length || 0
+  })
+  
+  if (existingItems && existingItems.length > 0) {
+    // Fetch variant names for all existing items
+    const existingVariantIds = existingItems
+      .map((item: any) => item.variant_id)
+      .filter((id: any) => id && id !== 'default' && !isNaN(Number(id)))
+      .map((id: any) => Number(id))
     
-    if (error) {
+    console.log('🛒 [CART ADD] Step 3a: Extracting variant IDs from existing items', {
+      allVariantIds: existingItems.map((item: any) => item.variant_id),
+      numericVariantIds: existingVariantIds
+    })
+    
+    let existingVariantMap: { [key: number]: string | null } = {}
+    if (existingVariantIds.length > 0) {
+      console.log('🛒 [CART ADD] Step 3b: Fetching variant names from database', {
+        variantIdsToFetch: existingVariantIds
+      })
+      
+      const { data: existingVariants, error: variantsError } = await supabase
+        .from('product_variants')
+        .select('id, variant_name')
+        .in('id', existingVariantIds)
+      
+      console.log('🛒 [CART ADD] Step 3b Result: Variant names fetched', {
+        found: existingVariants?.length || 0,
+        variants: existingVariants?.map((v: any) => ({
+          id: v.id,
+          variant_name: v.variant_name
+        })) || [],
+        error: variantsError?.message
+      })
+      
+      if (existingVariants) {
+        existingVariants.forEach((v: any) => {
+          existingVariantMap[v.id] = v.variant_name
+        })
+      }
     } else {
-      logger.log('✅ RPC upsert successful:', data)
+      console.log('🛒 [CART ADD] Step 3b: Skipped (no numeric variant IDs found)')
     }
-  } catch (e) {
-    upsertErr = e
-  }
-
-  if (upsertErr) {
-
-    // ⚡ Use Supabase upsert instead of manual SELECT → INSERT
-    // This is atomic and safe under concurrency
-    const finalPrice2 = variantPrice || product.price
-    logger.log('🛒 DEBUG: Using price for database (fallback):', finalPrice2, 'variantPrice:', variantPrice, 'product.price:', product.price)
     
-    const { error: upsertFallbackErr } = await supabase
-      .from('cart_items')
-      .upsert({
-        user_id: user.id,
-        product_id: productId,
-        variant_id: variantId,
-        quantity,
-        price: finalPrice2,
-        currency: 'USD'
-      }, {
-        onConflict: 'user_id,product_id,variant_id'
+    // Compare each existing item with the new one
+    console.log('🛒 [CART ADD] Step 3c: Comparing each existing item', {
+      newVariantId: String(variantId || 'default'),
+      newVariantName
+    })
+    
+    for (let i = 0; i < existingItems.length; i++) {
+      const existingItem = existingItems[i]
+      const existingVariantId = String(existingItem.variant_id || 'default')
+      const newVariantId = String(variantId || 'default')
+      
+      console.log(`🛒 [CART ADD] Step 3c.${i + 1}: Comparing item ${existingItem.id}`, {
+        existingItemId: existingItem.id,
+        existingVariantId,
+        existingVariantIdType: typeof existingItem.variant_id,
+        newVariantId,
+        newVariantIdType: typeof variantId,
+        variantIdMatch: existingVariantId === newVariantId
       })
-
-    if (upsertFallbackErr) {
-      return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
+      
+      // First check variant_id
+      if (existingVariantId === newVariantId) {
+        console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ✅ Variant ID matches! Checking variant name...`)
+        
+        // If variant_id matches, also check variant_name
+        let existingVariantName: string | null = null
+        if (existingItem.variant_id && !isNaN(Number(existingItem.variant_id))) {
+          existingVariantName = existingVariantMap[Number(existingItem.variant_id)] || null
+        }
+        
+        console.log(`🛒 [CART ADD] Step 3c.${i + 1}: Variant name comparison`, {
+          existingVariantName,
+          newVariantName,
+          existingVariantNameType: typeof existingVariantName,
+          newVariantNameType: typeof newVariantName,
+          bothNull: !existingVariantName && !newVariantName,
+          bothMatch: existingVariantName === newVariantName,
+          namesMatch: (existingVariantName === newVariantName) || (!existingVariantName && !newVariantName)
+        })
+        
+        // Compare variant names (both must match or both must be null/empty)
+        const namesMatch = (existingVariantName === newVariantName) || 
+                          (!existingVariantName && !newVariantName)
+        
+        if (namesMatch) {
+          matchingItem = existingItem
+          console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ✅✅✅ FOUND MATCHING ITEM!`, {
+            itemId: existingItem.id,
+            currentQuantity: existingItem.quantity,
+            variantId: existingVariantId,
+            variantName: existingVariantName || newVariantName,
+            willIncrement: true
+          })
+          break
+        } else {
+          console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ⚠️ Variant ID matches but name differs`, {
+            existingVariantId,
+            existingVariantName,
+            newVariantName,
+            reason: existingVariantName !== newVariantName ? 'Names are different' : 'One is null and other is not'
+          })
+        }
+      } else {
+        console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ❌ Variant ID does NOT match - skipping this item`)
+      }
     }
+    
+    if (!matchingItem) {
+      console.log('🛒 [CART ADD] Step 3 Result: ❌ No matching item found - will add as new item')
+    }
+  } else {
+    console.log('🛒 [CART ADD] Step 3: No existing items found - will add as new item')
   }
 
+  // Only increment if we found a matching item (same variant_id AND variant_name)
+  console.log('🛒 [CART ADD] Step 4: Deciding action (increment vs insert)', {
+    hasMatchingItem: !!matchingItem,
+    matchingItemId: matchingItem?.id || null,
+    matchingItemQuantity: matchingItem?.quantity || null
+  })
+  
+  if (matchingItem) {
+      console.log('🛒 [CART ADD] Step 4: ✅ ACTION = INCREMENT existing item', {
+        itemId: matchingItem.id,
+        currentQuantity: matchingItem.quantity,
+        addingQuantity: quantity,
+        newQuantity: matchingItem.quantity + quantity
+      })
+      
+      // Item exists with same variant_id AND variant_name - increment quantity
+      const newQuantity = matchingItem.quantity + quantity
+      
+      // Check stock limits
+      if (availableStock !== Infinity && newQuantity > availableStock) {
+        const maxAddable = availableStock - matchingItem.quantity
+        if (maxAddable <= 0) {
+          return NextResponse.json({ 
+            error: 'Maximum stock limit reached for this variant',
+            availableStock,
+            currentQuantity: matchingItem.quantity
+          }, { status: 400 })
+        }
+        
+        // Update to maximum available
+        const { error: updateError } = await supabase
+          .from('cart_items')
+          .update({ quantity: availableStock })
+          .eq('id', matchingItem.id)
+        
+        if (updateError) {
+          return NextResponse.json({ error: 'Failed to update cart item' }, { status: 500 })
+        }
+        
+        // SECURITY: Only send supplier display names, never UUIDs
+        logger.log('🛒 [CART POST] ========== SENDING RESPONSE (PARTIAL STOCK) ==========', {
+          productId,
+          supplierCompanyName,
+          supplierIsVerified,
+          supplierLocation,
+          supplierRegion
+        })
+        
+        return NextResponse.json({ 
+          success: true, 
+          message: `Updated quantity to maximum available (${availableStock})`,
+          partialStock: {
+            requested: newQuantity,
+            available: availableStock,
+            added: maxAddable
+          },
+          supplierCompanyName: supplierCompanyName || null,
+          supplierIsVerified: supplierIsVerified || false,
+          supplierLocation: supplierLocation || null,
+          supplierRegion: supplierRegion || null,
+          supplierNation: supplierNation || null
+        }, { status: 200 })
+      }
+      
+      // Update quantity
+      const { error: updateError } = await supabase
+        .from('cart_items')
+        .update({ quantity: newQuantity })
+        .eq('id', matchingItem.id)
+      
+      if (updateError) {
+        return NextResponse.json({ error: 'Failed to update cart item' }, { status: 500 })
+      }
+      
+      console.log('🛒 [CART ADD] Step 4: ✅✅✅ SUCCESS - Incremented existing cart item quantity', { 
+        itemId: matchingItem.id, 
+        oldQuantity: matchingItem.quantity, 
+        newQuantity,
+        variantId: String(variantId || 'default'),
+        variantName: newVariantName
+      })
+      
+      logger.log('✅ Incremented existing cart item quantity:', { 
+        itemId: matchingItem.id, 
+        oldQuantity: matchingItem.quantity, 
+        newQuantity,
+        variantId: String(variantId || 'default'),
+        variantName: newVariantName
+      })
+      
+      // SECURITY: Only send supplier display names, never UUIDs
+      logger.log('🛒 [CART POST] ========== SENDING RESPONSE (INCREMENT) ==========', {
+        productId,
+        supplierCompanyName,
+        supplierIsVerified,
+        supplierLocation,
+        supplierRegion
+      })
+      
+      const finalResponse = NextResponse.json({ 
+        success: true, 
+        message: 'Item quantity updated in cart',
+        supplierCompanyName: supplierCompanyName || null,
+        supplierIsVerified: supplierIsVerified || false,
+        supplierLocation: supplierLocation || null,
+        supplierRegion: supplierRegion || null,
+        supplierNation: supplierNation || null
+      }, { status: 200 })
+      
+      copyCookies(response, finalResponse)
+      return finalResponse
+  }
+  
+  // Item doesn't exist or different variant - insert new item
+  console.log('🛒 [CART ADD] Step 4: ✅ ACTION = INSERT new item (no match found or different variant)', {
+    productId,
+    variantId,
+    variantName: newVariantName,
+    quantity,
+    price: finalPrice,
+    reason: matchingItem ? 'Variant name/ID mismatch' : 'No existing items for this product'
+  })
+  
+  const { error: insertError } = await supabase
+    .from('cart_items')
+    .insert({
+      user_id: user.id,
+      product_id: productId,
+      variant_id: variantId,
+      quantity,
+      price: finalPrice,
+      currency: 'USD'
+    })
+  
+  if (insertError) {
+    console.error('🛒 [CART ADD] Step 4: ❌❌❌ FAILED to insert cart item:', {
+      error: insertError.message,
+      code: insertError.code,
+      details: insertError.details,
+      hint: insertError.hint,
+      productId,
+      variantId
+    })
+    logger.error('Failed to insert cart item:', insertError)
+    return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
+  }
+  
+  console.log('🛒 [CART ADD] Step 4: ✅✅✅ SUCCESS - Added new cart item', { 
+    productId, 
+    variantId, 
+    variantName: newVariantName,
+    quantity,
+    price: finalPrice
+  })
+  
+  logger.log('✅ Added new cart item:', { productId, variantId, quantity })
+
+  // SECURITY: Only send supplier display names, never UUIDs
+  logger.log('🛒 [CART POST] ========== SENDING RESPONSE (NEW ITEM) ==========', {
+    productId,
+    supplierCompanyName,
+    supplierIsVerified,
+    supplierLocation,
+    supplierRegion
+  })
+  
   const finalResponse = NextResponse.json({ 
     success: true, 
-    message: 'Item added to cart successfully' 
+    message: 'Item added to cart successfully',
+    supplierCompanyName: supplierCompanyName || null,
+    supplierIsVerified: supplierIsVerified || false,
+    supplierLocation: supplierLocation || null,
+    supplierRegion: supplierRegion || null,
+    supplierNation: supplierNation || null
   }, { status: 200 })
 
   copyCookies(response, finalResponse)

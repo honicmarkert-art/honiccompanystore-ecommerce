@@ -22,10 +22,12 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
   
   const wishlistCount = wishlistItems.length
   const savedLaterCount = savedLaterItems.length
-  const ordersCount = orders.length
+  // Only count active orders (not received/completed)
+  const ordersCount = orders.filter(order => order.isReceived !== true).length
   const nav = [
     { href: '/account', label: 'Overview', icon: User },
     { href: '/account/orders', label: 'Orders', icon: ShoppingBag },
+    { href: '/account/orders/history', label: 'Order History', icon: Clock },
     { href: '/cart', label: 'Cart', icon: ShoppingCart },
     { href: '/account/messages', label: 'Messages', icon: MessageCircle },
     { href: '/account/payment', label: 'Payment', icon: CreditCard },
@@ -208,7 +210,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
             {/* Top navigation tabs (consistent across account pages) */}
             <div className="mb-4 sm:mb-6 border-b">
               <div className="flex flex-wrap gap-2">
-                {[ '/account', '/account/orders', '/account/messages', '/account/payment', '/account/wishlist', '/account/saved-later' ].map((href) => {
+                {[ '/account', '/account/orders', '/account/orders/history', '/account/messages', '/account/payment', '/account/wishlist', '/account/saved-later' ].map((href) => {
                   const cfg = nav.find(n => n.href === href)!
                   const active = pathname === href
                   return (

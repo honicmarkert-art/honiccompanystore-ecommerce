@@ -30,6 +30,7 @@ import Image from 'next/image'
 import { useLanguage } from '@/contexts/language-context'
 import { t } from '@/lib/translations'
 import { UserProfile } from '@/components/user-profile'
+import { validateEmailFormat } from '@/lib/email-validation'
 
 interface PlanFeature {
   name: string
@@ -85,15 +86,20 @@ export default function BecomeSupplierPage() {
   const [emailExists, setEmailExists] = useState(false)
   const [checkingEmail, setCheckingEmail] = useState(false)
   const [emailCheckTimeout, setEmailCheckTimeout] = useState<NodeJS.Timeout | null>(null)
+  const [emailError, setEmailError] = useState<string>("")
+  const [emailValidationTimeout, setEmailValidationTimeout] = useState<NodeJS.Timeout | null>(null)
 
-  // Cleanup timeout on unmount
+  // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
       if (emailCheckTimeout) {
         clearTimeout(emailCheckTimeout)
       }
+      if (emailValidationTimeout) {
+        clearTimeout(emailValidationTimeout)
+      }
     }
-  }, [emailCheckTimeout])
+  }, [emailCheckTimeout, emailValidationTimeout])
 
   const benefits = [
     { icon: TrendingUp, title: 'Grow Your Business', description: 'Reach thousands of customers looking for quality products' },
@@ -1146,18 +1152,58 @@ export default function BecomeSupplierPage() {
                   setRegistrationForm(prev => ({ ...prev, email }))
                   setEmailExists(false)
                   setRegistrationError('')
+                  setEmailError("")
                   
-                  // Clear previous timeout
+                  // Clear previous timeouts
                   if (emailCheckTimeout) {
                     clearTimeout(emailCheckTimeout)
                   }
+                  if (emailValidationTimeout) {
+                    clearTimeout(emailValidationTimeout)
+                  }
                   
-                  // Validate email format first
-                  if (!email || !/\S+@\S+\.\S+/.test(email)) {
+                  // Real-time email validation with DNS check (debounced)
+                  const validationTimeout = setTimeout(async () => {
+                    if (email.trim().length > 0) {
+                      // Step 1: Basic format validation
+                      const emailValidation = validateEmailFormat(email.trim())
+                      
+                      if (!emailValidation.isValid) {
+                        setEmailError(emailValidation.error || "Please enter a valid email address")
+                        return
+                      }
+
+                      // Step 2: DNS/SMTP validation for invalid domains
+                      try {
+                        const response = await fetch('/api/auth/validate-email-domain', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ email: email.trim() })
+                        })
+                        
+                        const domainValidation = await response.json()
+                        
+                        if (!domainValidation.isValid) {
+                          setEmailError(domainValidation.error || "Invalid email domain. Please check your email address.")
+                        } else {
+                          setEmailError("")
+                        }
+                      } catch (error) {
+                        // If DNS check fails, use format validation result
+                        setEmailError(emailValidation.error || "Please enter a valid email address")
+                      }
+                    }
+                  }, 500)
+                  
+                  setEmailValidationTimeout(validationTimeout)
+                  
+                  // Only check email existence if format is valid
+                  const emailValidation = validateEmailFormat(email.trim())
+                  if (!emailValidation.isValid || !email || !/\S+@\S+\.\S+/.test(email)) {
                     return
                   }
                   
-                  // Debounce email check (wait 500ms after user stops typing)
+                  // Debounce email existence check (wait 500ms after user stops typing)
                   const timeout = setTimeout(async () => {
                     setCheckingEmail(true)
                     try {
@@ -1185,7 +1231,7 @@ export default function BecomeSupplierPage() {
                   "mt-1", 
                   themeClasses.cardBg, 
                   themeClasses.borderNeutralSecondary,
-                  emailExists && "border-red-500 focus:border-red-500 focus:ring-red-500"
+                  (emailExists || emailError) && "border-red-500 focus:border-red-500 focus:ring-red-500"
                 )}
                 autoComplete="email"
                 required
@@ -1195,7 +1241,10 @@ export default function BecomeSupplierPage() {
                   Checking email availability...
                 </p>
               )}
-              {emailExists && (
+              {emailError && (
+                <p className="text-xs text-red-500 mt-1">{emailError}</p>
+              )}
+              {emailExists && !emailError && (
                 <p className="text-xs mt-1 text-red-500">
                   An account with this email already exists. Please use a different email or try logging in.
                 </p>

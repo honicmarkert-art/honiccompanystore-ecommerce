@@ -63,6 +63,7 @@ export default function SupplierOrdersPage() {
   const { toast } = useToast()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
@@ -83,7 +84,7 @@ export default function SupplierOrdersPage() {
         // The layout will automatically update when orders are fetched
         window.dispatchEvent(new CustomEvent('supplier-orders-visited'))
       } catch (error) {
-        console.error('Error clearing unread count:', error)
+        // Error clearing unread count
       }
     }
     
@@ -105,7 +106,7 @@ export default function SupplierOrdersPage() {
         setIsActive(profile.is_active !== false) // Default to true if null
       }
     } catch (error) {
-      console.error('Error fetching supplier status:', error)
+      // Error fetching supplier status
     }
   }
 
@@ -121,7 +122,7 @@ export default function SupplierOrdersPage() {
         try {
           supabaseClient.removeChannel(activeChannel)
         } catch (error) {
-          console.warn('Supplier orders realtime cleanup error', error)
+          // Supplier orders realtime cleanup error
         }
       }
 
@@ -132,9 +133,9 @@ export default function SupplierOrdersPage() {
           schema: 'public', 
           table: 'confirmed_orders' 
         }, async (payload) => {
-        const newOrder = payload.new as any
+        const newOrder = payload?.new as any
         
-        if (!newOrder.id || seenOrderIds.current.has(newOrder.id)) {
+        if (!newOrder || !newOrder.id || seenOrderIds.current.has(newOrder.id)) {
           return
         }
         
@@ -178,7 +179,6 @@ export default function SupplierOrdersPage() {
       })
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.warn(`⚠️ Supplier orders realtime status: ${status}`)
           fetchOrders(true)
           if (isMounted) {
             setTimeout(() => subscribeToRealtime(), 3000)
@@ -197,34 +197,59 @@ export default function SupplierOrdersPage() {
         try {
           supabaseClient.removeChannel(activeChannel)
         } catch (error) {
-          console.warn('Supplier orders realtime cleanup error', error)
+          // Supplier orders realtime cleanup error
         }
       }
     }
   }, [toast])
 
-  const fetchOrders = async (isRealTimeUpdate = false, markAsSeen = true): Promise<Order[]> => {
+  const fetchOrders = async (isRealTimeUpdate = false, markAsSeen = true, showRefreshLoading = false): Promise<Order[]> => {
     try {
       if (!isRealTimeUpdate) {
-        setLoading(true)
+        if (showRefreshLoading) {
+          setIsRefreshing(true)
+        } else {
+          setLoading(true)
+        }
       }
       const response = await fetch('/api/supplier/orders', { 
         credentials: 'include' 
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured or unavailable.')
+        }
+        throw new Error(`Invalid response format. Expected JSON but received ${contentType}`)
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        throw new Error(`Failed to fetch orders: ${response.status} ${response.statusText}`)
+      }
+      
       const data = await response.json()
       
       if (data.success) {
-        const newOrders: Order[] = data.orders || []
-        setOrders(newOrders)
+        const allOrders: Order[] = data.orders || []
+        // Filter out picked_up orders - they should be in order history
+        // Only show orders where NOT all items are picked_up
+        const activeOrders = allOrders.filter(order => {
+          return !(order.items && order.items.every((item: OrderItem) => item.status === 'picked_up'))
+        })
+        setOrders(activeOrders)
         
         if (markAsSeen) {
           // Mark all current orders as seen
-          newOrders.forEach((order: Order) => {
+          activeOrders.forEach((order: Order) => {
             seenOrderIds.current.add(order.id)
           })
         }
         
-        return newOrders
+        return activeOrders
       } else {
         if (!isRealTimeUpdate) {
           toast({
@@ -235,11 +260,12 @@ export default function SupplierOrdersPage() {
         }
         return []
       }
-    } catch (error) {
+    } catch (error: any) {
       if (!isRealTimeUpdate) {
+        const errorMessage = error?.message || 'Failed to fetch orders'
         toast({
           title: 'Error',
-          description: 'Failed to fetch orders',
+          description: errorMessage,
           variant: 'destructive'
         })
       }
@@ -247,8 +273,17 @@ export default function SupplierOrdersPage() {
     } finally {
       if (!isRealTimeUpdate) {
         setLoading(false)
+        setIsRefreshing(false)
       }
     }
+  }
+
+  const handleRefresh = async () => {
+    await fetchOrders(false, true, true)
+    toast({
+      title: 'Orders refreshed',
+      description: 'Order list has been updated',
+    })
   }
 
   const filteredOrders = orders.filter(order =>
@@ -406,13 +441,32 @@ export default function SupplierOrdersPage() {
       {/* Header */}
       <div className="mb-4 sm:mb-6 lg:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-2">
-          <div>
-            <h1 className={cn("text-2xl sm:text-3xl font-bold mb-1 sm:mb-2", themeClasses.mainText)}>
-              Orders
-            </h1>
-            <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-              Manage and track your orders
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className={cn("text-2xl sm:text-3xl font-bold mb-1 sm:mb-2", themeClasses.mainText)}>
+                Current Orders
+              </h1>
+              <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
+                Manage and track your active orders (excluding picked up orders)
+              </p>
+            </div>
+            <Button
+              onClick={handleRefresh}
+              disabled={isRefreshing || loading}
+              variant="outline"
+              size="sm"
+              className={cn(
+                "h-8 w-8 sm:h-9 sm:w-9 p-0",
+                themeClasses.borderNeutralSecondary,
+                themeClasses.cardBg
+              )}
+              title="Refresh orders"
+            >
+              <RefreshCw className={cn(
+                "w-4 h-4 sm:w-5 sm:h-5",
+                (isRefreshing || loading) && "animate-spin"
+              )} />
+            </Button>
           </div>
           {isActive !== null && (
             <Badge className={cn(

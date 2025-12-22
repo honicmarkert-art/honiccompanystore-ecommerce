@@ -334,7 +334,7 @@ function AccountPageContent() {
         <CardContent>
           <div className="space-y-4">
             {(orders || []).slice(0, 3).map((order: any) => (
-              <div key={order.id} className="flex items-center justify-between p-3 sm:p-4 border rounded-lg">
+              <div key={order.orderNumber || order.referenceId} className="flex items-center justify-between p-3 sm:p-4 border rounded-lg">
                 <div className="flex items-center space-x-3 sm:space-x-4">
                   {getStatusIcon(order.status)}
                   <div>

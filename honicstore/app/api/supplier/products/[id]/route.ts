@@ -8,9 +8,12 @@ export const runtime = 'nodejs'
 // GET - Get a single product (only if it belongs to the supplier)
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Await params before using
+    const { id } = await params
+    
     // Rate limiting
     const rateLimitResult = enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
@@ -66,7 +69,7 @@ export async function GET(
         *,
         product_variants (*)
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`) // Ensure product belongs to supplier/user
       .single()
 
@@ -77,21 +80,15 @@ export async function GET(
       )
     }
 
-    // Transform variants to match expected format
+    // Transform variants to match expected format (simplified structure)
     const transformedProduct = {
       ...product,
       variants: product.product_variants?.map((v: any) => ({
         id: v.id,
+        variant_name: v.variant_name || '',
         price: v.price,
-        image: v.image,
-        sku: v.sku,
-        model: v.model,
-        variantType: v.variant_type,
-        attributes: v.attributes || {},
-        primaryAttribute: v.primary_attribute,
-        dependencies: v.dependencies || {},
-        primaryValues: v.primary_values || [],
-        stockQuantity: v.stock_quantity
+        stock_quantity: v.stock_quantity || 0,
+        stockQuantity: v.stock_quantity || 0 // Backward compatibility
       })) || []
     }
 
@@ -104,7 +101,7 @@ export async function GET(
     })
 
   } catch (error) {
-    logger.error('Supplier product GET error:', error)
+    console.error('Supplier product GET error:', error)
     return NextResponse.json(
       { success: false, error: 'An unexpected error occurred' },
       { status: 500 }
@@ -115,9 +112,12 @@ export async function GET(
 // PUT - Update a product (only if it belongs to the supplier)
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Await params before using
+    const { id } = await params
+    
     // Rate limiting
     const rateLimitResult = enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
@@ -170,7 +170,7 @@ export async function PUT(
     const { data: existingProduct } = await supabase
       .from('products')
       .select('id, supplier_id, user_id')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (!existingProduct || (existingProduct.supplier_id !== user.id && existingProduct.user_id !== user.id)) {
@@ -241,20 +241,9 @@ export async function PUT(
     let calculatedStock = stockQuantity ? parseInt(String(stockQuantity)) : null
     if (variants && Array.isArray(variants) && variants.length > 0) {
       calculatedStock = variants.reduce((sum: number, variant: any) => {
-        if (variant.stockQuantity) {
-          return sum + (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : parseInt(variant.stockQuantity) || 0)
-        }
-        if (variant.quantities) {
-          return sum + Object.values(variant.quantities).reduce((qtySum: number, qty: any) => 
-            qtySum + (typeof qty === 'number' ? qty : parseInt(qty) || 0), 0
-          )
-        }
-        if (Array.isArray(variant.primaryValues)) {
-          return sum + variant.primaryValues.reduce((pvSum: number, pv: any) => 
-            pvSum + (typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0), 0
-          )
-        }
-        return sum
+        // Simplified variant structure: use stock_quantity or stockQuantity
+        const qty = variant.stock_quantity || variant.stockQuantity || 0
+        return sum + (typeof qty === 'number' ? qty : parseInt(String(qty)) || 0)
       }, 0)
     }
 
@@ -289,13 +278,13 @@ export async function PUT(
     const { data: product, error } = await supabase
       .from('products')
       .update(updateData)
-      .eq('id', params.id)
+      .eq('id', id)
       .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`) // Double check ownership
       .select()
       .single()
 
     if (error) {
-      logger.error('Error updating product:', error)
+      console.error('Error updating product:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to update product' },
         { status: 500 }
@@ -308,45 +297,21 @@ export async function PUT(
       await supabase
         .from('product_variants')
         .delete()
-        .eq('product_id', params.id)
+        .eq('product_id', id)
 
       // Insert new variants if any
       if (Array.isArray(variants) && variants.length > 0) {
+        // Simplified variant structure for suppliers: variant_name, price, stock_quantity only
         const variantRecords = variants.map((variant: any) => {
-          let primaryAttribute = variant.primaryAttribute
-          let attributes = variant.attributes || {}
+          const stockQty = variant.stock_quantity || variant.stockQuantity || 0
+          const parsedStockQty = typeof stockQty === 'number' ? stockQty : parseInt(String(stockQty)) || 0
           
-          if (Array.isArray(variant.primaryValues) && variant.primaryValues.length > 0) {
-            // For the single primary_attribute column (backward compatibility)
-            // Use the first attribute from variantConfig.primaryAttributes if available,
-            // otherwise use the first one found in primaryValues
-            if (!primaryAttribute) {
-              // First, try to get from variantConfig.primaryAttributes (ordered list)
-              if (variantConfig?.primaryAttributes && Array.isArray(variantConfig.primaryAttributes) && variantConfig.primaryAttributes.length > 0) {
-                primaryAttribute = variantConfig.primaryAttributes[0]
-              } else {
-                // Fallback: find the first primary attribute from primaryValues
-                const firstPrimaryValue = variant.primaryValues.find((pv: any) => pv.attribute)
-                if (firstPrimaryValue?.attribute) {
-                  primaryAttribute = firstPrimaryValue.attribute
-                }
-              }
-            }
-            attributes = {}
-          }
-
           return {
-            product_id: parseInt(params.id),
+            product_id: parseInt(id),
+            variant_name: variant.variant_name?.trim() || '',
             price: variant.price ? parseFloat(variant.price) : parseFloat(price || product.price),
-            image: variant.image?.trim() || '',
-            sku: variant.sku?.trim() || '',
-            model: variant.model?.trim() || '',
-            variant_type: variant.variantType || variantConfig?.type || 'simple',
-            attributes: attributes,
-            primary_attribute: primaryAttribute || null,
-            dependencies: variant.dependencies || {},
-            primary_values: variant.primaryValues || [],
-            stock_quantity: variant.stockQuantity ? (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : parseInt(variant.stockQuantity)) : null
+            stock_quantity: parsedStockQty,
+            in_stock: parsedStockQty > 0
           }
         })
 
@@ -355,7 +320,7 @@ export async function PUT(
           .insert(variantRecords)
 
         if (variantError) {
-          logger.error('Error updating variants:', variantError)
+          console.error('Error updating variants:', variantError)
           // Don't fail the entire request
         }
       }
@@ -368,25 +333,19 @@ export async function PUT(
         *,
         product_variants (*)
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
-    // Transform variants to match expected format
+    // Transform variants to match expected format (simplified structure)
     const finalProduct = completeProduct || product
     const transformedProduct = {
       ...finalProduct,
       variants: finalProduct.product_variants?.map((v: any) => ({
         id: v.id,
+        variant_name: v.variant_name || '',
         price: v.price,
-        image: v.image,
-        sku: v.sku,
-        model: v.model,
-        variantType: v.variant_type,
-        attributes: v.attributes || {},
-        primaryAttribute: v.primary_attribute,
-        dependencies: v.dependencies || {},
-        primaryValues: v.primary_values || [],
-        stockQuantity: v.stock_quantity
+        stock_quantity: v.stock_quantity || 0,
+        stockQuantity: v.stock_quantity || 0 // Backward compatibility
       })) || []
     }
 
@@ -399,7 +358,7 @@ export async function PUT(
     })
 
   } catch (error) {
-    logger.error('Supplier product PUT error:', error)
+    console.error('Supplier product PUT error:', error)
     return NextResponse.json(
       { success: false, error: 'An unexpected error occurred' },
       { status: 500 }
@@ -410,9 +369,12 @@ export async function PUT(
 // DELETE - Delete a product (only if it belongs to the supplier)
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Await params before using
+    const { id } = await params
+    
     // Rate limiting
     const rateLimitResult = enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
@@ -465,11 +427,11 @@ export async function DELETE(
     const { error } = await supabase
       .from('products')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
       .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`)
 
     if (error) {
-      logger.error('Error deleting product:', error)
+      console.error('Error deleting product:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to delete product' },
         { status: 500 }
@@ -482,7 +444,7 @@ export async function DELETE(
     })
 
   } catch (error) {
-    logger.error('Supplier product DELETE error:', error)
+    console.error('Supplier product DELETE error:', error)
     return NextResponse.json(
       { success: false, error: 'An unexpected error occurred' },
       { status: 500 }

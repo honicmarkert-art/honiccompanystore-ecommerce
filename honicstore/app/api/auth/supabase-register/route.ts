@@ -6,15 +6,33 @@ import { z } from 'zod'
 import { notifyAllAdmins } from '@/lib/notification-helpers'
 import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
+import { validateEmailDomain, EMAIL_DOMAIN_TYPOS } from '@/lib/email-validation'
+import { validateEmailDomainWithTimeout } from '@/lib/email-domain-validator'
 
 // Force dynamic rendering - don't pre-render during build
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+// Email validation utilities imported from shared module
+
 // Registration input validation schema
 const registerRequestSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name is too long').trim(),
-  email: z.string().email('Please enter a valid email address').max(255, 'Email is too long').toLowerCase().trim(),
+  email: z.string()
+    .email('Please enter a valid email address')
+    .max(255, 'Email is too long')
+    .toLowerCase()
+    .trim()
+    .refine((email) => {
+      const domainValidation = validateEmailDomain(email)
+      return domainValidation.isValid
+    }, (email) => {
+      const domainValidation = validateEmailDomain(email)
+      return {
+        message: domainValidation.error || 'Invalid email domain',
+        path: ['email']
+      }
+    }),
   password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password is too long'),
   confirmPassword: z.string().min(1, 'Password confirmation is required'),
   phone: z.string().max(20, 'Phone number is too long').optional(),
@@ -50,30 +68,139 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
+    // Handle empty or incomplete request body (timeout protection)
+    let body
+    try {
+      const bodyText = await request.text()
+      if (!bodyText || bodyText.trim() === '') {
+        return NextResponse.json(
+          { 
+            success: false,
+            error: 'Request body is empty. Please try again.',
+            type: 'EMPTY_REQUEST_ERROR'
+          },
+          { status: 400 }
+        )
+      }
+      body = JSON.parse(bodyText)
+    } catch (parseError: any) {
+      // Handle JSON parse errors (including timeout/incomplete data)
+      if (parseError instanceof SyntaxError || parseError.message?.includes('JSON')) {
+        logger.error('JSON parse error in registration:', {
+          error: parseError.message,
+          errorType: parseError.name,
+          possibleCause: 'Request timeout or incomplete data'
+        })
+        return NextResponse.json(
+          { 
+            success: false,
+            error: 'Invalid request data. Please check your connection and try again.',
+            type: 'PARSE_ERROR',
+            details: process.env.NODE_ENV === 'development' ? parseError.message : undefined
+          },
+          { status: 400 }
+        )
+      }
+      throw parseError
+    }
     
+    // Pre-validate email domain before full schema validation (catch typos early)
+    if (body.email) {
+      const emailValidation = validateEmailDomain(String(body.email).toLowerCase().trim())
+      if (!emailValidation.isValid) {
+        logger.log('🚨 Email domain validation failed:', {
+          email: body.email,
+          error: emailValidation.error,
+          suggestion: emailValidation.suggestion
+        })
+        return NextResponse.json(
+          { 
+            success: false,
+            error: emailValidation.error || 'Invalid email domain',
+            suggestion: emailValidation.suggestion,
+            type: 'EMAIL_DOMAIN_ERROR'
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     // Validate and sanitize input
     let validatedData
     try {
       validatedData = registerRequestSchema.parse(body)
     } catch (error) {
       if (error instanceof z.ZodError) {
+        // Check if it's an email domain error and provide suggestion
+        const emailError = error.errors.find(e => e.path.includes('email'))
+        if (emailError && body.email) {
+          const domainValidation = validateEmailDomain(String(body.email).toLowerCase().trim())
+          return NextResponse.json(
+            { 
+              success: false,
+              error: emailError.message || 'Invalid email address',
+              suggestion: domainValidation.suggestion,
+              type: 'VALIDATION_ERROR',
+              details: process.env.NODE_ENV === 'development' ? error.errors : undefined
+            },
+            { status: 400 }
+          )
+        }
+        
         return NextResponse.json(
           { 
             success: false,
             error: error.errors[0]?.message || 'Invalid input data',
             type: 'VALIDATION_ERROR',
             details: process.env.NODE_ENV === 'development' ? error.errors : undefined
-        },
-        { status: 400 }
-      )
-    }
+          },
+          { status: 400 }
+        )
+      }
       throw error
     }
 
     const { name, email, password, confirmPassword, phone, isSupplier, planId } = validatedData
 
     logger.log('Registration request:', { email, isSupplier: !!isSupplier, hasPlanId: !!planId })
+
+    // Additional SMTP/DNS validation - verify domain actually exists and can receive emails
+    try {
+      logger.log('🔍 Validating email domain DNS/SMTP records for:', email)
+      const domainValidation = await validateEmailDomainWithTimeout(email, 5000)
+      
+      if (!domainValidation.isValid) {
+        logger.log('❌ Email domain validation failed:', {
+          email,
+          error: domainValidation.error,
+          hasMxRecords: domainValidation.hasMxRecords,
+          hasARecords: domainValidation.hasARecords
+        })
+        
+        return NextResponse.json(
+          {
+            success: false,
+            error: domainValidation.error || 'Email domain validation failed. Please check your email address.',
+            type: 'EMAIL_DOMAIN_VALIDATION_ERROR'
+          },
+          { status: 400 }
+        )
+      }
+      
+      logger.log('✅ Email domain validation passed:', {
+        email,
+        hasMxRecords: domainValidation.hasMxRecords,
+        hasARecords: domainValidation.hasARecords,
+        mxRecords: domainValidation.mxRecords?.slice(0, 3) // Log first 3 MX records
+      })
+    } catch (domainError: any) {
+      // Log error but don't block registration if DNS check fails (could be network issue)
+      logger.log('⚠️ Email domain validation error (non-blocking):', {
+        email,
+        error: domainError?.message || domainError
+      })
+      // Continue with registration - DNS check failure shouldn't block legitimate users
+    }
 
     // CRITICAL SECURITY: Check if email already exists using multiple methods
     // Method 1: Profiles table (primary - most reliable)
@@ -118,39 +245,12 @@ export async function POST(request: NextRequest) {
         )
       }
       
-      // Method 2: ALWAYS check auth users (critical - email might exist in auth but not in profiles yet)
-      console.log('🔍 Checking Auth users (Method 2 - always check):', email)
-      try {
-        // Use listUsers (getUserByEmail doesn't exist in Supabase admin API)
-        const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
-          
-        if (!listError && authUsers?.users) {
-          const existingAuthUser = authUsers.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
-          if (existingAuthUser) {
-            emailExists = true
-            logger.log('🚨 Registration blocked - email already exists in Auth (listUsers):', { 
-              email, 
-              userId: existingAuthUser.id,
-              createdAt: existingAuthUser.created_at 
-            })
-            console.error('🚨 BLOCKING REGISTRATION - Email already exists in Auth:', email)
-            return NextResponse.json(
-              {
-                success: false,
-                error: 'An account with this email address already exists. Please use a different email or try logging in.',
-                type: 'EMAIL_ALREADY_EXISTS'
-              },
-              { status: 409 }
-            )
-          }
-        }
-      } catch (authCheckError: any) {
-        // If listUsers fails, log but continue (Supabase signUp will validate as final check)
-        logger.warn('⚠️ listUsers failed (proceeding - Supabase signUp will validate):', {
-          error: authCheckError?.message || authCheckError
-        })
-        console.warn('⚠️ Auth users check error (proceeding - Supabase signUp will validate):', authCheckError)
-      }
+      // Method 2: Skip listUsers() check to prevent timeout
+      // NOTE: listUsers() fetches ALL users and can be VERY slow (causes timeout with many users)
+      // Supabase signUp() will catch duplicate emails as the final security layer
+      // This is safe because Supabase Auth enforces unique emails at the database level
+      console.log('🔍 Skipping listUsers() check (prevents timeout) - Supabase signUp will validate email uniqueness')
+      logger.log('⚠️ Skipping listUsers() check to prevent timeout - Supabase signUp will validate email uniqueness')
       
       // Email not found in profiles or auth - available for registration
       if (!emailExists) {
@@ -288,6 +388,48 @@ export async function POST(request: NextRequest) {
         }
       } else {
         console.log('⚠️ No session returned - user will need to verify email first')
+      }
+
+      // Ensure user_id/supplier_id are generated (safety check if trigger failed)
+      if (userData) {
+        try {
+          const adminSupabase = createAdminSupabaseClient()
+          const { data: profile, error: profileCheckError } = await adminSupabase
+            .from('profiles')
+            .select('user_id, supplier_id, is_supplier')
+            .eq('id', userData.id)
+            .single()
+
+          if (!profileCheckError && profile) {
+            // If IDs are missing, generate them using database RPC functions
+            if (isSupplier && !profile.supplier_id) {
+              const { data: newSupplierId, error: idError } = await adminSupabase.rpc('generate_next_supplier_id')
+              if (!idError && newSupplierId) {
+                const { error: updateError } = await adminSupabase
+                  .from('profiles')
+                  .update({ supplier_id: newSupplierId })
+                  .eq('id', userData.id)
+                if (!updateError) {
+                  logger.log('Generated supplier_id via fallback:', { userId: userData.id, supplierId: newSupplierId })
+                }
+              }
+            } else if (!isSupplier && !profile.user_id) {
+              const { data: newUserId, error: idError } = await adminSupabase.rpc('generate_next_user_id')
+              if (!idError && newUserId) {
+                const { error: updateError } = await adminSupabase
+                  .from('profiles')
+                  .update({ user_id: newUserId })
+                  .eq('id', userData.id)
+                if (!updateError) {
+                  logger.log('Generated user_id via fallback:', { userId: userData.id, userReadableId: newUserId })
+                }
+              }
+            }
+          }
+        } catch (idGenError) {
+          logger.error('Error ensuring IDs are generated:', idGenError)
+          // Don't fail registration if ID generation check fails
+        }
       }
 
       // Assign plan immediately if supplier registration with planId

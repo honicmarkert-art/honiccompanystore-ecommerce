@@ -220,8 +220,8 @@ export async function POST(request: NextRequest) {
       // Supplier should go to supplier dashboard
       redirectTo = '/supplier/dashboard'
     } else {
-      // Regular buyer should go to buyer pages (home/products)
-      redirectTo = '/'
+      // Regular buyer should go to products page
+      redirectTo = '/products'
     }
 
     // Create response with user data

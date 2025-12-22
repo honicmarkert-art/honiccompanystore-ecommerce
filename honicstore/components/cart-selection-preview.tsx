@@ -136,20 +136,7 @@ export function CartSelectionPreview({
                         "text-xs font-medium flex-1",
                         "text-gray-900 dark:text-gray-100"
                       )}>
-                        {Object.keys(variant.attributes).length > 0 
-                          ? Object.entries(variant.attributes).map(([key, value]) => {
-                              let display: string
-                              if (Array.isArray(value)) {
-                                display = value.map((item: any) => (typeof item === 'object' && item?.value) ? item.value : String(item)).join(', ')
-                              } else if (typeof value === 'object' && (value as any)?.value) {
-                                display = String((value as any).value)
-                              } else {
-                                display = String(value)
-                              }
-                              return `${key}: ${display}`
-                            }).join(', ')
-                          : 'Standard Product'
-                        }
+                        {(variant as any).variant_name || 'Standard Product'}
                       </span>
                     </div>
                     

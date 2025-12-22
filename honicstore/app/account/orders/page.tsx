@@ -30,7 +30,7 @@ import Image from 'next/image'
 import { OrdersListSkeleton } from '@/components/ui/skeleton'
 
 interface Order {
-  id: string
+  // id: string // REMOVED: UUID should never be exposed to client
   orderNumber: string
   referenceId: string
   pickupId: string
@@ -64,15 +64,20 @@ interface Order {
 }
 
 interface OrderItem {
-    id: string
+  // id: string // REMOVED: UUID should never be exposed to client
+  itemKey?: string // Safe, non-UUID identifier for client-side operations
   productId: string
   productName: string
   productImage: string
   variantName?: string
   variantAttributes?: any
-    quantity: number
+  quantity: number
   unitPrice: number
   totalPrice: number
+  // supplierId?: string | null // REMOVED: UUID should never be exposed to client
+  supplierName?: string | null // Only display name, never UUID
+  status?: string // Per-item status from confirmed_order_items
+  trackingNumber?: string | null
 }
 
 function OrdersPageContent() {
@@ -90,7 +95,25 @@ function OrdersPageContent() {
   }, [orders, searchTerm, statusFilter, dateFilter])
 
   const filterOrders = () => {
-    let filtered = orders
+    // Filter out orders where:
+    // 1. Order is marked as received (isReceived === true), OR
+    // 2. ALL items from ALL suppliers are picked_up
+    let filtered = orders.filter(order => {
+      // If order is received, exclude it
+      if (order.isReceived === true) {
+        return false
+      }
+      
+      // Check if ALL items (across all suppliers) are picked_up
+      if (order.items && order.items.length > 0) {
+        const allItemsPickedUp = order.items.every((item: OrderItem) => item.status === 'picked_up')
+        // Hide order if all items are picked up
+        return !allItemsPickedUp
+      }
+      
+      // If no items or items don't have status, show the order
+      return true
+    })
 
     // Search filter
     if (searchTerm) {
@@ -326,7 +349,7 @@ function OrdersPageContent() {
       ) : (
         <div className="space-y-3 sm:space-y-4">
         {filteredOrders.map((order) => (
-            <Card key={order.id} className="hover:shadow-md transition-shadow">
+            <Card key={order.orderNumber} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4 sm:p-6">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                   {/* Left Section: Order Info */}
@@ -335,7 +358,10 @@ function OrdersPageContent() {
                     <div className="flex items-center gap-3">
                       <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                       <div className="flex-1">
-                        <h3 className="font-bold text-lg">{order.orderNumber}</h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-lg">{order.orderNumber}</h3>
+                          <span className="text-xs text-muted-foreground font-mono">({order.referenceId})</span>
+                        </div>
                         <p className="text-xs sm:text-sm text-muted-foreground">{formatDate(order.createdAt)}</p>
                       </div>
                       {getStatusBadge(order.status)}

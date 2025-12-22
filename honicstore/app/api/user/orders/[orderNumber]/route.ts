@@ -194,8 +194,9 @@ export async function GET(
     }
 
     // Format the response (reference_id and pickup_id are READ-ONLY for customers)
+    // SECURITY: Never expose UUIDs (order.id, supplierId, item.id) to clients
     const responseData = {
-      id: order.id, // Keep for internal operations but don't expose in URLs
+      // id: order.id, // REMOVED: UUID should never be exposed to client
       orderNumber: order.order_number,
       referenceId: order.reference_id, // READ-ONLY: Payment gateway integration only
       pickupId: order.pickup_id,       // READ-ONLY: Customer pickup confirmation
@@ -219,10 +220,14 @@ export async function GET(
       confirmedAt: confirmedOrder?.confirmed_at || null,
       shippingAddress: order.shipping_address,
       billingAddress: order.billing_address,
-      items: orderItems.map((item: any) => {
+      items: orderItems.map((item: any, index: number) => {
         const supplierInfo = productSuppliersMap.get(item.product_id) || { supplierId: null, supplierName: null }
+        // SECURITY: Generate a safe hash key instead of exposing UUID
+        // Use product_id + variant_id + index to create a unique, non-UUID identifier
+        const safeItemKey = `${item.product_id}-${item.variant_id || 'default'}-${index}`
         return {
-          id: item.id,
+          // id: item.id, // REMOVED: UUID should never be exposed to client
+          itemKey: safeItemKey, // Safe, non-UUID identifier for client-side operations
           productId: item.product_id,
           productName: item.product_name || 'Unknown Product',
           productImage: productImagesMap.get(item.product_id) || '/placeholder.jpg',
@@ -231,8 +236,8 @@ export async function GET(
           quantity: item.quantity,
           unitPrice: item.price, // This is the unit price from the database
           totalPrice: item.total_price, // This is the total price from the database
-          supplierId: supplierInfo.supplierId,
-          supplierName: supplierInfo.supplierName,
+          // supplierId: supplierInfo.supplierId, // REMOVED: UUID should never be exposed to client
+          supplierName: supplierInfo.supplierName, // Only send display name, never UUID
           trackingNumber: item.tracking_number || null,
           status: item.status || 'confirmed' // Per-item status from confirmed_order_items
         }

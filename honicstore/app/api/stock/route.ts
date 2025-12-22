@@ -53,7 +53,6 @@ export async function GET(request: NextRequest) {
           name,
           product_variants (
             id,
-            primary_values,
             stock_quantity
           )
         `)
@@ -66,16 +65,14 @@ export async function GET(request: NextRequest) {
 
       // Process and cache results
       for (const product of products || []) {
-        // Calculate stock from attribute quantities in variants
+        // Calculate stock from variant stock_quantity (simplified variant system)
         let calculatedStock = 0
         if (product.product_variants && Array.isArray(product.product_variants)) {
           product.product_variants.forEach((variant: any) => {
-            if (Array.isArray(variant.primary_values)) {
-              variant.primary_values.forEach((pv: any) => {
-                const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                calculatedStock += qty
-              })
-            }
+            const qty = typeof variant.stock_quantity === 'number' 
+              ? variant.stock_quantity 
+              : parseInt(variant.stock_quantity) || 0
+            calculatedStock += qty
           })
         }
         

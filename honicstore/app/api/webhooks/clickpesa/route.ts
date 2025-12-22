@@ -740,81 +740,118 @@ export async function POST(request: NextRequest) {
       isRetryPayment: order.payment_status === 'failed' || order.payment_status === 'pending'
     })
 
-    // SECURITY: Always verify transaction via ClickPesa API before marking as confirmed
-    console.log('\n🔐 VERIFYING TRANSACTION WITH CLICKPESA API:')
-    console.log('  Order Reference:', orderReference)
-    logger.log('🔐 Verifying transaction with ClickPesa API before confirmation:', {
-      orderReference: orderReference,
-      webhookPaymentStatus: paymentStatus,
-      webhookEvent: event
-    })
+    // Check if this is a manual trigger (skip API verification)
+    const isManualTrigger = request.headers.get('x-manual-trigger') === 'true'
     
-    // Use regular credentials for regular orders
-    const verification = await verifyTransactionWithClickPesa(orderReference, false)
+    let verification: any = { verified: false, transactionId: null, status: null }
+    let verifiedStatus = ''
+    let verifiedPaymentStatus = paymentStatus
     
-    console.log('  Verification Result:', verification.verified ? 'VERIFIED' : 'FAILED')
-    console.log('  ClickPesa API Status:', verification.status)
-    console.log('  Transaction ID:', verification.transactionId || 'N/A')
-    console.log('  Amount:', verification.amount || 'N/A', verification.currency || 'N/A')
-    if (verification.error) {
-      console.log('  Error:', verification.error)
-    }
-    
-    // If verification failed, reject the webhook
-    if (!verification.verified) {
-      console.log('\n❌ SECURITY REJECTION: Transaction verification failed')
-      console.log('  Status: 401 Unauthorized')
-      console.log('  Reason: Could not verify transaction with ClickPesa API')
-      logger.error('❌ SECURITY: Webhook rejected - Transaction verification failed', {
+    if (isManualTrigger) {
+      // Skip API verification for manual triggers
+      console.log('\n🔧 MANUAL TRIGGER DETECTED - Skipping API verification')
+      logger.log('🔧 Manual trigger detected - skipping ClickPesa API verification', {
         orderReference: orderReference,
-        orderId: order.id,
-        verificationError: verification.error,
-        verificationStatus: verification.status
+        webhookPaymentStatus: paymentStatus
       })
-      return NextResponse.json(
-        { error: 'Transaction verification failed. Could not confirm transaction status with ClickPesa API.' },
-        { status: 401 }
-      )
-    }
-    
-    // Always use webhook status as primary source
-    // API verification confirms transaction exists, but webhook has the most current status
-    const verifiedStatus = verification.status?.toUpperCase() || ''
-    const verifiedPaymentStatus = paymentStatus // Always use webhook status
-    
-    // SECURITY: Always ensure we have a transaction ID (use API verification as fallback)
-    if (!transactionId && verification.transactionId) {
-      transactionId = verification.transactionId
-      logger.log('📝 Using transaction ID from ClickPesa API verification (webhook had none):', transactionId)
-    } else if (verification.transactionId && transactionId && verification.transactionId !== transactionId) {
-      // If both exist but don't match, use API version (more reliable)
-      logger.log('⚠️ Transaction ID mismatch - using API version:', {
-        webhook: transactionId,
-        api: verification.transactionId
+      
+      // Use webhook data directly for manual triggers
+      verifiedStatus = 'MANUAL'
+      verifiedPaymentStatus = paymentStatus
+      
+      // Ensure transaction ID is set (use provided or generate one)
+      if (!transactionId) {
+        transactionId = `MANUAL-${Date.now()}`
+        logger.log('📝 Generated transaction ID for manual trigger:', transactionId)
+      }
+    } else {
+      // SECURITY: Always verify transaction via ClickPesa API before marking as confirmed
+      console.log('\n🔐 VERIFYING TRANSACTION WITH CLICKPESA API:')
+      console.log('  Order Reference:', orderReference)
+      logger.log('🔐 Verifying transaction with ClickPesa API before confirmation:', {
+        orderReference: orderReference,
+        webhookPaymentStatus: paymentStatus,
+        webhookEvent: event
       })
-      transactionId = verification.transactionId
-    } else if (verification.transactionId && !transactionId) {
-      transactionId = verification.transactionId
-      logger.log('📝 Using transaction ID from ClickPesa API verification:', transactionId)
+      
+      // Use regular credentials for regular orders
+      verification = await verifyTransactionWithClickPesa(orderReference, false)
+      
+      console.log('  Verification Result:', verification.verified ? 'VERIFIED' : 'FAILED')
+      console.log('  ClickPesa API Status:', verification.status)
+      console.log('  Transaction ID:', verification.transactionId || 'N/A')
+      console.log('  Amount:', verification.amount || 'N/A', verification.currency || 'N/A')
+      if (verification.error) {
+        console.log('  Error:', verification.error)
+      }
+      
+      // If verification failed, reject the webhook
+      if (!verification.verified) {
+        console.log('\n❌ SECURITY REJECTION: Transaction verification failed')
+        console.log('  Status: 401 Unauthorized')
+        console.log('  Reason: Could not verify transaction with ClickPesa API')
+        logger.error('❌ SECURITY: Webhook rejected - Transaction verification failed', {
+          orderReference: orderReference,
+          orderId: order.id,
+          verificationError: verification.error,
+          verificationStatus: verification.status
+        })
+        return NextResponse.json(
+          { error: 'Transaction verification failed. Could not confirm transaction status with ClickPesa API.' },
+          { status: 401 }
+        )
+      }
+      
+      // Always use webhook status as primary source
+      // API verification confirms transaction exists, but webhook has the most current status
+      verifiedStatus = verification.status?.toUpperCase() || ''
+      verifiedPaymentStatus = paymentStatus // Always use webhook status
+      
+      // SECURITY: Always ensure we have a transaction ID (use API verification as fallback)
+      if (!transactionId && verification.transactionId) {
+        transactionId = verification.transactionId
+        logger.log('📝 Using transaction ID from ClickPesa API verification (webhook had none):', transactionId)
+      } else if (verification.transactionId && transactionId && verification.transactionId !== transactionId) {
+        // If both exist but don't match, use API version (more reliable)
+        logger.log('⚠️ Transaction ID mismatch - using API version:', {
+          webhook: transactionId,
+          api: verification.transactionId
+        })
+        transactionId = verification.transactionId
+      } else if (verification.transactionId && !transactionId) {
+        transactionId = verification.transactionId
+        logger.log('📝 Using transaction ID from ClickPesa API verification:', transactionId)
+      }
+      
+      // CRITICAL: Ensure transaction ID is always set (use orderReference as last resort)
+      if (!transactionId) {
+        logger.warn('⚠️ No transaction ID available from webhook or API - using orderReference as fallback')
+        transactionId = orderReference // Use orderReference as fallback to ensure field is never null
+      }
     }
     
-    // CRITICAL: Ensure transaction ID is always set (use orderReference as last resort)
-    if (!transactionId) {
-      logger.warn('⚠️ No transaction ID available from webhook or API - using orderReference as fallback')
-      transactionId = orderReference // Use orderReference as fallback to ensure field is never null
+    if (isManualTrigger) {
+      console.log('\n✅ MANUAL TRIGGER PROCESSED:')
+      console.log('  Payment Status:', verifiedPaymentStatus)
+      console.log('  Transaction ID:', transactionId)
+      logger.log('✅ Manual trigger processed - payment status updated', {
+        webhookStatus: paymentStatus,
+        orderReference: orderReference,
+        transactionId: transactionId
+      })
+    } else {
+      console.log('\n✅ TRANSACTION VERIFIED:')
+      console.log('  ClickPesa API Status:', verifiedStatus, '(for reference only)')
+      console.log('  Webhook Status (USED):', paymentStatus)
+      console.log('  Verified Payment Status:', verifiedPaymentStatus)
+      console.log('  Transaction ID (FINAL):', transactionId)
+      logger.log('✅ Transaction verified - using webhook status as primary source', {
+        webhookStatus: paymentStatus,
+        apiStatus: verifiedStatus,
+        orderReference: orderReference,
+        transactionId: transactionId
+      })
     }
-    
-    console.log('\n✅ TRANSACTION VERIFIED:')
-    console.log('  ClickPesa API Status:', verifiedStatus, '(for reference only)')
-    console.log('  Webhook Status (USED):', paymentStatus)
-    console.log('  Verified Payment Status:', verifiedPaymentStatus)
-    console.log('  Transaction ID (FINAL):', transactionId)
-    logger.log('✅ Transaction verified - using webhook status as primary source', {
-      webhookStatus: paymentStatus,
-      apiStatus: verifiedStatus,
-      orderReference: orderReference,
-      transactionId: transactionId
-    })
     
     // Update payment status - always use webhook status
     let orderStatus = order.status

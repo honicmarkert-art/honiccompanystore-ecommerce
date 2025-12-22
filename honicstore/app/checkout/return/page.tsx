@@ -435,7 +435,7 @@ function CheckoutReturnContent() {
         try {
           localStorage.removeItem('guest_cart')
         } catch (error) {
-          console.error('Error clearing guest cart:', error)
+          // Error clearing guest cart
         }
       }
       

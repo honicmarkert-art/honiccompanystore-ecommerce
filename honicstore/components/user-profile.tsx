@@ -116,6 +116,14 @@ export function UserProfile() {
   const isFreePlan = currentPlan?.slug === 'free'
   const isPremiumPlan = currentPlan?.slug === 'premium'
 
+  // Don't show profile button/dropdown for suppliers
+  // Suppliers have their own navigation in the supplier layout
+  // Check both the state and user object to catch suppliers immediately
+  const userIsSupplier = isSupplier || user?.isSupplier || user?.profile?.is_supplier || false
+  if (userIsSupplier) {
+    return null
+  }
+
   if (!user) {
     return (
       <DropdownMenu>

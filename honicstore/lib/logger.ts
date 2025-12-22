@@ -3,7 +3,32 @@
  * 
  * Prevents console.log spam in production while maintaining debug capabilities
  * Usage: Replace console.log with logger.log
+ * 
+ * Logs are saved to:
+ * - Development: ./logs/app.log (client-side logs go to console only)
+ * - Production: External services (Sentry, LogRocket, etc.) or ./logs/app.log (server-side)
  */
+
+// Only import Node.js modules on server-side
+// Using type-safe conditional imports
+type FSType = typeof import('fs')
+type PathType = typeof import('path')
+
+let fs: FSType | null = null
+let path: PathType | null = null
+
+// Only load Node.js modules on server-side (not in browser)
+if (typeof window === 'undefined') {
+  try {
+    // Use require for Node.js modules (works in server context)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    fs = require('fs') as FSType
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    path = require('path') as PathType
+  } catch (error) {
+    // Silently fail if modules can't be loaded (e.g., in edge runtime)
+  }
+}
 
 type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug'
 
@@ -15,6 +40,67 @@ interface LogOptions {
 class Logger {
   private isDevelopment = process.env.NODE_ENV === 'development'
   private isDebugEnabled = process.env.DEBUG === 'true'
+  private logDir: string = ''
+  private logFile: string = ''
+  private errorLogFile: string = ''
+  
+  constructor() {
+    // Only set up file paths on server-side
+    if (typeof window === 'undefined' && path && fs) {
+      try {
+        this.logDir = path.join(process.cwd(), 'logs')
+        this.logFile = path.join(this.logDir, 'app.log')
+        this.errorLogFile = path.join(this.logDir, 'errors.log')
+        
+        // Create logs directory if it doesn't exist (server-side only)
+        if (fs.existsSync && !fs.existsSync(this.logDir)) {
+          fs.mkdirSync(this.logDir, { recursive: true })
+        }
+      } catch (error) {
+        // Silently fail if we can't set up log directory
+      }
+    }
+  }
+  
+  /**
+   * Write log to file (server-side only)
+   */
+  private writeToFile(level: string, message: string, data?: any): void {
+    // Only write to file on server-side
+    if (typeof window !== 'undefined' || !fs || !fs.appendFileSync) {
+      return
+    }
+    
+    try {
+      const timestamp = new Date().toISOString()
+      const logEntry = `[${timestamp}] [${level}] ${message}${data ? ' ' + JSON.stringify(data) : ''}\n`
+      const logFile = level === 'ERROR' ? this.errorLogFile : this.logFile
+      
+      if (!logFile) {
+        return // No log file path set (client-side)
+      }
+      
+      // Append to log file
+      fs.appendFileSync(logFile, logEntry, 'utf8')
+      
+      // Rotate log file if it gets too large (10MB)
+      try {
+        if (fs.statSync) {
+          const stats = fs.statSync(logFile)
+          if (stats.size > 10 * 1024 * 1024) { // 10MB
+            const rotatedFile = logFile.replace('.log', `-${Date.now()}.log`)
+            if (fs.renameSync) {
+              fs.renameSync(logFile, rotatedFile)
+            }
+          }
+        }
+      } catch (error) {
+        // Ignore rotation errors
+      }
+    } catch (error) {
+      // Silently fail if file writing fails
+    }
+  }
 
   /**
    * General logging (only in development)

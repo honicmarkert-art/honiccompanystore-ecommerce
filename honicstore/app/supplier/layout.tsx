@@ -24,6 +24,7 @@ import {
   Moon,
   Sun,
   Settings,
+  History,
 } from "lucide-react"
 import { supabaseClient } from '@/lib/supabase-client'
 
@@ -100,7 +101,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   const allNavigation = [
     { name: tNav('dashboard'), href: "/supplier/dashboard", icon: LayoutDashboard },
     { name: tNav('products'), href: "/supplier/products", icon: Package },
-    { name: tNav('orders'), href: "/supplier/orders", icon: ShoppingCart },
+    { name: 'Current Orders', href: "/supplier/orders", icon: ShoppingCart },
+    { name: 'Order History', href: "/supplier/orders/history", icon: History },
     { name: tNav('analytics'), href: "/supplier/analytics", icon: TrendingUp },
     { name: tNav('marketing'), href: "/supplier/marketing", icon: Megaphone },
     { name: tNav('featured'), href: "/supplier/featured", icon: Star },
@@ -279,11 +281,18 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       setIsCheckingCompanyInfo(true)
       try {
         // First fetch current plan to check if user is Winga
-        const planResponse = await fetch('/api/user/current-plan', {
-          credentials: 'include'
-        })
-        const planData = await planResponse.json()
-        const isWinga = planData.success && planData.plan?.slug === 'winga'
+        let isWinga = false
+        try {
+          const planResponse = await fetch('/api/user/current-plan', {
+            credentials: 'include'
+          })
+          if (planResponse.ok) {
+            const planData = await planResponse.json()
+            isWinga = planData.success && planData.plan?.slug === 'winga'
+          }
+        } catch (planError) {
+          // Silently handle plan fetch errors - continue with default values
+        }
         
         const { data: profile, error } = await supabaseClient
           .from('profiles')
@@ -378,7 +387,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           setCompanyInfoComplete(false)
         }
       } catch (error) {
-        console.error('Error fetching supplier status:', error)
         // If error fetching, assume incomplete to show modal
         setCompanyInfoComplete(false)
       } finally {
@@ -454,13 +462,16 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         const response = await fetch('/api/supplier/orders/unread-count', {
           credentials: 'include'
         })
-        const data = await response.json()
         
-        if (data.success) {
-          setUnreadOrderCount(data.unreadCount || 0)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success) {
+            setUnreadOrderCount(data.unreadCount || 0)
+          }
         }
       } catch (error) {
-        console.error('Error fetching unread order count:', error)
+        // Silently handle fetch errors (network issues, extensions, etc.)
+        // Don't update unread count on error to avoid resetting it
       }
     }
     

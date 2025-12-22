@@ -14,6 +14,8 @@ import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { cn } from '@/lib/utils'
+import { validateEmailFormat } from '@/lib/email-validation'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -189,6 +191,17 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     confirmPassword: ''
   })
   const [agreeToTerms, setAgreeToTerms] = useState(false)
+  const [registerEmailError, setRegisterEmailError] = useState<string>("")
+  const [registerEmailValidationTimeout, setRegisterEmailValidationTimeout] = useState<NodeJS.Timeout | null>(null)
+  
+  // Cleanup email validation timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (registerEmailValidationTimeout) {
+        clearTimeout(registerEmailValidationTimeout)
+      }
+    }
+  }, [registerEmailValidationTimeout])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -767,17 +780,64 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                       type="email"
                       placeholder="Email"
                       value={registerForm.email}
-                      onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
+                      onChange={(e) => {
+                        const email = e.target.value
+                        setRegisterForm({ ...registerForm, email })
+                        setRegisterEmailError("")
+                        
+                        // Clear previous validation timeout
+                        if (registerEmailValidationTimeout) {
+                          clearTimeout(registerEmailValidationTimeout)
+                        }
+                        
+                        // Real-time email validation with DNS check (debounced)
+                        const timeout = setTimeout(async () => {
+                          if (email.trim().length > 0) {
+                            // Step 1: Basic format validation
+                            const emailValidation = validateEmailFormat(email.trim())
+                            
+                            if (!emailValidation.isValid) {
+                              setRegisterEmailError(emailValidation.error || "Please enter a valid email address")
+                              return
+                            }
+
+                            // Step 2: DNS/SMTP validation for invalid domains
+                            try {
+                              const response = await fetch('/api/auth/validate-email-domain', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ email: email.trim() })
+                              })
+                              
+                              const domainValidation = await response.json()
+                              
+                              if (!domainValidation.isValid) {
+                                setRegisterEmailError(domainValidation.error || "Invalid email domain. Please check your email address.")
+                              } else {
+                                setRegisterEmailError("")
+                              }
+                            } catch (error) {
+                              // If DNS check fails, use format validation result
+                              setRegisterEmailError(emailValidation.error || "Please enter a valid email address")
+                            }
+                          }
+                        }, 500)
+                        
+                        setRegisterEmailValidationTimeout(timeout)
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault()
                           handleRegister(e)
                         }
                       }}
-                      className="pl-10 h-8 text-sm"
+                      className={cn("pl-10 h-8 text-sm", registerEmailError && "border-red-500 focus:border-red-500 focus:ring-red-500")}
                       required
                     />
                   </div>
+                  {registerEmailError && (
+                    <p className="text-xs text-red-500">{registerEmailError}</p>
+                  )}
                 </div>
 
                 <div className="space-y-1">

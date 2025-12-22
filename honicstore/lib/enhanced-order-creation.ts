@@ -122,7 +122,7 @@ export async function PUT(request: NextRequest) {
         product_name: item.productName,
         variant_id: item.variantId,
         variant_name: item.variantName,
-        variant_attributes: item.variantAttributes || null,
+        variant_attributes: null, // No longer used in simplified variant system
         quantity: item.quantity,
         price: item.unitPrice || item.price,
         total_price: item.totalPrice,

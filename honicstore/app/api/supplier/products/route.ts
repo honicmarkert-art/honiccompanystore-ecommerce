@@ -286,20 +286,9 @@ export async function POST(request: NextRequest) {
     let calculatedStock = stockQuantity ? parseInt(stockQuantity) : 0
     if (variants && Array.isArray(variants) && variants.length > 0) {
       calculatedStock = variants.reduce((sum: number, variant: any) => {
-        if (variant.stockQuantity) {
-          return sum + (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : parseInt(variant.stockQuantity) || 0)
-        }
-        if (variant.quantities) {
-          return sum + Object.values(variant.quantities).reduce((qtySum: number, qty: any) => 
-            qtySum + (typeof qty === 'number' ? qty : parseInt(qty) || 0), 0
-          )
-        }
-        if (Array.isArray(variant.primaryValues)) {
-          return sum + variant.primaryValues.reduce((pvSum: number, pv: any) => 
-            pvSum + (typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0), 0
-          )
-        }
-        return sum
+        // Simplified variant structure: use stock_quantity or stockQuantity
+        const qty = variant.stock_quantity || variant.stockQuantity || 0
+        return sum + (typeof qty === 'number' ? qty : parseInt(String(qty)) || 0)
       }, 0)
     }
 
@@ -342,42 +331,17 @@ export async function POST(request: NextRequest) {
 
     // Add variants to product_variants table if they exist
     if (variants && Array.isArray(variants) && variants.length > 0) {
+      // Simplified variant structure for suppliers: variant_name, price, stock_quantity only
       const variantRecords = variants.map((variant: any) => {
-        // Extract primary attribute from primaryValues if present
-        let primaryAttribute = variant.primaryAttribute
-        let attributes = variant.attributes || {}
+        const stockQty = variant.stock_quantity || variant.stockQuantity || 0
+        const parsedStockQty = typeof stockQty === 'number' ? stockQty : parseInt(String(stockQty)) || 0
         
-        if (Array.isArray(variant.primaryValues) && variant.primaryValues.length > 0) {
-          // For the single primary_attribute column (backward compatibility)
-          // Use the first attribute from variantConfig.primaryAttributes if available,
-          // otherwise use the first one found in primaryValues
-          if (!primaryAttribute) {
-            // First, try to get from variantConfig.primaryAttributes (ordered list)
-            if (variantConfig?.primaryAttributes && Array.isArray(variantConfig.primaryAttributes) && variantConfig.primaryAttributes.length > 0) {
-              primaryAttribute = variantConfig.primaryAttributes[0]
-            } else {
-              // Fallback: find the first primary attribute from primaryValues
-              const firstPrimaryValue = variant.primaryValues.find((pv: any) => pv.attribute)
-              if (firstPrimaryValue?.attribute) {
-                primaryAttribute = firstPrimaryValue.attribute
-              }
-            }
-          }
-          attributes = {}
-        }
-
         return {
           product_id: product.id,
+          variant_name: variant.variant_name?.trim() || '',
           price: variant.price ? parseFloat(variant.price) : parseFloat(price),
-          image: variant.image?.trim() || '',
-          sku: variant.sku?.trim() || '',
-          model: variant.model?.trim() || '',
-          variant_type: variant.variantType || variantConfig?.type || 'simple',
-          attributes: attributes,
-          primary_attribute: primaryAttribute || null,
-          dependencies: variant.dependencies || {},
-          primary_values: variant.primaryValues || [],
-          stock_quantity: variant.stockQuantity ? (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : parseInt(variant.stockQuantity)) : null
+          stock_quantity: parsedStockQty,
+          in_stock: parsedStockQty > 0
         }
       })
 
@@ -401,22 +365,16 @@ export async function POST(request: NextRequest) {
       .eq('id', product.id)
       .single()
 
-    // Transform variants to match expected format
+    // Transform variants to match expected format (simplified structure)
     const finalProduct = completeProduct || product
     const transformedProduct = {
       ...finalProduct,
       variants: finalProduct.product_variants?.map((v: any) => ({
         id: v.id,
+        variant_name: v.variant_name || '',
         price: v.price,
-        image: v.image,
-        sku: v.sku,
-        model: v.model,
-        variantType: v.variant_type,
-        attributes: v.attributes || {},
-        primaryAttribute: v.primary_attribute,
-        dependencies: v.dependencies || {},
-        primaryValues: v.primary_values || [],
-        stockQuantity: v.stock_quantity
+        stock_quantity: v.stock_quantity || 0,
+        stockQuantity: v.stock_quantity || 0 // Backward compatibility
       })) || []
     }
 

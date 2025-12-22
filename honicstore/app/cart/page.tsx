@@ -41,6 +41,8 @@ import {
   Settings,
   Moon,
   Sun,
+  CheckCircle,
+  MapPin,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -63,7 +65,6 @@ import { SecurityGuard } from "@/components/security-guard"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { ValidationModal, useValidationModal } from "@/components/ui/validation-modal"
 import { UserProfile } from "@/components/user-profile"
-import { CartSelectionPreview } from "@/components/cart-selection-preview"
 import { Footer } from "@/components/footer"
 
 export default function CartPage() {
@@ -77,6 +78,20 @@ export default function CartPage() {
 function CartPageContent() {
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { cart, updateItemQuantity, removeItem, cartUniqueProducts, cartSubtotal, clearCart, isLoading } = useCart() // Use useCart hook
+  
+  // Calculate total cart items (count variants as separate items)
+  const totalCartItems = useMemo(() => {
+    return cart.reduce((total, item) => {
+      return total + (item.variants?.length || 1)
+    }, 0)
+  }, [cart])
+  
+  // Calculate total quantity (sum of all variant quantities)
+  const totalQuantity = useMemo(() => {
+    return cart.reduce((total, item) => {
+      return total + (item.variants?.reduce((sum: number, v: any) => sum + (v.quantity || 0), 0) || item.totalQuantity || 0)
+    }, 0)
+  }, [cart])
   const { products } = useProducts() // Use useProducts hook
   const { getStock, fetchStock } = useStock() // Use stock hook for real-time stock data
   const { currency, setCurrency, formatPrice } = useCurrency() // Use global currency context
@@ -94,8 +109,6 @@ function CartPageContent() {
   const { openAuthModal } = useGlobalAuthModal()
   const { items: wishlistItems, add: addToWishlist, remove: removeFromWishlist } = useWishlist() // Use wishlist hook
   const { items: savedForLaterItems, add: addToSavedLater } = useSavedLater() // Use saved later hook
-  const [previewItem, setPreviewItem] = useState<any>(null)
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [selected, setSelected] = useState<Record<number, boolean>>({})
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
@@ -138,6 +151,23 @@ function CartPageContent() {
     }
   }, [uniqueSortedProductIds, fetchStock])
 
+  // Group cart items by supplier (memoized to avoid re-computation)
+  const groupedCartItems = useMemo(() => {
+    const grouped: { [key: string]: typeof cart } = {}
+    cart.forEach(item => {
+      // Use supplierCompanyName from API (server-provided, safe)
+      // If not available, use a fallback key based on product grouping
+      const supplierKey = (item as any).supplierCompanyName || 
+        (item as any).supplierName || 
+        `group-${item.productId}` // Fallback: group by product if no supplier name
+      
+      if (!grouped[supplierKey]) {
+        grouped[supplierKey] = []
+      }
+      grouped[supplierKey].push(item)
+    })
+    return grouped
+  }, [cart])
 
   const handleQuantityChange = useCallback((productId: number, variantId: string | undefined, delta: number) => {
     const currentItem = cart.find((item) => item.productId === productId)
@@ -247,8 +277,8 @@ function CartPageContent() {
     handleQuantityInput(productId, variantId, newQuantity)
   }, [products, handleQuantityInput])
 
-  const handleRemoveItem = useCallback((productId: number) => {
-    startTransition(() => removeItem(productId, undefined)) // Always remove entire product
+  const handleRemoveItem = useCallback((productId: number, variantId?: string) => {
+    startTransition(() => removeItem(productId, variantId)) // Remove specific variant or entire product
   }, [removeItem])
 
   const handleClearCart = () => {
@@ -340,7 +370,14 @@ function CartPageContent() {
   
   const selectedItems = cart.filter(i => selected[i.productId])
   const hasSelection = selectedItems.length > 0
-  const selectedItemsCount = hasSelection ? selectedItems.reduce((s,i)=>s+i.totalQuantity,0) : cartUniqueProducts
+  // Count items (variants) not quantities - for mobile display
+  const selectedItemsCount = hasSelection 
+    ? selectedItems.reduce((s,i)=>s+(i.variants?.length || 1), 0)
+    : totalCartItems
+  // Calculate total quantity (sum of quantities) for desktop display
+  const selectedTotalQuantity = hasSelection 
+    ? selectedItems.reduce((s,i)=>s+(i.variants?.reduce((sum: number, v: any) => sum + (v.quantity || 0), 0) || i.totalQuantity || 0), 0)
+    : totalQuantity
   const selectedSubtotal = hasSelection ? selectedItems.reduce((s,i)=>s+i.totalPrice,0) : cartSubtotal
 
   const calculateShippingFee = (subtotal: number) => {
@@ -625,9 +662,11 @@ function CartPageContent() {
                 <Button
                   variant="outline"
                   className={cn(
-                    "flex items-center gap-1 border-yellow-500 bg-transparent text-xs sm:text-sm w-[20px] h-[10px] sm:w-auto sm:h-auto",
+                    "flex items-center gap-1 bg-transparent text-xs sm:text-sm w-[20px] h-[10px] sm:w-auto sm:h-auto",
+                    "border-0 sm:border sm:border-yellow-500",
+                    "hover:border-0 sm:hover:border sm:hover:border-yellow-500",
                     darkHeaderFooterClasses.buttonGhostText,
-                    darkHeaderFooterClasses.buttonGhostHoverBg,
+                    "sm:[&:hover]:bg-opacity-10",
                   )}
                 >
                   {currency === "USD" ? <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" /> : <Landmark className="w-3 h-3 sm:w-4 sm:h-4" />}
@@ -675,7 +714,7 @@ function CartPageContent() {
             {isAuthenticated ? (
               <div className="flex flex-col items-center">
               <UserProfile />
-                <span className="text-xs text-white mt-1">
+                <span className={cn("text-xs mt-1", themeClasses.mainText)}>
                   {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                 </span>
               </div>
@@ -816,12 +855,12 @@ function CartPageContent() {
                       <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
                       <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
                       <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
-                        Cart Items ({hasSelection ? selectedItems.length : cart.length})
+                        Cart Items ({hasSelection ? selectedItems.reduce((sum, item) => sum + (item.variants?.length || 1), 0) : totalCartItems})
                       </span>
                     </div>
                     <div className="hidden sm:flex items-center gap-4 text-sm">
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Total Items: {selectedItemsCount}
+                        Total Items: {selectedTotalQuantity}
                       </span>
                       <span className={cn(themeClasses.textNeutralSecondary)}>
                         Subtotal: {formatPrice(selectedSubtotal)}
@@ -831,10 +870,10 @@ function CartPageContent() {
                   <div className="flex items-center justify-between sm:justify-end gap-2">
                     <div className="flex sm:hidden items-center gap-2 text-xs">
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Items: {cartUniqueProducts}
+                        Items: {selectedItemsCount}
                       </span>
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Total: {formatPrice(cartSubtotal)}
+                        Total: {formatPrice(selectedSubtotal)}
                       </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -879,168 +918,107 @@ function CartPageContent() {
                   }}
                 >
                   <div style={{ direction: 'ltr' }}>
-                    {cart.slice().reverse().map((item, index) => {
-                    const product = products.find(p => p.id === item.productId) || item.product
-                    const stockData = getStock(item.productId)
-                    const stockQty = stockData?.stockQuantity ?? (product as any)?.stockQuantity ?? null
-                    
-                    
-                    
-                    // If item has multiple variants, display as one product with multiple selections
-                    if (item.variants && item.variants.length > 1) {
+                    {/* Group cart items by supplier */}
+                    {Object.entries(groupedCartItems).map(([supplierKey, supplierItems]) => {
+                        const firstItem = supplierItems[0] as any
+                        // Get supplier company name (same as displayed on product detail page) - NO FALLBACK
+                        // Use company_name from profiles table (same as /api/products/[id]/supplier-info)
+                        // SECURITY: This comes from server, no UUID exposure
+                        const displaySupplierName = (firstItem as any).supplierCompanyName || null
+                        const supplierIsVerified = (firstItem as any).supplierIsVerified || false
+                        const supplierRegion = (firstItem as any).supplierRegion || null
+                        const supplierNation = (firstItem as any).supplierNation || null
+                        const supplierCompanyLogo = (firstItem as any).supplierCompanyLogo || null
+                        
+                        // Build location string - only region and nation (not location field)
+                        const locationParts = []
+                        if (supplierRegion) locationParts.push(supplierRegion)
+                        if (supplierNation) locationParts.push(supplierNation)
+                        const locationString = locationParts.length > 0 ? locationParts.join(', ') : null
+                        
+                        return (
+                          <div key={supplierKey} className="mb-6">
+                            {/* Supplier Header - Display above the card with gradient background */}
+                            {displaySupplierName && (
+                              <div className={cn(
+                                "mb-3 px-3 py-2 sm:px-4 sm:py-3 rounded-t-lg border-2 border-b-0",
+                                "bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50",
+                                "dark:from-blue-900/20 dark:via-indigo-900/20 dark:to-purple-900/20",
+                                themeClasses.cardBorder,
+                                "font-semibold text-sm sm:text-base md:text-lg",
+                                themeClasses.mainText,
+                                "flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 md:gap-3"
+                              )}>
+                                <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
+                                  {/* Company Logo - only show if available */}
+                                  {supplierCompanyLogo && (
+                                    <div className="flex-shrink-0">
+                                      <Image
+                                        src={supplierCompanyLogo}
+                                        alt={`${displaySupplierName} logo`}
+                                        width={32}
+                                        height={32}
+                                        className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 rounded-lg object-cover border border-gray-200 dark:border-gray-700"
+                                      />
+                                    </div>
+                                  )}
+                                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                                  <span className="flex-1 text-xs sm:text-sm md:text-base truncate">{displaySupplierName}</span>
+                                  {/* Verification badge - moved right after company name */}
+                                  {supplierIsVerified && (
+                                    <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+                                      <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 md:w-5 md:h-5 text-green-600 dark:text-green-500 font-bold stroke-[3]" />
+                                      <span className="px-1.5 py-[1px] sm:px-2 sm:py-0.5 bg-blue-600 dark:bg-blue-500 text-[9px] sm:text-xs font-medium text-white rounded">Verified</span>
+                                    </div>
+                                  )}
+                                </div>
+                                {/* Location - only region and nation */}
+                                {locationString && (
+                                  <div className="flex items-center gap-1 sm:gap-1.5 text-gray-600 dark:text-gray-400">
+                                    <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4 flex-shrink-0" />
+                                    <span className="text-[10px] sm:text-xs md:text-sm truncate">{locationString}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            
+                            {/* Supplier's Products Card - All products from this supplier in one card */}
+                            <Card className={cn(
+                              displaySupplierName ? "rounded-t-none rounded-b-lg" : "",
+                              themeClasses.cardBg,
+                              themeClasses.cardBorder,
+                              "mb-4"
+                            )}>
+                              <CardContent className="p-4">
+                                {/* Supplier's Products - All grouped together */}
+                                <div className="space-y-3">
+                                {supplierItems.slice().reverse().flatMap((item, itemIndex) => {
+                              const product = products.find(p => p.id === item.productId) || item.product
+                              const stockData = getStock(item.productId)
+                              
+                              // Display each variant as an independent item
+                              return (item.variants || []).map((variant: any, variantIndex: number) => {
+                      const stockQty = stockData?.stockQuantity ?? (product as any)?.stockQuantity ?? null
+                      const variantStockQty = variant.stock_quantity ?? variant.stockQuantity ?? stockQty
+                      const variantPrice = variant.price || item.totalPrice / item.totalQuantity
+                      const variantQuantity = variant.quantity || 1
+                      const variantTotalPrice = variantPrice * variantQuantity
+                      const uniqueKey = `${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`
+                      const unitPrice = variantPrice
+                      const discountPercentage = product?.originalPrice && product.originalPrice > unitPrice
+                        ? ((product.originalPrice - unitPrice) / product.originalPrice) * 100
+                        : 0
+
                       return (
-                        <Card
-                          key={`${item.productId}-${index}`}
+                        <div
+                          key={uniqueKey}
                           className={cn(
-                            "transition-all duration-200 hover:shadow-lg group rounded-sm mb-2",
-                            themeClasses.cardBg,
-                            themeClasses.cardBorder,
+                            "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
                           )}
-                          suppressHydrationWarning
                         >
-                          <CardContent className="p-0.5 sm:p-1">
-                            {/* Product Header */}
-                            <div className="flex gap-0.5 sm:gap-1 mb-0.5 sm:mb-1">
-                              {/* Select checkbox */}
-                              <div className="flex items-start">
-                                <input
-                                  type="checkbox"
-                                  checked={!!selected[item.productId]}
-                                  onChange={() => toggleSelected(item.productId)}
-                                  className="mt-1"
-                                />
-                              </div>
-                              {/* Product Image */}
-                              <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/cart')}`} className="flex-shrink-0">
-                                <div className="relative">
-                                  {product?.image && (
-                                    <LazyImage
-                                      src={product.image}
-                                      alt={product.name}
-                                      width={50}
-                                      height={50}
-                                      className="w-12 h-12 sm:w-15 sm:h-15 rounded object-cover border border-neutral-200 hover:border-yellow-500 transition-colors bg-gray-50"
-                                      priority={false} // Not priority since it's in a list
-                                      quality={80}
-                                    />
-                                  )}
-                                </div>
-                              </Link>
-
-                              {/* Product Details */}
-                              <div className="flex-1 min-w-0">
-                                <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/cart')}`}>
-                                  <h3 className={cn(
-                                    "font-semibold text-xs hover:underline line-clamp-2",
-                                    themeClasses.mainText
-                                  )}>
-                                    {product?.name || "Unknown Product"}
-                                  </h3>
-                                </Link>
-                                
-                                {/* Product SKU */}
-                                <div className="mt-0.5 sm:mt-1">
-                                  <span className={cn("text-[9px] sm:text-[10px]", themeClasses.textNeutralSecondary)}>
-                                    SKU: {product?.sku || "N/A"}
-                                  </span>
-                                </div>
-
-                                {/* Delivery estimate */}
-                                <div className={cn("flex items-center gap-1 mt-0.5 sm:mt-1 text-[9px] sm:text-[10px]", getDeliveryStatus(product, item.totalPrice).color)}>
-                                  <Truck className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
-                                  <span>{getDeliveryStatus(product, item.totalPrice).text}</span>
-                                </div>
-                              </div>
-
-                              {/* Action Buttons */}
-                              <div className="flex items-center gap-0.5">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setPreviewItem(item)
-                                    setIsPreviewOpen(true)
-                                  }}
-                                  className={cn(
-                                    "h-5 sm:h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-green-500 hover:bg-green-50 hover:text-green-600",
-                                    themeClasses.buttonGhostHoverBg,
-                                  )}
-                                >
-                                  Preview
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleAddToWishlist(item.productId)}
-                                  className={cn(
-                                    "h-5 w-5 sm:h-6 sm:w-6 hover:bg-blue-50 hover:text-blue-600",
-                                    isInWishlist(item.productId) 
-                                      ? "text-blue-600 fill-blue-600" 
-                                      : "text-blue-500",
-                                    themeClasses.buttonGhostHoverBg,
-                                  )}
-                                >
-                                  <Heart className={cn(
-                                    "w-2 h-2 sm:w-2.5 sm:h-2.5",
-                                    isInWishlist(item.productId) && "fill-current"
-                                  )} />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleRemoveItem(item.productId)}
-                                  className={cn(
-                                    "h-5 w-5 sm:h-6 sm:w-6 text-red-500 hover:bg-red-50 hover:text-red-600",
-                                    themeClasses.buttonGhostHoverBg,
-                                  )}
-                                >
-                                  <Trash2 className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
-                                </Button>
-                              </div>
-                            </div>
-
-                            {/* Compact Selection Summary */}
-                            <div className="border-t border-neutral-200 pt-0.5 sm:pt-1">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-1 sm:gap-2">
-                                  <span className={cn("text-[10px] sm:text-xs font-medium", themeClasses.mainText)}>
-                                    {item.variants.length} selection{item.variants.length > 1 ? 's' : ''}
-                                  </span>
-                                  <span className={cn("text-[10px] sm:text-xs", themeClasses.textNeutralSecondary)}>
-                                    • {item.totalQuantity} items
-                                  </span>
-                                </div>
-                                <span className={cn("text-xs sm:text-sm font-semibold text-green-600", themeClasses.mainText)}>
-                                  {formatPrice(item.totalPrice)}
-                                </span>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )
-                    }
-                    
-                    // Single variant or legacy item display
-                    
-                    const unitPrice = item.totalPrice / item.totalQuantity
-                    const discountPercentage = product?.originalPrice && product.originalPrice > unitPrice
-                      ? ((product.originalPrice - unitPrice) / product.originalPrice) * 100
-                      : 0
-
-                    return (
-                      <Card
-                        key={`${item.productId}-${item.variants[0]?.variantId || "base"}-${index}`}
-                        className={cn(
-                          "transition-all duration-200 hover:shadow-lg group rounded-sm mb-3",
-                          themeClasses.cardBg,
-                          themeClasses.cardBorder,
-                        )}
-                        suppressHydrationWarning
-                      >
-                        <CardContent className="p-1 sm:p-2">
                           <div className="flex gap-1 sm:gap-2">
                             {/* Product Image */}
-                            <div className="flex items-start gap-2">
+                              <div className="flex items-start gap-2">
                               <input
                                 type="checkbox"
                                 checked={!!selected[item.productId]}
@@ -1068,7 +1046,7 @@ function CartPageContent() {
                               </div>
                               </Link>
                             </div>
-
+                            
                             {/* Product Details */}
                             <div className="flex-1 min-w-0">
                               <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
@@ -1079,31 +1057,35 @@ function CartPageContent() {
                                       themeClasses.mainText
                                     )}>
                                       {product?.name || `Product ${item.productId}`}
+                                      {variant.variant_name && (
+                                        <span className="font-normal text-blue-600 dark:text-blue-400">
+                                          {" | "}{variant.variant_name}
+                                        </span>
+                                      )}
                                     </h3>
                                   </Link>
-                                  
 
                                   {/* Price Display */}
                                   <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
                                     <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
-                                      {formatPrice(item.totalPrice / item.totalQuantity)}
+                                      {formatPrice(variantPrice)}
                                     </span>
-                                    {product?.originalPrice && product.originalPrice > (item.totalPrice / item.totalQuantity) && (
+                                    {product?.originalPrice && product.originalPrice > variantPrice && (
                                       <>
                                         <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
                                           {formatPrice(product.originalPrice)}
                                         </span>
                                         <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
-                                          Save {formatPrice(product.originalPrice - unitPrice)}
+                                          Save {formatPrice(product.originalPrice - variantPrice)}
                                         </span>
                                       </>
                                     )}
                                   </div>
 
                                   {/* Delivery estimate */}
-                                  <div className={cn("flex items-center gap-0.5 mt-0.5 sm:mt-2 text-[9px] sm:text-xs", getDeliveryStatus(product, item.totalPrice).color)}>
+                                  <div className={cn("flex items-center gap-0.5 mt-0.5 sm:mt-2 text-[9px] sm:text-xs", getDeliveryStatus(product, variantTotalPrice).color)}>
                                     <Truck className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
-                                    <span>{getDeliveryStatus(product, item.totalPrice).text}</span>
+                                    <span>{getDeliveryStatus(product, variantTotalPrice).text}</span>
                                 </div>
 
                                   {/* Mobile: Quantity Controls and Actions below product details */}
@@ -1119,8 +1101,8 @@ function CartPageContent() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, -1)}
-                                disabled={item.totalQuantity <= 1 || (product && product.price < 500 && item.totalQuantity <= 5)}
+                                onClick={() => handleQuantityChange(item.productId, variant.variantId, -1)}
+                                disabled={variantQuantity <= 1 || (product && product.price < 500 && variantQuantity <= 5)}
                                         className="rounded-none h-5 w-5 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700"
                               >
                                 <Minus className="w-2.5 h-2.5" />
@@ -1128,9 +1110,9 @@ function CartPageContent() {
                                       <Input
                                         type="number"
                                         min={product && product.price < 500 ? "5" : "1"}
-                                        value={item.totalQuantity}
+                                        value={variantQuantity}
                                         onChange={(e) => {
-                                          handleQuantityInputChange(item.productId, item.variants[0]?.variantId, e.target.value)
+                                          handleQuantityInputChange(item.productId, variant.variantId, e.target.value)
                                         }}
                                         onKeyDown={(e) => {
                                           if (product && product.price < 500) {
@@ -1144,7 +1126,7 @@ function CartPageContent() {
                                               e.preventDefault()
                                               setQuantityWarningItem({
                                                 productId: item.productId,
-                                                variantId: item.variants[0]?.variantId,
+                                                variantId: variant.variantId,
                                                 productName: product.name
                                               })
                                               setIsQuantityWarningModalOpen(true)
@@ -1152,7 +1134,7 @@ function CartPageContent() {
                                           }
                                         }}
                                         style={{
-                                          width: `${getQuantityInputWidth(item.totalQuantity)}rem`,
+                                          width: `${getQuantityInputWidth(variantQuantity)}rem`,
                                           minWidth: '1.5rem',
                                           maxWidth: '4rem'
                                         }}
@@ -1161,8 +1143,8 @@ function CartPageContent() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, 1)}
-                                disabled={stockQty !== null && item.totalQuantity >= stockQty}
+                                onClick={() => handleQuantityChange(item.productId, variant.variantId, 1)}
+                                disabled={variantStockQty !== null && variantQuantity >= variantStockQty}
                                 className="rounded-none h-5 w-5 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
                               >
                                 <Plus className="w-2.5 h-2.5" />
@@ -1171,20 +1153,6 @@ function CartPageContent() {
 
                                   {/* Action Buttons */}
                                   <div className="flex items-center gap-0.5">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => {
-                                        setPreviewItem(item)
-                                        setIsPreviewOpen(true)
-                                      }}
-                                      className={cn(
-                                          "h-5 px-1 text-[9px] text-green-500 hover:bg-green-50 hover:text-green-600",
-                                        themeClasses.buttonGhostHoverBg,
-                                      )}
-                                    >
-                                        Preview
-                                    </Button>
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -1205,7 +1173,7 @@ function CartPageContent() {
                           <Button
                             variant="ghost"
                             size="icon"
-                                        onClick={() => handleRemoveItem(item.productId)}
+                                        onClick={() => handleRemoveItem(item.productId, variant.variantId)}
                             className={cn(
                                           "h-5 w-5 text-red-500 hover:bg-red-50 hover:text-red-600",
                               themeClasses.buttonGhostHoverBg,
@@ -1230,8 +1198,8 @@ function CartPageContent() {
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, -1)}
-                                      disabled={item.totalQuantity <= 1 || (product && product.price < 500 && item.totalQuantity <= 5)}
+                                      onClick={() => handleQuantityChange(item.productId, variant.variantId, -1)}
+                                      disabled={variantQuantity <= 1 || (product && product.price < 500 && variantQuantity <= 5)}
                                       className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700"
                                     >
                                       <Minus className="w-3.5 h-3.5" />
@@ -1239,9 +1207,9 @@ function CartPageContent() {
                                     <Input
                                       type="number"
                                       min={product && product.price < 500 ? "5" : "1"}
-                                      value={item.totalQuantity}
+                                      value={variantQuantity}
                                       onChange={(e) => {
-                                        handleQuantityInputChange(item.productId, item.variants[0]?.variantId, e.target.value)
+                                        handleQuantityInputChange(item.productId, variant.variantId, e.target.value)
                                       }}
                                       onKeyDown={(e) => {
                                         if (product && product.price < 500) {
@@ -1255,7 +1223,7 @@ function CartPageContent() {
                                             e.preventDefault()
                                             setQuantityWarningItem({
                                               productId: item.productId,
-                                              variantId: item.variants[0]?.variantId,
+                                              variantId: variant.variantId,
                                               productName: product.name
                                             })
                                             setIsQuantityWarningModalOpen(true)
@@ -1263,7 +1231,7 @@ function CartPageContent() {
                                         }
                                       }}
                                       style={{
-                                        width: `${getDesktopQuantityInputWidth(item.totalQuantity)}rem`,
+                                        width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`,
                                         minWidth: '2.5rem',
                                         maxWidth: '6rem'
                                       }}
@@ -1272,8 +1240,8 @@ function CartPageContent() {
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      onClick={() => handleQuantityChange(item.productId, item.variants[0]?.variantId, 1)}
-                                      disabled={stockQty !== null && item.totalQuantity >= stockQty}
+                                      onClick={() => handleQuantityChange(item.productId, variant.variantId, 1)}
+                                      disabled={variantStockQty !== null && variantQuantity >= variantStockQty}
                                       className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
                                     >
                                       <Plus className="w-3.5 h-3.5" />
@@ -1282,20 +1250,6 @@ function CartPageContent() {
 
                                   {/* Action Buttons */}
                                   <div className="flex items-center gap-0.5">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => {
-                                        setPreviewItem(item)
-                                        setIsPreviewOpen(true)
-                                      }}
-                                      className={cn(
-                                        "h-7 px-3 text-sm text-green-500 hover:bg-green-50 hover:text-green-600",
-                                        themeClasses.buttonGhostHoverBg,
-                                      )}
-                                    >
-                                      Preview
-                                    </Button>
                                     <Button
                                       variant="ghost"
                                       size="icon"
@@ -1316,7 +1270,7 @@ function CartPageContent() {
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      onClick={() => handleRemoveItem(item.productId)}
+                                      onClick={() => handleRemoveItem(item.productId, variant.variantId)}
                                       className={cn(
                                         "h-7 w-7 text-red-500 hover:bg-red-50 hover:text-red-600",
                                         themeClasses.buttonGhostHoverBg,
@@ -1328,19 +1282,25 @@ function CartPageContent() {
                       </div>
                               </div>
 
-                              {/* Item Total */}
+                              {/* Item Total Price */}
                               <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
-                                <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>Item Total:</span>
+                                <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>Item Total Price:</span>
                                 <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>
-                        {formatPrice(item.totalPrice)}
+                        {formatPrice(variantTotalPrice)}
                                 </span>
                               </div>
                             </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                    )
-                  })}
+                          </div>
+                        </div>
+                              )
+                            })
+                          })}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        )
+                      })}
                   </div>
             </div>
 
@@ -1604,19 +1564,6 @@ function CartPageContent() {
 
       <Footer />
 
-      {/* Selection Preview Dialog */}
-      {previewItem && (
-        <CartSelectionPreview
-          item={previewItem}
-          isOpen={isPreviewOpen}
-          onClose={() => {
-            setIsPreviewOpen(false)
-            setPreviewItem(null)
-          }}
-          onQuantityChange={handleQuantityChange}
-          formatPrice={formatPrice}
-        />
-      )}
 
       {/* Clear Cart Confirmation */}
       <ValidationModal

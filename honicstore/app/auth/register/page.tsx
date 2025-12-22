@@ -14,6 +14,7 @@ import { useTheme } from "@/hooks/use-theme"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, Loader2, CheckCircle, XCircle, Store } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { validateEmailFormat } from "@/lib/email-validation"
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -30,15 +31,19 @@ export default function RegisterPage() {
   const [emailExists, setEmailExists] = useState(false)
   const [checkingEmail, setCheckingEmail] = useState(false)
   const [emailCheckTimeout, setEmailCheckTimeout] = useState<NodeJS.Timeout | null>(null)
+  const [emailValidationTimeout, setEmailValidationTimeout] = useState<NodeJS.Timeout | null>(null)
 
-  // Cleanup timeout on unmount
+  // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
       if (emailCheckTimeout) {
         clearTimeout(emailCheckTimeout)
       }
+      if (emailValidationTimeout) {
+        clearTimeout(emailValidationTimeout)
+      }
     }
-  }, [emailCheckTimeout])
+  }, [emailCheckTimeout, emailValidationTimeout])
 
   const { signUp } = useAuth()
   const { themeClasses } = useTheme()
@@ -57,11 +62,16 @@ export default function RegisterPage() {
       newErrors.name = "Name can only contain letters and spaces"
     }
 
-    // Email validation
+    // Email validation with domain check
     if (!formData.email) {
       newErrors.email = "Email is required"
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = "Please enter a valid email address"
+    } else {
+      const emailValidation = validateEmailFormat(formData.email)
+      if (!emailValidation.isValid) {
+        newErrors.email = emailValidation.error || "Please enter a valid email address"
+      } else {
+        setEmailSuggestion(null)
+      }
     }
 
     // Password validation
@@ -153,9 +163,65 @@ export default function RegisterPage() {
   const handleInputChange = (field: string, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: "" }))
+    // Real-time email validation as user types
+    if (field === 'email' && typeof value === 'string') {
+      // Clear previous validation timeout
+      if (emailValidationTimeout) {
+        clearTimeout(emailValidationTimeout)
+      }
+
+      // Clear previous errors
+      setErrors(prev => ({ ...prev, email: "" }))
+      setEmailExists(false)
+
+      // Validate email after user stops typing (debounce)
+      const timeout = setTimeout(async () => {
+        if (value.trim().length > 0) {
+          // Step 1: Basic format validation
+          const emailValidation = validateEmailFormat(value.trim())
+          
+          if (!emailValidation.isValid) {
+            setErrors(prev => ({ 
+              ...prev, 
+              email: emailValidation.error || "Please enter a valid email address" 
+            }))
+            return
+          }
+
+          // Step 2: DNS/SMTP validation for invalid domains
+          try {
+            const response = await fetch('/api/auth/validate-email-domain', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: value.trim() })
+            })
+            
+            const domainValidation = await response.json()
+            
+            if (!domainValidation.isValid) {
+              setErrors(prev => ({ 
+                ...prev, 
+                email: domainValidation.error || "Invalid email domain. Please check your email address." 
+              }))
+            } else {
+              setErrors(prev => ({ ...prev, email: "" }))
+            }
+          } catch (error) {
+            // If DNS check fails, use format validation result
+            setErrors(prev => ({ 
+              ...prev, 
+              email: emailValidation.error || "Please enter a valid email address" 
+            }))
+          }
+        }
+      }, 500) // Wait 500ms after user stops typing (longer for DNS check)
+
+      setEmailValidationTimeout(timeout)
+    } else {
+      // Clear error when user starts typing other fields
+      if (errors[field]) {
+        setErrors(prev => ({ ...prev, [field]: "" }))
+      }
     }
   }
 
@@ -265,7 +331,7 @@ export default function RegisterPage() {
                     value={formData.email}
                     onChange={async (e) => {
                       const email = e.target.value
-                      handleInputChange("email", email)
+                      handleInputChange("email", email) // This now handles real-time validation
                       setEmailExists(false)
                       
                       // Clear previous timeout
@@ -273,12 +339,13 @@ export default function RegisterPage() {
                         clearTimeout(emailCheckTimeout)
                       }
                       
-                      // Validate email format first
-                      if (!email || !/\S+@\S+\.\S+/.test(email)) {
+                      // Only check email existence if format is valid (after real-time validation)
+                      const emailValidation = validateEmailFormat(email.trim())
+                      if (!emailValidation.isValid || !email || !/\S+@\S+\.\S+/.test(email)) {
                         return
                       }
                       
-                      // Debounce email check (wait 500ms after user stops typing)
+                      // Debounce email existence check (wait 500ms after user stops typing)
                       const timeout = setTimeout(async () => {
                         setCheckingEmail(true)
                         try {

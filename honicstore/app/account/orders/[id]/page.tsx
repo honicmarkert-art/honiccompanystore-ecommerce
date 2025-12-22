@@ -32,7 +32,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 
 interface Order {
-  id: string
+  // id: string // REMOVED: UUID should never be exposed to client
   orderNumber: string
   referenceId: string
   pickupId: string
@@ -69,7 +69,8 @@ interface Order {
 }
 
 interface OrderItem {
-  id: string
+  // id: string // REMOVED: UUID should never be exposed to client
+  itemKey?: string // Safe, non-UUID identifier for client-side operations
   productId: string
   productName: string
   productImage: string
@@ -78,8 +79,8 @@ interface OrderItem {
   quantity: number
   unitPrice: number
   totalPrice: number
-  supplierId?: string | null
-  supplierName?: string | null
+  // supplierId?: string | null // REMOVED: UUID should never be exposed to client
+  supplierName?: string | null // Only display name, never UUID
   trackingNumber?: string | null
   status?: string // Per-item status from confirmed_order_items
 }
@@ -170,14 +171,6 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       }
       
       setOrder(orderData)
-      
-      // Debug: Log order data to see what status we're getting
-      console.log('📦 Order Data:', {
-        status: orderData?.status,
-        deliveryOption: orderData?.deliveryOption,
-        confirmedAt: orderData?.confirmedAt,
-        updatedAt: orderData?.updatedAt
-      })
       
       // Build dynamic status history from order data
       const dynamicStatusHistory: OrderStatus[] = []
@@ -288,22 +281,14 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       // Handle rate limit errors gracefully
       if (error?.status === 429 || error?.code === 'over_request_rate_limit') {
         if (!isBackgroundRefresh) {
-          console.warn('Rate limit reached. Please wait a moment before refreshing.')
           setError('Too many requests. Please wait a moment and try again.')
-      } else {
-          // For background refreshes, just log and skip - don't show error
-          console.debug('Rate limit reached during background refresh. Skipping this refresh cycle.')
         }
         return // Don't update loading state, just return
       }
       
       // Only show error on initial load, not on background refreshes
       if (!isBackgroundRefresh) {
-        console.error('Error fetching order details:', error)
         setError(error instanceof Error ? error.message : 'Failed to fetch order details')
-      } else {
-        // Silently log background refresh errors for debugging
-        console.debug('Background refresh error (silent):', error)
       }
     } finally {
       // Only update loading state on initial load, not on background refreshes
@@ -313,7 +298,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }
   
-  const handleMarkAsDelivered = async (itemIds?: string[]) => {
+  const handleMarkAsDelivered = async () => {
     if (!orderNumber || !order) return
     
     try {
@@ -324,9 +309,8 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          itemIds: itemIds || undefined
-        }),
+        // SECURITY: Don't send UUIDs. API will handle updating items by supplier group server-side
+        body: JSON.stringify({}),
       })
       
       if (!response.ok) {
@@ -349,7 +333,6 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       // Refresh status history (background refresh, no loading state)
       await fetchOrderDetails(true)
     } catch (error: any) {
-      console.error('Error marking order as delivered/picked up:', error)
       alert(error.message || 'Failed to mark order. Please try again.')
     } finally {
       setMarkingDelivered(false)
@@ -371,12 +354,10 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        console.error('❌ [MARK-RECEIVED] API Error:', errorData)
         throw new Error(errorData.error || errorData.details || 'Failed to mark order as received')
       }
       
       const data = await response.json()
-      console.log('✅ [MARK-RECEIVED] Success:', data)
       
       // Update local order state
       setOrder({
@@ -390,11 +371,8 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       
       alert('Order received successfully!')
     } catch (error: any) {
-      console.error('❌ [MARK-RECEIVED] Full error:', error)
-      console.error('❌ [MARK-RECEIVED] Error message:', error.message)
-      console.error('❌ [MARK-RECEIVED] Error stack:', error.stack)
       const errorMessage = error.message || 'Failed to mark order as received. Please try again.'
-      alert(`Error: ${errorMessage}\n\nPlease check the browser console for more details.`)
+      alert(`Error: ${errorMessage}`)
     } finally {
       setMarkingReceived(false)
     }
@@ -403,21 +381,21 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
+        return <Badge className="bg-yellow-100 text-yellow-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Pending</Badge>
       case 'confirmed':
-        return <Badge className="bg-blue-100 text-blue-800">Confirmed</Badge>
+        return <Badge className="bg-blue-100 text-blue-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Confirmed</Badge>
       case 'shipped':
-        return <Badge className="bg-indigo-100 text-indigo-800">Shipped</Badge>
+        return <Badge className="bg-indigo-100 text-indigo-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Shipped</Badge>
       case 'delivered':
-        return <Badge className="bg-green-100 text-green-800">Delivered</Badge>
+        return <Badge className="bg-green-100 text-green-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Delivered</Badge>
       case 'ready_for_pickup':
-        return <Badge className="bg-purple-100 text-purple-800">Ready for Pickup</Badge>
+        return <Badge className="bg-purple-100 text-purple-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Ready for Pickup</Badge>
       case 'picked_up':
-        return <Badge className="bg-green-100 text-green-800">Picked Up</Badge>
+        return <Badge className="bg-green-100 text-green-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Picked Up</Badge>
       case 'cancelled':
-        return <Badge className="bg-red-100 text-red-800">Cancelled</Badge>
+        return <Badge className="bg-red-100 text-red-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Cancelled</Badge>
       default:
-        return <Badge variant="outline">{status}</Badge>
+        return <Badge variant="outline" className="text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">{status}</Badge>
     }
   }
 
@@ -482,7 +460,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
     timeline.push({
       status: 'confirmed',
       description: 'Order confirmed',
-      location: 'Store',
+      location: 'honic',
       completed: isConfirmed
     })
     
@@ -492,7 +470,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       timeline.push({
         status: 'shipped',
         description: 'Package shipped',
-        location: deliveryOption === 'pickup' ? 'Store' : 'Warehouse',
+        location: 'seller',
         completed: isShipped
       })
     }
@@ -522,7 +500,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       timeline.push({
         status: 'delivered',
         description: 'Package delivered',
-        location: deliveryOption === 'pickup' ? 'Store' : 'Destination',
+        location: 'seller',
         completed: packageStatus === 'delivered' || packageStatus === 'picked_up' || isReceived
       })
     }
@@ -582,15 +560,15 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
   const getPaymentStatusBadge = (status: string) => {
     switch (status) {
       case 'paid':
-        return <Badge className="bg-green-100 text-green-800">Payment Successful</Badge>
+        return <Badge className="bg-green-100 text-green-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Payment Successful</Badge>
       case 'pending':
-        return <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
+        return <Badge className="bg-yellow-100 text-yellow-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Pending</Badge>
       case 'failed':
-        return <Badge className="bg-red-100 text-red-800">Failed</Badge>
+        return <Badge className="bg-red-100 text-red-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Failed</Badge>
       case 'unpaid':
-        return <Badge className="bg-gray-100 text-gray-800">Unpaid</Badge>
+        return <Badge className="bg-gray-100 text-gray-800 text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">Unpaid</Badge>
       default:
-        return <Badge variant="outline">{status}</Badge>
+        return <Badge variant="outline" className="text-xs sm:text-sm px-2 sm:px-2.5 py-0.5 sm:py-1">{status}</Badge>
     }
   }
 
@@ -652,21 +630,25 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg">Loading order details...</div>
+      <div className="flex items-center justify-center h-64 px-4">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-3"></div>
+          <div className="text-sm sm:text-base">Loading order details...</div>
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
-          <div className="text-lg text-red-600 dark:text-red-400">{error}</div>
+      <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8">
+        <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] gap-3 sm:gap-4">
+          <AlertCircle className="w-12 h-12 sm:w-16 sm:h-16 text-red-600 dark:text-red-400" />
+          <div className="text-sm sm:text-base text-red-600 dark:text-red-400 text-center px-4">{error}</div>
           <Button onClick={() => {
             setError(null)
             fetchOrderDetails(false)
-          }}>
+          }} className="h-10 sm:h-11 text-sm sm:text-base px-6">
             Try Again
           </Button>
         </div>
@@ -676,16 +658,16 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
 
   if (!order) {
     return (
-      <div className="container mx-auto px-4 py-8 min-h-screen bg-background">
-        <Card>
-          <CardContent className="p-8 text-center">
-            <Package className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-medium mb-2">Order Not Found</h3>
-            <p className="text-muted-foreground mb-4">
+      <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 min-h-screen bg-background">
+        <Card className="shadow-sm border-0 sm:border">
+          <CardContent className="p-6 sm:p-8 text-center">
+            <Package className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-3 sm:mb-4" />
+            <h3 className="text-base sm:text-lg font-medium mb-2">Order Not Found</h3>
+            <p className="text-xs sm:text-sm text-muted-foreground mb-4 px-4">
               The order you're looking for doesn't exist or you don't have permission to view it.
             </p>
             <Link href="/account/orders">
-              <Button>Back to Orders</Button>
+              <Button className="h-10 sm:h-11 text-sm sm:text-base px-6">Back to Orders</Button>
             </Link>
           </CardContent>
         </Card>
@@ -694,14 +676,15 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-4 mb-4">
+    <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-7xl">
+      {/* Header - Mobile Optimized */}
+      <div className="mb-4 sm:mb-8">
+        <div className="flex items-center gap-2 sm:gap-4 mb-3 sm:mb-4">
           <Link href="/account/orders">
-            <Button variant="outline" size="sm">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Orders
+            <Button variant="outline" size="sm" className="h-9 sm:h-10 px-3 sm:px-4 text-xs sm:text-sm">
+              <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+              <span className="hidden sm:inline">Back to Orders</span>
+              <span className="sm:hidden">Back</span>
             </Button>
           </Link>
           <Button 
@@ -709,52 +692,52 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             size="sm"
             onClick={() => fetchOrderDetails(false)}
             disabled={loading}
+            className="h-9 sm:h-10 px-3 sm:px-4 text-xs sm:text-sm"
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 ${loading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
         
-        {/* Order Header Card - Improved Layout */}
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <h1 className="text-2xl font-bold">{order.orderNumber}</h1>
-                  {getStatusBadge(order.status)}
+        {/* Order Header Card - Mobile Native Style */}
+        <Card className="mb-4 sm:mb-6 shadow-sm border-0 sm:border">
+          <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6 pb-4 sm:pb-6">
+            <div className="flex flex-col gap-3 sm:gap-4 mb-3 sm:mb-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+                    <h1 className="text-lg sm:text-2xl font-bold truncate">{order.orderNumber}</h1>
+                    <div className="flex-shrink-0">{getStatusBadge(order.status)}</div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                      <span className="truncate">{formatDate(order.createdAt)}</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                      {order.itemCount} item{order.itemCount !== 1 ? 's' : ''}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Calendar className="w-4 h-4" />
-                    {formatDate(order.createdAt)}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Package className="w-4 h-4" />
-                    {order.itemCount} item{order.itemCount !== 1 ? 's' : ''}
-                  </span>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <p className="text-2xl font-bold">{formatCurrency(order.totalAmount, order.currency)}</p>
-                  <p className="text-xs text-muted-foreground">Total</p>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xl sm:text-2xl font-bold">{formatCurrency(order.totalAmount, order.currency)}</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">Total</p>
                 </div>
               </div>
             </div>
             
-            <div className="flex flex-wrap items-center gap-3 pt-4 border-t">
-              <div className="flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Payment:</span>
-                <span className="text-sm">{order.paymentMethod}</span>
-                {getPaymentStatusBadge(order.paymentStatus)}
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center gap-2 sm:gap-3 pt-3 sm:pt-4 border-t">
+              <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                <CreditCard className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground flex-shrink-0" />
+                <span className="font-medium">Payment:</span>
+                <span className="truncate">{order.paymentMethod}</span>
+                <div className="flex-shrink-0">{getPaymentStatusBadge(order.paymentStatus)}</div>
               </div>
-              <div className="flex items-center gap-2">
-                <Truck className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Delivery:</span>
-                <Badge variant={order.deliveryOption === 'pickup' ? 'secondary' : 'outline'}>
+              <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                <Truck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground flex-shrink-0" />
+                <span className="font-medium">Delivery:</span>
+                <Badge variant={order.deliveryOption === 'pickup' ? 'secondary' : 'outline'} className="text-xs">
                   {order.deliveryOption === 'pickup' ? 'Pickup' : 'Delivery'}
                 </Badge>
               </div>
@@ -762,34 +745,35 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
           </CardContent>
         </Card>
         
-        {/* Action Button */}
-        <div className="flex items-center gap-3 mb-6">
-          <Button variant="outline" size="lg" className="w-full" onClick={() => handleDownloadInvoice()} disabled={downloadingInvoice}>
-            <Download className="w-4 h-4 mr-2" />
+        {/* Action Button - Mobile Optimized */}
+        <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+          <Button variant="outline" size="lg" className="w-full h-11 sm:h-12 text-sm sm:text-base" onClick={() => handleDownloadInvoice()} disabled={downloadingInvoice}>
+            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
             {downloadingInvoice ? 'Generating Invoice...' : 'Download Invoice'}
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
         {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Order Items */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="w-5 h-5" />
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+          {/* Order Items - Mobile Native Style */}
+          <Card className="shadow-sm border-0 sm:border">
+            <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <Package className="w-4 h-4 sm:w-5 sm:h-5" />
                 Order Items ({order.itemCount})
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
               <div className="space-y-6">
                 {(() => {
                   // Group items by supplier
                   const groupedBySupplier = new Map<string | null, typeof order.items>()
                   
                   order.items.forEach(item => {
-                    const supplierKey = item.supplierId || 'no-supplier'
+                    // SECURITY: Use supplier name as key instead of UUID
+                    const supplierKey = item.supplierName || 'no-supplier'
                     if (!groupedBySupplier.has(supplierKey)) {
                       groupedBySupplier.set(supplierKey, [])
                     }
@@ -798,7 +782,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                   
                   return Array.from(groupedBySupplier.entries()).map(([supplierKey, items]) => {
                     const supplierName = items[0]?.supplierName || 'Honic Company'
-                    const supplierId = items[0]?.supplierId
+                    // supplierId removed - UUID should never be exposed to client
                     const groupTotal = items.reduce((sum, item) => sum + item.totalPrice, 0)
                     // Get tracking number from first item (all items from same supplier should have same tracking number)
                     const trackingNumber = items[0]?.trackingNumber || items.find(item => item.trackingNumber)?.trackingNumber || null
@@ -813,84 +797,67 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                     }, 'confirmed')
                     
                     return (
-                      <div key={supplierKey} className="border rounded-lg p-4 space-y-4">
-                        {/* Supplier Header */}
-                        <div className="flex items-center justify-between pb-3 border-b">
-                          <div>
-                            <h3 className="font-semibold text-lg">{supplierName}</h3>
-                            <p className="text-sm text-muted-foreground">
+                      <div key={supplierKey} className="border rounded-lg p-3 sm:p-4 space-y-3 sm:space-y-4 bg-white dark:bg-gray-900">
+                        {/* Supplier Header - Mobile Optimized */}
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-sm sm:text-lg truncate">{supplierName}</h3>
+                            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                               {items.length} {items.length === 1 ? 'product' : 'products'} • Total: {formatCurrency(groupTotal)}
                             </p>
                             {trackingNumber && (
                               <div className="mt-2">
-                                <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                                <p className="text-xs sm:text-sm font-medium text-blue-600 dark:text-blue-400 break-all">
                                   Tracking: {trackingNumber}
                                 </p>
                               </div>
                             )}
                           </div>
-                          {/* Show button based on package status, not tracking number */}
-                          {packageStatus === 'picked_up' ? (
-                            <Button 
-                              variant="outline" 
-                              className="flex items-center gap-2 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
-                              disabled
-                            >
-                              <CheckCircle className="w-4 h-4 text-green-600" />
-                              Package Picked Up
-                            </Button>
-                          ) : packageStatus === 'delivered' ? (
-                            <Button 
-                              variant="outline" 
-                              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white border-purple-600"
-                              onClick={() => handleMarkAsDelivered(items.map(item => item.id))}
-                              disabled={markingDelivered}
-                            >
-                              {markingDelivered ? (
-                                <>
-                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                  Processing...
-                                </>
-                              ) : (
-                                  <>
-                                    <Package className="w-4 h-4" />
-                                    Package Picked Up
-                                  </>
-                                )}
-                              </Button>
-                          ) : !trackingNumber ? (
-                            <Badge variant="outline" className="text-muted-foreground">
-                              Tracking Pending
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-muted-foreground">
-                              {packageStatus === 'confirmed' ? 'Awaiting Shipment' : packageStatus}
-                            </Badge>
-                          )}
+                          {/* Show status badge only - button moved to bottom */}
+                          <div className="flex-shrink-0">
+                            {packageStatus === 'picked_up' ? (
+                              <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs px-2 py-1">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                Picked Up
+                              </Badge>
+                            ) : packageStatus === 'delivered' ? (
+                              <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 text-xs px-2 py-1">
+                                Delivered
+                              </Badge>
+                            ) : !trackingNumber ? (
+                              <Badge variant="outline" className="text-muted-foreground text-xs px-2 py-1">
+                                Tracking Pending
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-muted-foreground text-xs px-2 py-1">
+                                {packageStatus === 'confirmed' ? 'Awaiting Shipment' : packageStatus}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                         
-                        {/* Tracking Timeline - Horizontal */}
+                        {/* Tracking Timeline - Horizontal - Mobile Optimized */}
                         {/* Show timeline if order is confirmed (has confirmedAt) - always show after confirmation */}
                         {order.confirmedAt && (
-                          <div id={`tracking-timeline-${supplierKey}`} className="pt-4 border-t">
-                            <h4 className="text-sm font-semibold mb-4 flex items-center gap-2">
-                              <Truck className="w-4 h-4" />
+                          <div id={`tracking-timeline-${supplierKey}`} className="pt-3 sm:pt-4 border-t">
+                            <h4 className="text-xs sm:text-sm font-semibold mb-3 sm:mb-4 flex items-center gap-1.5 sm:gap-2">
+                              <Truck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                               Package Tracking
                               {!trackingNumber && (
-                                <Badge variant="outline" className="ml-2 text-xs">
+                                <Badge variant="outline" className="ml-1.5 sm:ml-2 text-[10px] sm:text-xs px-1.5 py-0.5">
                                   Tracking Pending
                                 </Badge>
                               )}
                             </h4>
-                            <div className="overflow-x-auto pb-4">
-                              <div className="flex items-start gap-2 min-w-max">
+                            <div className="overflow-x-auto pb-2 sm:pb-4 -mx-3 sm:mx-0 px-3 sm:px-0">
+                              <div className="flex items-start gap-1.5 sm:gap-2 min-w-max">
                                 {getTrackingTimeline(packageStatus, order.deliveryOption, order.isReceived || false, order.confirmedAt).map((step, index, array) => {
                                   const isLastStep = index === array.length - 1
                                   
                                   return (
-                                    <div key={index} className="flex items-start gap-2 flex-shrink-0">
+                                    <div key={index} className="flex items-start gap-1.5 sm:gap-2 flex-shrink-0">
                                       <div className="flex flex-col items-center">
-                                        <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 ${
+                                        <div className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center border-2 ${
                                           step.completed
                                             ? 'bg-green-500 border-green-500 text-white' 
                                             : isLastStep && !step.completed
@@ -898,29 +865,29 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                                             : 'bg-muted border-muted-foreground'
                                         }`}>
                                           {step.completed ? (
-                                            <CheckCircle className="w-4 h-4" />
+                                            <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                           ) : (
-                                            <Clock className="w-3.5 h-3.5" />
+                                            <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                           )}
                                         </div>
                                         {!isLastStep && (
-                                          <div className={`h-0.5 w-12 mt-2 ${
+                                          <div className={`h-0.5 w-8 sm:w-12 mt-1.5 sm:mt-2 ${
                                             step.completed ? 'bg-green-500' : 'bg-muted'
                                           }`} />
                                         )}
                                       </div>
-                                      <div className="flex flex-col items-center min-w-[80px] max-w-[120px] pt-1">
-                                        <div className="flex flex-col items-center gap-1">
-                                          <span className={`text-xs font-medium text-center ${
+                                      <div className="flex flex-col items-center min-w-[70px] sm:min-w-[80px] max-w-[100px] sm:max-w-[120px] pt-0.5 sm:pt-1">
+                                        <div className="flex flex-col items-center gap-0.5 sm:gap-1">
+                                          <span className={`text-[10px] sm:text-xs font-medium text-center leading-tight ${
                                             step.completed ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
                                           }`}>
                                             {step.description}
                                           </span>
                                           {step.completed && (
-                                            <CheckCircle className="w-3 h-3 text-green-500" />
+                                            <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-green-500" />
                                           )}
                                         </div>
-                                        <p className="text-[10px] text-muted-foreground text-center mt-1">
+                                        <p className="text-[9px] sm:text-[10px] text-muted-foreground text-center mt-0.5 sm:mt-1 leading-tight">
                                           {step.location}
                                         </p>
                                       </div>
@@ -932,30 +899,73 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                           </div>
                         )}
                         
-                        {/* Products in this supplier group */}
-                        <div className="space-y-3">
+                        {/* Products in this supplier group - Mobile Native Style */}
+                        <div className="space-y-2 sm:space-y-3">
                           {items.map((item) => (
-                            <div key={item.id} className="flex gap-4 p-3 bg-muted/50 rounded-lg">
-                    <Image
-                      src={item.productImage || '/placeholder.jpg'}
-                      alt={item.productName || 'Product image'}
+                            <div key={item.itemKey || `${item.productId}-${item.variantName || 'default'}`} className="flex gap-2.5 sm:gap-4 p-2.5 sm:p-3 bg-muted/50 rounded-lg">
+                              <Image
+                                src={item.productImage || '/placeholder.jpg'}
+                                alt={item.productName || 'Product image'}
                                 width={60}
                                 height={60}
-                      className="rounded-lg object-cover"
-                    />
-                    <div className="flex-1">
-                                <h4 className="font-medium">{item.productName}</h4>
-                      {item.variantName && (
-                                  <p className="text-xs text-muted-foreground">Variant: {item.variantName}</p>
+                                className="rounded-lg object-cover w-14 h-14 sm:w-[60px] sm:h-[60px] flex-shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-medium text-sm sm:text-base truncate">{item.productName}</h4>
+                                {item.variantName && (
+                                  <p className="text-xs text-muted-foreground truncate mt-0.5">Variant: {item.variantName}</p>
                                 )}
-                                <div className="flex items-center justify-between mt-1">
-                                  <span className="text-sm text-muted-foreground">Qty: {item.quantity}</span>
-                                  <span className="font-semibold text-sm">{formatCurrency(item.totalPrice)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                                <div className="flex items-center justify-between mt-1.5 sm:mt-2 gap-2">
+                                  <span className="text-xs sm:text-sm text-muted-foreground">Qty: {item.quantity}</span>
+                                  <span className="font-semibold text-xs sm:text-sm flex-shrink-0">{formatCurrency(item.totalPrice)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
+                        
+                        {/* Pickup Confirmation Section - Show when package is delivered */}
+                        {packageStatus === 'delivered' && (
+                          <div className="pt-3 sm:pt-4 border-t space-y-3">
+                            <div className="p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                              <div className="flex items-start gap-2 sm:gap-3">
+                                <Package className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                                <div className="flex-1 space-y-2">
+                                  <h4 className="font-semibold text-sm sm:text-base text-blue-900 dark:text-blue-100">
+                                    Package Delivered from {supplierName}
+                                  </h4>
+                                  <p className="text-xs sm:text-sm text-blue-800 dark:text-blue-200 leading-relaxed">
+                                    Your package has been delivered. Please pick it up and confirm to complete your order.
+                                  </p>
+                                  <div className="pt-2 border-t border-blue-200 dark:border-blue-700">
+                                    <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                                      <span className="font-semibold">Auto-confirmation:</span> If you don't confirm within 5 days, 
+                                      your order will be automatically confirmed and refund requests will not be considered.
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <Button 
+                              variant="default" 
+                              className="w-full bg-purple-600 hover:bg-purple-700 text-white border-purple-600 h-11 sm:h-12 text-sm sm:text-base font-semibold shadow-sm"
+                              onClick={() => handleMarkAsDelivered(items.map(item => item.itemKey || `${item.productId}-${item.variantName || 'default'}`))}
+                              disabled={markingDelivered}
+                            >
+                              {markingDelivered ? (
+                                <>
+                                  <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />
+                                  Confirming Pickup...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                                  Confirm Package Pickup
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )
                   })
@@ -964,49 +974,24 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             </CardContent>
           </Card>
 
-          {/* Action Buttons - Moved from Order Status section */}
-          {/* For both shipping and pickup orders: Mark as Picked Up after delivered */}
-          {order.status === 'delivered' && order.status !== 'picked_up' && (
-          <Card>
-              <CardContent className="pt-6">
-                <Button 
-                  onClick={handleMarkAsDelivered}
-                  disabled={markingDelivered}
-                  className="w-full bg-purple-600 hover:bg-purple-700"
-                >
-                  {markingDelivered ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <Package className="w-4 h-4 mr-2" />
-                      Package Picked Up
-                    </>
-                  )}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
           
-          {/* Congratulations message - Final status for both shipping and pickup orders */}
+          {/* Congratulations message - Mobile Optimized */}
           {/* Only show when ALL packages are picked up */}
           {(() => {
             // Check if all items are picked up
             const allItemsPickedUp = order.items.every(item => item.status === 'picked_up')
             return allItemsPickedUp && (
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center p-6 bg-green-50 dark:bg-green-900/20 rounded-lg border-2 border-green-200 dark:border-green-800">
-                    <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
-                    <h3 className="text-2xl font-bold text-green-700 dark:text-green-300 mb-2">
+              <Card className="shadow-sm border-0 sm:border">
+                <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6 pb-4 sm:pb-6">
+                  <div className="text-center p-4 sm:p-6 bg-green-50 dark:bg-green-900/20 rounded-lg border-2 border-green-200 dark:border-green-800">
+                    <CheckCircle className="w-12 h-12 sm:w-16 sm:h-16 text-green-600 mx-auto mb-3 sm:mb-4" />
+                    <h3 className="text-lg sm:text-2xl font-bold text-green-700 dark:text-green-300 mb-2">
                       Congratulations!
                     </h3>
-                    <p className="text-lg text-green-600 dark:text-green-400 mb-1">
+                    <p className="text-sm sm:text-lg text-green-600 dark:text-green-400 mb-1">
                       Your order has been successfully picked up!
                     </p>
-                    <p className="text-sm text-green-600 dark:text-green-400">
+                    <p className="text-xs sm:text-sm text-green-600 dark:text-green-400">
                       Thank you for your purchase. We hope you enjoy your products!
                     </p>
                     </div>
@@ -1015,33 +1000,33 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             )
           })()}
           
-          {/* Success Messages */}
+          {/* Success Messages - Mobile Optimized */}
           {(order.status === 'delivered' || order.status === 'picked_up') && !order.isReceived && (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                  <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-                    <CheckCircle className="w-5 h-5" />
-                    <span className="font-medium">
+            <Card className="shadow-sm border-0 sm:border">
+              <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6 pb-4 sm:pb-6">
+                <div className="p-2.5 sm:p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-start gap-2 text-blue-700 dark:text-blue-300">
+                    <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0 mt-0.5" />
+                    <span className="font-medium text-xs sm:text-sm leading-relaxed">
                       Package {order.status === 'picked_up' ? 'picked up' : 'delivered'}! Please confirm receipt above.
-                        </span>
-                      </div>
+                    </span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
           )}
           
-          {/* Final Success Message - Order Complete and Read-Only */}
+          {/* Final Success Message - Mobile Optimized */}
           {order.isReceived && order.receivedAt && (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border-2 border-green-300 dark:border-green-700">
-                  <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
-                    <CheckCircle className="w-6 h-6" />
-                    <div>
-                      <p className="font-bold text-lg">Order Completed Successfully!</p>
-                      <p className="text-sm">Confirmed on {formatDate(order.receivedAt)}</p>
-                      <p className="text-xs mt-1 text-green-600 dark:text-green-400 italic">
+            <Card className="shadow-sm border-0 sm:border">
+              <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6 pb-4 sm:pb-6">
+                <div className="p-3 sm:p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border-2 border-green-300 dark:border-green-700">
+                  <div className="flex items-start gap-2 sm:gap-3 text-green-700 dark:text-green-300">
+                    <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-sm sm:text-lg">Order Completed Successfully!</p>
+                      <p className="text-xs sm:text-sm mt-1">Confirmed on {formatDate(order.receivedAt)}</p>
+                      <p className="text-[10px] sm:text-xs mt-1 text-green-600 dark:text-green-400 italic">
                         This order is now read-only and cannot be modified.
                       </p>
                     </div>
@@ -1051,28 +1036,28 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
           </Card>
           )}
 
-          {/* Tracking Information */}
+          {/* Tracking Information - Mobile Optimized */}
           {order.trackingNumber && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Truck className="w-5 h-5" />
+            <Card className="shadow-sm border-0 sm:border">
+              <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <Truck className="w-4 h-4 sm:w-5 sm:h-5" />
                   Tracking Information
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
+              <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+                <div className="space-y-3 sm:space-y-4">
                   <div>
-                    <label className="text-sm font-medium">Tracking Number</label>
-                    <p className="text-lg font-mono">{order.trackingNumber}</p>
+                    <label className="text-xs sm:text-sm font-medium">Tracking Number</label>
+                    <p className="text-sm sm:text-lg font-mono break-all mt-1">{order.trackingNumber}</p>
                   </div>
                   {order.estimatedDelivery && (
                     <div>
-                      <label className="text-sm font-medium">Estimated Delivery</label>
-                      <p className="text-lg">{formatDate(order.estimatedDelivery)}</p>
+                      <label className="text-xs sm:text-sm font-medium">Estimated Delivery</label>
+                      <p className="text-sm sm:text-lg mt-1">{formatDate(order.estimatedDelivery)}</p>
                     </div>
                   )}
-                  <Button variant="outline" className="w-full">
+                  <Button variant="outline" className="w-full h-10 sm:h-11 text-sm sm:text-base">
                     Track Package
                   </Button>
                 </div>
@@ -1081,29 +1066,29 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
           )}
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Order Summary */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Order Summary</CardTitle>
+        {/* Sidebar - Mobile Optimized */}
+        <div className="space-y-4 sm:space-y-6">
+          {/* Order Summary - Mobile Native Style */}
+          <Card className="shadow-sm border-0 sm:border">
+            <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
+              <CardTitle className="text-base sm:text-lg">Order Summary</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex justify-between">
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+              <div className="space-y-2.5 sm:space-y-3">
+                <div className="flex justify-between text-sm sm:text-base">
                   <span>Subtotal</span>
-                  <span>{formatCurrency(order.totalAmount, order.currency)}</span>
+                  <span className="font-medium">{formatCurrency(order.totalAmount, order.currency)}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between text-sm sm:text-base">
                   <span>Shipping</span>
                   <span>Free</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between text-sm sm:text-base">
                   <span>Tax</span>
                   <span>TZS 0</span>
                 </div>
-                <hr />
-                <div className="flex justify-between font-semibold text-lg">
+                <hr className="my-2 sm:my-3" />
+                <div className="flex justify-between font-semibold text-base sm:text-lg pt-1">
                   <span>Total</span>
                   <span>{formatCurrency(order.totalAmount, order.currency)}</span>
                 </div>
@@ -1111,23 +1096,23 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             </CardContent>
           </Card>
 
-          {/* Payment Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CreditCard className="w-5 h-5" />
+          {/* Payment Information - Mobile Optimized */}
+          <Card className="shadow-sm border-0 sm:border">
+            <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
                 Payment
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
               <div className="space-y-3">
                 <div>
-                  <label className="text-sm font-medium">Payment Method</label>
-                  <p>{order.paymentMethod}</p>
+                  <label className="text-xs sm:text-sm font-medium">Payment Method</label>
+                  <p className="text-sm sm:text-base mt-1">{order.paymentMethod}</p>
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Payment Status</label>
-                  <div className="mt-1">
+                  <label className="text-xs sm:text-sm font-medium">Payment Status</label>
+                  <div className="mt-1.5">
                     {getPaymentStatusBadge(order.paymentStatus)}
                   </div>
                 </div>
@@ -1135,47 +1120,47 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             </CardContent>
           </Card>
 
-          {/* Delivery Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {order.deliveryOption === 'pickup' ? <Package className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
+          {/* Delivery Information - Mobile Optimized */}
+          <Card className="shadow-sm border-0 sm:border">
+            <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                {order.deliveryOption === 'pickup' ? <Package className="w-4 h-4 sm:w-5 sm:h-5" /> : <Truck className="w-4 h-4 sm:w-5 sm:h-5" />}
                 {order.deliveryOption === 'pickup' ? 'Pickup Information' : 'Delivery Information'}
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+              <div className="space-y-3 sm:space-y-4">
                 {/* Delivery Method Badge */}
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
-                  <Badge className={`whitespace-nowrap ${order.deliveryOption === 'pickup' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-start sm:justify-center gap-2">
+                  <Badge className={`whitespace-nowrap text-xs sm:text-sm ${order.deliveryOption === 'pickup' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
                     {order.deliveryOption === 'pickup' ? 'Store Pickup' : 'Home Delivery'}
                   </Badge>
                   {order.deliveryOption === 'pickup' && (
-                    <span className="text-sm text-muted-foreground text-center sm:text-left break-all sm:break-normal">
+                    <span className="text-xs sm:text-sm text-muted-foreground break-all">
                       Pickup ID: <span className="font-mono">{order.pickupId}</span>
                     </span>
                   )}
                 </div>
                 
-                {/* Address Information - Only show if there's an address for delivery orders */}
+                {/* Address Information - Mobile Optimized */}
                 {(order.deliveryOption === 'delivery' || order.deliveryOption === 'shipping') && order.shippingAddress && (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5 sm:space-y-2">
                     {order.shippingAddress.fullName && (
-                      <p className="font-medium">{order.shippingAddress.fullName}</p>
+                      <p className="font-medium text-sm sm:text-base">{order.shippingAddress.fullName}</p>
                     )}
                     {order.shippingAddress.address && (
-                      <p>{order.shippingAddress.address}</p>
+                      <p className="text-sm sm:text-base">{order.shippingAddress.address}</p>
                     )}
-                    {order.shippingAddress.address2 && <p>{order.shippingAddress.address2}</p>}
+                    {order.shippingAddress.address2 && <p className="text-sm sm:text-base">{order.shippingAddress.address2}</p>}
                     {(order.shippingAddress.city || order.shippingAddress.state) && (
-                      <p>{[order.shippingAddress.city, order.shippingAddress.state].filter(Boolean).join(', ')}</p>
+                      <p className="text-sm sm:text-base">{[order.shippingAddress.city, order.shippingAddress.state].filter(Boolean).join(', ')}</p>
                     )}
                     {(order.shippingAddress.postalCode || order.shippingAddress.country) && (
-                      <p>{[order.shippingAddress.postalCode, order.shippingAddress.country].filter(Boolean).join(', ')}</p>
+                      <p className="text-sm sm:text-base">{[order.shippingAddress.postalCode, order.shippingAddress.country].filter(Boolean).join(', ')}</p>
                     )}
                     {order.shippingAddress.phone && (
-                      <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Phone className="w-4 h-4" />
+                      <p className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground mt-2">
+                        <Phone className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                         {order.shippingAddress.phone}
                       </p>
                     )}
@@ -1185,17 +1170,17 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
                 {/* For pickup orders, show pickup ID prominently if no address */}
                 {order.deliveryOption === 'pickup' && (!order.shippingAddress || !order.shippingAddress.fullName) && (
                   <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-xs sm:text-sm text-muted-foreground">
                       Pickup orders don't require a shipping address. Please collect from our store.
                     </p>
                   </div>
                 )}
 
-                {/* Pickup Instructions */}
+                {/* Pickup Instructions - Mobile Optimized */}
                 {order.deliveryOption === 'pickup' && (
-                  <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                    <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2">Pickup Instructions</h4>
-                    <p className="text-sm text-purple-700 dark:text-purple-300">
+                  <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                    <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-1.5 sm:mb-2 text-sm sm:text-base">Pickup Instructions</h4>
+                    <p className="text-xs sm:text-sm text-purple-700 dark:text-purple-300 leading-relaxed">
                       Please bring a valid ID and your pickup ID ({order.pickupId}) when collecting your order.
                       Our store hours are Monday-Friday 9AM-6PM, Saturday 9AM-4PM.
                     </p>
@@ -1205,39 +1190,39 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             </CardContent>
           </Card>
 
-          {/* Billing Address */}
+          {/* Billing Address - Mobile Optimized */}
           {order.billingAddress && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Home className="w-5 h-5" />
+            <Card className="shadow-sm border-0 sm:border">
+              <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <Home className="w-4 h-4 sm:w-5 sm:h-5" />
                   Billing Address
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
+              <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+                <div className="space-y-1.5 sm:space-y-2">
                   {order.billingAddress.fullName && (
-                    <p className="font-medium">{order.billingAddress.fullName}</p>
+                    <p className="font-medium text-sm sm:text-base">{order.billingAddress.fullName}</p>
                   )}
                   {order.billingAddress.address && (
-                    <p>{order.billingAddress.address}</p>
+                    <p className="text-sm sm:text-base">{order.billingAddress.address}</p>
                   )}
                   {(order.billingAddress.city || order.billingAddress.region) && (
-                    <p>{[order.billingAddress.city, order.billingAddress.region].filter(Boolean).join(', ')}</p>
+                    <p className="text-sm sm:text-base">{[order.billingAddress.city, order.billingAddress.region].filter(Boolean).join(', ')}</p>
                   )}
                   {(order.billingAddress.postalCode || order.billingAddress.country) && (
-                    <p>{[order.billingAddress.postalCode, order.billingAddress.country].filter(Boolean).join(', ')}</p>
+                    <p className="text-sm sm:text-base">{[order.billingAddress.postalCode, order.billingAddress.country].filter(Boolean).join(', ')}</p>
                   )}
                   {order.billingAddress.phone && (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Phone className="w-4 h-4" />
+                    <p className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground mt-2">
+                      <Phone className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                       {order.billingAddress.phone}
                     </p>
                   )}
                   {order.billingAddress.email && (
-                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Mail className="w-4 h-4" />
-                      {order.billingAddress.email}
+                    <p className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground">
+                      <Mail className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                      <span className="break-all">{order.billingAddress.email}</span>
                     </p>
                   )}
                 </div>
@@ -1245,50 +1230,52 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
             </Card>
           )}
 
-          {/* Order Notes */}
+          {/* Order Notes - Mobile Optimized */}
           {order.notes && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5" />
+            <Card className="shadow-sm border-0 sm:border">
+              <CardHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5" />
                   Special Instructions
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm">{order.notes}</p>
+              <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+                <p className="text-xs sm:text-sm leading-relaxed">{order.notes}</p>
               </CardContent>
             </Card>
           )}
 
-          {/* Actions */}
-          <Card>
-            <CardContent className="p-6">
-              <div className="space-y-3">
+          {/* Actions - Mobile Optimized */}
+          <Card className="shadow-sm border-0 sm:border">
+            <CardContent className="p-4 sm:p-6">
+              <div className="space-y-2.5 sm:space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <Button 
-                    className="w-full" 
+                    className="w-full h-10 sm:h-11 text-xs sm:text-sm" 
                     onClick={() => handleDownloadInvoice()}
                     disabled={downloadingInvoice}
                   >
-                    <Download className="w-4 h-4 mr-2" />
-                    {downloadingInvoice ? 'Generating...' : 'HTML Invoice'}
+                    <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+                    <span className="hidden sm:inline">{downloadingInvoice ? 'Generating...' : 'HTML Invoice'}</span>
+                    <span className="sm:hidden">HTML</span>
                   </Button>
                   <Button 
                     variant="outline" 
-                    className="w-full"
+                    className="w-full h-10 sm:h-11 text-xs sm:text-sm"
                     onClick={() => handleDownloadInvoice(order!.orderNumber, 'pdf')}
                     disabled={downloadingInvoice}
                   >
-                    <Download className="w-4 h-4 mr-2" />
-                    PDF Invoice
+                    <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+                    <span className="hidden sm:inline">PDF Invoice</span>
+                    <span className="sm:hidden">PDF</span>
                   </Button>
                 </div>
-                <Button variant="outline" className="w-full">
-                  <RefreshCw className="w-4 h-4 mr-2" />
+                <Button variant="outline" className="w-full h-10 sm:h-11 text-xs sm:text-sm" onClick={() => fetchOrderDetails(false)} disabled={loading}>
+                  <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 ${loading ? 'animate-spin' : ''}`} />
                   Refresh Status
                 </Button>
                 {order.status === 'delivered' && (
-                  <Button variant="outline" className="w-full">
+                  <Button variant="outline" className="w-full h-10 sm:h-11 text-xs sm:text-sm">
                     Leave Review
                   </Button>
                 )}

@@ -46,31 +46,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log('🔍 [ORDERS API] Starting GET request')
-    
+    // SECURITY: Don't log UUIDs or sensitive user information
     const supabase = await getClient()
-    console.log('✅ [ORDERS API] Supabase client created')
     
     // Get the current user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
-    console.log('👤 [ORDERS API] User auth result:', { 
-      hasUser: !!user, 
-      userId: user?.id, 
-      userEmail: user?.email,
-      authError 
-    })
     
     if (authError || !user) {
-      console.error('❌ [ORDERS API] Authentication failed:', authError)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    
-    console.log('🔍 [ORDERS API] Fetching orders for user:', user.id)
-    console.log('🔍 [ORDERS API] Query details:', {
-      table: 'orders',
-      filter: 'user_id = ' + user.id,
-      select: 'orders.*, order_items(*)'
-    })
     
     // Fetch orders for the user (without products JOIN to avoid RLS issues)
     const { data: orders, error: ordersError } = await supabase
@@ -103,24 +87,12 @@ export async function GET(request: NextRequest) {
     })
 
     if (ordersError) {
-      console.error('❌ [ORDERS API] Orders fetch error:', {
-        code: ordersError.code,
-        message: ordersError.message,
-        details: ordersError.details,
-        hint: ordersError.hint,
-        fullError: JSON.stringify(ordersError, null, 2)
-      })
       return NextResponse.json({ 
-        error: 'Failed to fetch orders', 
-        details: ordersError.message,
-        code: ordersError.code
+        error: 'Failed to fetch orders'
       }, { status: 500 })
     }
-    
-    console.log('✅ [ORDERS API] Successfully fetched', orders?.length || 0, 'orders')
 
-    // Fetch product images for all order items
-    console.log('🖼️ [ORDERS API] Fetching product images...')
+    // Fetch product images and supplier information for all order items
     const allProductIds = new Set<number>()
     orders?.forEach(order => {
       order.order_items?.forEach((item: any) => {
@@ -128,71 +100,102 @@ export async function GET(request: NextRequest) {
       })
     })
     
-    console.log('📦 [ORDERS API] Unique product IDs to fetch:', Array.from(allProductIds))
-    
     let productImagesMap = new Map<number, string>()
+    let productSuppliersMap = new Map<number, { supplierName: string | null }>()
+    
     if (allProductIds.size > 0) {
       try {
-        // Fetch product images (public read access)
+        // Fetch product images and supplier IDs (public read access)
         const { data: products, error: productsError } = await supabase
           .from('products')
-          .select('id, image')
+          .select('id, image, supplier_id, user_id')
           .in('id', Array.from(allProductIds))
         
-        console.log('✅ [ORDERS API] Products fetch result:', {
-          hasData: !!products,
-          count: products?.length,
-          hasError: !!productsError
-        })
-        
         if (products && !productsError) {
+          // Get unique supplier IDs
+          const supplierIds = [...new Set(products.map(p => p.supplier_id || p.user_id).filter(Boolean))]
+          
+          // Fetch supplier names (SECURITY: Only send display names, never UUIDs)
+          let suppliersMap = new Map<string, string>()
+          if (supplierIds.length > 0) {
+            const { data: suppliers } = await supabase
+              .from('profiles')
+              .select('id, company_name, full_name')
+              .in('id', supplierIds)
+            
+            if (suppliers) {
+              suppliers.forEach(supplier => {
+                suppliersMap.set(supplier.id, supplier.company_name || supplier.full_name || 'Unknown Supplier')
+              })
+            }
+          }
+          
           products.forEach(product => {
             productImagesMap.set(product.id, product.image || '/placeholder.jpg')
+            const supplierId = product.supplier_id || product.user_id
+            const supplierName = supplierId ? (suppliersMap.get(supplierId) || 'Unknown Supplier') : null
+            productSuppliersMap.set(product.id, { supplierName })
           })
         }
       } catch (error) {
-        console.error('⚠️ [ORDERS API] Error fetching product images:', error)
+        // Silently handle errors - don't expose details
       }
     }
 
     // Check confirmed orders for status updates
-    console.log('🔍 [ORDERS API] Checking confirmed orders...')
     const orderIds = orders?.map(order => order.id) || []
-    console.log('📋 [ORDERS API] Order IDs to check:', orderIds)
     let confirmedOrdersMap = new Map()
+    let confirmedOrderItemsMap = new Map<string, any[]>() // Map order_id to confirmed items
     
     if (orderIds.length > 0) {
-      console.log('🔍 [ORDERS API] Querying confirmed_orders table...')
-      const { data: confirmedOrders, error: confirmedOrdersError } = await supabase
+      const { data: confirmedOrders } = await supabase
         .from('confirmed_orders')
         .select('order_id, status, confirmed_at, is_received, received_at')
         .in('order_id', orderIds)
-      
-      console.log('✅ [ORDERS API] Confirmed orders query result:', {
-        hasData: !!confirmedOrders,
-        count: confirmedOrders?.length,
-        hasError: !!confirmedOrdersError,
-        errorDetails: confirmedOrdersError ? {
-          code: confirmedOrdersError.code,
-          message: confirmedOrdersError.message
-        } : null
-      })
       
       if (confirmedOrders) {
         confirmedOrders.forEach(confirmed => {
           confirmedOrdersMap.set(confirmed.order_id, confirmed)
         })
+        
+        // Fetch confirmed order items with status
+        // Note: confirmed_order_items.confirmed_order_id links to confirmed_orders.id (UUID), not order_id
+        const confirmedOrderIdMap = new Map<string, string>() // Map confirmed_orders.id -> order_id
+        confirmedOrders.forEach(co => {
+          confirmedOrderIdMap.set(co.id, co.order_id)
+        })
+        
+        const confirmedOrderUuids = Array.from(confirmedOrderIdMap.keys())
+        if (confirmedOrderUuids.length > 0) {
+          const { data: confirmedItems } = await supabase
+            .from('confirmed_order_items')
+            .select('confirmed_order_id, product_id, status, tracking_number')
+            .in('confirmed_order_id', confirmedOrderUuids)
+          
+          if (confirmedItems) {
+            // Group items by order_id (map confirmed_order_id -> order_id)
+            confirmedItems.forEach(item => {
+              const orderId = confirmedOrderIdMap.get(item.confirmed_order_id)
+              if (orderId) {
+                if (!confirmedOrderItemsMap.has(orderId)) {
+                  confirmedOrderItemsMap.set(orderId, [])
+                }
+                confirmedOrderItemsMap.get(orderId)!.push(item)
+              }
+            })
+          }
+        }
       }
     }
 
     // Transform the data to match our frontend interface
-    console.log('🔄 [ORDERS API] Transforming orders data...')
+    // SECURITY: Never expose UUIDs (order.id, supplierId, item.id) to clients
     const transformedOrders = orders?.map(order => {
       const confirmedOrder = confirmedOrdersMap.get(order.id)
       const finalStatus = confirmedOrder?.status || order.status
       
       return {
-        id: order.id,
+        // id: order.id, // REMOVED: UUID should never be exposed to client
         orderNumber: order.order_number,
         referenceId: order.reference_id,
         pickupId: order.pickup_id,
@@ -224,36 +227,39 @@ export async function GET(request: NextRequest) {
           country: order.shipping_address?.country || '',
           phone: order.shipping_address?.phone || ''
         },
-        items: order.order_items?.map((item: any) => ({
-          id: item.id,
-          productId: item.product_id,
-          productName: item.product_name || 'Unknown Product',
-          productImage: productImagesMap.get(item.product_id) || '/placeholder.jpg',
-          variantName: item.variant_name,
-          variantAttributes: item.variant_attributes,
-          quantity: item.quantity,
-          unitPrice: item.price,
-          totalPrice: item.total_price
-        })) || [],
+        items: order.order_items?.map((item: any, index: number) => {
+          // SECURITY: Generate a safe hash key instead of exposing UUID
+          const safeItemKey = `${item.product_id}-${item.variant_id || 'default'}-${index}`
+          const confirmedItem = confirmedOrderItemsMap.get(order.id)?.find(ci => ci.product_id === item.product_id)
+          const supplierInfo = productSuppliersMap.get(item.product_id) || { supplierName: null }
+          
+          return {
+            // id: item.id, // REMOVED: UUID should never be exposed to client
+            itemKey: safeItemKey, // Safe, non-UUID identifier for client-side operations
+            productId: item.product_id,
+            productName: item.product_name || 'Unknown Product',
+            productImage: productImagesMap.get(item.product_id) || '/placeholder.jpg',
+            variantName: item.variant_name,
+            variantAttributes: item.variant_attributes,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            totalPrice: item.total_price,
+            // supplierId: REMOVED - UUID should never be exposed to client
+            supplierName: supplierInfo.supplierName, // Only send display name, never UUID
+            status: confirmedItem?.status || 'confirmed', // Per-item status from confirmed_order_items
+            trackingNumber: confirmedItem?.tracking_number || null
+          }
+        }) || [],
         notes: order.notes
       }
     }) || []
 
-    console.log('✅ [ORDERS API] Successfully transformed', transformedOrders.length, 'orders')
-    console.log('✅ [ORDERS API] Returning response with', transformedOrders.length, 'orders')
-
     return NextResponse.json({ orders: transformedOrders })
 
   } catch (error: any) {
-    console.error('❌ [ORDERS API] Exception caught:', {
-      message: error.message,
-      stack: error.stack,
-      error: error.toString(),
-      fullError: JSON.stringify(error, null, 2)
-    })
+    // SECURITY: Don't expose error details that might leak system information
     return NextResponse.json({ 
-      error: 'Internal server error', 
-      details: error.message 
+      error: 'Internal server error'
     }, { status: 500 })
   }
 }
@@ -324,7 +330,7 @@ export async function POST(request: NextRequest) {
         product_name: item.productName || 'Unknown Product',
         variant_id: item.variantId,
         variant_name: item.variantName || null,
-        variant_attributes: item.variantAttributes || null,
+        variant_attributes: null, // No longer used in simplified variant system
         quantity: item.quantity,
         price: item.unitPrice || item.price, // Use unitPrice if available, fallback to price
         total_price: item.totalPrice

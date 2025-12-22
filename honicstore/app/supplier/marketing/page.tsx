@@ -118,6 +118,18 @@ export default function SupplierMarketingPage() {
       const response = await fetch('/api/supplier/products?limit=1000', {
         credentials: 'include'
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          console.error('Server returned HTML instead of JSON')
+          return
+        }
+        return
+      }
+      
       const data = await response.json()
       
       if (data.success) {
@@ -138,6 +150,18 @@ export default function SupplierMarketingPage() {
       const response = await fetch('/api/user/current-plan', {
         credentials: 'include'
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          console.error('Server returned HTML instead of JSON')
+          return
+        }
+        return
+      }
+      
       const data = await response.json()
       if (data.success && data.plan) {
         setCurrentPlan(data.plan)
@@ -153,6 +177,17 @@ export default function SupplierMarketingPage() {
       const response = await fetch('/api/supplier/promotions', {
         credentials: 'include'
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
+      
       const data = await response.json()
       
       if (data.success) {
@@ -166,8 +201,14 @@ export default function SupplierMarketingPage() {
           })
         }
       }
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to fetch promotions'
       console.error('Error fetching promotions:', error)
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive'
+      })
     } finally {
       setLoading(false)
     }
@@ -207,6 +248,16 @@ export default function SupplierMarketingPage() {
         })
       })
 
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
+
       const result = await response.json()
 
       if (result.success) {
@@ -241,6 +292,16 @@ export default function SupplierMarketingPage() {
         method: 'DELETE',
         credentials: 'include'
       })
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
 
       const result = await response.json()
 
@@ -309,6 +370,18 @@ export default function SupplierMarketingPage() {
       const response = await fetch('/api/supplier/advertisements', {
         credentials: 'include'
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          console.error('Server returned HTML instead of JSON')
+          return
+        }
+        return
+      }
+      
       const data = await response.json()
       
       if (data.success) {
@@ -385,6 +458,16 @@ export default function SupplierMarketingPage() {
         body: formDataToSend
       })
 
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
+
       const result = await response.json()
 
       if (result.success) {
@@ -421,6 +504,16 @@ export default function SupplierMarketingPage() {
         method: 'DELETE',
         credentials: 'include'
       })
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
 
       const result = await response.json()
 
@@ -530,6 +623,17 @@ export default function SupplierMarketingPage() {
                       const plansResponse = await fetch('/api/supplier-plans', {
                         credentials: 'include'
                       })
+                      
+                      // Check if response is JSON
+                      const plansContentType = plansResponse.headers.get('content-type')
+                      if (!plansContentType || !plansContentType.includes('application/json')) {
+                        const text = await plansResponse.text()
+                        if (text.includes('<!DOCTYPE')) {
+                          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+                        }
+                        throw new Error('Invalid response format from server')
+                      }
+                      
                       const plansData = await plansResponse.json()
                       
                       if (!plansData.success || !plansData.plans) {
@@ -553,6 +657,16 @@ export default function SupplierMarketingPage() {
                           amount: premiumPlan.price
                         })
                       })
+                      
+                      // Check if response is JSON
+                      const initiateContentType = initiateResponse.headers.get('content-type')
+                      if (!initiateContentType || !initiateContentType.includes('application/json')) {
+                        const text = await initiateResponse.text()
+                        if (text.includes('<!DOCTYPE')) {
+                          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+                        }
+                        throw new Error('Invalid response format from server')
+                      }
                       
                       // Check response status before parsing JSON
                       if (!initiateResponse.ok) {

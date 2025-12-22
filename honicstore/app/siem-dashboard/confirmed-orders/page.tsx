@@ -384,6 +384,110 @@ export default function ConfirmedOrdersPage() {
     return pickupId
   }
 
+  // Generate tracking timeline based on package status from confirmed_order_items.status
+  // Similar to customer order detail page
+  const getTrackingTimeline = (packageStatus: string, deliveryOption: string, isReceived: boolean, confirmedAt?: string | null) => {
+    const timeline: Array<{ status: string; description: string; location: string; completed: boolean }> = []
+    
+    // Determine completion states based on package status from confirmed_order_items.status
+    const isConfirmed = confirmedAt !== null && confirmedAt !== undefined || 
+                        packageStatus === 'confirmed' || 
+                        packageStatus === 'shipped' || 
+                        packageStatus === 'delivered' || 
+                        packageStatus === 'picked_up' || 
+                        isReceived
+    
+    const isShipped = packageStatus === 'shipped' || 
+                     packageStatus === 'delivered' || 
+                     packageStatus === 'picked_up' || 
+                     isReceived
+    
+    const isDelivered = packageStatus === 'delivered' || 
+                       packageStatus === 'picked_up' || 
+                       isReceived
+    
+    // Step 1: Order placed (always completed)
+    timeline.push({
+      status: 'placed',
+      description: 'Order placed',
+      location: 'Online',
+      completed: true
+    })
+    
+    // Step 2: Confirmed - Show as completed if order has been confirmed
+    timeline.push({
+      status: 'confirmed',
+      description: 'Order confirmed',
+      location: 'honic',
+      completed: isConfirmed
+    })
+    
+    // Step 3: Package shipped (for both shipping and pickup orders)
+    // Always show this step if order is confirmed
+    if (isConfirmed) {
+      timeline.push({
+        status: 'shipped',
+        description: 'Package shipped',
+        location: 'seller',
+        completed: isShipped
+      })
+    }
+    
+    // Step 4: Shipping vs Pickup paths
+    if (deliveryOption === 'shipping' && isShipped) {
+      // Shipping: In transit (only show if shipped)
+      timeline.push({
+        status: 'transit',
+        description: 'In transit',
+        location: 'On the way',
+        completed: isDelivered
+      })
+      
+      // Shipping: Out for delivery (only show if shipped)
+      timeline.push({
+        status: 'out_for_delivery',
+        description: 'Out for delivery',
+        location: 'Local area',
+        completed: isDelivered
+      })
+    }
+    
+    // Step 5: Package delivered (for both shipping and pickup orders)
+    // Always show if order is confirmed
+    if (isConfirmed) {
+      timeline.push({
+        status: 'delivered',
+        description: 'Package delivered',
+        location: 'seller',
+        completed: packageStatus === 'delivered' || packageStatus === 'picked_up' || isReceived
+      })
+    }
+    
+    // Step 6: Package picked up (only for pickup orders, final step)
+    // Show after delivered step for pickup orders - this is the final status
+    if (isConfirmed && deliveryOption === 'pickup') {
+      timeline.push({
+        status: 'picked_up',
+        description: 'Package picked up',
+        location: 'Customer',
+        completed: packageStatus === 'picked_up'
+      })
+    }
+    
+    // Step 7: Package received (final step - only for shipping orders)
+    // Only show for shipping orders, not pickup orders
+    if (isDelivered && deliveryOption === 'shipping') {
+      timeline.push({
+        status: 'received',
+        description: 'Package received',
+        location: 'Customer',
+        completed: isReceived
+      })
+    }
+    
+    return timeline
+  }
+
   const clearAllFilters = () => {
     setSearchTerm('')
     setStatusFilter('all')
@@ -1118,9 +1222,18 @@ export default function ConfirmedOrdersPage() {
                       return Array.from(groupedBySupplier.entries()).map(([supplierKey, items]) => {
                         const supplierName = items[0]?.supplierName || 'Honic Company'
                         const groupTotal = items.reduce((sum, item) => sum + item.total_price, 0)
+                        // Get package status - use the most advanced status among items in this package
+                        // Priority: delivered/picked_up > shipped > confirmed
+                        const packageStatus = items.reduce((currentStatus, item) => {
+                          const itemStatus = item.status || 'confirmed'
+                          if (itemStatus === 'delivered' || itemStatus === 'picked_up') return itemStatus
+                          if (itemStatus === 'shipped' && currentStatus !== 'delivered' && currentStatus !== 'picked_up') return itemStatus
+                          if (itemStatus === 'confirmed' && currentStatus === 'confirmed') return itemStatus
+                          return currentStatus
+                        }, 'confirmed')
                         
                         return (
-                          <div key={supplierKey} className="space-y-2">
+                          <div key={supplierKey} className="space-y-3">
                             {/* Supplier Header */}
                             <div className="flex items-center justify-between pb-2 border-b">
                               <div className="flex items-center gap-2">
@@ -1139,6 +1252,75 @@ export default function ConfirmedOrdersPage() {
                                 </p>
                               </div>
                             </div>
+                            
+                            {/* Tracking Timeline - Show if order is confirmed */}
+                            {selectedOrder.confirmedAt && (
+                              <div className="pt-3 border-t">
+                                <h4 className={cn("text-sm font-semibold mb-4 flex items-center gap-2", themeClasses.mainText)}>
+                                  <Truck className="w-4 h-4" />
+                                  Package Tracking Status
+                                  <Badge variant="outline" className="ml-2 text-xs">
+                                    {packageStatus === 'confirmed' ? 'Awaiting Shipment' : 
+                                     packageStatus === 'shipped' ? 'In Transit' :
+                                     packageStatus === 'delivered' ? 'Delivered' :
+                                     packageStatus === 'picked_up' ? 'Picked Up' : 
+                                     'Processing'}
+                                  </Badge>
+                                </h4>
+                                <div className="overflow-x-auto pb-4 -mx-2 px-2">
+                                  <div className="flex items-start gap-2 min-w-max">
+                                    {getTrackingTimeline(packageStatus, selectedOrder.deliveryOption, false, selectedOrder.confirmedAt).map((step, index, array) => {
+                                      const isLastStep = index === array.length - 1
+                                      
+                                      return (
+                                        <div key={index} className="flex items-start gap-2 flex-shrink-0">
+                                          <div className="flex flex-col items-center">
+                                            <div className={cn(`w-7 h-7 rounded-full flex items-center justify-center border-2 transition-colors ${
+                                              step.completed
+                                                ? 'bg-green-500 border-green-500 text-white' 
+                                                : isLastStep && !step.completed
+                                                ? 'bg-blue-500 border-blue-500 text-white'
+                                                : 'bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400'
+                                            }`)}>
+                                              {step.completed ? (
+                                                <CheckCircle className="w-4 h-4" />
+                                              ) : (
+                                                <Clock className="w-3.5 h-3.5" />
+                                              )}
+                                            </div>
+                                            {!isLastStep && (
+                                              <div className={cn(`h-0.5 w-12 mt-2 transition-colors ${
+                                                step.completed ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-700'
+                                              }`)} />
+                                            )}
+                                          </div>
+                                          <div className="flex flex-col items-center min-w-[80px] max-w-[120px] pt-1">
+                                            <div className="flex flex-col items-center gap-1">
+                                              <span className={cn(`text-xs font-medium text-center leading-tight ${
+                                                step.completed 
+                                                  ? 'text-green-600 dark:text-green-400' 
+                                                  : themeClasses.textNeutralSecondary
+                                              }`)}>
+                                                {step.description}
+                                              </span>
+                                              {step.completed && (
+                                                <CheckCircle className="w-3 h-3 text-green-500 mt-0.5" />
+                                              )}
+                                            </div>
+                                            <p className={cn("text-[10px] text-center mt-1 leading-tight", themeClasses.textNeutralSecondary)}>
+                                              {step.location}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                                <p className={cn("text-xs mt-3 italic", themeClasses.textNeutralSecondary)}>
+                                  This is how the customer sees the tracking status for this package.
+                                </p>
+                              </div>
+                            )}
                             
                             {/* Items for this supplier */}
                             <div className="space-y-2 pl-4">

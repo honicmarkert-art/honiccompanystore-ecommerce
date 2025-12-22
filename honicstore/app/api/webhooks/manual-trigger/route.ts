@@ -46,11 +46,14 @@ export async function POST(request: NextRequest) {
     
     logger.log('🔄 Forwarding to webhook:', webhookUrl)
     
+    // Send without signature header to skip signature verification
+    // Add a header to indicate this is a manual trigger (skip API verification)
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-clickpesa-signature': 'manual-test-signature'
+        'X-Manual-Trigger': 'true', // Flag to skip API verification
+        // Don't include signature - webhook handler will skip signature validation
       },
       body: JSON.stringify(mockWebhookPayload)
     })

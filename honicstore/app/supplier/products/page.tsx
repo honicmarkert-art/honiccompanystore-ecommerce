@@ -182,6 +182,22 @@ function SupplierProductsContent() {
       const response = await fetch(`/api/supplier/products/${id}`, {
         credentials: 'include'
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          console.error('Server returned HTML instead of JSON')
+          return null
+        }
+        return null
+      }
+      
+      if (!response.ok) {
+        return null
+      }
+      
       const data = await response.json()
       if (data.success && data.product) {
         return data.product
@@ -196,10 +212,32 @@ function SupplierProductsContent() {
   const handleEditProduct = async (product: Product) => {
     try {
       const refreshedProduct = await fetchProductDetails(product.id)
-      setEditingProduct(refreshedProduct || product)
+      // Transform product to ensure variants use simplified structure for suppliers
+      const transformedProduct = refreshedProduct || product
+      if (transformedProduct && transformedProduct.variants) {
+        transformedProduct.variants = transformedProduct.variants.map((variant: any) => ({
+          id: variant.id,
+          variant_name: variant.variant_name || '',
+          price: variant.price || 0,
+          stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
+          stockQuantity: variant.stock_quantity || variant.stockQuantity || 0
+        }))
+      }
+      setEditingProduct(transformedProduct)
       setIsAddDialogOpen(true)
     } catch (error) {
-      setEditingProduct(product)
+      // Transform product even on error
+      const transformedProduct = { ...product }
+      if (transformedProduct.variants) {
+        transformedProduct.variants = transformedProduct.variants.map((variant: any) => ({
+          id: variant.id,
+          variant_name: variant.variant_name || '',
+          price: variant.price || 0,
+          stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
+          stockQuantity: variant.stock_quantity || variant.stockQuantity || 0
+        }))
+      }
+      setEditingProduct(transformedProduct)
       setIsAddDialogOpen(true)
     }
   }
@@ -215,6 +253,17 @@ function SupplierProductsContent() {
         method: 'DELETE',
         credentials: 'include'
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
+      
       const data = await response.json()
 
       if (data.success) {

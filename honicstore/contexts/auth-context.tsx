@@ -157,9 +157,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsAuthenticated(true)
           setIsAdmin(userRole === 'admin')
             
-            // Handle role-based routing only if user is trying to access admin
-          if (userRole === 'user' && pathnameRef.current?.startsWith('/admin')) {
-            routerRef.current.replace('/')
+          // Handle role-based routing
+          const currentPath = pathnameRef.current || (typeof window !== 'undefined' ? window.location.pathname : '/')
+          
+          // Redirect non-admin users away from admin pages
+          if (userRole === 'user' && currentPath.startsWith('/admin')) {
+            routerRef.current.replace('/products')
+          }
+          
+          // Redirect suppliers to dashboard if they're on home page or buyer pages (but not already on supplier pages)
+          if (isSupplier && userRole !== 'admin') {
+            // Don't redirect if already on supplier pages or auth pages
+            if (!currentPath.startsWith('/supplier') && 
+                !currentPath.startsWith('/auth') && 
+                !currentPath.startsWith('/admin') &&
+                currentPath !== '/supplier/dashboard') {
+              // Small delay to prevent redirect loops
+              setTimeout(() => {
+                routerRef.current.replace('/supplier/dashboard')
+              }, 100)
+            }
+          }
+          
+          // Redirect normal users to products page if they're on home page
+          if (!isSupplier && userRole !== 'admin' && currentPath === '/') {
+            setTimeout(() => {
+              routerRef.current.replace('/products')
+            }, 100)
+          }
+          
+          // Force redirect normal users away from supplier pages
+          if (!isSupplier && userRole !== 'admin' && currentPath.startsWith('/supplier')) {
+            // Don't redirect if on company-info page (registration flow)
+            if (currentPath !== '/supplier/company-info') {
+              setTimeout(() => {
+                routerRef.current.replace('/products')
+              }, 100)
+            }
           }
       } else {
           // No valid session found
@@ -342,7 +376,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } else if (isSupplier) {
               finalRedirect = '/supplier/dashboard'
             } else {
-              finalRedirect = '/' // Regular buyer goes to home
+              finalRedirect = '/products' // Regular buyer goes to products page
             }
           }
           

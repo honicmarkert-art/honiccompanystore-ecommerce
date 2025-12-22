@@ -10,6 +10,7 @@ const nextConfig = {
     formats: ['image/webp', 'image/avif'],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+    qualities: [60, 75, 80, 85, 90, 100], // Required for Next.js 16 - configure allowed quality values (includes all values used in codebase)
     minimumCacheTTL: 31536000, // 1 year cache for images
     dangerouslyAllowSVG: true,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
@@ -143,6 +144,16 @@ const nextConfig = {
       splitChunks: false,
       // Remove runtimeChunk to avoid exports issues
       runtimeChunk: false
+    }
+    
+    // Add chunk load error handling
+    if (!isServer) {
+      // Configure webpack to handle chunk loading errors better
+      config.output = {
+        ...config.output,
+        // Increase public path timeout handling
+        crossOriginLoading: 'anonymous',
+      }
     }
     
     return config

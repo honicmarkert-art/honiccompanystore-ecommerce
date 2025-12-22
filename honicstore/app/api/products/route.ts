@@ -416,7 +416,7 @@ export async function GET(request: NextRequest) {
           .select(`
             id, name, description, category, brand, price, image,
             product_variants (
-              sku, model, attributes, primary_values
+              sku, model, attributes, primary_values, variant_name
             )
           `)
           .textSearch('search_vector', sanitized, { type: 'websearch' })
@@ -441,6 +441,7 @@ export async function GET(request: NextRequest) {
           const variants = p.product_variants || []
           return variants.some((variant: any) => {
             const variantTexts = [
+              variant.variant_name || '', // Include variant_name in search
               variant.sku || '',
               variant.model || '',
               JSON.stringify(variant.attributes || {}),
@@ -832,7 +833,11 @@ export async function GET(request: NextRequest) {
             // Also preserve snake_case for compatibility
             primary_values: primaryValues,
             stockQuantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
-            inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true
+            stock_quantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
+            inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true,
+            in_stock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true,
+            // Include simplified variant fields
+            variant_name: variant.variant_name || null
           }
         }) || [],
         variantConfig: product.variant_config || null
@@ -1088,32 +1093,16 @@ export async function POST(request: NextRequest) {
       logger.log('Variants to save:', productData.variants)
       logger.log('Calculated total stock:', calculatedTotalStock)
       
+      // Simplified variant system: variant_name, price, stock_quantity
       const variants = productData.variants.map((variant: any) => {
-        // If variant has primaryValues, derive primary_attribute and clear attributes
-        let primaryAttribute = variant.primaryAttribute
-        let attributes = variant.attributes || {}
-        
-        if (Array.isArray(variant.primaryValues) && variant.primaryValues.length > 0) {
-          // Extract primary attribute from first primaryValue if not set
-          if (!primaryAttribute && variant.primaryValues[0]?.attribute) {
-            primaryAttribute = variant.primaryValues[0].attribute
-          }
-          // Clear attributes when using primaryValues
-          attributes = {}
-        }
-        
         return {
           product_id: product.id,
-          price: variant.price,
-          image: variant.image,
-          sku: variant.sku,
-          model: variant.model,
-          variant_type: variant.variantType || productData.variantConfig?.type || 'simple',
-          attributes,
-          primary_attribute: primaryAttribute,
-          dependencies: variant.dependencies || {},
-          primary_values: variant.primaryValues || [],
-          stock_quantity: typeof variant.stockQuantity === 'number' ? variant.stockQuantity : null
+          variant_name: variant.variant_name || null, // Simplified: just variant name
+          price: variant.price || productData.price || 0,
+          image: variant.image || null,
+          sku: variant.sku || null,
+          stock_quantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : 
+                        (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : null)
         }
       })
 
@@ -1264,19 +1253,16 @@ export async function PUT(request: NextRequest) {
       logger.log('Updating variants for product:', id)
       logger.log('Variants to save:', updates.variants)
       
-      // Calculate total stock from all primaryValues quantities
+      // Calculate total stock from simplified variants (variant_name, price, stock_quantity)
       let calculatedTotalStock = 0
       if (updates.variants && updates.variants.length > 0) {
         updates.variants.forEach((variant: any) => {
-          if (Array.isArray(variant.primaryValues)) {
-            variant.primaryValues.forEach((pv: any) => {
-              const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-              calculatedTotalStock += qty
-            })
-          }
+          const qty = typeof variant.stock_quantity === 'number' ? variant.stock_quantity : 
+                      (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : 0)
+          calculatedTotalStock += qty
         })
       }
-      logger.log('Calculated total stock:', calculatedTotalStock)
+      logger.log('Calculated total stock from simplified variants:', calculatedTotalStock)
 
       // Only update product stock from variants if there are actually variants
       // Otherwise, keep the manually set stock quantity
@@ -1302,36 +1288,37 @@ export async function PUT(request: NextRequest) {
         logger.log('Successfully deleted existing variants')
       }
 
-      // Then, add new variants if they exist
+      // Then, add new variants if they exist (simplified variant system)
       if (updates.variants && updates.variants.length > 0) {
+        // Calculate total stock from simplified variants
+        let calculatedTotalStock = 0
+        updates.variants.forEach((variant: any) => {
+          const qty = typeof variant.stock_quantity === 'number' ? variant.stock_quantity : 
+                      (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : 0)
+          calculatedTotalStock += qty
+        })
+        
         const variants = updates.variants.map((variant: any) => {
-          // If variant has primaryValues, derive primary_attribute and clear attributes
-          let primaryAttribute = variant.primaryAttribute
-          let attributes = variant.attributes || {}
-          
-          if (Array.isArray(variant.primaryValues) && variant.primaryValues.length > 0) {
-            // Extract primary attribute from first primaryValue if not set
-            if (!primaryAttribute && variant.primaryValues[0]?.attribute) {
-              primaryAttribute = variant.primaryValues[0].attribute
-            }
-            // Clear attributes when using primaryValues
-            attributes = {}
-          }
-          
+          // Simplified variant system: variant_name, price, stock_quantity
           return {
             product_id: id,
-            price: variant.price,
-            image: variant.image,
-            sku: variant.sku,
-            model: variant.model,
-            variant_type: variant.variantType || updates.variantConfig?.type || 'simple',
-            attributes,
-            primary_attribute: primaryAttribute,
-            dependencies: variant.dependencies || {},
-            primary_values: variant.primaryValues || [],
-            stock_quantity: typeof variant.stockQuantity === 'number' ? variant.stockQuantity : null
+            variant_name: variant.variant_name || null, // Simplified: just variant name
+            price: variant.price || updates.price || 0,
+            image: variant.image || null,
+            sku: variant.sku || null,
+            stock_quantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : 
+                          (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : null)
           }
         })
+        
+        // Update product stock from simplified variants
+        await adminClient
+          .from('products')
+          .update({ 
+            stock_quantity: calculatedTotalStock,
+            in_stock: calculatedTotalStock > 0
+          })
+          .eq('id', id)
 
         logger.log('Transformed variants for database:', variants)
 

@@ -117,7 +117,7 @@ import { useTheme } from "@/hooks/use-theme"
 // import { useProducts } from "@/hooks/use-products" // Removed - using useProductsOptimized instead
 import { useCart } from "@/hooks/use-cart" // Import useCart hook
 import { useToast } from "@/hooks/use-toast" // Import useToast hook
-import { checkProductStock, validateAutoSelectedStock } from "@/utils/stock-validation"
+import { checkProductStock } from "@/utils/stock-validation"
 import { getLeftBadge, getRightBadge } from "@/utils/product-badges"
 import { useCompanyContext } from "@/components/company-provider"
 import { Footer } from "@/components/footer"
@@ -188,7 +188,6 @@ function ProductsPageContent() {
     productId: number
     quantity: number
     variantId?: string
-    combination?: any
     price: number
   } | null>(null)
   
@@ -445,18 +444,18 @@ function ProductsPageContent() {
   const [currentAdIndex, setCurrentAdIndex] = useState(0)
   const [adRotationTime, setAdRotationTime] = useState(10)
   
-  // Rotating promotional text with animation types
+  // Rotating promotional text with animation types and unique transition animations
   const promotionalTexts = [
-    { text: "More To Love", animation: "bounce", decoration: "heart" },
-    { text: "Mega Choice For You Up To 40% Off", animation: "pulse", decoration: "badge" },
-    { text: "What Are You Waiting For", animation: "slide", decoration: "arrow" },
-    { text: "Flash Sale: 50% Off", animation: "flash", decoration: "lightning" },
-    { text: "Free Shipping Today", animation: "float", decoration: "truck" },
-    { text: "New Arrivals", animation: "fade", decoration: "star" },
-    { text: "Buy More, Save More", animation: "scale", decoration: "tag" },
-    { text: "Weekend Special: 25% Off", animation: "wiggle", decoration: "gift" },
-    { text: "Best Prices", animation: "glow", decoration: "check" },
-    { text: "Exclusive: 30% Off", animation: "shimmer", decoration: "crown" }
+    { text: "More To Love", animation: "bounce", decoration: "heart", transition: "slideInLeft" },
+    { text: "Mega Choice For You Up To 40% Off", animation: "pulse", decoration: "badge", transition: "zoomIn" },
+    { text: "What Are You Waiting For", animation: "slide", decoration: "arrow", transition: "slideInRight" },
+    { text: "Flash Sale: 50% Off", animation: "flash", decoration: "lightning", transition: "fadeIn" },
+    { text: "Free Shipping Today", animation: "slideLeftRight", decoration: "truck", transition: "slideInUp" },
+    { text: "New Arrivals", animation: "fade", decoration: "star", transition: "rotateIn" },
+    { text: "Buy More, Save More", animation: "scale", decoration: "tag", transition: "flipInX" },
+    { text: "Weekend Special: 25% Off", animation: "wiggle", decoration: "gift", transition: "bounceIn" },
+    { text: "Best Prices", animation: "glow", decoration: "check", transition: "fadeInScale" },
+    { text: "Exclusive: 30% Off", animation: "shimmer", decoration: "crown", transition: "slideInDown" }
   ]
   
   // Shuffle promotional texts order for random rotation
@@ -482,9 +481,45 @@ function ProductsPageContent() {
       scale: "animate-[scale_1.5s_ease-in-out_infinite]",
       wiggle: "animate-[wiggle_1s_ease-in-out_infinite]",
       glow: "animate-[glow_2s_ease-in-out_infinite]",
-      shimmer: "relative overflow-hidden bg-gradient-to-r from-yellow-400 via-yellow-200 to-yellow-400 bg-clip-text text-transparent bg-[length:200%_auto] animate-[shimmer-text_2s_linear_infinite]"
+      shimmer: "relative overflow-hidden bg-gradient-to-r from-blue-400 via-blue-200 to-blue-400 bg-clip-text text-transparent bg-[length:200%_auto] animate-[shimmer-text-blue_2s_linear_infinite]",
+      slideLeftRight: "animate-[slideLeftRight_25s_ease-in-out_infinite]"
     }
     return animations[animation] || ""
+  }
+  
+  // Transition animation classes mapping for text switching
+  const getTransitionClass = (transition: string, isFading: boolean) => {
+    if (isFading) {
+      // Exit animations
+      const exitAnimations: Record<string, string> = {
+        slideInLeft: "animate-[slideOutLeft_0.4s_ease-in-out_forwards]",
+        zoomIn: "animate-[zoomOut_0.4s_ease-in-out_forwards]",
+        slideInRight: "animate-[slideOutRight_0.4s_ease-in-out_forwards]",
+        fadeIn: "animate-[fadeOut_0.4s_ease-in-out_forwards]",
+        slideInUp: "animate-[slideOutUp_0.4s_ease-in-out_forwards]",
+        rotateIn: "animate-[rotateOut_0.4s_ease-in-out_forwards]",
+        flipInX: "animate-[flipOutX_0.4s_ease-in-out_forwards]",
+        bounceIn: "animate-[bounceOut_0.4s_ease-in-out_forwards]",
+        fadeInScale: "animate-[fadeOutScale_0.4s_ease-in-out_forwards]",
+        slideInDown: "animate-[slideOutDown_0.4s_ease-in-out_forwards]"
+      }
+      return exitAnimations[transition] || "animate-[fadeOut_0.4s_ease-in-out_forwards]"
+    } else {
+      // Enter animations
+      const enterAnimations: Record<string, string> = {
+        slideInLeft: "animate-[slideInLeft_0.4s_ease-in-out_forwards]",
+        zoomIn: "animate-[zoomIn_0.4s_ease-in-out_forwards]",
+        slideInRight: "animate-[slideInRight_0.4s_ease-in-out_forwards]",
+        fadeIn: "animate-[fadeIn_0.4s_ease-in-out_forwards]",
+        slideInUp: "animate-[slideInUp_0.4s_ease-in-out_forwards]",
+        rotateIn: "animate-[rotateIn_0.4s_ease-in-out_forwards]",
+        flipInX: "animate-[flipInX_0.4s_ease-in-out_forwards]",
+        bounceIn: "animate-[bounceIn_0.4s_ease-in-out_forwards]",
+        fadeInScale: "animate-[fadeInScale_0.4s_ease-in-out_forwards]",
+        slideInDown: "animate-[slideInDown_0.4s_ease-in-out_forwards]"
+      }
+      return enterAnimations[transition] || "animate-[fadeIn_0.4s_ease-in-out_forwards]"
+    }
   }
   
   // Decoration component
@@ -499,7 +534,7 @@ function ProductsPageContent() {
       tag: <span className="text-red-500 animate-[scale_1.5s_ease-in-out_infinite]">🏷️</span>,
       gift: <span className="text-purple-500 animate-[wiggle_1s_ease-in-out_infinite]">🎁</span>,
       check: <span className="text-green-500 animate-pulse">✓</span>,
-      crown: <span className="text-yellow-500 animate-[shimmer_2s_ease-in-out_infinite]">👑</span>
+      crown: <span className="text-blue-500 animate-[shimmer-blue_2s_ease-in-out_infinite]">👑</span>
     }
     return decorations[decoration] || null
   }
@@ -962,18 +997,39 @@ function ProductsPageContent() {
     }
   }, [advertisements.length, currentAdIndex])
 
-  // Rotate promotional text with fade animation (using shuffled order)
+  // Rotate promotional text with unique transition animations (using shuffled order)
+  const [transitionType, setTransitionType] = useState<string>("fadeIn")
   useEffect(() => {
+    // Get current text to determine rotation interval
+    const currentTextIndex = shuffledPromoOrder[currentPromoIndex]
+    const currentPromoItem = promotionalTexts[currentTextIndex]
+    const isFreeShipping = currentPromoItem.text === "Free Shipping Today"
+    
+    // Free Shipping needs 25 seconds to complete scroll animation, others use 3 seconds
+    const rotationInterval = isFreeShipping ? 25000 : 3000
+    
     const interval = setInterval(() => {
+      // Get the next text index
+      const nextIndex = (currentPromoIndex + 1) % shuffledPromoOrder.length
+      const nextTextIndex = shuffledPromoOrder[nextIndex]
+      const nextPromoItem = promotionalTexts[nextTextIndex]
+      
+      // Set transition type for the next text
+      setTransitionType(nextPromoItem.transition || "fadeIn")
+      
+      // Start exit animation
       setIsFading(true)
+      
       setTimeout(() => {
-        setCurrentPromoIndex((prevIndex) => (prevIndex + 1) % shuffledPromoOrder.length)
+        // Change to next text
+        setCurrentPromoIndex(nextIndex)
+        // Start enter animation
         setIsFading(false)
-      }, 300) // Half of animation duration
-    }, 3000) // Change text every 3 seconds
+      }, 400) // Transition duration
+    }, rotationInterval)
     
     return () => clearInterval(interval)
-  }, [shuffledPromoOrder.length])
+  }, [currentPromoIndex, shuffledPromoOrder.length])
 
 
   // Touch swipe handlers for advertisements
@@ -1003,7 +1059,7 @@ function ProductsPageContent() {
     }
   }
 
-  // Helper function to calculate minimum price from variants
+  // Helper function to calculate minimum price from variants (simplified)
   const getMinimumPrice = (productPrice: number, variants?: any[]): number => {
     if (!variants || variants.length === 0) {
       return productPrice
@@ -1011,22 +1067,13 @@ function ProductsPageContent() {
 
     let minPrice = productPrice
 
-    // Check primary values for minimum price
+    // Check variant prices (simplified variant system)
     variants.forEach((variant: any) => {
-      if (variant.primaryValues) {
-        variant.primaryValues.forEach((pv: any) => {
-          if (pv.price) {
-            const variantPrice = parseFloat(pv.price)
-            if (variantPrice < minPrice) {
-              minPrice = variantPrice
-            }
-          }
-        })
-      }
-      
-      // Check variant base price
-      if (variant.price && variant.price < minPrice) {
-        minPrice = variant.price
+      if (variant.price) {
+        const variantPrice = parseFloat(variant.price)
+        if (variantPrice < minPrice) {
+          minPrice = variantPrice
+        }
       }
     })
 
@@ -1052,7 +1099,6 @@ function ProductsPageContent() {
     variants: product.product_variants || [],
     gallery: product.image ? [product.image] : [],
     specifications: {},
-    variantConfig: (product as any).variant_config
   }))
 
   // Use server-side filtering with PostgreSQL full-text search
@@ -1363,84 +1409,6 @@ function ProductsPageContent() {
 
 
 
-  // Helper function to get attribute values for a specific type
-  const getAttributeValuesForType = (type: string, variants?: any[], variantConfig?: any): string[] => {
-    if (!variants) return []
-    
-    const values = new Set<string>()
-    
-    // Check if this is a primary attribute with multiple values
-    if ((variantConfig?.type === 'primary-dependent' && type === variantConfig.primaryAttribute) ||
-        (variantConfig?.type === 'multi-dependent' && variantConfig.primaryAttributes?.includes(type)) ||
-        (variantConfig?.type === 'simple' && type === variantConfig.primaryAttribute)) {
-      
-      variants.forEach((variant: any) => {
-        if (variant.primaryValues) {
-          variant.primaryValues.forEach((primaryValue: any) => {
-            if (primaryValue.value && (variantConfig?.type === 'primary-dependent' || 
-                (variantConfig?.type === 'multi-dependent' && primaryValue.attribute === type) ||
-                (variantConfig?.type === 'simple' && primaryValue.attribute === type))) {
-              values.add(primaryValue.value)
-            }
-          })
-        }
-      })
-    } else {
-      // Check if this is a multi-value attribute (array of objects in attributes)
-      const hasArrayValues = variants.some((variant: any) => 
-        variant.attributes?.[type] && Array.isArray(variant.attributes[type])
-      )
-      
-      if (hasArrayValues) {
-        variants.forEach((variant: any) => {
-          if (variant.attributes?.[type] && Array.isArray(variant.attributes[type])) {
-            variant.attributes[type].forEach((item: any) => {
-              if (item) {
-                // Handle both object format {value: "white"} and string format "white"
-                const value = typeof item === 'object' && item.value ? item.value : item
-                if (value) {
-                  values.add(value)
-                }
-              }
-            })
-          }
-        })
-      } else {
-        // For regular attributes
-        variants.forEach((variant: any) => {
-          if (variant.attributes && variant.attributes[type]) {
-            values.add(variant.attributes[type])
-          }
-        })
-      }
-    }
-    
-    return Array.from(values)
-  }
-
-  // Helper function to calculate price for a combination (MEMOIZED for performance)
-  const calculatePriceForCombination = useCallback((combination: { [key: string]: string | string[] }, variants?: any[], variantConfig?: any, basePrice?: number): number => {
-    if (!variants || !variantConfig) return basePrice || 0
-    
-    // For primary-dependent logic, find the primary attribute price
-    if (variantConfig.type === 'primary-dependent' && variantConfig.primaryAttribute) {
-      const primaryValue = combination[variantConfig.primaryAttribute]
-      if (primaryValue) {
-        const variant = variants.find((v: any) => 
-          v.primaryValues?.some((pv: any) => pv.value === primaryValue)
-        )
-        if (variant) {
-          const primaryValueObj = variant.primaryValues?.find((pv: any) => pv.value === primaryValue)
-          if (primaryValueObj && primaryValueObj.price) {
-            return parseFloat(primaryValueObj.price)
-          }
-        }
-      }
-    }
-    
-    // Fallback to base price
-    return basePrice || 0
-  }, [])
 
   // Filter functions
   const handlePriceFilterChange = (newRange: [number, number]) => {
@@ -1539,11 +1507,13 @@ function ProductsPageContent() {
   // Handle China import modal
   const handleChinaImportConfirm = () => {
     if (pendingCartItem) {
+      // Add to cart - simplified variant system (like detail page)
+      // Pass variantId (numeric ID from database), no attributes, price from database
       addItem(
         pendingCartItem.productId,
         pendingCartItem.quantity,
         pendingCartItem.variantId,
-        pendingCartItem.combination,
+        {}, // No complex attributes
         pendingCartItem.price
       )
     }
@@ -1556,168 +1526,109 @@ function ProductsPageContent() {
     setPendingCartItem(null)
   }
 
-  const handleAddToCart = async (productId: number, productName: string, productPrice: number, productVariants?: any[], variantConfig?: any) => {
-    
-    // Check if product has variants/attributes
-    let hasVariants = productVariants && productVariants.length > 0
-    let hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
-    
-    // If variants array exists but is empty, fetch full product data
+  const handleAddToCart = async (productId: number, productName: string, productPrice: number, productVariants?: any[]) => {
+    // Fetch full product data from database to get accurate variant info and prices
     let fullProductData = null
-    if (Array.isArray(productVariants) && productVariants.length === 0) {
-      try {
-        const response = await fetch(`/api/products/${productId}`)
-        if (response.ok) {
-          fullProductData = await response.json()
-          
-          productVariants = fullProductData.variants || []
-          variantConfig = fullProductData.variantConfig || null
-          hasVariants = productVariants && productVariants.length > 0
-          hasAttributes = variantConfig && Object.keys(variantConfig).length > 0
-        }
-      } catch (error) {
-      }
-    }
-
-    // Check basic product stock before proceeding
-    const productForStockCheck = products.find((p: any) => p.id === productId) || fullProductData
-    if (productForStockCheck) {
-      const stockCheck = checkProductStock(productForStockCheck)
-      
-      if (!stockCheck.isAvailable) {
-        toast({
-          title: "Out of Stock",
-          description: stockCheck.message || "This product is currently unavailable.",
-          variant: "destructive",
-        })
-        return
-      }
-    }
+    let selectedVariant: any = null
+    let variantPrice: number = productPrice
     
-    if (hasVariants || hasAttributes) {
-      
-      // Get attribute types from variant config or variants
-      const attributeTypes: string[] = []
-      
-      if (variantConfig?.primaryAttribute) {
-        attributeTypes.push(variantConfig.primaryAttribute)
-      }
-      
-      if (variantConfig?.attributeOrder) {
-        variantConfig.attributeOrder.forEach((attr: string) => {
-          if (!attributeTypes.includes(attr)) {
-            attributeTypes.push(attr)
-          }
-        })
-      }
-      
-      // Extract attributes from variants if not in config
-      if (productVariants) {
-        productVariants.forEach((variant: any) => {
-          // Extract from regular attributes
-          Object.keys(variant.attributes || {}).forEach(key => {
-            if (!attributeTypes.includes(key)) {
-              attributeTypes.push(key)
-            }
-          })
-          
-          // Extract from multi values
-          if (variant.multiValues) {
-            Object.keys(variant.multiValues).forEach(key => {
-              if (!key.endsWith('_raw') && !attributeTypes.includes(key)) {
-                attributeTypes.push(key)
-              }
-            })
-          }
-        })
-      }
-      
-      
-      // Derive attribute types from variantConfig (supports multiple shapes)
-      let derivedAttributeTypes: string[] = []
-      if (variantConfig) {
-        if (Array.isArray(variantConfig.attributeOrder) && variantConfig.attributeOrder.length > 0) {
-          derivedAttributeTypes = variantConfig.attributeOrder
-        } else if (Array.isArray(variantConfig.primaryAttributes) && variantConfig.primaryAttributes.length > 0) {
-          derivedAttributeTypes = variantConfig.primaryAttributes
-        } else if (typeof variantConfig.primaryAttribute === 'string' && variantConfig.primaryAttribute.length > 0) {
-          derivedAttributeTypes = [variantConfig.primaryAttribute]
-        }
-      }
-
-      
-      if (derivedAttributeTypes.length > 0) {
-        // Auto-select first option for each attribute type
-        const autoSelectedAttributes: { [key: string]: string | string[] } = {}
+    try {
+      const response = await fetch(`/api/products/${productId}`)
+      if (response.ok) {
+        fullProductData = await response.json()
         
-        derivedAttributeTypes.forEach((attrType: string) => {
-          const values = getAttributeValuesForType(attrType, productVariants, variantConfig)
-          if (values.length > 0) autoSelectedAttributes[attrType] = values[0] // Select first option
-        })
+        // Use simplified variant system - get variants from database
+        const variants = fullProductData.variants || []
         
-        // Validate stock for auto-selected attributes
-        const stockValidation = validateAutoSelectedStock(productForStockCheck)
-        if (!stockValidation.isAvailable) {
+        // Check basic product stock before proceeding
+        const stockCheck = checkProductStock(fullProductData)
+        if (!stockCheck.isAvailable) {
           toast({
             title: "Out of Stock",
-            description: stockValidation.message || "The selected options are currently unavailable.",
+            description: stockCheck.message || "This product is currently unavailable.",
             variant: "destructive",
           })
           return
         }
         
-        // Generate combination and calculate price
-        const combination = autoSelectedAttributes
-        const combinationKey = Object.entries(combination).map(([key, value]) => `${key}:${value}`).join('-')
-        const variantId = `combination-0-${combinationKey}`
-        const variantPrice = calculatePriceForCombination(combination, productVariants, variantConfig, productPrice)
-        
-        
-        // Auto-set quantity to 5 for products under 500 TZS
-        const quantity = variantPrice < 500 ? 5 : 1
-        
-        // Check if this is a China import item
-        const product = products.find((p: any) => p.id === productId)
-        if (product && (product.importChina || product.import_china)) {
-          // Show modal for China import items
-          setPendingCartItem({
-            productId,
-            quantity,
-            variantId,
-            combination,
-            price: variantPrice
+        // If product has variants, auto-select first variant (like detail page)
+        if (variants && variants.length > 0) {
+          selectedVariant = variants[0] // Auto-select first variant
+          variantPrice = parseFloat(selectedVariant.price) || productPrice
+          
+          // Check variant stock
+          const variantStockQty = selectedVariant.stock_quantity || selectedVariant.stockQuantity || 0
+          if (variantStockQty <= 0) {
+            toast({
+              title: "Out of Stock",
+              description: "This variant is currently unavailable.",
+              variant: "destructive",
+            })
+            return
+          }
+        } else {
+          // No variants - use product price
+          variantPrice = parseFloat(fullProductData.price) || productPrice
+        }
+      } else {
+        // Fallback if API fails
+        const productForStockCheck = products.find((p: any) => p.id === productId)
+        if (productForStockCheck) {
+          const stockCheck = checkProductStock(productForStockCheck)
+          if (!stockCheck.isAvailable) {
+            toast({
+              title: "Out of Stock",
+              description: stockCheck.message || "This product is currently unavailable.",
+              variant: "destructive",
+            })
+            return
+          }
+        }
+      }
+    } catch (error) {
+      // Fallback to basic check
+      const productForStockCheck = products.find((p: any) => p.id === productId)
+      if (productForStockCheck) {
+        const stockCheck = checkProductStock(productForStockCheck)
+        if (!stockCheck.isAvailable) {
+          toast({
+            title: "Out of Stock",
+            description: stockCheck.message || "This product is currently unavailable.",
+            variant: "destructive",
           })
-          setShowChinaImportModal(true)
           return
         }
-        
-        addItem(productId, quantity, variantId, combination, variantPrice)
-        return
       }
     }
     
-    // Fallback: simple product without variants - use minimum price
-    const minPrice = getMinimumPrice(productPrice, productVariants)
-    
     // Auto-set quantity to 5 for products under 500 TZS
-    const quantity = minPrice < 500 ? 5 : 1
+    const quantity = variantPrice < 500 ? 5 : 1
     
     // Check if this is a China import item
-    const productForChinaCheck = products.find((p: any) => p.id === productId)
-    if (productForChinaCheck && (productForChinaCheck.importChina || productForChinaCheck.import_china)) {
+    const product = products.find((p: any) => p.id === productId) || fullProductData
+    if (product && (product.importChina || product.import_china)) {
       // Show modal for China import items
       setPendingCartItem({
         productId,
         quantity,
-        variantId: undefined,
-        combination: {},
-        price: minPrice
+        variantId: selectedVariant?.id?.toString(),
+        price: variantPrice
       })
       setShowChinaImportModal(true)
       return
     }
     
-    addItem(productId, quantity, undefined, {}, minPrice)
+    // Add to cart - simplified variant system (like detail page)
+    // Pass variantId (numeric ID from database), no attributes, price from database
+    addItem(
+      productId, 
+      quantity, 
+      selectedVariant?.id?.toString(), // Variant ID from database
+      {}, // No complex attributes
+      variantPrice, // Price from database (will be validated by API)
+      selectedVariant?.sku,
+      selectedVariant?.image
+    )
   }
 
   return (
@@ -2916,6 +2827,29 @@ function ProductsPageContent() {
                               setHoveredMegaCategory(category.slug)
                             }
                           }}
+                          onDoubleClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            // On mobile double-click: filter by category and close menu
+                            if (window.innerWidth < 1024) {
+                              // Set category state and update URL
+                              setSelectedMainCategory(category.slug)
+                              const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
+                              const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
+                              setSelectedSubCategories(allSubSlugs)
+                              
+                              const params = new URLSearchParams(urlSearchParams?.toString())
+                              params.set('mainCategory', category.slug)
+                              if (allSubSlugs.length > 0) {
+                                params.set('subCategories', allSubSlugs.join(','))
+                              } else {
+                                params.delete('subCategories')
+                              }
+                              const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                              router.replace(nextUrl, { scroll: false })
+                              setIsCategoryMegaMenuOpen(false)
+                            }
+                          }}
                         >
                           {category.name}
                         </button>
@@ -3613,8 +3547,8 @@ function ProductsPageContent() {
         <div className="px-1 sm:px-2 lg:px-3 mb-6">
           <div className="text-center">
             <h2 
-              className={`text-base sm:text-xl md:text-2xl lg:text-3xl xl:text-4xl font-bold text-black dark:text-white mb-1 font-sans transition-opacity duration-500 ease-in-out ${
-                isFading ? 'opacity-0' : 'opacity-100'
+              className={`text-base sm:text-xl md:text-2xl lg:text-3xl xl:text-4xl font-bold text-black dark:text-white mb-1 font-sans ${
+                getTransitionClass(transitionType, isFading)
               }`}
               style={{ minHeight: '1.5em' }}
             >
@@ -3622,8 +3556,21 @@ function ProductsPageContent() {
                 const currentTextIndex = shuffledPromoOrder[currentPromoIndex]
                 const promoItem = promotionalTexts[currentTextIndex]
                 const isMegaChoiceText = promoItem.text === "Mega Choice For You Up To 40% Off"
+                const isFreeShipping = promoItem.text === "Free Shipping Today"
                 const animationClass = getAnimationClass(promoItem.animation)
                 const decoration = getDecoration(promoItem.decoration)
+                
+                // For Free Shipping, wrap in a container that spans full width for sliding animation
+                if (isFreeShipping) {
+                  return (
+                    <div className="relative w-full overflow-hidden" style={{ minHeight: '1.5em' }}>
+                      <span className={`inline-flex items-center gap-2 ${animationClass} absolute whitespace-nowrap`}>
+                        {decoration && <span className="flex-shrink-0">{decoration}</span>}
+                        <span>{promoItem.text}</span>
+                      </span>
+                    </div>
+                  )
+                }
                 
                 return (
                   <span className={`inline-flex items-center gap-2 ${animationClass}`}>
@@ -3774,34 +3721,14 @@ function ProductsPageContent() {
                 {/* All Product Cards */}
             {(shuffledProducts.length > 0 ? shuffledProducts : displayedProducts).map((product: any, index: number) => {
             
-            // If product has variants and variantConfig, compute first-combination price for display
-            let effectivePrice = product.price
-            if (product?.variants && product.variants.length > 0 && product?.variantConfig) {
-              const attributeTypesLocal = Array.isArray(product.variantConfig?.attributeOrder)
-                ? product.variantConfig.attributeOrder
-                : (product.variantConfig?.primaryAttributes || [])
-              const autoAttributes: { [k: string]: string | string[] } = {}
-              attributeTypesLocal.forEach((attr: string) => {
-                const values = getAttributeValuesForType(attr, product.variants, product.variantConfig)
-                if (values.length > 0) autoAttributes[attr] = values[0]
-              })
-              if (Object.keys(autoAttributes).length > 0) {
-                effectivePrice = calculatePriceForCombination(autoAttributes, product.variants, product.variantConfig, product.price)
-              }
-            }
-            // Calculate pricing display for all products (deterministic)
-            let testOriginalPrice = product.originalPrice
-            // If no original price or original price is same as current price, synthesize a stable discount (10-30%) based on product id
-            if (testOriginalPrice <= effectivePrice) {
-              // Simple deterministic pseudo-random based on product id
-              const idNumber = Number(product.id) || 0
-              const hash = (idNumber * 9301 + 49297) % 233280
-              const fraction = hash / 233280 // [0,1)
-              const discountRate = 0.10 + (fraction * 0.20) // 10%..30%
-              testOriginalPrice = Math.round(effectivePrice / (1 - discountRate))
-            }
-            
-            const discountPercentage = ((testOriginalPrice - effectivePrice) / testOriginalPrice) * 100
+            // Use simplified variant system - get minimum price from variants
+            let effectivePrice = getMinimumPrice(product.price, product.variants)
+            // Use server-provided prices only - no client-side discount synthesis
+            const originalPrice = product.originalPrice || product.original_price || effectivePrice
+            // Only show discount if original price is actually higher than current price (server-validated)
+            const discountPercentage = originalPrice > effectivePrice 
+              ? ((originalPrice - effectivePrice) / originalPrice) * 100 
+              : 0
             
             const productInCart = isInCart(product.id, product.variants?.[0]?.id) // Check if product or its default variant is in cart
             const hasFreeShipping = product.free_delivery === true ||
@@ -3997,10 +3924,10 @@ function ProductsPageContent() {
                         </div>
                         
                         {/* Original Price and Discount - Always show for all products */}
-                        {testOriginalPrice > effectivePrice && (
+                        {originalPrice > effectivePrice && (
                       <>
                             <div className={cn("text-[10px] line-through sm:text-xs", themeClasses.textNeutralSecondary)} suppressHydrationWarning>
-                              {formatPrice(testOriginalPrice)}
+                              {formatPrice(originalPrice)}
                 </div>
                             <div className="text-[10px] font-medium text-green-600" suppressHydrationWarning>
                           {discountPercentage.toFixed(0)}% OFF
@@ -4028,7 +3955,7 @@ function ProductsPageContent() {
                         ? "bg-red-800 text-white hover:bg-red-900" 
                         : "bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
                     )}
-                    onClick={() => handleAddToCart(product.id, product.name, product.price, product.variants, product.variantConfig)}
+                    onClick={() => handleAddToCart(product.id, product.name, product.price, product.variants)}
                         suppressHydrationWarning
                   >
                     <>

@@ -4,10 +4,40 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { useToast } from '@/hooks/use-toast'
 
+// Safe console logging helper - defined as const with IIFE to ensure availability
+const safeLog = (function() {
+  const logFn = function(...args: any[]) {
+    if (typeof console !== 'undefined' && typeof console.log === 'function') {
+      try {
+        console.log(...args)
+      } catch (e) {
+        // Silently fail if logging fails
+      }
+    }
+  }
+  // Ensure function is always callable
+  return logFn
+})()
+
+const safeError = (function() {
+  const errorFn = function(...args: any[]) {
+    if (typeof console !== 'undefined' && typeof console.error === 'function') {
+      try {
+        console.error(...args)
+      } catch (e) {
+        // Silently fail if logging fails
+      }
+    }
+  }
+  // Ensure function is always callable
+  return errorFn
+})()
+
 // Types
 export interface SelectedVariant {
   variantId: string
-  attributes: { [key: string]: string | string[] }
+  variant_name?: string | null
+  attributes: { [key: string]: string | string[] } // Deprecated - use variant_name instead
   quantity: number
   price: number
   sku?: string
@@ -162,12 +192,13 @@ export function useCart() {
   // Migrate old cart items to new structure
   const migrateCartItem = useCallback((item: any): CartItem => {
     
-    // If item already has new structure, migrate attributes if needed
+    // If item already has new structure, preserve variant_name and migrate attributes if needed
     if (item.variants && Array.isArray(item.variants)) {
       const migrated = {
         ...item,
         variants: item.variants.map((variant: any) => ({
           ...variant,
+          variant_name: variant.variant_name, // Preserve variant_name
           attributes: Object.entries(variant.attributes || {}).reduce((acc, [key, value]) => {
             // If value is a comma-separated string, convert to object array
             if (typeof value === 'string' && value.includes(',')) {
@@ -180,16 +211,17 @@ export function useCart() {
         }))
       }
       
-      
       return migrated
     }
     
     // Migrate old structure to new structure
+    
     const migratedItem: CartItem = {
       id: item.id,
       productId: item.productId,
       variants: [{
         variantId: item.variantId || 'default',
+        variant_name: item.variant_name || null, // Preserve variant_name if present
         attributes: Object.entries(item.attributes || {}).reduce((acc, [key, value]) => {
           // If value is a comma-separated string, convert to object array
           if (typeof value === 'string' && value.includes(',')) {
@@ -234,8 +266,13 @@ export function useCart() {
           'Content-Type': 'application/json'
         },
         signal: cartAbortRef.current.signal
+      }).catch((error) => {
+        // Handle AbortError gracefully
+        if (error.name === 'AbortError') {
+          throw error // Re-throw to be caught by outer try-catch
+        }
+        throw error
       })
-      
       
       if (response.status === 429) {
         // brief backoff and single retry
@@ -255,51 +292,109 @@ export function useCart() {
         }
       }
 
+      // Read response text once (can only be read once)
+      const responseText = await response.text()
+      
       if (response.ok) {
-        const data: CartResponse = await response.json()
+        const data: CartResponse = JSON.parse(responseText)
         const migratedCart = (data.items || []).map(migrateCartItem)
         setCart(migratedCart)
         setCartSubtotal(data.totals.subtotal)
         setCartTotalItems(data.totals.total_items)
       } else {
+        // Parse error response
+        let errorData: any = null
+        try {
+          errorData = JSON.parse(responseText)
+        } catch (e) {
+          // Not JSON, use as text
+          errorData = { message: responseText || 'Unknown error' }
+        }
+        
+        safeError('🛒 [USE-CART] Failed to load cart:', {
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url,
+          errorMessage: responseText || 'No error message',
+          errorData: errorData
+        })
+        
+        // If 401, user might not be authenticated
+        if (response.status === 401) {
+          safeError('🛒 [USE-CART] Authentication failed - user may need to log in')
+        }
       }
     } catch (error) {
+        // Handle AbortError gracefully - don't show error for aborted requests
+        if (error && (error as any).name === 'AbortError') {
+          // Don't set error state for aborted requests - this is expected behavior
+          return
+        }
+      safeError('🛒 [USE-CART] Error loading cart:', error)
     } finally {
       setIsLoading(false)
       cartAbortRef.current = null
     }
   }, [isAuthenticated, migrateCartItem])
 
-  // Load product data for cart items that don't have it
+  // Load product data for cart items that don't have it, and fetch variant_name for variants
   const loadProductDataForCartItems = useCallback(async (cartItems: CartItem[]) => {
     const itemsNeedingProductData = cartItems.filter(item => !item.product)
+    const itemsNeedingVariantName = cartItems.filter(item => 
+      item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId)))
+    )
     
-    if (itemsNeedingProductData.length === 0) return cartItems
-    
+    if (itemsNeedingProductData.length === 0 && itemsNeedingVariantName.length === 0) return cartItems
     
     const updatedItems = await Promise.all(
       cartItems.map(async (item) => {
-        if (item.product) return item // Already has product data
+        const needsProductData = !item.product
+        const needsVariantName = item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId)))
         
-        try {
-          const response = await fetch(`/api/products/${item.productId}`)
-          if (response.ok) {
-            const productData = await response.json()
-            return {
-              ...item,
-              product: {
-                id: productData.id,
-                name: productData.name,
-                image: productData.image,
-                price: productData.price,
-                originalPrice: productData.original_price,
-                inStock: productData.in_stock,
-                stockQuantity: productData.stock_quantity,
-                sku: productData.sku
+        // Fetch product data if needed (for product info or variant_name)
+        if (needsProductData || needsVariantName) {
+          try {
+            const response = await fetch(`/api/products/${item.productId}`)
+            if (response.ok) {
+              const productData = await response.json()
+              
+              // Update variants with variant_name and price from database
+              const updatedVariants = item.variants.map((v: any) => {
+                let updatedVariant = { ...v }
+                
+                if (v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId))) {
+                  const variant = productData.variants?.find((pv: any) => pv.id === Number(v.variantId))
+                  if (variant) {
+                    // Always update variant_name and price from database
+                    updatedVariant.variant_name = variant.variant_name || null
+                    updatedVariant.price = parseFloat(variant.price) || updatedVariant.price
+                  }
+                } else if (needsProductData) {
+                  // For products without variants, use product price
+                  updatedVariant.price = parseFloat(productData.price) || updatedVariant.price
+                }
+                
+                return updatedVariant
+              })
+              
+              return {
+                ...item,
+                variants: updatedVariants,
+                product: needsProductData ? {
+                  id: productData.id,
+                  name: productData.name,
+                  image: productData.image,
+                  price: productData.price,
+                  originalPrice: productData.original_price,
+                  inStock: productData.in_stock,
+                  stockQuantity: productData.stock_quantity,
+                  sku: productData.sku
+                } : item.product
               }
             }
+          } catch (error) {
+            safeError('🛒 [USE-CART] Error fetching product data:', error)
           }
-        } catch (error) {
         }
         
         return item // Return original item if product data loading failed
@@ -423,10 +518,8 @@ export function useCart() {
     variantSku?: string,
     variantImage?: string
   ) => {
-    
     // Normalize variant id so simple products always use a single key
     const normalizedVariantId: string = buildCanonicalVariantId(variantId, variantAttributes)
-    
 
     // Use provided price immediately for faster response
     let finalVariantPrice: number = variantPrice || 0
@@ -464,23 +557,18 @@ export function useCart() {
     // Check if product already exists in cart
     const existingItem = cart.find(item => item.productId === productId)
     
-
     if (existingItem) {
-      
-      
-      // Check if this exact selection already exists (match by canonical id OR attributes)
-      const existingVariant = existingItem.variants.find(v => (
-        v.variantId === normalizedVariantId || areAttributesEqual(v.attributes, variantAttributes)
-      ))
-      
+      // Check if this exact variant already exists (match ONLY by variantId - simplified variant system)
+      const existingVariant = existingItem.variants.find(v => 
+        v.variantId === normalizedVariantId
+      )
       
       if (existingVariant) {
-        
         // Update existing variant quantity
         const updatedCart = cart.map(item => {
           if (item.productId === productId) {
             const updatedVariants = item.variants.map(v => 
-              (v.variantId === normalizedVariantId || areAttributesEqual(v.attributes, variantAttributes)) 
+              (v.variantId === normalizedVariantId) 
                 ? { ...v, quantity: v.quantity + quantity }
                 : v
             )
@@ -496,17 +584,70 @@ export function useCart() {
           }
           return item
         })
-        setCart(updatedCart)
+        setCart(prev => {
+          // Save to localStorage immediately for guest users
+          if (!isAuthenticated) {
+            try {
+              const subtotal = updatedCart.reduce((sum, item) => sum + item.totalPrice, 0)
+              const totalItems = updatedCart.reduce((sum, item) => sum + item.totalQuantity, 0)
+              localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({
+                items: updatedCart,
+                subtotal,
+                totalItems
+              }))
+            } catch (error) {
+              safeError('🛒 [CLIENT] Error saving guest cart:', error)
+            }
+          }
+          return updatedCart
+        })
         setCartTotalItems(prev => prev + quantity)
         setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
         
       } else {
+        // Fetch variant_name and price from database if variantId is numeric
+        let variantName: string | null = null
+        let variantPriceFromDB: number | null = null
+        
+        if (normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
+          try {
+            const variantResponse = await fetch(`/api/products/${productId}`)
+            if (variantResponse.ok) {
+              const productData = await variantResponse.json()
+              const variant = productData.variants?.find((v: any) => v.id === Number(normalizedVariantId))
+              if (variant) {
+                variantName = variant.variant_name || null
+                variantPriceFromDB = parseFloat(variant.price) || null
+              }
+            }
+          } catch (error) {
+            safeError('🛒 [CLIENT] Error fetching variant data:', error)
+          }
+        }
+        
+        // If no variant-specific price, fetch product price
+        if (variantPriceFromDB === null) {
+          try {
+            const productResponse = await fetch(`/api/products/${productId}`)
+            if (productResponse.ok) {
+              const productData = await productResponse.json()
+              variantPriceFromDB = parseFloat(productData.price) || 0
+            }
+          } catch (error) {
+            safeError('🛒 [CLIENT] Error fetching product price:', error)
+          }
+        }
+        
+        // Use database price if available, otherwise fall back to provided price
+        const finalPriceToUseForVariant = variantPriceFromDB !== null ? variantPriceFromDB : finalVariantPrice
+        
         // Add new variant to existing product
         const newVariant: SelectedVariant = {
           variantId: normalizedVariantId,
+          variant_name: variantName,
           attributes: variantAttributes || {},
           quantity,
-          price: finalVariantPrice,
+          price: finalPriceToUseForVariant, // Always use database price
           sku: variantSku,
           image: variantImage
         }
@@ -526,34 +667,68 @@ export function useCart() {
           }
           return item
         })
-      setCart(updatedCart)
+      setCart(prev => {
+        // Save to localStorage immediately for guest users
+        if (!isAuthenticated) {
+          try {
+            const subtotal = updatedCart.reduce((sum, item) => sum + item.totalPrice, 0)
+            const totalItems = updatedCart.reduce((sum, item) => sum + item.totalQuantity, 0)
+            localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({
+              items: updatedCart,
+              subtotal,
+              totalItems
+            }))
+          } catch (error) {
+            safeError('🛒 [CLIENT] Error saving guest cart:', error)
+          }
+        }
+        return updatedCart
+      })
       setCartTotalItems(prev => prev + quantity)
         setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
         
       }
     } else {
+      // Fetch product data (for both guest and authenticated users to get variant_name and price from DB)
+      let productData = null
+      let variantName: string | null = null
+      let variantPriceFromDB: number | null = null
+      
+      try {
+        const response = await fetch(`/api/products/${productId}`)
+        if (response.ok) {
+          productData = await response.json()
+          
+          // Extract variant_name and price if variantId is numeric
+          if (normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
+            const variant = productData.variants?.find((v: any) => v.id === Number(normalizedVariantId))
+            if (variant) {
+              variantName = variant.variant_name || null
+              variantPriceFromDB = parseFloat(variant.price) || null
+            }
+          }
+          
+          // If no variant-specific price, use product price
+          if (variantPriceFromDB === null) {
+            variantPriceFromDB = parseFloat(productData.price) || 0
+          }
+        }
+      } catch (error) {
+        safeError('🛒 [CLIENT] Error fetching product data:', error)
+      }
+
+      // Use database price if available, otherwise fall back to provided price
+      const finalPriceToUse = variantPriceFromDB !== null ? variantPriceFromDB : finalVariantPrice
 
       // Add new product with variant
       const newVariant: SelectedVariant = {
         variantId: normalizedVariantId,
+        variant_name: variantName,
         attributes: variantAttributes || {},
         quantity,
-        price: finalVariantPrice,
+        price: finalPriceToUse, // Always use database price
         sku: variantSku,
         image: variantImage
-      }
-      
-      // Fetch product data for guest users
-      let productData = null
-      if (!isAuthenticated) {
-        try {
-          const response = await fetch(`/api/products/${productId}`)
-          if (response.ok) {
-            productData = await response.json()
-
-          }
-        } catch (error) {
-        }
       }
 
       
@@ -562,8 +737,8 @@ export function useCart() {
           productId,
         variants: [newVariant],
         totalQuantity: quantity,
-        totalPrice: finalVariantPrice * quantity,
-        currency: 'USD',
+        totalPrice: finalPriceToUse * quantity,
+        currency: 'TZS',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         product: productData ? {
@@ -587,9 +762,8 @@ export function useCart() {
         const newCart = [...prev, newItem]
         return newCart
       })
-        setCartTotalItems(prev => prev + quantity)
-      setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
-      
+      setCartTotalItems(prev => prev + quantity)
+      setCartSubtotal(prev => prev + (finalPriceToUse * quantity))
     }
 
     // Call API for authenticated users in background (non-blocking)
@@ -598,12 +772,13 @@ export function useCart() {
       (async () => {
         try {
           // For simple products (no attributes), send undefined so API normalizes to NULL
+          // NOTE: We don't send price - API will fetch authoritative price from database
           const isSimpleSelection = !variantAttributes || Object.keys(variantAttributes).length === 0
           const requestBody = {
             productId,
             variantId: isSimpleSelection ? undefined : normalizedVariantId,
             quantity,
-            price: finalVariantPrice,
+            // price: NOT SENT - API fetches from database for security
             variantAttributes: variantAttributes
           }
 
@@ -615,12 +790,31 @@ export function useCart() {
             credentials: 'include',
             body: JSON.stringify(requestBody)
           })
+          
+          const responseData = await response.json().catch((err) => {
+            safeError('🛒 [CLIENT] Failed to parse API response:', err)
+            return {}
+          })
 
           if (response.ok) {
-            const responseData = await response.json()
+            if (typeof safeLog === 'function') {
+            }
 
-            // Don't reload cart - the optimistic update is sufficient
-            // await loadServerCart()
+            // Update cart item with supplier info from API response (if available)
+            if (responseData.supplierCompanyName) {
+              setCart(prev => prev.map(item => {
+                if (item.productId === productId) {
+                  return {
+                    ...item,
+                    supplierCompanyName: responseData.supplierCompanyName || (item as any).supplierCompanyName
+                  }
+                }
+                return item
+              }))
+            }
+
+            // Reload cart from server to get latest data including supplier info
+            await loadServerCart()
           
           // Check if this was a partial stock response
           if (responseData.partialStock) {
@@ -639,7 +833,13 @@ export function useCart() {
             })
           }
         } else {
-          const errorData = await response.json()
+          safeError('🛒 [CLIENT] ❌ API request failed:', {
+            status: response.status,
+            statusText: response.statusText
+          })
+          
+          const errorData = await response.json().catch(() => ({}))
+          safeError('🛒 [CLIENT] Error response data:', errorData)
           
           if (errorData.error === 'Product out of stock') {
             toast({

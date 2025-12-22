@@ -161,7 +161,11 @@ export async function GET(
           // Also preserve snake_case for compatibility
           primary_values: primaryValues,
           stockQuantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
-          inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true
+          stock_quantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
+          inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true,
+          in_stock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true,
+          // Include simplified variant fields
+          variant_name: variant.variant_name || null
         }
       }) || [],
       variantConfig: (() => {
@@ -399,36 +403,13 @@ export async function PUT(
     
     if (updates.variants !== undefined) {
       try {
-        // Calculate total stock from all primaryValues and multiValues quantities
+        // Calculate total stock from simplified variants (variant_name, price, stock_quantity)
         let calculatedTotalStock = 0
         if (Array.isArray(updates.variants)) {
           updates.variants.forEach((variant: any) => {
-            
-            // Check primaryValues quantities
-            if (Array.isArray(variant.primaryValues)) {
-              variant.primaryValues.forEach((pv: any, pvIndex: number) => {
-                const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                calculatedTotalStock += qty
-              })
-            }
-            
-            // Check multiValues quantities
-            if (variant.multiValues && typeof variant.multiValues === 'object') {
-              Object.keys(variant.multiValues).forEach(key => {
-                if (key.endsWith('_quantity')) {
-                  const qty = parseInt(variant.multiValues[key]) || 0
-                  calculatedTotalStock += qty
-                }
-              })
-            }
-            
-            // Check stock_quantities object
-            if (variant.quantities && typeof variant.quantities === 'object') {
-              Object.keys(variant.quantities).forEach(key => {
-                const qty = parseInt(variant.quantities[key]) || 0
-                calculatedTotalStock += qty
-              })
-            }
+            const qty = typeof variant.stock_quantity === 'number' ? variant.stock_quantity : 
+                        (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : 0)
+            calculatedTotalStock += qty
           })
         }
 
@@ -457,56 +438,11 @@ export async function PUT(
             if (v.sku) existingBySku.set(String(v.sku), v)
           })
 
+          // Simplified variant system: variant_name, price, stock_quantity
           const variantsToInsert = updates.variants.map((variant: any) => {
-            // If variant has primaryValues, derive primary_attribute and clear attributes
-            let primaryAttribute = variant.primaryAttribute
-            let attributes = variant.attributes || {}
-            
-            if (Array.isArray(variant.primaryValues) && variant.primaryValues.length > 0) {
-              // Extract primary attribute from first primaryValue if not set
-              if (!primaryAttribute && variant.primaryValues[0]?.attribute) {
-                primaryAttribute = variant.primaryValues[0].attribute
-              }
-              // Clear attributes when using primaryValues
-              attributes = {}
-            }
-            
-            // Calculate stock quantity for this variant
-            let variantStockQuantity = 0
-            
-            // Check primaryValues quantities
-            if (Array.isArray(variant.primaryValues)) {
-              variant.primaryValues.forEach((pv: any) => {
-                const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                variantStockQuantity += qty
-              })
-            }
-            
-            // Check multiValues quantities
-            if (variant.multiValues && typeof variant.multiValues === 'object') {
-              Object.keys(variant.multiValues).forEach(key => {
-                if (key.endsWith('_quantity')) {
-                  const qty = parseInt(variant.multiValues[key]) || 0
-                  variantStockQuantity += qty
-                }
-              })
-            }
-            
-            // Check stock_quantities object
-            if (variant.quantities && typeof variant.quantities === 'object') {
-              Object.keys(variant.quantities).forEach(key => {
-                const qty = parseInt(variant.quantities[key]) || 0
-                variantStockQuantity += qty
-              })
-            }
-            
-            // Clean attributes by removing old _quantity fields
-            const cleanAttributes = { ...attributes }
-            Object.keys(cleanAttributes).forEach(key => {
-              if (key.endsWith('_quantity')) {
-                delete cleanAttributes[key]
-              }
-            })
+            // Get stock quantity from simplified variant
+            const variantStockQuantity = typeof variant.stock_quantity === 'number' ? variant.stock_quantity : 
+                                        (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : 0)
 
             // Preserve image if not provided in payload
             const preservedImage = variant.image 
@@ -515,16 +451,10 @@ export async function PUT(
 
             return {
               product_id: Number(productId),
-              price: variant.price,
+              variant_name: variant.variant_name || null, // Simplified: just variant name
+              price: variant.price || updates.price || 0,
               image: preservedImage || null,
-              sku: variant.sku,
-              model: variant.model,
-              variant_type: variant.variantType || updates.variantConfig?.type || 'simple',
-              attributes: cleanAttributes,
-              primary_attribute: primaryAttribute,
-              dependencies: variant.dependencies || {},
-              primary_values: variant.primaryValues || [],
-              stock_quantities: variant.quantities || {},
+              sku: variant.sku || null,
               stock_quantity: variantStockQuantity,
               in_stock: variantStockQuantity > 0
             }

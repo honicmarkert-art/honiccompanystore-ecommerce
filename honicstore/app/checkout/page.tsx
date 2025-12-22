@@ -156,6 +156,7 @@ function CheckoutPageContent() {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [hasTimedOut, setHasTimedOut] = useState(false)
   const [orderId, setOrderId] = useState<string>("")
   const [orderReferenceId, setOrderReferenceId] = useState<string | null>(null)
   const [orderPickupId, setOrderPickupId] = useState<string | null>(null)
@@ -205,6 +206,28 @@ function CheckoutPageContent() {
   
   const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
   const orderTotal = selectedSubtotal + shippingFee - promotionDiscount
+
+  // Timeout for payment processing (30 seconds)
+  useEffect(() => {
+    if (isProcessingPayment) {
+      setHasTimedOut(false)
+      const timeoutId = setTimeout(() => {
+        setHasTimedOut(true)
+      }, 30000) // 30 seconds timeout
+
+      return () => clearTimeout(timeoutId)
+    } else {
+      setHasTimedOut(false)
+    }
+  }, [isProcessingPayment])
+
+  // Retry payment function
+  const handleRetryPayment = () => {
+    setHasTimedOut(false)
+    setIsProcessingPayment(false)
+    setPaymentError(null)
+    // The user can click "Place Order" again to retry
+  }
   
   const [isClient, setIsClient] = useState(false)
   const [showMapContainer, setShowMapContainer] = useState(false)
@@ -360,13 +383,13 @@ function CheckoutPageContent() {
         customerPhone: customerInfo.phone,
         items: selectedItems.flatMap(item => 
           item.variants.map(variant => ({
-          productId: item.productId,
+            productId: item.productId,
             productName: item.product?.name || `Product ${item.productId}`,
-            variantId: variant.variantId ? parseInt(variant.variantId) : null, // Convert string to integer or null
-            variantName: Object.values(variant.attributes).join(', ') || 'Default',
-            variantAttributes: variant.attributes || {},
+            variantId: variant.variantId && variant.variantId !== 'default' && !isNaN(Number(variant.variantId)) ? parseInt(variant.variantId) : null, // Convert string to integer or null
+            variantName: variant.variant_name || 'Default', // Use simplified variant_name from database
+            variantAttributes: null, // No longer used in simplified variant system
             quantity: variant.quantity,
-            unitPrice: variant.price, // unit price
+            unitPrice: variant.price, // unit price from database
             totalPrice: variant.price * variant.quantity, // total price for this variant
           name: item.product?.name || `Product ${item.productId}`,
           }))
@@ -418,34 +441,103 @@ function CheckoutPageContent() {
             }),
       })
 
-      const data = await response.json()
+      // Parse response with error handling
+      let data: any
+      try {
+        const responseText = await response.text()
+        logger.log('ClickPesa API Raw Response:', {
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          responseText: responseText.substring(0, 500) // Log first 500 chars
+        })
+        
+        if (!responseText) {
+          throw new Error('Empty response from payment API')
+        }
+        
+        data = JSON.parse(responseText)
+      } catch (parseError) {
+        logger.error('Failed to parse ClickPesa API response:', parseError)
+        throw new Error('Invalid response from payment gateway. Please try again.')
+      }
+
+      // Log the parsed response for debugging
+      logger.log('ClickPesa API Response:', {
+        ok: response.ok,
+        status: response.status,
+        hasCheckoutLink: !!data.checkoutLink,
+        error: data.error,
+        success: data.success,
+        checkoutLink: data.checkoutLink ? `${data.checkoutLink.substring(0, 50)}...` : null
+      })
 
       if (!response.ok || !data.checkoutLink) {
-        throw new Error(data.error || 'Payment gateway did not return a checkout URL')
+        const errorMsg = data.error || data.message || 'Payment gateway did not return a checkout URL'
+        logger.error('ClickPesa API Error:', {
+          status: response.status,
+          error: errorMsg,
+          responseData: data
+        })
+        throw new Error(errorMsg)
       }
 
       // Store reference for later use
       safeSessionStorage.setItem('last_order_reference', reference)
 
-      // Open ClickPesa checkout in new tab
-      window.open(data.checkoutLink, '_blank', 'noopener,noreferrer')
+      // Always open ClickPesa checkout in new tab
+      // Since this is called from a user click event, window.open should work
+      const popupWindow = window.open(data.checkoutLink, '_blank', 'noopener,noreferrer')
       
-      // Show success message
+      if (popupWindow && !popupWindow.closed) {
+        // Successfully opened in new tab
         toast({
-        title: 'Payment Page Opened',
-        description: 'Please complete your payment in the new tab. You will be redirected back after payment.',
+          title: 'Payment Page Opened',
+          description: 'Please complete your payment in the new tab. You will be redirected back after payment.',
           duration: 5000
         })
+      } else {
+        // Popup was blocked - try alternative approach
+        logger.log('Popup blocked, using alternative method')
+        // Create a temporary anchor element and click it (works better with user interaction)
+        const link = document.createElement('a')
+        link.href = data.checkoutLink
+        link.target = '_blank'
+        link.rel = 'noopener noreferrer'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        toast({
+          title: 'Opening Payment Page',
+          description: 'Please complete your payment in the new tab.',
+          duration: 5000
+        })
+      }
 
     } catch (error: any) {
-      logger.error('Payment initiation error:', error)
-      const errorMessage = error.message || 'Failed to initiate payment. Please try again.'
+      logger.error('Payment initiation error:', {
+        error: error,
+        message: error?.message,
+        stack: error?.stack,
+        name: error?.name
+      })
+      
+      // Extract detailed error message
+      let errorMessage = 'Failed to initiate payment. Please try again.'
+      if (error?.message) {
+        errorMessage = error.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       setPaymentError(errorMessage)
       setIsProcessingPayment(false)
       toast({
         title: 'Payment Error',
         description: errorMessage,
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 8000 // Show longer so user can read it
       })
     }
   }
@@ -1530,13 +1622,48 @@ function CheckoutPageContent() {
             return (
               <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
                 <CardContent className="text-center py-12">
-                  <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
-                  <h3 className={cn("text-xl font-semibold mb-3", themeClasses.mainText)}>
-                    Loading to ClickPesa for complete payment
-                  </h3>
-                  <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                    Please wait while we redirect you to complete your payment...
-                  </p>
+                  {!hasTimedOut ? (
+                    <>
+                      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
+                      <div className="space-y-2">
+                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
+                          Loading to ClickPesa for complete payment
+                        </h3>
+                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
+                          Please wait while we redirect you to complete your payment...
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900/20">
+                        <Clock className="w-8 h-8 text-yellow-600 dark:text-yellow-400" />
+                      </div>
+                      <div className="space-y-4">
+                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
+                          Payment Redirect Taking Too Long
+                        </h3>
+                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
+                          The payment redirect is taking longer than expected. You can try again or check if the payment page opened in a new tab.
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
+                          <Button
+                            onClick={handleRetryPayment}
+                            className="bg-yellow-500 hover:bg-yellow-600 text-white"
+                          >
+                            Try Again
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => window.location.reload()}
+                            className={cn(themeClasses.borderNeutralSecondary)}
+                          >
+                            Refresh Page
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )
@@ -1559,8 +1686,9 @@ function CheckoutPageContent() {
                       </p>
                     </div>
                   ) : (
-                    selectedItems.map((item, index) => (
-                    <div key={index} className="flex items-start gap-2 sm:gap-4 p-2 sm:p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                    selectedItems.flatMap((item, itemIndex) => 
+                      (item.variants || []).map((variant: any, variantIndex: number) => (
+                    <div key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`} className="flex items-start gap-2 sm:gap-4 p-2 sm:p-4 rounded-lg border border-gray-200 dark:border-gray-700">
                       <div className="flex-shrink-0 self-start">
                           {item.product?.image ? (
                             <Link 
@@ -1595,17 +1723,30 @@ function CheckoutPageContent() {
                           >
                             <h4 className={cn("font-medium truncate text-sm sm:text-base", themeClasses.mainText)}>
                               {item.product?.name || `Product ${item.productId}`}
+                              {variant.variant_name && (
+                                <span className={cn("font-normal text-blue-600 dark:text-blue-400")}>
+                                  {" | "}{variant.variant_name}
+                                </span>
+                              )}
                             </h4>
                           </Link>
-                          <p className={cn("text-xs sm:text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                            Quantity: {item.totalQuantity}
-                          </p>
-                          <p className={cn("text-sm sm:text-base font-medium mt-1", themeClasses.mainText)}>
-                            {formatPrice(item.totalPrice)}
-                          </p>
+                          <div className={cn("flex items-center justify-between mt-1 gap-2")}>
+                            <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
+                              Unit Price: {formatPrice(variant.price || 0)}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <span className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
+                                Qty: {variant.quantity || 1}
+                              </span>
+                              <span className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
+                                {formatPrice((variant.price || 0) * (variant.quantity || 1))}
+                              </span>
+                            </div>
+                          </div>
               </div>
                     </div>
-                            ))
+                      ))
+                    )
                   )}
                           </div>
                     </div>
@@ -1652,13 +1793,48 @@ function CheckoutPageContent() {
             return (
               <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
                 <CardContent className="text-center py-12">
-                  <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
-                  <h3 className={cn("text-xl font-semibold mb-3", themeClasses.mainText)}>
-                    Loading to ClickPesa for complete payment
-                  </h3>
-                  <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                    Please wait while we redirect you to complete your payment...
-                  </p>
+                  {!hasTimedOut ? (
+                    <>
+                      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
+                      <div className="space-y-2">
+                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
+                          Loading to ClickPesa for complete payment
+                        </h3>
+                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
+                          Please wait while we redirect you to complete your payment...
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900/20">
+                        <Clock className="w-8 h-8 text-yellow-600 dark:text-yellow-400" />
+                      </div>
+                      <div className="space-y-4">
+                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
+                          Payment Redirect Taking Too Long
+                        </h3>
+                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
+                          The payment redirect is taking longer than expected. You can try again or check if the payment page opened in a new tab.
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
+                          <Button
+                            onClick={handleRetryPayment}
+                            className="bg-yellow-500 hover:bg-yellow-600 text-white"
+                          >
+                            Try Again
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => window.location.reload()}
+                            className={cn(themeClasses.borderNeutralSecondary)}
+                          >
+                            Refresh Page
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )
@@ -1712,12 +1888,19 @@ function CheckoutPageContent() {
                               {item.product?.name || "Product"}
                             </h4>
                           </Link>
-                          <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                            Quantity: {item.totalQuantity}
-                          </p>
-                          <p className={cn("text-sm font-medium mt-1", themeClasses.mainText)}>
-                            {formatPrice(item.totalPrice)}
-                          </p>
+                          <div className={cn("flex items-center justify-between mt-1 gap-2")}>
+                            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                              Unit Price: {formatPrice(item.totalPrice / (item.totalQuantity || 1))}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                                Qty: {item.totalQuantity}
+                              </span>
+                              <span className={cn("text-sm font-medium", themeClasses.mainText)}>
+                                {formatPrice(item.totalPrice)}
+                              </span>
+                            </div>
+                          </div>
                       </div>
                     </div>
                   ))}

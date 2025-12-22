@@ -234,7 +234,7 @@ export async function POST(request: NextRequest) {
       product_name: item.product_name || 'Unknown Product',
       variant_id: item.variant_id || null,
       variant_name: item.variant_name || null,
-      variant_attributes: item.variant_attributes || null,
+      variant_attributes: null, // No longer used in simplified variant system
       quantity: item.quantity,
       price: item.price,
       total_price: item.price * item.quantity,

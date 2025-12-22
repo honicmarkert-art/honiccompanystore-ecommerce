@@ -129,55 +129,17 @@ export function SupplierRouteGuard({ children }: SupplierRouteGuardProps) {
 
     if (!isSupplier && !isAdmin) {
       // Double-check we're not on company-info page before redirecting
-      const currentPathCheck = pathname === '/supplier/company-info'
-      if (currentPathCheck) {
+      const currentPathCheck = pathname || (typeof window !== 'undefined' ? window.location.pathname : '')
+      if (currentPathCheck === '/supplier/company-info') {
         return // Don't redirect if on company-info page
       }
       
-      // User might be a supplier but profile hasn't loaded yet
-      // Wait longer and also check via API to ensure profile data has loaded
-      retryTimeoutRef.current = setTimeout(async () => {
-        // Double-check supplier status before redirecting
-        const finalUser = userRef.current
-        const finalCheck = finalUser?.isSupplier || finalUser?.profile?.is_supplier || false
-        
-        // Check current path again (might have changed) - use fallback
-        const finalPathCheck = pathname || (typeof window !== 'undefined' ? window.location.pathname : '')
-        const isStillOnCompanyInfo = finalPathCheck === '/supplier/company-info'
-        
-        if (isStillOnCompanyInfo) {
-          return // Don't redirect if still on company-info page
-        }
-        
-        // If still not found, check via API
-        if (!finalCheck && !isAdmin && !hasRedirected.current) {
-          try {
-            const profileResponse = await fetch('/api/auth/session')
-            if (profileResponse.ok) {
-              const profileData = await profileResponse.json()
-              const apiCheck = profileData.user?.isSupplier || profileData.user?.profile?.is_supplier || false
-              
-              if (!apiCheck && !hasRedirected.current) {
-                hasRedirected.current = true
-                router.push('/')
-              }
-              // If API check shows supplier, don't redirect - let component re-render
-            } else if (!hasRedirected.current) {
-              // If API fails, redirect anyway (user is likely not a supplier)
-              hasRedirected.current = true
-              router.push('/')
-            }
-          } catch (error) {
-            console.error('Error checking supplier status:', error)
-            // On error, redirect to be safe
-            if (!hasRedirected.current) {
-              hasRedirected.current = true
-              router.push('/')
-            }
-          }
-        }
-      }, 2000) // Wait 2 seconds to allow profile to load (increased from 500ms)
-      return
+      // Force redirect normal users immediately to products page
+      if (!hasRedirected.current) {
+        hasRedirected.current = true
+        router.replace('/products')
+        return
+      }
     }
   }, [loading, forceRender, router, pathname]) // Include pathname to re-check when route changes
 

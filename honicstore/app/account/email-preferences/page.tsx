@@ -51,7 +51,7 @@ function EmailPreferencesPageContent() {
           }
         }
       } catch (error) {
-        console.error('Error loading email preferences:', error)
+        // Error loading email preferences
       } finally {
         setLoading(false)
       }

@@ -35,6 +35,21 @@ function SupplierEditProductContent() {
       const response = await fetch(`/api/supplier/products/${productId}`, {
         credentials: 'include'
       })
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch product: ${response.status} ${response.statusText}`)
+      }
+      
       const data = await response.json()
 
       if (data.success && data.product) {
@@ -45,7 +60,15 @@ function SupplierEditProductContent() {
           inStock: data.product.in_stock,
           stockQuantity: data.product.stock_quantity,
           view360: data.product.view_360,
-          importChina: data.product.import_china
+          importChina: data.product.import_china,
+          // Ensure variants use simplified structure for suppliers
+          variants: (data.product.variants || []).map((variant: any) => ({
+            id: variant.id,
+            variant_name: variant.variant_name || '',
+            price: variant.price || 0,
+            stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
+            stockQuantity: variant.stock_quantity || variant.stockQuantity || 0
+          }))
         }
         setProduct(transformedProduct)
       } else {
@@ -56,10 +79,11 @@ function SupplierEditProductContent() {
         })
         router.push('/supplier/products')
       }
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to load product'
       toast({
         title: 'Error',
-        description: 'Failed to load product',
+        description: errorMessage,
         variant: 'destructive'
       })
       router.push('/supplier/products')
@@ -99,6 +123,16 @@ function SupplierEditProductContent() {
         credentials: 'include',
         body: JSON.stringify(supplierProductData)
       })
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        if (text.includes('<!DOCTYPE')) {
+          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+        }
+        throw new Error('Invalid response format from server')
+      }
 
       const result = await response.json()
 

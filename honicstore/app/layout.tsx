@@ -19,6 +19,7 @@ import { OptimizedPageWrapper, ScrollRestoration, PageTransitionMonitor } from '
 import { Toaster } from '@/components/ui/toaster'
 import { HydrationFix } from '@/components/hydration-fix'
 import { SWRProvider } from '@/components/swr-provider'
+import { ChunkErrorHandler } from '@/components/chunk-error-handler'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Analytics } from '@vercel/analytics/react'
 
@@ -231,6 +232,7 @@ export default function RootLayout({
                           {children}
                         </OptimizedPageWrapper>
                         <HydrationFix />
+                        <ChunkErrorHandler />
                         <div suppressHydrationWarning>
                         <Toaster />
                         </div>
