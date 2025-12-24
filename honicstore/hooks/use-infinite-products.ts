@@ -102,7 +102,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
   // Track previous category signature to avoid no-op cache clears
   const prevCategoriesSigRef = useRef<string | null>(null)
 
-  // Reset function
+  // Reset function - clears all products immediately
   const reset = useCallback(() => {
     // Abort any in-flight request when resetting
     if (abortControllerRef.current) {
@@ -110,6 +110,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       abortControllerRef.current = null
     }
     lastResetAtRef.current = Date.now()
+    // Clear products immediately - this ensures previous search results are removed
     setProducts([])
     setOffset(initialOffset)
     setHasMore(true)
@@ -117,6 +118,9 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     setTotalCount(0)
     hasMoreRef.current = true
     loadingRef.current = false
+    // Also clear loading states to show fresh loading state
+    setLoading(false)
+    setLoadingMore(false)
   }, [initialOffset])
 
   // Fetch products function
@@ -232,7 +236,9 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       }
 
       // Check if we have more data - use API's hasMore flag if available
-      const hasMoreData = pagination?.hasMore ?? (newProducts.length === limit)
+      // Account for client-side filtering (out-of-stock products) by checking if we got full batch
+      const receivedFullBatch = newProducts.length >= limit
+      const hasMoreData = pagination?.hasMore ?? receivedFullBatch
       
       
       hasMoreRef.current = hasMoreData

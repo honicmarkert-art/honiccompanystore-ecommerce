@@ -1443,6 +1443,34 @@ function ProductDetailPageContent() {
     : 0
 
 
+  // Get current available stock (memoized for performance)
+  const currentAvailableStock = useMemo((): number => {
+    // If variant is selected, use variant stock
+    if (selectedVariant) {
+      const variantStock = selectedVariant.stock_quantity || selectedVariant.stockQuantity || 0
+      return typeof variantStock === 'number' ? variantStock : parseInt(String(variantStock)) || 0
+    }
+    
+    // If product has variants, calculate total stock
+    if (displayProduct?.variants && displayProduct.variants.length > 0) {
+      let total = 0
+      displayProduct.variants.forEach((variant: any) => {
+        const qty = variant.stock_quantity || variant.stockQuantity || 0
+        total += typeof qty === 'number' ? qty : parseInt(String(qty)) || 0
+      })
+      return total
+    }
+    
+    // Fallback to product-level stock
+    if (displayProduct?.stockQuantity) {
+      return typeof displayProduct.stockQuantity === 'number' 
+        ? displayProduct.stockQuantity 
+        : parseInt(String(displayProduct.stockQuantity)) || 0
+    }
+    
+    return 0
+  }, [selectedVariant, displayProduct])
+
   const handleQuantityChange = (delta: number) => {
     setQuantity((prev) => {
       const newQuantity = prev + delta
@@ -1453,6 +1481,18 @@ function ProductDetailPageContent() {
       if (product && product.price < 500 && newQuantity < 5 && delta < 0) {
         setIsQuantityLimitModalOpen(true)
         return prev // Don't change quantity
+      }
+      
+      // Check stock before incrementing
+      if (delta > 0) {
+        if (newQuantity > currentAvailableStock) {
+          toast({
+            title: "Insufficient Stock",
+            description: `Only ${currentAvailableStock} ${currentAvailableStock === 1 ? 'unit' : 'units'} available${selectedVariant ? ` for this variant` : ''}.`,
+            variant: "destructive",
+          })
+          return prev // Don't change quantity
+        }
       }
       
       return Math.max(minQuantity, newQuantity)
@@ -1585,7 +1625,21 @@ function ProductDetailPageContent() {
   }
 
   const handleBulkOrderClick = () => {
-    setQuantity(100) // Auto-insert 100 items
+    const availableStock = currentAvailableStock
+    const BULK_ORDER_MINIMUM = 100
+    
+    // Check if stock can support bulk order
+    if (availableStock < BULK_ORDER_MINIMUM) {
+      toast({
+        title: "Insufficient Stock for Bulk Order",
+        description: `Bulk orders require minimum 100 items, but only ${availableStock} ${availableStock === 1 ? 'unit' : 'units'} available${selectedVariant ? ` for this variant` : ''}.`,
+        variant: "destructive",
+      })
+      return // Don't proceed with bulk order
+    }
+    
+    // Set quantity to 100 and open dialog
+    setQuantity(BULK_ORDER_MINIMUM)
     setIsBulkOrderDialogOpen(true)
   }
 
@@ -2440,19 +2494,21 @@ function ProductDetailPageContent() {
                         <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Verified</span>
                       </div>
                     )}
-                    {/* View Seller Products - Mobile: Inline, Desktop: Link */}
-                    {supplierInfo?.supplierId && (
+                    {/* View Count and View Seller Products Link */}
+                    {supplierInfo?.totalViews !== null && supplierInfo?.totalViews !== undefined && (
                       <>
                         <span className="text-xs text-gray-600 dark:text-gray-400 sm:hidden">
-                          ({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'}) view
+                          ({supplierInfo.totalViews.toLocaleString()}) view{supplierInfo.totalViews !== 1 ? 's' : ''}
                         </span>
-                        <Link
-                          href={`/products?supplier=${supplierInfo.supplierId}`}
-                          className="hidden sm:inline-flex text-xs text-blue-600 dark:text-blue-400 hover:underline items-center gap-1 ml-1"
-                        >
-                          <span>({supplierInfo.totalViews ? supplierInfo.totalViews.toLocaleString() : '0'})</span>
-                          <span>view seller products</span>
-                        </Link>
+                        {product?.id && (
+                          <OptimizedLink
+                            href={`/products?supplierByProduct=${product.id}`}
+                            className="hidden sm:inline-flex text-xs text-blue-600 dark:text-blue-400 hover:underline items-center gap-1 ml-1"
+                          >
+                            <span>({supplierInfo.totalViews.toLocaleString()})</span>
+                            <span>view seller products</span>
+                          </OptimizedLink>
+                        )}
                       </>
                     )}
                   </div>
@@ -2498,8 +2554,8 @@ function ProductDetailPageContent() {
                   "relative aspect-square overflow-hidden rounded-lg border",
                   themeClasses.cardBorder,
                   themeClasses.cardBg,
-                  "max-w-[calc(85%-20px)] max-h-[calc(85%-20px)]",
-                  "w-[85%] mx-auto lg:mx-0",
+                  "max-w-[calc(95%-20px)] max-h-[calc(95%-20px)] sm:max-w-[calc(90%-20px)] sm:max-h-[calc(90%-20px)]",
+                  "w-[95%] sm:w-[90%] lg:w-[85%] mx-auto lg:mx-0",
                 )}
               >
                 {/* Main Image View */}
@@ -2741,7 +2797,7 @@ function ProductDetailPageContent() {
                 )}
                       </div>
               {/* Video and 360° View Controls */}
-              <div className="flex items-center justify-center gap-8 mt-2 p-4 bg-gray-50 dark:bg-black rounded-lg w-[85%] mx-auto lg:mx-0">
+              <div className={cn("flex items-center justify-center gap-8 mt-2 p-4 rounded-lg w-[85%] mx-auto lg:mx-0", themeClasses.cardBg)}>
                 {/* Always show video button */}
                 <Button
                   variant="outline"
@@ -3035,16 +3091,20 @@ function ProductDetailPageContent() {
                           onClick={() => handleVariantSelect(variant.id?.toString() || '')}
                           disabled={!isInStock}
                                 className={cn(
-                            "px-4 py-2 rounded-md text-sm sm:text-base font-medium transition-all",
+                            "px-4 py-2 rounded-md text-sm sm:text-base font-medium transition-all whitespace-nowrap overflow-hidden text-ellipsis max-w-full",
                                   isSelected 
                               ? backgroundColor === "white"
                                 ? "bg-blue-600 text-white border-2 border-blue-700"
                                 : "bg-blue-700 text-white border-2 border-blue-500"
-                              : backgroundColor === "white"
-                                ? "bg-white text-gray-900 border-2 border-gray-300 hover:border-gray-400 hover:bg-gray-50"
-                                : "bg-gray-800 text-gray-100 border-2 border-gray-600 hover:border-gray-500 hover:bg-gray-700",
+                              : cn(
+                                  themeClasses.cardBg,
+                                  themeClasses.mainText,
+                                  themeClasses.cardBorder,
+                                  "border-2 hover:opacity-80"
+                                ),
                             !isInStock && "opacity-50 cursor-not-allowed"
                           )}
+                          title={variant.variant_name || `Variant ${variant.id}`}
                         >
                           {variant.variant_name || `Variant ${variant.id}`}
                         </button>
@@ -3118,6 +3178,18 @@ function ProductDetailPageContent() {
                       return // Don't change quantity
                     }
                     
+                    // Check stock before setting quantity
+                    if (newQuantity > currentAvailableStock) {
+                      toast({
+                        title: "Insufficient Stock",
+                        description: `Only ${currentAvailableStock} ${currentAvailableStock === 1 ? 'unit' : 'units'} available${selectedVariant ? ` for this variant` : ''}.`,
+                        variant: "destructive",
+                      })
+                      // Set to max available stock instead of preventing change
+                      setQuantity(Math.max(minQuantity, Math.min(currentAvailableStock, newQuantity)))
+                      return
+                    }
+                    
                     setQuantity(Math.max(minQuantity, newQuantity))
                   }}
                   style={{
@@ -3138,11 +3210,13 @@ function ProductDetailPageContent() {
                   variant="ghost"
                   size="icon"
                   onClick={() => handleQuantityChange(1)}
+                  disabled={quantity >= currentAvailableStock}
                   className={cn(
                     "rounded-none h-8 w-8 sm:h-9 sm:w-9",
                     backgroundColor === "white" 
                       ? "bg-white hover:bg-gray-100 text-neutral-950" 
-                      : "bg-gray-800 hover:bg-gray-700 text-white"
+                      : "bg-gray-800 hover:bg-gray-700 text-white",
+                    quantity >= currentAvailableStock && "opacity-50 cursor-not-allowed"
                   )}
                 >
                   <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -3151,12 +3225,15 @@ function ProductDetailPageContent() {
               <Button 
                 variant="ghost" 
                 onClick={handleBulkOrderClick}
+                disabled={currentAvailableStock < 100}
                 className={cn(
                   "flex items-center gap-1 group border border-transparent hover:border-white/20 hover:bg-transparent text-xs sm:text-sm",
                   backgroundColor === "dark" 
                     ? "text-blue-400 hover:text-yellow-500" 
-                    : "text-blue-600 hover:bg-blue-50"
+                    : "text-blue-600 hover:bg-blue-50",
+                  currentAvailableStock < 100 && "opacity-50 cursor-not-allowed"
                 )}
+                title={currentAvailableStock < 100 ? `Insufficient stock. Only ${currentAvailableStock} ${currentAvailableStock === 1 ? 'unit' : 'units'} available.` : "Bulk order (minimum 100 items)"}
               >
                 <UsersIcon className={cn(
                   "w-3 h-3 sm:w-4 sm:h-4 group-hover:text-yellow-500 transition-colors",
@@ -3510,14 +3587,30 @@ function ProductDetailPageContent() {
                   "grid grid-cols-1 md:grid-cols-2 gap-2 transition-all duration-300 ease-in-out",
                   !expandedSpecs ? "max-h-96 overflow-hidden" : ""
                 )}>
-                  {product.specifications && Object.entries(product.specifications).map(([key, value]) => (
-                    <div key={key} className="flex items-center justify-between py-2 px-3 border-b border-opacity-10" style={{ borderColor: backgroundColor === "white" ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)" }}>
-                      <span className={cn("font-medium text-sm flex-shrink-0", themeClasses.mainText)}>{String(key)}:</span>
-                      <span className={cn("text-sm text-right break-words ml-2", themeClasses.textNeutralSecondary)}>{String(value)}</span>
-                    </div>
-                  ))}
+                  {product.specifications && Object.entries(product.specifications).map(([key, value]) => {
+                    // Handle both old format (string) and new format (object with value)
+                    let specValue = ''
+                    
+                    if (typeof value === 'string') {
+                      specValue = value
+                    } else if (typeof value === 'object' && value !== null) {
+                      specValue = (value as any).value || ''
+                    } else {
+                      specValue = String(value)
+                    }
+                    
+                    return (
+                      <div key={key} className="py-2 px-3 border-b border-opacity-10" style={{ borderColor: backgroundColor === "white" ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)" }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <span className={cn("font-medium text-sm flex-shrink-0", themeClasses.mainText)}>{String(key)}:</span>
+                          <span className={cn("text-sm text-right break-words ml-2 flex-1", themeClasses.textNeutralSecondary)}>{specValue}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
                 
+                {/* Show More/Less button for specifications table */}
                 {product.specifications && Object.entries(product.specifications).length > 4 && (
                   <div className="mt-4 text-center">
                     <Button
@@ -3531,6 +3624,46 @@ function ProductDetailPageContent() {
                     </Button>
                   </div>
                 )}
+                
+                {/* Specification Images Section - Display below specifications table */}
+                {(() => {
+                  // Handle both array of strings and array of objects
+                  const specImages = product?.specificationImages || []
+                  const imageUrls = Array.isArray(specImages) 
+                    ? specImages.map((img: any) => {
+                        if (typeof img === 'string') return img
+                        if (img && typeof img === 'object' && img.imageUrl) return img.imageUrl
+                        if (img && typeof img === 'object' && img.url) return img.url
+                        return String(img || '')
+                      }).filter((url: string) => url && url.trim() !== '')
+                    : []
+                  
+                  return imageUrls.length > 0 ? (
+                    <div className="mt-6 pt-6 border-t border-opacity-10" style={{ borderColor: backgroundColor === "white" ? "rgba(0,0,0,0.1)" : "rgba(255,255,255,0.1)" }}>
+                      <h3 className={cn("text-lg font-semibold mb-4", themeClasses.mainText)}>Specification Images</h3>
+                      <div className="space-y-[1px]">
+                        {imageUrls.map((imgUrl: string, imgIndex: number) => (
+                          <div key={imgIndex} className="relative group w-full">
+                            <div className="relative w-full overflow-hidden rounded-lg cursor-pointer hover:opacity-80 transition-opacity bg-transparent">
+                              <Image
+                                src={imgUrl}
+                                alt={`Specification image ${imgIndex + 1}`}
+                                width={800}
+                                height={600}
+                                className="w-full h-auto object-contain"
+                                sizes="100vw"
+                                onClick={() => {
+                                  // Open image in new tab
+                                  window.open(imgUrl, '_blank')
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null
+                })()}
               </div>
             </div>
           )}
@@ -3902,81 +4035,27 @@ function ProductDetailPageContent() {
         <DialogContent className={cn("sm:max-w-md", backgroundColor === "dark" ? "bg-gray-900 border-gray-700" : "bg-white border-gray-200", themeClasses.mainText)}>
           <DialogHeader>
             <DialogTitle className={cn("text-lg font-bold", themeClasses.mainText)}>
-              🎯 Bulk Order Policy
+              Bulk Order
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 bg-yellow-500 rounded-full mt-2 flex-shrink-0"></div>
-                <div>
-                  <h4 className={cn("font-semibold text-sm", themeClasses.mainText)}>Minimum Order Quantity</h4>
-                  <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                    Minimum 100 items required for bulk orders. Quantity has been auto-set to 100.
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                <div>
-                  <h4 className={cn("font-semibold text-sm", themeClasses.mainText)}>Special Pricing</h4>
-                  <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                    Bulk orders receive special discounted pricing. Check the updated price in the quantity section.
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
-                <div>
-                  <h4 className={cn("font-semibold text-sm", themeClasses.mainText)}>Delivery & Shipping</h4>
-                  <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                    Bulk orders have extended delivery times (7-14 days). Free shipping available for orders over $500.
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 bg-purple-500 rounded-full mt-2 flex-shrink-0"></div>
-                <div>
-                  <h4 className={cn("font-semibold text-sm", themeClasses.mainText)}>Payment Terms</h4>
-                  <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                    Bulk orders require advance payment. Bank transfer or wire transfer preferred for large orders.
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-              <p className={cn("text-xs font-medium", themeClasses.mainText)}>
-                💡 <strong>Quantity Updated:</strong> Your quantity has been automatically set to 100 items for bulk order pricing.
+            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+              Minimum 100 items required. Quantity has been set to 100 with special bulk pricing.
+            </p>
+            {currentAvailableStock >= 100 && (
+              <p className={cn("text-xs text-green-600 dark:text-green-400", themeClasses.textNeutralSecondary)}>
+                ✓ {currentAvailableStock} items available in stock
               </p>
-            </div>
+            )}
           </div>
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setIsBulkOrderDialogOpen(false)}
-              className={cn(
-                "w-full sm:w-auto",
-                themeClasses.borderNeutralSecondary,
-                themeClasses.mainText,
-              )}
-            >
-              Read Policy Again
-            </Button>
+          <DialogFooter>
             <Button
               onClick={() => {
                 setIsBulkOrderDialogOpen(false)
-                toast({
-                  title: "Bulk Order Ready!",
-                  description: "Your bulk order is configured. You can now proceed with the purchase.",
-                })
               }}
-              className="w-full sm:w-auto bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+              className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
             >
-              Proceed
+              OK
             </Button>
           </DialogFooter>
         </DialogContent>

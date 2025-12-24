@@ -324,7 +324,7 @@ function SupplierProductsContent() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-6 max-w-full overflow-hidden">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
         <div>
@@ -711,17 +711,16 @@ function SupplierProductsContent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 sm:p-6">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="overflow-x-auto max-w-full">
+            <table className="w-full min-w-[800px]">
               <thead>
                 <tr className={cn("border-b", themeClasses.cardBorder)}>
                   <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium w-8 sm:w-12 text-xs sm:text-sm", themeClasses.mainText)}>No.</th>
-                  <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Product</th>
+                  <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm w-32 sm:w-48", themeClasses.mainText)}>Product</th>
                   <th className={cn("hidden sm:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Category</th>
                   <th className={cn("hidden md:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Brand</th>
                   <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Price</th>
                   <th className={cn("hidden lg:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Variants</th>
-                  <th className={cn("hidden lg:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Rating</th>
                   <th className={cn("hidden md:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Views</th>
                   <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Actions</th>
                 </tr>
@@ -729,7 +728,7 @@ function SupplierProductsContent() {
               <tbody>
                 {filteredProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center">
+                    <td colSpan={8} className="py-12 text-center">
                       <div className={cn("text-center", themeClasses.textNeutralSecondary)}>
                         <Package className="w-16 h-16 mx-auto mb-4 opacity-50" />
                         <p className="text-lg font-semibold mb-2">No products found</p>
@@ -745,33 +744,33 @@ function SupplierProductsContent() {
                   filteredProducts.map((product, idx) => (
                     <tr key={product.id} className={cn("border-b", themeClasses.cardBorder)}>
                       <td className="py-2 sm:py-3 px-2 sm:px-4 align-top text-xs sm:text-sm">{idx + 1}</td>
-                      <td className="py-2 sm:py-3 px-2 sm:px-4">
+                      <td className="py-2 sm:py-3 px-2 sm:px-4 w-32 sm:w-48">
                         <div className="flex items-center space-x-2 sm:space-x-3">
                           {product.image ? (
                             <Image
                               src={product.image}
                               alt={product.name}
-                              width={40}
-                              height={40}
-                              className="rounded-md object-cover w-8 h-8 sm:w-10 sm:h-10"
+                              width={32}
+                              height={32}
+                              className="rounded-md object-cover w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0"
                             />
                           ) : (
-                            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-200 rounded-md flex items-center justify-center flex-shrink-0">
-                              <Package className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
+                            <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-200 rounded-md flex items-center justify-center flex-shrink-0">
+                              <Package className="h-3 w-3 sm:h-4 sm:w-4 text-gray-400" />
                             </div>
                           )}
-                          <div className="min-w-0 flex-1">
-                            <p className={cn("font-medium text-xs sm:text-sm truncate", themeClasses.mainText)}>
+                          <div className="min-w-0 flex-1 overflow-hidden">
+                            <p className={cn("font-medium text-xs truncate", themeClasses.mainText)}>
                               {product.name}
                             </p>
-                            <p className={cn("text-[10px] sm:text-xs", themeClasses.textNeutralSecondary)}>
+                            <p className={cn("text-[9px] sm:text-[10px] truncate", themeClasses.textNeutralSecondary)}>
                               SKU: {product.sku}
                             </p>
                           </div>
                         </div>
                       </td>
                       <td className="hidden sm:table-cell py-2 sm:py-3 px-2 sm:px-4">
-                        <Badge variant="secondary" className="text-xs">{product.category}</Badge>
+                        <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>{product.category}</span>
                       </td>
                       <td className="hidden md:table-cell py-2 sm:py-3 px-2 sm:px-4">
                         <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>{product.brand}</span>
@@ -787,18 +786,17 @@ function SupplierProductsContent() {
                         )}
                       </td>
                       <td className="hidden lg:table-cell py-2 sm:py-3 px-2 sm:px-4">
-                        <Badge variant="outline" className="text-xs">
-                          {product.variants?.length || 0} variants
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center">
-                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400 mr-1" />
-                          <span className={themeClasses.mainText}>{product.rating || 0}</span>
-                          <span className={cn("text-xs ml-1", themeClasses.textNeutralSecondary)}>
-                            ({product.reviews || 0})
-                          </span>
-                        </div>
+                        <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>
+                          {(() => {
+                            // Count only valid variants (those with id and variant_name or sku)
+                            if (!product.variants || !Array.isArray(product.variants)) {
+                              return 0
+                            }
+                            return product.variants.filter((v: any) => 
+                              v && v.id && (v.variant_name || v.sku)
+                            ).length
+                          })()}
+                        </span>
                       </td>
                       <td className="py-3 px-4">
                         <span className={themeClasses.mainText}>

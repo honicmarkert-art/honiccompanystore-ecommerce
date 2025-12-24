@@ -775,7 +775,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 <Link href="/supplier/dashboard" className={cn("flex items-center gap-2", themeClasses.mainText)}>
                   <Image
                     src={displayLogo}
-                    alt={`${companyName} Logo`}
+                    alt={`${companyName || 'Honic'} Logo`}
                     width={48}
                     height={48}
                     className="rounded-md"
@@ -970,22 +970,20 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
 
             <div className="flex flex-1 items-center gap-x-1 sm:gap-x-2 self-stretch lg:gap-x-4 min-w-0 overflow-hidden" suppressHydrationWarning>
               {/* Company Name with Logo - Left Side */}
-              {userCompanyName && (
-                <div className="hidden sm:flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                  {userCompanyLogo && (
-                    <Image
-                      src={userCompanyLogo}
-                      alt={`${userCompanyName} Logo`}
-                      width={40}
-                      height={40}
-                      className="w-8 h-8 sm:w-9 sm:h-9 lg:w-10 lg:h-10 flex-shrink-0 rounded-lg object-contain"
-                    />
-                  )}
-                  <span className={cn("text-xs sm:text-sm lg:text-base font-bold truncate block", themeClasses.mainText)}>
-                    {userCompanyName}
-                  </span>
-                </div>
-              )}
+              <div className="hidden sm:flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                {userCompanyLogo && (
+                  <Image
+                    src={userCompanyLogo}
+                    alt={`${userCompanyName || 'Honic'} Logo`}
+                    width={40}
+                    height={40}
+                    className="w-8 h-8 sm:w-9 sm:h-9 lg:w-10 lg:h-10 flex-shrink-0 rounded-lg object-contain"
+                  />
+                )}
+                <span className={cn("text-xs sm:text-sm lg:text-base font-bold truncate block", themeClasses.mainText)}>
+                  {userCompanyName || 'Honic'}
+                </span>
+              </div>
               <div className="flex flex-1 sm:hidden" suppressHydrationWarning />
               <div className="flex items-center gap-x-0.5 sm:gap-x-1 lg:gap-x-2 flex-shrink-0 overflow-visible" suppressHydrationWarning>
                 {/* Account Status - Mobile Native Style */}

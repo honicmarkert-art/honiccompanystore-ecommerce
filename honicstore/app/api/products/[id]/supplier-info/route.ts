@@ -59,7 +59,8 @@ export async function GET(
           detailSentence: null,
           rating: null,
           reviewCount: null,
-          supplierId: null,
+          // SECURITY: Do NOT expose supplierId (UUID) to clients
+          // supplierId: null, // REMOVED - UUIDs should never be exposed
           productCount: null,
           totalViews: null,
           region: null
@@ -106,7 +107,8 @@ export async function GET(
       detailSentence: supplierData.detail_sentence || null,
       rating: supplierData.supplier_rating || null,
       reviewCount: supplierData.supplier_review_count || null,
-      supplierId: supplierId,
+      // SECURITY: Do NOT expose supplierId (UUID) to clients
+      // supplierId: supplierId, // REMOVED - UUIDs should never be exposed
       productCount: productCount || null,
       totalViews: totalViews || null,
       region: supplierData.region || null

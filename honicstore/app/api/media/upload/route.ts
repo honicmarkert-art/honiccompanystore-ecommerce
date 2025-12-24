@@ -111,12 +111,16 @@ export async function POST(request: NextRequest) {
     // Validate file extension matches MIME type
     const fileExtension = file.name.split('.').pop()?.toLowerCase()
     const extensionMap: Record<string, string[]> = {
-      'image': ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'],
+      'image': ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp', 'svg'],
       'video': ['mp4', 'webm', 'ogg', 'mov'],
       'model3d': ['glb', 'gltf', 'obj']
     }
     
-    if (fileExtension && extensionMap[type] && !extensionMap[type].includes(fileExtension)) {
+    // JFIF files are JPEG files, so accept them if MIME type is image/jpeg
+    if (fileExtension === 'jfif' && file.type === 'image/jpeg') {
+      // Allow JFIF files - they're JPEG format
+      logger.log('✅ JFIF file detected (JPEG format):', file.name)
+    } else if (fileExtension && extensionMap[type] && !extensionMap[type].includes(fileExtension)) {
       logger.log('❌ Invalid file extension:', fileExtension, 'for type:', type)
       return NextResponse.json({ 
         error: `Invalid file extension. Expected one of: ${extensionMap[type].join(', ')}`,
@@ -131,7 +135,7 @@ export async function POST(request: NextRequest) {
     
     // Generate product-specific filename if productId is provided
     let fileName: string
-    if (productId && (context === 'product' || context === 'variant')) {
+    if (productId && (context === 'product' || context === 'variant' || context === 'specification')) {
       fileName = `product_${productId}_${type}_${timestamp}.${fileExt}`
     } else {
       fileName = `${type}_${timestamp}_${randomString}.${fileExt}`
@@ -147,6 +151,19 @@ export async function POST(request: NextRequest) {
     const bucketName = getBucketName(type, context)
     logger.log('📦 Using bucket:', bucketName)
 
+    // Check if bucket exists (for specification-images bucket)
+    if (bucketName === 'specification-images') {
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets()
+      const bucketExists = buckets?.some(b => b.name === bucketName)
+      if (!bucketExists) {
+        logger.log('❌ Bucket does not exist:', bucketName)
+        return NextResponse.json({ 
+          error: `Storage bucket '${bucketName}' does not exist. Please create it in Supabase Dashboard.`,
+          bucket: bucketName
+        }, { status: 400 })
+      }
+    }
+
     // Upload to Supabase Storage
     logger.log('⬆️ Uploading to Supabase...')
     const { data, error } = await supabase.storage
@@ -159,13 +176,16 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error('❌ Supabase upload error:', error)
       console.error('Error details:', {
-        message: error.message
+        message: error.message,
+        statusCode: error.statusCode,
+        bucket: bucketName
       })
       return NextResponse.json({ 
         error: 'Upload failed', 
         details: error.message,
-        bucket: bucketName
-      }, { status: 500 })
+        bucket: bucketName,
+        statusCode: error.statusCode
+      }, { status: error.statusCode === 404 ? 400 : 500 })
     }
 
     logger.log('✅ Upload successful:', data)
@@ -284,6 +304,8 @@ function getBucketName(type: string, context: string = 'product'): string {
         return 'category-images'
       case 'variant':
         return 'variant-images'
+      case 'specification':
+        return 'specification-images'
       case 'product':
       default:
         return 'product-images'

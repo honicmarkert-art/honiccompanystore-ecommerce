@@ -338,13 +338,17 @@ export function useCart() {
   }, [isAuthenticated, migrateCartItem])
 
   // Load product data for cart items that don't have it, and fetch variant_name for variants
-  const loadProductDataForCartItems = useCallback(async (cartItems: CartItem[]) => {
+  // SECURITY: Always re-fetch supplier info from API for guest users to prevent localStorage tampering
+  const loadProductDataForCartItems = useCallback(async (cartItems: CartItem[], forceRefreshSupplierInfo: boolean = false) => {
     const itemsNeedingProductData = cartItems.filter(item => !item.product)
     const itemsNeedingVariantName = cartItems.filter(item => 
       item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId)))
     )
     
-    if (itemsNeedingProductData.length === 0 && itemsNeedingVariantName.length === 0) return cartItems
+    // For guest users, always refresh supplier info from API (don't trust localStorage)
+    const needsSupplierInfoRefresh = forceRefreshSupplierInfo || !isAuthenticated
+    
+    if (itemsNeedingProductData.length === 0 && itemsNeedingVariantName.length === 0 && !needsSupplierInfoRefresh) return cartItems
     
     const updatedItems = await Promise.all(
       cartItems.map(async (item) => {
@@ -352,59 +356,96 @@ export function useCart() {
         const needsVariantName = item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId)))
         
         // Fetch product data if needed (for product info or variant_name)
-        if (needsProductData || needsVariantName) {
+        // SECURITY: Always fetch supplier info from API for guest users (never trust localStorage)
+        if (needsProductData || needsVariantName || needsSupplierInfoRefresh) {
           try {
-            const response = await fetch(`/api/products/${item.productId}`)
-            if (response.ok) {
-              const productData = await response.json()
-              
-              // Update variants with variant_name and price from database
-              const updatedVariants = item.variants.map((v: any) => {
-                let updatedVariant = { ...v }
-                
-                if (v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId))) {
-                  const variant = productData.variants?.find((pv: any) => pv.id === Number(v.variantId))
-                  if (variant) {
-                    // Always update variant_name and price from database
-                    updatedVariant.variant_name = variant.variant_name || null
-                    updatedVariant.price = parseFloat(variant.price) || updatedVariant.price
-                  }
-                } else if (needsProductData) {
-                  // For products without variants, use product price
-                  updatedVariant.price = parseFloat(productData.price) || updatedVariant.price
+            // Fetch product data and supplier info in parallel
+            // SECURITY: Always fetch supplier info from API, even if it exists in localStorage
+            const [productResponse, supplierResponse] = await Promise.all([
+              needsProductData || needsVariantName ? fetch(`/api/products/${item.productId}`) : Promise.resolve(null),
+              needsSupplierInfoRefresh ? fetch(`/api/products/${item.productId}/supplier-info`).catch(() => null) : Promise.resolve(null)
+            ])
+            
+            const productData = productResponse && productResponse.ok ? await productResponse.json() : null
+            
+            // SECURITY: Always fetch supplier info from API for guest users (prevent tampering)
+            let supplierInfo: any = null
+            if (needsSupplierInfoRefresh && supplierResponse && supplierResponse.ok) {
+              try {
+                supplierInfo = await supplierResponse.json()
+                // SECURITY: Remove any supplierId if present (should not be in response, but double-check)
+                if (supplierInfo && 'supplierId' in supplierInfo) {
+                  delete supplierInfo.supplierId
                 }
-                
-                return updatedVariant
-              })
-              
-              return {
-                ...item,
-                variants: updatedVariants,
-                product: needsProductData ? {
-                  id: productData.id,
-                  name: productData.name,
-                  image: productData.image,
-                  price: productData.price,
-                  originalPrice: productData.original_price,
-                  inStock: productData.in_stock,
-                  stockQuantity: productData.stock_quantity,
-                  sku: productData.sku
-                } : item.product
+              } catch (e) {
+                // Ignore supplier info errors, but don't use localStorage data
+                supplierInfo = null
               }
+            }
+            
+            // Update variants with variant_name and price from database
+            const updatedVariants = productData ? item.variants.map((v: any) => {
+              let updatedVariant = { ...v }
+              
+              if (v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId))) {
+                const variant = productData.variants?.find((pv: any) => pv.id === Number(v.variantId))
+                if (variant) {
+                  // Always update variant_name and price from database
+                  updatedVariant.variant_name = variant.variant_name || null
+                  updatedVariant.price = parseFloat(variant.price) || updatedVariant.price
+                }
+              } else if (needsProductData) {
+                // For products without variants, use product price
+                updatedVariant.price = parseFloat(productData.price) || updatedVariant.price
+              }
+              
+              return updatedVariant
+            }) : item.variants
+            
+            return {
+              ...item,
+              variants: updatedVariants,
+              product: needsProductData && productData ? {
+                id: productData.id,
+                name: productData.name,
+                image: productData.image,
+                price: productData.price,
+                originalPrice: productData.original_price,
+                inStock: productData.in_stock,
+                stockQuantity: productData.stock_quantity,
+                sku: productData.sku
+              } : item.product,
+              // SECURITY: Always use API-supplied supplier info, never trust localStorage
+              // If API fetch failed, remove supplier info (don't use potentially tampered data)
+              supplierCompanyName: supplierInfo?.companyName || null,
+              supplierIsVerified: supplierInfo?.isVerified || false,
+              supplierRegion: supplierInfo?.region || null,
+              supplierNation: null, // supplier-info doesn't return nation separately
+              supplierCompanyLogo: supplierInfo?.companyLogo || null
             }
           } catch (error) {
             safeError('🛒 [USE-CART] Error fetching product data:', error)
+            // On error, remove supplier info to prevent using tampered data
+            return {
+              ...item,
+              supplierCompanyName: null,
+              supplierIsVerified: false,
+              supplierRegion: null,
+              supplierNation: null,
+              supplierCompanyLogo: null
+            } as any
           }
         }
         
-        return item // Return original item if product data loading failed
+        return item // Return original item if no updates needed
       })
     )
     
     return updatedItems
-  }, [])
+  }, [isAuthenticated])
 
   // Load guest cart from localStorage
+  // SECURITY: Always re-fetch supplier info from API to prevent localStorage tampering
   const loadGuestCart = useCallback(async () => {
     if (isAuthenticated) return
 
@@ -414,28 +455,74 @@ export function useCart() {
         const guestCart = JSON.parse(stored)
         const migratedCart = (guestCart.items || []).map(migrateCartItem)
         
-        // Load product data for items that don't have it
-        const cartWithProductData = await loadProductDataForCartItems(migratedCart)
+        // SECURITY: Always refresh supplier info from API (forceRefreshSupplierInfo = true)
+        // This prevents guest users from tampering with supplier info in localStorage
+        const cartWithProductData = await loadProductDataForCartItems(migratedCart, true)
         
         setCart(cartWithProductData)
         setCartSubtotal(guestCart.subtotal || 0)
         setCartTotalItems(guestCart.totalItems || 0)
       }
     } catch (error) {
+      safeError('🛒 [USE-CART] Error loading guest cart:', error)
     }
   }, [isAuthenticated, migrateCartItem, loadProductDataForCartItems])
 
   // Save guest cart to localStorage
+  // SECURITY: Sanitize data before saving - remove any UUIDs or sensitive data
   const saveGuestCart = useCallback((items: CartItem[], subtotal: number, totalItems: number) => {
     if (isAuthenticated) return
 
     try {
+      // SECURITY: Sanitize items before saving - remove any UUIDs or sensitive supplier data
+      // We only save display-safe supplier info (company name, logo, verification status, region)
+      // Never save supplierId or any UUIDs
+      const sanitizedItems = items.map(item => {
+        const sanitized: any = {
+          id: item.id,
+          productId: item.productId,
+          variants: item.variants,
+          totalQuantity: item.totalQuantity,
+          totalPrice: item.totalPrice,
+          currency: item.currency,
+          appliedDiscount: item.appliedDiscount,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          product: item.product
+        }
+        
+        // Only include safe supplier display info (no UUIDs)
+        if ((item as any).supplierCompanyName) {
+          sanitized.supplierCompanyName = (item as any).supplierCompanyName
+        }
+        if ((item as any).supplierIsVerified !== undefined) {
+          sanitized.supplierIsVerified = (item as any).supplierIsVerified
+        }
+        if ((item as any).supplierRegion) {
+          sanitized.supplierRegion = (item as any).supplierRegion
+        }
+        if ((item as any).supplierNation) {
+          sanitized.supplierNation = (item as any).supplierNation
+        }
+        if ((item as any).supplierCompanyLogo) {
+          sanitized.supplierCompanyLogo = (item as any).supplierCompanyLogo
+        }
+        
+        // SECURITY: Explicitly remove any UUIDs or sensitive fields
+        delete (sanitized as any).supplierId
+        delete (sanitized as any).supplier_id
+        delete (sanitized as any).user_id
+        
+        return sanitized
+      })
+      
       localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({
-        items,
+        items: sanitizedItems,
         subtotal,
         totalItems
       }))
     } catch (error) {
+      safeError('🛒 [USE-CART] Error saving guest cart:', error)
     }
   }, [isAuthenticated])
 
@@ -732,6 +819,19 @@ export function useCart() {
       }
 
       
+      // Fetch supplier info for guest users
+      let supplierInfo: any = null
+      if (!isAuthenticated) {
+        try {
+          const supplierResponse = await fetch(`/api/products/${productId}/supplier-info`).catch(() => null)
+          if (supplierResponse && supplierResponse.ok) {
+            supplierInfo = await supplierResponse.json()
+          }
+        } catch (e) {
+          // Ignore supplier info fetch errors
+        }
+      }
+      
       const newItem: CartItem = {
           id: Date.now(), // Temporary ID
           productId,
@@ -750,8 +850,15 @@ export function useCart() {
           inStock: productData.in_stock,
           stockQuantity: productData.stock_quantity,
           sku: productData.sku
-        } : undefined
-      }
+        } : undefined,
+        // Add supplier info for guest users
+        ...(supplierInfo ? {
+          supplierCompanyName: supplierInfo.companyName || null,
+          supplierIsVerified: supplierInfo.isVerified || false,
+          supplierRegion: supplierInfo.region || null,
+          supplierCompanyLogo: supplierInfo.companyLogo || null
+        } : {})
+      } as any
 
 
 

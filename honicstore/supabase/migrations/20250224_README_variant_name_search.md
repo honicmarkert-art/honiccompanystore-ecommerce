@@ -74,3 +74,6 @@ After this migration:
 - Existing search functionality continues to work unchanged
 - No API changes required - search automatically benefits from variant names
 
+
+
+

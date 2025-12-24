@@ -68,7 +68,7 @@ export function MediaUpload({
   const getDefaultFormats = () => {
     switch (type) {
       case 'image':
-        return ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+        return ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml']
       case 'video':
         return ['video/mp4', 'video/webm', 'video/ogg']
       case 'model3d':
@@ -79,6 +79,23 @@ export function MediaUpload({
   }
 
   const formats = acceptedFormats.length > 0 ? acceptedFormats : getDefaultFormats()
+  
+  // For file input accept attribute, also include file extensions
+  const getAcceptString = () => {
+    if (acceptedFormats.length > 0) {
+      return acceptedFormats.join(',')
+    }
+    switch (type) {
+      case 'image':
+        return 'image/jpeg,image/jpg,image/png,image/webp,image/gif,image/svg+xml,.jfif'
+      case 'video':
+        return 'video/mp4,video/webm,video/ogg'
+      case 'model3d':
+        return 'model/gltf+json,model/gltf-binary,application/octet-stream'
+      default:
+        return ''
+    }
+  }
 
   const handleFileSelect = useCallback(async (file: File) => {
     // Validate file size
@@ -131,7 +148,7 @@ export function MediaUpload({
       formData.append('context', context)
       
       // Include product ID if available for product-specific uploads
-      if (productId && (context === 'product' || context === 'variant')) {
+      if (productId && (context === 'product' || context === 'variant' || context === 'specification')) {
         formData.append('productId', productId.toString())
       }
       
@@ -145,7 +162,8 @@ export function MediaUpload({
       })
 
       if (!response.ok) {
-        throw new Error('Upload failed')
+        const errorData = await response.json().catch(() => ({ error: 'Upload failed' }))
+        throw new Error(errorData.error || 'Upload failed')
       }
 
       const result = await response.json()
@@ -156,11 +174,13 @@ export function MediaUpload({
         description: `${type} uploaded successfully`
       })
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload file'
       toast({
         title: "Upload failed",
-        description: "Failed to upload file",
+        description: errorMessage,
         variant: "destructive"
       })
+      console.error('Upload error:', error)
     } finally {
       setIsUploading(false)
     }
@@ -472,7 +492,7 @@ export function MediaUpload({
       <input
         ref={fileInputRef}
         type="file"
-        accept={formats.join(',')}
+        accept={getAcceptString()}
         onChange={handleFileInputChange}
         className="hidden"
       />

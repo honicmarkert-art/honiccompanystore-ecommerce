@@ -88,8 +88,24 @@ export async function GET(
         variant_name: v.variant_name || '',
         price: v.price,
         stock_quantity: v.stock_quantity || 0,
-        stockQuantity: v.stock_quantity || 0 // Backward compatibility
-      })) || []
+        stockQuantity: v.stock_quantity || 0, // Backward compatibility
+        sku: v.sku || null,
+        image: v.image || null
+      })) || [],
+      variantImages: (() => {
+        const images = product.variant_images || []
+        // Normalize to ensure consistent format
+        const normalized = images.map((img: any): { imageUrl: string } => {
+          if (typeof img === 'string') {
+            return { imageUrl: img }
+          } else if (img && typeof img === 'object' && img.imageUrl) {
+            return { imageUrl: img.imageUrl }
+          }
+          return { imageUrl: String(img || '') }
+        }).filter((img: { imageUrl: string }) => img.imageUrl)
+        return normalized
+      })(),
+      specificationImages: product.specification_images || []
     }
 
     // Remove the raw product_variants array
@@ -197,7 +213,9 @@ export async function PUT(
       video,
       view360,
       importChina,
-      variantConfig
+      variantConfig,
+      variantImages,
+      specificationImages
     } = body
 
     // Generate slug from product name if name is being updated
@@ -270,6 +288,8 @@ export async function PUT(
     }
     if (specifications !== undefined) updateData.specifications = specifications
     if (variantConfig !== undefined) updateData.variant_config = variantConfig
+    if (variantImages !== undefined) updateData.variant_images = variantImages
+    if (specificationImages !== undefined) updateData.specification_images = specificationImages
     if (video !== undefined) updateData.video = video?.trim() || ''
     if (view360 !== undefined) updateData.view360 = view360?.trim() || ''
     if (importChina !== undefined) updateData.import_china = importChina
@@ -345,8 +365,24 @@ export async function PUT(
         variant_name: v.variant_name || '',
         price: v.price,
         stock_quantity: v.stock_quantity || 0,
-        stockQuantity: v.stock_quantity || 0 // Backward compatibility
-      })) || []
+        stockQuantity: v.stock_quantity || 0, // Backward compatibility
+        sku: v.sku || null,
+        image: v.image || null
+      })) || [],
+      variantImages: (() => {
+        const images = finalProduct.variant_images || []
+        // Normalize to ensure consistent format
+        const normalized = images.map((img: any): { imageUrl: string } => {
+          if (typeof img === 'string') {
+            return { imageUrl: img }
+          } else if (img && typeof img === 'object' && img.imageUrl) {
+            return { imageUrl: img.imageUrl }
+          }
+          return { imageUrl: String(img || '') }
+        }).filter((img: { imageUrl: string }) => img.imageUrl)
+        return normalized
+      })(),
+      specificationImages: finalProduct.specification_images || []
     }
 
     // Remove the raw product_variants array

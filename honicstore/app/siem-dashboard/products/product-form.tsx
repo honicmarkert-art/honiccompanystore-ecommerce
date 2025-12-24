@@ -18,7 +18,7 @@ import { useCategories } from "@/hooks/use-categories"
 import { useBrands } from "@/hooks/use-brands"
 import { SelectWithAddOption } from "@/components/select-with-add-option"
 import { HierarchicalCategorySelector } from "@/components/hierarchical-category-selector"
-import { X, Plus, Upload, Image as ImageIcon, Eye, Trash2, Link } from "lucide-react"
+import { X, Plus, Upload, Image as ImageIcon, Eye, Trash2, Link, Edit } from "lucide-react"
 import { MediaUpload } from "@/components/media/media-upload"
 import { logger } from '@/lib/logger'
 
@@ -31,7 +31,7 @@ interface ProductFormProps {
   restrictVariantType?: boolean // Restrict variant type to primary-dependent for suppliers
 }
 
-export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, hideImportChina = false, restrictVariantType = false }: ProductFormProps) {
+export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false, hideImportChina = false, restrictVariantType = false }: ProductFormProps) {
   const { themeClasses } = useTheme()
   const { toast } = useToast()
   const { categories: rawCategories, isLoading: categoriesLoading, error: categoriesError } = useCategories()
@@ -59,8 +59,9 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
   const [isSuccess, setIsSuccess] = useState(false)
   const [showVariantImageDialog, setShowVariantImageDialog] = useState(false)
   const [selectedVariantForImage, setSelectedVariantForImage] = useState<number | null>(null)
-  const [selectedAttributesForImage, setSelectedAttributesForImage] = useState<Array<{name: string, value: string}>>([])
   const [newVariantImageUrl, setNewVariantImageUrl] = useState("")
+  const [editingVariantImageIndex, setEditingVariantImageIndex] = useState<number | null>(null)
+  const [editingVariantImageUrl, setEditingVariantImageUrl] = useState("")
 
   // Form state
   const [formData, setFormData] = useState({
@@ -91,43 +92,18 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
     freeDelivery: false,
     sameDayDelivery: false,
     importChina: false,
-    variantConfig: {
-      type: (restrictVariantType ? 'primary-dependent' : 'simple') as 'simple' | 'primary-dependent' | 'multi-dependent',
-      primaryAttribute: '',
-      primaryAttributes: [] as string[],
-      attributeOrder: [] as string[],
-      dependencies: {} as Record<string, string[]>
-    },
+        variantConfig: null,
     hasBeenUpdated: false
   })
 
-  // Predefined worldwide common attributes
-  const commonAttributes = [
-    "color",
-    "size", 
-    "weight",
-    "storage",
-    "material",
-    "brand",
-    "model",
-    "capacity",
-    "dimensions",
-    "power",
-    "voltage",
-    "frequency",
-    "connectivity",
-    "compatibility",
-    "warranty"
-  ]
-
-  // Attribute management state
-  const [selectedAttributes, setSelectedAttributes] = useState<string[]>([])
-  const [newAttribute, setNewAttribute] = useState("")
 
   // Dialog states for replacing prompts
   
-  // Specification fields state
+  // Specification fields state - text only (key-value pairs)
   const [specificationFields, setSpecificationFields] = useState<Array<{id: string, key: string, value: string}>>([])
+  
+  // Specification images state - separate independent section (max 2 images)
+  const [specificationImages, setSpecificationImages] = useState<string[]>([])
 
   // Initialize form with product data if editing
   useEffect(() => {
@@ -147,21 +123,14 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         image: product.image ?? "",
         specifications: product.specifications || {},
         variants: (product.variants || []).map((variant: any) => {
-          // Use the new stock_quantities structure
-          const quantities = variant.quantities || {}
-          const attributes = variant.attributes ? { ...variant.attributes } : {}
-          
-          // Clean attributes by removing any remaining _quantity fields
-          Object.keys(attributes).forEach(key => {
-            if (key.endsWith('_quantity') || key === '_quantities' || key === 'quantities') {
-              delete attributes[key]
-            }
-          })
-          
+          // Simplified variant system: variant_name, price, stock_quantity, sku, image
           return {
-            ...variant,
-            attributes: attributes, // Clean attributes
-            quantities: quantities // Quantities from stock_quantities column
+            id: variant.id,
+            variant_name: variant.variant_name || variant.name || '',
+            price: variant.price || product.price || 0,
+            stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
+            sku: variant.sku || '',
+            image: variant.image || ''
           }
         }),
         video: product.video ?? "",
@@ -173,130 +142,50 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         freeDelivery: product.freeDelivery || false,
         importChina: product.importChina || product.import_china || false,
         sameDayDelivery: product.sameDayDelivery || false,
-        variantConfig: product.variantConfig || {
-          type: restrictVariantType ? 'primary-dependent' : 'simple',
-          primaryAttribute: '',
-          primaryAttributes: [],
-          attributeOrder: [],
-          dependencies: {}
-        },
+        variantConfig: null,
         hasBeenUpdated: false
       })
       
 
-      // Initialize specification fields
+      // Initialize specification fields (text only)
       if (product.specifications) {
-        const specFields = Object.entries(product.specifications).map(([key, value], index) => ({
-          id: `spec-${index}`,
-          key: key,
-          value: value as string
-        }))
-        setSpecificationFields(specFields)
-      }
-
-      // Initialize selected attributes from variant config AND existing variants
-      // This ensures all attributes used in variants are shown
-      const allAttributes = new Set<string>()
-      
-      // Add attributes from variant config
-      if (product.variantConfig) {
-        // Force primary-dependent type for suppliers
-        if (restrictVariantType && product.variantConfig.type !== 'primary-dependent') {
-          product.variantConfig.type = 'primary-dependent'
-        }
-        if (product.variantConfig.primaryAttribute) {
-          allAttributes.add(product.variantConfig.primaryAttribute)
-        }
-        // For suppliers, ensure ALL primaryAttributes are loaded
-        if (product.variantConfig.primaryAttributes && Array.isArray(product.variantConfig.primaryAttributes)) {
-          product.variantConfig.primaryAttributes.forEach((attr: string) => allAttributes.add(attr))
-        }
-        if (product.variantConfig.attributeOrder) {
-          product.variantConfig.attributeOrder.forEach((attr: string) => allAttributes.add(attr))
-        }
-      }
-      
-      // Add attributes from existing variants
-      if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
-        
-        product.variants.forEach((variant: any) => {
-          // Add attributes from variant.attributes (exclude _quantity fields and technical objects)
-          if (variant.attributes) {
-            Object.keys(variant.attributes).forEach(attr => {
-              if (!attr.endsWith('_quantity') && 
-                  attr !== 'quantities' && 
-                  attr !== '_quantities' &&
-                  !attr.startsWith('_')) {
-                allAttributes.add(attr)
-              }
-            })
+        const specFields = Object.entries(product.specifications).map(([key, value], index) => {
+          // Handle both old format (string) and new format (object with value)
+          let specValue = ''
+          
+          if (typeof value === 'string') {
+            specValue = value
+          } else if (typeof value === 'object' && value !== null) {
+            specValue = (value as any).value || ''
           }
           
-          // Add attributes from primary_values
-          if (variant.primaryValues) {
-            variant.primaryValues.forEach((pv: any) => {
-              if (pv.attribute) allAttributes.add(pv.attribute)
-            })
-          }
-          
-          // Add attributes from attributes (exclude _quantity fields)
-          if (variant.attributes) {
-            Object.keys(variant.attributes).forEach(attr => {
-              if (!attr.endsWith('_quantity')) {
-                allAttributes.add(attr)
-              }
-            })
+          return {
+            id: `spec-${index}`,
+            key: key,
+            value: specValue
           }
         })
+        setSpecificationFields(specFields)
       }
-
-      const attributesArray = Array.from(allAttributes)
-      const filteredAttributes = attributesArray.filter(attr => 
-        attr !== 'quantities' && 
-        attr !== '_quantities' && 
-        !attr.endsWith('_quantity') && 
-        !attr.startsWith('_')
-      )
-      setSelectedAttributes(filteredAttributes)
-    }
-    }, [product, categoriesLoading, brandsLoading])
-
-  // Auto-set ALL attributes as primary for suppliers when attributes are selected
-  useEffect(() => {
-    if (restrictVariantType && formData.variantConfig.type === 'primary-dependent') {
-      const validAttributes = selectedAttributes.filter(attribute => 
-        !/^\d+$/.test(attribute) && 
-        !attribute.endsWith('_raw') &&
-        !attribute.endsWith('_quantity') &&
-        attribute !== 'quantities'
-      )
-      if (validAttributes.length > 0) {
-        const currentPrimary = formData.variantConfig.primaryAttribute
-        const currentPrimaryAttributes = formData.variantConfig.primaryAttributes || []
+      
+      // Initialize specification images from product data if available
+      // Handle both array of strings and array of objects
+      if (product.specificationImages) {
+        const images = Array.isArray(product.specificationImages) 
+          ? product.specificationImages.map((img: any) => {
+              if (typeof img === 'string') return img
+              if (img && typeof img === 'object' && img.imageUrl) return img.imageUrl
+              if (img && typeof img === 'object' && img.url) return img.url
+              return String(img || '')
+            }).filter((url: string) => url && url.trim() !== '')
+          : []
         
-        // Set first attribute as primaryAttribute (required for primary-dependent type)
-        const needsPrimaryUpdate = !currentPrimary || !validAttributes.includes(currentPrimary)
-        
-        // Set ALL valid attributes in primaryAttributes array
-        const needsPrimaryAttributesUpdate = 
-          currentPrimaryAttributes.length !== validAttributes.length ||
-          !validAttributes.every(attr => currentPrimaryAttributes.includes(attr))
-        
-        if (needsPrimaryUpdate || needsPrimaryAttributesUpdate) {
-          setFormData(prev => ({
-            ...prev,
-            variantConfig: {
-              ...prev.variantConfig,
-              // Set first attribute as primaryAttribute (required field)
-              primaryAttribute: validAttributes[0],
-              // Set ALL attributes as primaryAttributes (treat all as primary)
-              primaryAttributes: [...validAttributes]
-            }
-          }))
+        if (images.length > 0) {
+          setSpecificationImages(images.slice(0, 2))
         }
       }
     }
-  }, [selectedAttributes, restrictVariantType, formData.variantConfig.type, formData.variantConfig.primaryAttribute, formData.variantConfig.primaryAttributes])
+    }, [product, categoriesLoading, brandsLoading])
 
   // Auto-refresh product data after updating (5 seconds, one-time)
   useEffect(() => {
@@ -333,23 +222,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
 
   const handleInputChange = (field: string, value: any) => {
     
-    // Special handling for variant config changes
-    if (field === 'variantConfig') {
-      
-      // If changing from simple to multi-dependent, check if variants exist
-      if (formData.variantConfig?.type === 'simple' && value?.type === 'multi-dependent') {
-        if (formData.variants.length > 0) {
-          // Variants exist during type change - this might cause issues
-        }
-      }
-      
-      // If changing from multi-dependent to simple, warn about variant data
-      if (formData.variantConfig?.type === 'multi-dependent' && value?.type === 'simple') {
-        if (formData.variants.length > 0) {
-          // Variants exist during type change - variant data will be preserved but not used
-        }
-      }
-    }
     
     setFormData(prev => {
       const newData = {
@@ -387,7 +259,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         f.id === id ? { ...f, [field]: value } : f
       )
       
-      // Update formData specifications with the updated fields
+      // Update formData specifications with the updated fields (text only)
       const newSpecs: Record<string, string> = {}
       updatedFields.forEach(f => {
         if (f.key.trim() && f.value.trim()) {
@@ -402,6 +274,72 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
       
       return updatedFields
     })
+  }
+
+  // Update specification images (separate independent section)
+  const updateSpecificationImages = async (images: string[]) => {
+    // Limit to max 2 images and filter out empty values
+    const limitedImages = images.filter(url => url && url.trim() !== '').slice(0, 2)
+    
+    // Update local state immediately for preview (before saving)
+    setSpecificationImages(limitedImages)
+    
+    // If editing an existing product, save to database immediately
+    if (product?.id) {
+      try {
+        const endpoint = hideImportChina 
+          ? `/api/supplier/products/${product.id}` 
+          : `/api/products/${product.id}`
+        
+        const response = await fetch(endpoint, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            id: product.id,
+            specificationImages: limitedImages
+          })
+        })
+        
+        if (!response.ok) {
+          throw new Error('Failed to save specification images')
+        }
+        
+        const updatedProduct = await response.json()
+        
+        // Update local state with the response (handle both admin and supplier API formats)
+        const savedImages = updatedProduct.product?.specificationImages || 
+                           updatedProduct.specificationImages || 
+                           limitedImages
+        
+        // Ensure we have an array of strings
+        const finalImages = Array.isArray(savedImages) 
+          ? savedImages.map((img: any) => {
+              if (typeof img === 'string') return img
+              if (img && typeof img === 'object' && img.imageUrl) return img.imageUrl
+              if (img && typeof img === 'object' && img.url) return img.url
+              return String(img || '')
+            }).filter((url: string) => url && url.trim() !== '').slice(0, 2)
+          : limitedImages
+        
+        setSpecificationImages(finalImages)
+        
+        toast({
+          title: "✅ Saved!",
+          description: "Specification images have been saved.",
+          duration: 2000,
+        })
+      } catch (error) {
+        console.error('Error saving specification images:', error)
+        toast({
+          title: "⚠️ Save Failed",
+          description: "Failed to save specification images. They will be saved when you submit the form.",
+          variant: "destructive",
+          duration: 3000,
+        })
+      }
+    }
   }
 
   const removeSpecificationField = (id: string) => {
@@ -440,12 +378,11 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         ...prev.variants,
         {
           id: prev.variants.length + 1, // Use simple sequential ID
-          price: prev.price || 0, // Set default price to product price
-          image: "",
-          sku: "",
-          attributes: {},
-          primaryValues: [],
-          quantities: {}
+          variant_name: '', // Variant name (e.g., "Red", "Large", "5V")
+          price: parseFloat(prev.price) || 0, // Set default price to product price
+          stock_quantity: 0,
+          sku: '',
+          image: ''
         }
       ]
     }))
@@ -468,20 +405,88 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
   }
 
 
+  // Validate image URL (HTTPS and image file extension)
+  const validateImageUrl = (url: string): { valid: boolean; error?: string } => {
+    if (!url || !url.trim()) {
+      return { valid: false, error: "URL is required" }
+    }
+
+    const trimmedUrl = url.trim()
+
+    // Check if URL starts with https://
+    if (!trimmedUrl.startsWith('https://')) {
+      return { valid: false, error: "URL must start with https://" }
+    }
+
+    // Check if URL has a valid image file extension
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico']
+    const urlLower = trimmedUrl.toLowerCase()
+    const hasImageExtension = imageExtensions.some(ext => urlLower.includes(ext))
+
+    // Also check for common image URL patterns (e.g., from CDNs that might not have extensions)
+    const imagePatterns = [
+      /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|$)/i,
+      /\/image\//i,
+      /\/img\//i,
+      /\/photo\//i,
+      /\/picture\//i
+    ]
+
+    if (!hasImageExtension && !imagePatterns.some(pattern => pattern.test(trimmedUrl))) {
+      // Try to validate by checking if it's a valid URL
+      try {
+        const urlObj = new URL(trimmedUrl)
+        // If it's a valid URL but doesn't match image patterns, warn but allow
+        // (some CDNs serve images without extensions)
+        return { valid: true }
+      } catch {
+        return { valid: false, error: "Invalid URL format" }
+      }
+    }
+
+    return { valid: true }
+  }
+
   // Variant image functions
   const handleAddVariantImage = () => {
     if (newVariantImageUrl.trim()) {
+      const trimmedUrl = newVariantImageUrl.trim()
+      
+      const validation = validateImageUrl(trimmedUrl)
+      if (!validation.valid) {
+        toast({
+          title: "Invalid URL",
+          description: validation.error || "Please enter a valid HTTPS image URL",
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+
+      // Check if this image URL already exists to prevent duplicates
+      const alreadyExists = formData.variantImages.some(
+        img => img.imageUrl?.trim() === trimmedUrl
+      )
+      
+      if (alreadyExists) {
+        toast({
+          title: "Image Already Added",
+          description: "This image is already in your variant images list.",
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+
       setFormData(prev => ({
         ...prev,
         variantImages: [...prev.variantImages, {
           variantId: selectedVariantForImage || undefined,
-          imageUrl: newVariantImageUrl.trim(),
-          attributes: selectedAttributesForImage.length > 0 ? selectedAttributesForImage : undefined
+          imageUrl: trimmedUrl,
         }]
       }))
       setNewVariantImageUrl("")
       setSelectedVariantForImage(null)
-      setSelectedAttributesForImage([])
       setShowVariantImageDialog(false)
     }
   }
@@ -489,19 +494,36 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
   // Automatic variant image addition when image is uploaded
   const handleVariantImageUpload = (imageUrl: string) => {
     if (imageUrl.trim()) {
+      const trimmedUrl = imageUrl.trim()
+      
+      // Check if this image URL already exists to prevent duplicates
+      const alreadyExists = formData.variantImages.some(
+        img => img.imageUrl?.trim() === trimmedUrl
+      )
+      
+      if (alreadyExists) {
+        toast({
+          title: "Image Already Added",
+          description: "This image is already in your variant images list.",
+          duration: 3000,
+        })
+        // Still clear the form
+        setNewVariantImageUrl("")
+        setSelectedVariantForImage(null)
+        return
+      }
+      
       setFormData(prev => ({
         ...prev,
         variantImages: [...prev.variantImages, {
           variantId: selectedVariantForImage || undefined,
-          imageUrl: imageUrl.trim(),
-          attributes: selectedAttributesForImage.length > 0 ? selectedAttributesForImage : undefined
+          imageUrl: trimmedUrl,
         }]
       }))
       
       // Clear the form
       setNewVariantImageUrl("")
       setSelectedVariantForImage(null)
-      setSelectedAttributesForImage([])
       
       // Show success message
       toast({
@@ -511,6 +533,119 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
       })
       
       // Close dialog after a short delay to let user see the success message
+      setTimeout(() => {
+        setShowVariantImageDialog(false)
+      }, 1500)
+    }
+  }
+
+  // Handle editing variant image (replace with new upload or URL)
+  const handleEditVariantImage = (index: number) => {
+    const variantImg = formData.variantImages[index]
+    setEditingVariantImageIndex(index)
+    setEditingVariantImageUrl(variantImg.imageUrl || "")
+    setSelectedVariantForImage(variantImg.variantId || null)
+    setShowVariantImageDialog(true)
+  }
+
+  // Save edited variant image
+  const handleSaveEditedVariantImage = () => {
+    if (editingVariantImageIndex === null) return
+
+    // If URL is provided, validate it
+    if (editingVariantImageUrl.trim()) {
+      const trimmedUrl = editingVariantImageUrl.trim()
+      
+      const validation = validateImageUrl(trimmedUrl)
+      if (!validation.valid) {
+        toast({
+          title: "Invalid URL",
+          description: validation.error || "Please enter a valid HTTPS image URL",
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+
+      // Check if this image URL already exists in OTHER images (not the one being edited)
+      const alreadyExists = formData.variantImages.some(
+        (img, index) => index !== editingVariantImageIndex && img.imageUrl?.trim() === trimmedUrl
+      )
+      
+      if (alreadyExists) {
+        toast({
+          title: "Image Already Added",
+          description: "This image is already in your variant images list.",
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+
+      // Update the variant image URL
+      const updatedImages = [...formData.variantImages]
+      updatedImages[editingVariantImageIndex] = {
+        ...updatedImages[editingVariantImageIndex],
+        imageUrl: trimmedUrl
+      }
+      setFormData(prev => ({ ...prev, variantImages: updatedImages }))
+      
+      toast({
+        title: "✅ Variant Image Updated!",
+        description: "The variant image has been updated successfully.",
+        duration: 3000,
+      })
+    }
+
+    // Reset editing state
+    setEditingVariantImageIndex(null)
+    setEditingVariantImageUrl("")
+    setSelectedVariantForImage(null)
+    setNewVariantImageUrl("")
+    setShowVariantImageDialog(false)
+  }
+
+  // Handle variant image upload when editing
+  const handleEditVariantImageUpload = (imageUrl: string) => {
+    if (editingVariantImageIndex === null) return
+
+    if (imageUrl.trim()) {
+      const trimmedUrl = imageUrl.trim()
+      
+      // Check if this image URL already exists in OTHER images (not the one being edited)
+      const alreadyExists = formData.variantImages.some(
+        (img, index) => index !== editingVariantImageIndex && img.imageUrl?.trim() === trimmedUrl
+      )
+      
+      if (alreadyExists) {
+        toast({
+          title: "Image Already Added",
+          description: "This image is already in your variant images list.",
+          variant: "destructive",
+          duration: 3000,
+        })
+        return
+      }
+      
+      const updatedImages = [...formData.variantImages]
+      updatedImages[editingVariantImageIndex] = {
+        ...updatedImages[editingVariantImageIndex],
+        imageUrl: trimmedUrl
+      }
+      setFormData(prev => ({ ...prev, variantImages: updatedImages }))
+      
+      toast({
+        title: "✅ Variant Image Replaced!",
+        description: "The variant image has been replaced successfully.",
+        duration: 3000,
+      })
+
+      // Reset editing state
+      setEditingVariantImageIndex(null)
+      setEditingVariantImageUrl("")
+      setSelectedVariantForImage(null)
+      setNewVariantImageUrl("")
+      
       setTimeout(() => {
         setShowVariantImageDialog(false)
       }, 1500)
@@ -576,218 +711,10 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
     }
   }
 
-  // Attribute management functions
-  const toggleAttribute = (attribute: string) => {
-    setSelectedAttributes(prev => {
-      if (prev.includes(attribute)) {
-        // Remove attribute from all variants
-        setFormData(prevForm => ({
-          ...prevForm,
-          variants: prevForm.variants.map(variant => {
-            const newAttributes = { ...variant.attributes }
-            delete newAttributes[attribute]
-            return { ...variant, attributes: newAttributes }
-          })
-        }))
-        return prev.filter(attr => attr !== attribute)
-      } else {
-        return [...prev, attribute]
-      }
-    })
-  }
-
-  const addCustomAttribute = () => {
-    if (newAttribute.trim() && !selectedAttributes.includes(newAttribute.trim()) && !commonAttributes.includes(newAttribute.trim())) {
-      setSelectedAttributes(prev => [...prev, newAttribute.trim()])
-      setNewAttribute("")
-    }
-  }
-
-  const removeAttribute = (attribute: string) => {
-    // Prevent deletion of _quantity fields and quantities object - they should not be shown as separate attributes
-    if (attribute.endsWith('_quantity') || attribute === 'quantities') {
-      return
-    }
-    
-    setSelectedAttributes(prev => prev.filter(attr => attr !== attribute))
-    // Also remove this attribute from all variants
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map(variant => {
-        const newAttributes = { ...variant.attributes }
-        delete newAttributes[attribute]
-        // Also remove the corresponding _quantity field
-        delete newAttributes[`${attribute}_quantity`]
-        return { ...variant, attributes: newAttributes }
-      })
-    }))
-  }
-
-  const updateVariantAttribute = (variantIndex: number, attribute: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) => 
-        index === variantIndex 
-          ? { 
-              ...variant, 
-              attributes: { 
-                ...variant.attributes, 
-                [attribute]: value 
-              } 
-            }
-          : variant
-      )
-    }))
-  }
-
-  // Separate function for updating quantity fields
-  const updateVariantQuantity = (variantIndex: number, attribute: string, quantity: string) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) => 
-        index === variantIndex 
-          ? { 
-              ...variant, 
-              quantities: { 
-                ...variant.quantities, 
-                [attribute]: quantity 
-              } 
-            }
-          : variant
-      )
-    }))
-  }
-
-  // Helper functions for managing primary attribute values
-  const addPrimaryValue = (variantIndex: number, attribute?: string) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) => 
-        index === variantIndex 
-          ? { 
-              ...variant, 
-              primaryValues: [...(variant.primaryValues || []), { 
-                value: "", 
-                price: "", 
-                attribute: attribute || "" 
-              }]
-            }
-          : variant
-      )
-    }))
-  }
-
-  const updatePrimaryValue = (variantIndex: number, valueIndex: number, field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) => 
-        index === variantIndex 
-          ? { 
-              ...variant, 
-              primaryValues: variant.primaryValues?.map((primaryValue: any, vIndex: number) => 
-                vIndex === valueIndex 
-                  ? { ...primaryValue, [field]: value }
-                  : primaryValue
-              ) || []
-            }
-          : variant
-      )
-    }))
-  }
-
-  const removePrimaryValue = (variantIndex: number, valueIndex: number) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) =>
-        index === variantIndex
-          ? {
-              ...variant,
-              primaryValues: variant.primaryValues?.filter((_: any, vIndex: number) => vIndex !== valueIndex) || []
-            }
-          : variant
-      )
-    }))
-  }
 
 
 
-  const addMultiValue = (variantIndex: number, attribute: string) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) =>
-        index === variantIndex
-          ? {
-              ...variant,
-              multiValues: {
-                ...variant.multiValues,
-                [attribute]: [...(variant.multiValues?.[attribute] || []), ""]
-              }
-            }
-          : variant
-      )
-    }))
-  }
 
-
-  // Smart attribute update - stores comma-separated values as arrays of objects in attributes
-  const updateSmartAttribute = (variantIndex: number, attribute: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) =>
-        index === variantIndex
-          ? {
-              ...variant,
-              // Store value in attributes - keep as string while typing, convert on blur
-              attributes: {
-                ...variant.attributes,
-                [attribute]: value // Keep as string for now, convert on blur
-              }
-            }
-          : variant
-      )
-    }))
-  }
-
-  // Convert comma-separated string to array of objects on blur
-  const handleAttributeBlur = (variantIndex: number, attribute: string) => {
-    const variant = formData.variants[variantIndex]
-    const value = variant.attributes?.[attribute]
-    
-    if (typeof value === 'string' && value.includes(',')) {
-      setFormData(prev => ({
-        ...prev,
-        variants: prev.variants.map((variant, index) =>
-          index === variantIndex
-            ? {
-                ...variant,
-                attributes: {
-                  ...variant.attributes,
-                  [attribute]: value.split(',').map(v => v.trim()).filter(v => v).map(v => ({ value: v }))
-                }
-              }
-            : variant
-        )
-      }))
-    }
-  }
-
-  // Smart quantity update - stores quantity in quantities
-  const updateSmartQuantity = (variantIndex: number, attribute: string, quantity: string) => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) =>
-        index === variantIndex
-          ? {
-              ...variant,
-              quantities: {
-                ...variant.quantities,
-                [attribute]: quantity
-              }
-            }
-          : variant
-      )
-    }))
-  }
 
 
 
@@ -829,32 +756,20 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         return
       }
 
-      // Prepare product data
+      // Prepare product data - calculate stock from simplified variants
       const calculatedStock = (() => {
         // If product has no variants, use the manual stock field
         if (formData.variants.length === 0) {
           return parseInt(formData.stockQuantity as string) || 0
         }
         
-        // Otherwise, auto-calculate from all attribute quantities
+        // Otherwise, calculate from variant stock_quantity
         let total = 0
         formData.variants.forEach(variant => {
-          // Count primary values quantities
-          if (Array.isArray(variant.primaryValues)) {
-            variant.primaryValues.forEach((pv: any) => {
-              const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-              total += qty
-            })
-          }
-          
-          // Count quantities object
-          if (variant.quantities) {
-            Object.keys(variant.quantities).forEach(attr => {
-              const qty = parseInt(variant.quantities[attr]) || 0
-              total += qty
-            })
-          }
-          
+          const qty = typeof variant.stock_quantity === 'number' 
+            ? variant.stock_quantity 
+            : parseInt(String(variant.stock_quantity || 0)) || 0
+          total += qty
         })
         return total
       })()
@@ -865,57 +780,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         calculatedStock,
         inStock: formData.inStock
       })
-
-      // Normalize variant configuration so non-primary attributes are preserved
-      const usedAttributesSet = new Set<string>()
-      formData.variants.forEach((variant: any) => {
-        if (variant?.attributes && typeof variant.attributes === 'object') {
-          Object.keys(variant.attributes).forEach(a => a && usedAttributesSet.add(a))
-        }
-        if (Array.isArray(variant?.primaryValues)) {
-          variant.primaryValues.forEach((pv: any) => {
-            if (pv?.attribute) usedAttributesSet.add(pv.attribute)
-          })
-        }
-      })
-
-      const usedAttributes = Array.from(usedAttributesSet)
-      const normalizedVariantConfig = (() => {
-        const vc = { ...(formData.variantConfig || {}) }
-        
-        
-        // Only auto-change type if no type is set and attributes exist
-        // If user explicitly chose 'simple', respect their choice even with attributes
-        if (usedAttributes.length > 0 && !vc.type) {
-          vc.type = 'multi-dependent'
-        } else if (usedAttributes.length > 0 && vc.type === 'simple') {
-          // Explicitly ensure the type stays 'simple'
-          vc.type = 'simple'
-        }
-        // Primary-dependent: ensure primaryAttribute
-        if (vc.type === 'primary-dependent' && !vc.primaryAttribute && usedAttributes.length > 0) {
-          vc.primaryAttribute = usedAttributes[0]
-        }
-        // For suppliers (restrictVariantType), set ALL used attributes as primaryAttributes even in primary-dependent mode
-        if (vc.type === 'primary-dependent' && restrictVariantType && usedAttributes.length > 0) {
-          vc.primaryAttributes = Array.from(new Set([...usedAttributes]))
-          // Ensure primaryAttribute is set to first attribute
-          if (!vc.primaryAttribute) {
-            vc.primaryAttribute = usedAttributes[0]
-          }
-        }
-        // Multi-dependent: ensure primaryAttributes/attributeOrder include used attributes
-        if (vc.type === 'multi-dependent') {
-          vc.primaryAttributes = Array.isArray(vc.primaryAttributes) && vc.primaryAttributes.length > 0
-            ? Array.from(new Set([...vc.primaryAttributes, ...usedAttributes]))
-            : usedAttributes
-        }
-        vc.attributeOrder = Array.isArray(vc.attributeOrder) && vc.attributeOrder.length > 0
-          ? Array.from(new Set([...vc.attributeOrder, ...usedAttributes]))
-          : usedAttributes
-        
-        return vc
-      })()
 
       const productData = {
         ...formData,
@@ -934,38 +798,32 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
             return formData.inStock
           }
           
-          // Otherwise, auto-calculate from all attribute quantities
+          // Otherwise, calculate from variant stock_quantity
           let total = 0
           formData.variants.forEach(variant => {
-            // Count primary values quantities
-            if (Array.isArray(variant.primaryValues)) {
-              variant.primaryValues.forEach((pv: any) => {
-                const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                total += qty
-              })
-            }
-            
-            // Count quantities object
-            if (variant.quantities) {
-              Object.keys(variant.quantities).forEach(attr => {
-                const qty = parseInt(variant.quantities[attr]) || 0
-                total += qty
-              })
-            }
-            
+            const qty = typeof variant.stock_quantity === 'number' 
+              ? variant.stock_quantity 
+              : parseInt(String(variant.stock_quantity || 0)) || 0
+            total += qty
           })
           return total > 0
         })(),
         freeDelivery: formData.freeDelivery,
         importChina: formData.importChina,
         sameDayDelivery: formData.sameDayDelivery,
-        variantConfig: normalizedVariantConfig,
+        variantConfig: null,
         // Include variant images data
         variantImages: formData.variantImages,
-        // Include variants data with proper price handling
+        // Include specification images (separate independent section)
+        specificationImages: specificationImages.filter(img => img && img.trim()),
+        // Include variants data with simplified structure
         variants: formData.variants.map(variant => ({
-          ...variant,
-          price: parseFloat(variant.price) || parseFloat(formData.price) || 0
+          id: variant.id,
+          variant_name: variant.variant_name || '',
+          price: parseFloat(variant.price) || parseFloat(formData.price) || 0,
+          stock_quantity: parseInt(String(variant.stock_quantity || 0)) || 0,
+          sku: variant.sku || '',
+          image: variant.image || ''
         }))
       }
 
@@ -981,7 +839,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
           
           // Clear any pending variant image selections
           setSelectedVariantForImage(null)
-          setSelectedAttributesForImage([])
           setNewVariantImageUrl("")
           
           setFormData(prev => ({
@@ -1000,21 +857,14 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
             image: updatedProduct.image ?? prev.image,
             specifications: updatedProduct.specifications || prev.specifications,
             variants: (updatedProduct.variants || prev.variants).map((variant: any) => {
-              // Use the new stock_quantities structure
-              const quantities = variant.quantities || {}
-              const attributes = variant.attributes ? { ...variant.attributes } : {}
-              
-              // Clean attributes by removing any remaining _quantity fields
-              Object.keys(attributes).forEach(key => {
-                if (key.endsWith('_quantity') || key === '_quantities' || key === 'quantities') {
-                  delete attributes[key]
-                }
-              })
-              
+              // Simplified variant system: variant_name, price, stock_quantity, sku, image
               return {
-                ...variant,
-                attributes: attributes, // Clean attributes
-                quantities: quantities // Quantities from stock_quantities column
+                id: variant.id,
+                variant_name: variant.variant_name || variant.name || '',
+                price: variant.price || 0,
+                stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
+                sku: variant.sku || '',
+                image: variant.image || ''
               }
             }),
             video: updatedProduct.video ?? prev.video,
@@ -1027,9 +877,38 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
             sameDayDelivery: updatedProduct.sameDayDelivery ?? prev.sameDayDelivery,
             importChina: updatedProduct.importChina ?? prev.importChina,
             // Variant configuration
-            variantConfig: updatedProduct.variantConfig || prev.variantConfig
+            variantConfig: null
           }))
           
+          // Update specification images if available
+          // Update specification images if available
+          if (updatedProduct.specificationImages && Array.isArray(updatedProduct.specificationImages)) {
+            const images = updatedProduct.specificationImages.map((img: any) => {
+              if (typeof img === 'string') return img
+              if (img && typeof img === 'object' && img.imageUrl) return img.imageUrl
+              if (img && typeof img === 'object' && img.url) return img.url
+              return String(img || '')
+            }).filter((url: string) => url && url.trim() !== '').slice(0, 2)
+            setSpecificationImages(images)
+          }
+          
+          // Update specification fields
+          if (updatedProduct.specifications) {
+            const specFields = Object.entries(updatedProduct.specifications).map(([key, value], index) => {
+              let specValue = ''
+              if (typeof value === 'string') {
+                specValue = value
+              } else if (typeof value === 'object' && value !== null) {
+                specValue = (value as any).value || ''
+              }
+              return {
+                id: `spec-${index}`,
+                key: key,
+                value: specValue
+              }
+            })
+            setSpecificationFields(specFields)
+          }
         }
       }
 
@@ -1208,30 +1087,19 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                       <Label>Stock Quantity (Auto-Calculated)</Label>
                       <div className="text-3xl font-bold text-green-600">
                         {(() => {
+                          // Calculate from variant stock_quantity (simplified variant system)
                           let total = 0
                           formData.variants.forEach(variant => {
-                            // Check primaryValues quantities
-                            if (Array.isArray(variant.primaryValues)) {
-                              variant.primaryValues.forEach((pv: any) => {
-                                const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                                total += qty
-                              })
-                            }
-                            
-                            
-                            // Check quantities object
-                            if (variant.quantities && typeof variant.quantities === 'object') {
-                              Object.keys(variant.quantities).forEach(key => {
-                                const qty = parseInt(variant.quantities[key]) || 0
-                                total += qty
-                              })
-                            }
+                            const qty = typeof variant.stock_quantity === 'number' 
+                              ? variant.stock_quantity 
+                              : parseInt(String(variant.stock_quantity || 0)) || 0
+                            total += qty
                           })
                           return total
                         })()} units
                       </div>
                       <p className="text-xs text-gray-600">
-                        Calculated by summing all attribute quantities from variants.
+                        Calculated by summing stock quantities from all variants.
                       </p>
                     </>
                   ) : (
@@ -1264,24 +1132,13 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                           return qty > 0 ? `${qty} units available` : 'Out of stock (toggle to override)'
                         }
                         
+                        // Calculate from variant stock_quantity (simplified variant system)
                         let total = 0
                         formData.variants.forEach(variant => {
-                          // Count primary values quantities
-                          if (Array.isArray(variant.primaryValues)) {
-                            variant.primaryValues.forEach((pv: any) => {
-                              const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                              total += qty
-                            })
-                          }
-                          
-                          // Count quantities object
-                          if (variant.quantities) {
-                            Object.keys(variant.quantities).forEach(attr => {
-                              const qty = parseInt(variant.quantities[attr]) || 0
-                              total += qty
-                            })
-                          }
-                          
+                          const qty = typeof variant.stock_quantity === 'number' 
+                            ? variant.stock_quantity 
+                            : parseInt(String(variant.stock_quantity || 0)) || 0
+                          total += qty
                         })
                         return total > 0 ? `Auto-calculated: ${total} units available` : 'Auto-calculated: Out of stock (override if needed)'
                       })()}
@@ -1391,258 +1248,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
             </div>
           </div>
 
-                     {/* Attribute Management */}
-           <Card>
-             <CardHeader className="p-4 sm:p-6">
-               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-                 <CardTitle className="text-base sm:text-lg">Product Attributes</CardTitle>
-                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-                   <Input
-                     placeholder="Add custom attribute"
-                     value={newAttribute}
-                     onChange={(e) => setNewAttribute(e.target.value)}
-                     onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomAttribute())}
-                     className="w-full sm:w-48 text-sm sm:text-base"
-                   />
-                   <Button type="button" onClick={addCustomAttribute} size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
-                     <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
-                     Add Custom
-                   </Button>
-                 </div>
-               </div>
-             </CardHeader>
-             <CardContent className="p-4 sm:p-6">
-               <div className="space-y-3 sm:space-y-4">
-                 {/* Common Attributes */}
-                 <div>
-                   <Label className="text-xs sm:text-sm font-medium mb-2 block">Common Attributes (Click to select)</Label>
-                   <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                     {commonAttributes.map(attribute => (
-                       <Button
-                         key={attribute}
-                         type="button"
-                         variant={selectedAttributes.includes(attribute) ? "default" : "outline"}
-                         size="sm"
-                         onClick={() => toggleAttribute(attribute)}
-                         className="capitalize text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3"
-                       >
-                         {attribute}
-                       </Button>
-                     ))}
-                   </div>
-                 </div>
-
-                 {/* Selected Attributes */}
-                 {selectedAttributes.length > 0 && (
-                   <div>
-                     <Label className="text-xs sm:text-sm font-medium mb-2 block">Selected Attributes</Label>
-                     <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                       {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw') && !attribute.endsWith('_quantity') && attribute !== 'quantities' && attribute !== '_quantities' && !attribute.startsWith('_')).map(attribute => (
-                         <Badge key={attribute} variant="secondary" className="flex items-center gap-1 capitalize text-xs sm:text-sm px-2 sm:px-3 py-0.5 sm:py-1">
-                           <span className="truncate max-w-[120px] sm:max-w-none">{attribute}</span>
-                           <Button
-                             type="button"
-                             variant="ghost"
-                             size="sm"
-                             onClick={() => removeAttribute(attribute)}
-                             className="h-4 w-4 sm:h-4 sm:w-4 p-0 hover:bg-red-100 flex-shrink-0"
-                           >
-                             <X className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                           </Button>
-                         </Badge>
-                       ))}
-                     </div>
-                   </div>
-                 )}
-
-                 {selectedAttributes.length === 0 && (
-                   <p className="text-xs sm:text-sm text-muted-foreground">No attributes selected. Select attributes to create variants.</p>
-                 )}
-
-
-               </div>
-             </CardContent>
-           </Card>
-
-          {/* Variant Configuration */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Variant Configuration</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-4">
-                <div>
-                  <Label className="text-sm font-medium mb-2 block">Variant Logic Type</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {!restrictVariantType && (
-                      <Button
-                        type="button"
-                        variant={formData.variantConfig.type === 'simple' ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => handleInputChange("variantConfig", { ...formData.variantConfig, type: 'simple' })}
-                      >
-                        Simple (No Price Impact)
-                      </Button>
-                    )}
-                    <Button
-                      type="button"
-                      variant={formData.variantConfig.type === 'primary-dependent' ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => !restrictVariantType && handleInputChange("variantConfig", { ...formData.variantConfig, type: 'primary-dependent' })}
-                      disabled={restrictVariantType}
-                      className={restrictVariantType ? "cursor-default" : ""}
-                    >
-                      Primary-Dependent (One Attribute Affects Price)
-                    </Button>
-                    {!restrictVariantType && (
-                      <Button
-                        type="button"
-                        variant={formData.variantConfig.type === 'multi-dependent' ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => handleInputChange("variantConfig", { ...formData.variantConfig, type: 'multi-dependent' })}
-                      >
-                        Multi-Dependent (Step-by-Step Selection)
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Primary Attribute Selection for Primary-Dependent Logic */}
-                {formData.variantConfig.type === 'primary-dependent' && !restrictVariantType && (
-                  <div>
-                    <Label className="text-xs sm:text-sm font-medium mb-2 block">Primary Attribute (Affects Price)</Label>
-                    <select
-                      value={formData.variantConfig.primaryAttribute}
-                      onChange={(e) => handleInputChange("variantConfig", { 
-                        ...formData.variantConfig, 
-                        primaryAttribute: e.target.value 
-                      })}
-                      className="w-full p-2 border rounded-md text-sm sm:text-base h-9 sm:h-10"
-                    >
-                      <option value="">Select Primary Attribute</option>
-                      {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map(attribute => (
-                        <option key={attribute} value={attribute}>
-                          {attribute.charAt(0).toUpperCase() + attribute.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Primary Attribute Selection for Multi-Dependent Logic */}
-                {formData.variantConfig.type === 'multi-dependent' && (
-                  <div>
-                    <Label className="text-xs sm:text-sm font-medium mb-2 block">Primary Attributes (Affect Price)</Label>
-                    <div className="space-y-2">
-                      {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map((attribute) => (
-                        <div key={attribute} className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            id={`primary-${attribute}`}
-                            checked={formData.variantConfig.primaryAttributes?.includes(attribute) || false}
-                            onChange={(e) => {
-                              const currentPrimaryAttributes = formData.variantConfig.primaryAttributes || []
-                              const newPrimaryAttributes = e.target.checked
-                                ? [...currentPrimaryAttributes, attribute]
-                                : currentPrimaryAttributes.filter(attr => attr !== attribute)
-                              handleInputChange("variantConfig", { 
-                                ...formData.variantConfig, 
-                                primaryAttributes: newPrimaryAttributes 
-                              })
-                            }}
-                            className="rounded w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0"
-                          />
-                          <label htmlFor={`primary-${attribute}`} className="flex-1 capitalize text-xs sm:text-sm min-w-0">
-                            <span className="truncate block">{attribute}</span>
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                    {formData.variantConfig.primaryAttributes?.length > 0 && (
-                      <div className="mt-2 p-2 sm:p-2.5 bg-orange-50 rounded-md">
-                        <span className="text-xs sm:text-sm font-medium text-orange-700">Primary Attributes: </span>
-                        <span className="text-xs sm:text-sm text-orange-600 break-words">
-                          {formData.variantConfig.primaryAttributes.map((attr, index) => (
-                            <span key={attr}>
-                              {index > 0 ? ", " : ""}{attr.charAt(0).toUpperCase() + attr.slice(1)}
-                            </span>
-                          ))}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Attribute Order for Multi-Dependent Logic */}
-                {formData.variantConfig.type === 'multi-dependent' && (
-                  <div>
-                    <Label className="text-xs sm:text-sm font-medium mb-2 block">Attribute Selection Order</Label>
-                    <div className="space-y-2">
-                      {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).map((attribute, index) => (
-                        <div key={attribute} className="flex items-center gap-2">
-                          <span className="text-xs sm:text-sm font-medium w-6 sm:w-8 flex-shrink-0">{index + 1}.</span>
-                          <span className="flex-1 capitalize text-xs sm:text-sm truncate min-w-0">{attribute}</span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const newOrder = [...formData.variantConfig.attributeOrder]
-                              const currentIndex = newOrder.indexOf(attribute)
-                              if (currentIndex === -1) {
-                                newOrder.push(attribute)
-                              } else {
-                                newOrder.splice(currentIndex, 1)
-                              }
-                              handleInputChange("variantConfig", { 
-                                ...formData.variantConfig, 
-                                attributeOrder: newOrder 
-                              })
-                            }}
-                            className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3 flex-shrink-0"
-                          >
-                            {formData.variantConfig.attributeOrder.includes(attribute) ? "Remove" : "Add"}
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                    {formData.variantConfig.attributeOrder.length > 0 && (
-                      <div className="mt-2 p-2 sm:p-2.5 bg-blue-50 rounded-md">
-                        <span className="text-xs sm:text-sm font-medium">Current Order: </span>
-                        <span className="text-xs sm:text-sm break-words">
-                          {formData.variantConfig.attributeOrder.map((attr, index) => (
-                            <span key={attr}>
-                              {index > 0 ? " → " : ""}{attr.charAt(0).toUpperCase() + attr.slice(1)}
-                            </span>
-                          ))}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Configuration Summary */}
-                <div className={cn("p-3 sm:p-4 rounded-md", themeClasses.cardBg, themeClasses.cardBorder)}>
-                  <h4 className={cn("font-medium mb-2 text-sm sm:text-base", themeClasses.mainText)}>Configuration Summary</h4>
-                  <div className={cn("text-xs sm:text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                    <div className="break-words"><strong>Logic Type:</strong> {formData.variantConfig.type}</div>
-                    {formData.variantConfig.type === 'primary-dependent' && formData.variantConfig.primaryAttribute && (
-                      <div className="break-words"><strong>Primary Attribute:</strong> {formData.variantConfig.primaryAttribute}</div>
-                    )}
-                    {formData.variantConfig.type === 'multi-dependent' && formData.variantConfig.primaryAttributes?.length > 0 && (
-                      <div className="break-words"><strong>Primary Attributes:</strong> {formData.variantConfig.primaryAttributes.join(", ")}</div>
-                    )}
-                    {formData.variantConfig.type === 'multi-dependent' && formData.variantConfig.attributeOrder.length > 0 && (
-                      <div className="break-words"><strong>Selection Order:</strong> {formData.variantConfig.attributeOrder.join(" → ")}</div>
-                    )}
-                    <div><strong>Selected Attributes:</strong> {selectedAttributes.filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw')).length}</div>
-                    <div><strong>Variants Created:</strong> {formData.variants.length}</div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Variants */}
           <Card>
             <CardHeader className="p-4 sm:p-6">
@@ -1655,26 +1260,14 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                         {(() => {
                           let total = 0
                           formData.variants.forEach(variant => {
-                            // Count primary values quantities
-                            if (Array.isArray(variant.primaryValues)) {
-                              variant.primaryValues.forEach((pv: any) => {
-                                const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
-                                total += qty
-                              })
-                            }
-                            
-                            // Count quantities object
-                            if (variant.quantities) {
-                              Object.keys(variant.quantities).forEach(attr => {
-                                const qty = parseInt(variant.quantities[attr]) || 0
-                                total += qty
-                              })
-                            }
-                            
+                            const qty = typeof variant.stock_quantity === 'number' 
+                              ? variant.stock_quantity 
+                              : parseInt(String(variant.stock_quantity || 0)) || 0
+                            total += qty
                           })
                           return total
                         })()}
-                      </span> units (auto-calculated from all attribute quantities)
+                      </span> units
                     </p>
                   )}
                 </div>
@@ -1689,7 +1282,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                 <div key={variant.id} className="border rounded-lg p-3 sm:p-4 space-y-3 sm:space-y-4">
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="font-medium text-sm sm:text-base truncate flex-1 min-w-0">
-                      {variant.sku ? `Variant: ${variant.sku}` : `Variant ${index + 1}`}
+                      {variant.variant_name || variant.sku ? `${variant.variant_name || variant.sku}` : `Variant ${index + 1}`}
                     </h4>
                     <Button
                       type="button"
@@ -1702,19 +1295,33 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                     </Button>
                   </div>
                   
+                  {/* Simplified Variant Fields */}
                   <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <Label className="text-xs sm:text-sm">Variant Name *</Label>
+                      <Input
+                        value={variant.variant_name ?? ""}
+                        onChange={(e) => updateVariant(index, "variant_name", e.target.value)}
+                        placeholder="e.g., Red, Large, 5V"
+                        className="text-sm sm:text-base h-9 sm:h-10"
+                        required
+                      />
+                    </div>
+                    
                     <div className="space-y-1.5 sm:space-y-2">
                       <Label className="text-xs sm:text-sm">SKU</Label>
                       <Input
                         value={variant.sku ?? ""}
                         onChange={(e) => updateVariant(index, "sku", e.target.value)}
-                        placeholder="Variant SKU"
+                        placeholder="Variant SKU (optional)"
                         className="text-sm sm:text-base h-9 sm:h-10"
                       />
                     </div>
-                    
+                  </div>
+
+                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
                     <div className="space-y-1.5 sm:space-y-2">
-                      <Label className="text-xs sm:text-sm">Price (TZS)</Label>
+                      <Label className="text-xs sm:text-sm">Price (TZS) *</Label>
                       <div className="relative">
                         <Input
                           type="number"
@@ -1724,172 +1331,50 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                           onChange={(e) => updateVariant(index, "price", parseFloat(e.target.value) || 0)}
                           placeholder="500"
                           className="pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10"
+                          required
                         />
                         <div className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
                           TZS
                         </div>
                       </div>
                     </div>
+                    
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <Label className="text-xs sm:text-sm">Stock Quantity *</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={variant.stock_quantity ?? ""}
+                        onChange={(e) => updateVariant(index, "stock_quantity", parseInt(e.target.value) || 0)}
+                        placeholder="0"
+                        className="text-sm sm:text-base h-9 sm:h-10"
+                        required
+                      />
+                    </div>
                   </div>
 
-
-                                     {/* Dynamic Attributes */}
-                   {(selectedAttributes.length > 0 || variant.attributes || variant.primaryValues) && (
-                     <div className="space-y-2 sm:space-y-3">
-                       <Label className="text-xs sm:text-sm font-medium">Attributes</Label>
-                       <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-                         {(selectedAttributes.length > 0 ? selectedAttributes : Object.keys(variant.attributes || {})).filter(attribute => !/^\d+$/.test(attribute) && !attribute.endsWith('_raw') && !attribute.endsWith('_quantity') && attribute !== 'quantities' && attribute !== '_quantities' && !attribute.startsWith('_')).map(attribute => {
-                           const isPrimary = attribute === formData.variantConfig.primaryAttribute || 
-                                           (formData.variantConfig.type === 'multi-dependent' && 
-                                            formData.variantConfig.primaryAttributes?.includes(attribute)) ||
-                                           (restrictVariantType && formData.variantConfig.primaryAttributes?.includes(attribute))
-                           // All non-primary attributes now support comma-separated values
-                           
-                           return (
-                             <div key={attribute} className="space-y-1.5 sm:space-y-2">
-                               <div className="flex items-start sm:items-center justify-between gap-2">
-                                 <Label className="text-xs sm:text-sm capitalize flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
-                                   <span className="truncate">{attribute}</span>
-                                   {isPrimary && !restrictVariantType && (
-                                     <span className="text-[10px] sm:text-xs text-orange-600 font-medium whitespace-nowrap">
-                                       (Primary)
-                                     </span>
-                                   )}
-                                 </Label>
-                               </div>
-                               
-                               {isPrimary ? (
-                                 /* Primary Attribute - Multiple Values with Individual Prices */
-                                 <div className="space-y-2">
-                                   {variant.primaryValues?.filter((pv: any) => {
-                                     // For suppliers (restrictVariantType), filter by attribute even in primary-dependent mode
-                                     if (restrictVariantType) {
-                                       return pv.attribute === attribute
-                                     }
-                                     // For multi-dependent, filter by attribute
-                                     if (formData.variantConfig.type === 'multi-dependent') {
-                                       return pv.attribute === attribute
-                                     }
-                                     // For regular primary-dependent, show all (only one primary attribute)
-                                     return true
-                                   }).map((primaryValue: any, valueIndex: number) => {
-                                     // Get all primary values for this attribute to find the correct index
-                                     const attributePrimaryValues = variant.primaryValues?.filter((pv: any) => {
-                                       if (restrictVariantType) {
-                                         return pv.attribute === attribute
-                                       }
-                                       if (formData.variantConfig.type === 'multi-dependent') {
-                                         return pv.attribute === attribute
-                                       }
-                                       return true
-                                     }) || []
-                                     
-                                     // Find the actual index in the full primaryValues array
-                                     const actualIndex = variant.primaryValues?.findIndex((pv: any, idx: number) => {
-                                       if (restrictVariantType) {
-                                         return pv.attribute === attribute && pv === attributePrimaryValues[valueIndex]
-                                       }
-                                       if (formData.variantConfig.type === 'multi-dependent') {
-                                         return pv.attribute === attribute && pv === attributePrimaryValues[valueIndex]
-                                       }
-                                       return idx === valueIndex
-                                     }) || valueIndex
-                                     
-                                     return (
-                                      <div key={valueIndex} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 p-2 sm:p-2.5 border rounded-md">
-                                         <Input
-                                           value={primaryValue.value ?? ""}
-                                           onChange={(e) => updatePrimaryValue(index, actualIndex, "value", e.target.value)}
-                                           placeholder={`Enter ${attribute} value`}
-                                           className="text-sm sm:text-base h-9 sm:h-10"
-                                         />
-                                        <div className="relative">
-                                          <Input
-                                            type="number"
-                                            step="1"
-                                            min="0"
-                                            value={primaryValue.price ?? ""}
-                                            onChange={(e) => updatePrimaryValue(index, actualIndex, "price", e.target.value)}
-                                            placeholder="500"
-                                            className="pr-8 sm:pr-10 text-sm sm:text-base h-9 sm:h-10"
-                                          />
-                                          <div className="absolute right-2 sm:right-2.5 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
-                                            TZS
-                                          </div>
-                                        </div>
-                                        <Input
-                                          type="number"
-                                          min={0}
-                                          value={primaryValue.quantity ?? ""}
-                                          onChange={(e) => updatePrimaryValue(index, actualIndex, "quantity", e.target.value === '' ? '' : String(parseInt(e.target.value) || 0))}
-                                          placeholder="Qty"
-                                          className="text-sm sm:text-base h-9 sm:h-10"
-                                        />
-                                        <div className="flex items-center justify-center sm:justify-start">
-                                         <Button
-                                           type="button"
-                                           variant="ghost"
-                                           size="sm"
-                                           onClick={() => removePrimaryValue(index, actualIndex)}
-                                           className="h-8 w-8 sm:h-9 sm:w-9"
-                                         >
-                                           <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                         </Button>
-                                        </div>
-                                       </div>
-                                     )
-                                   })}
-                                   <Button
-                                     type="button"
-                                     variant="outline"
-                                     size="sm"
-                                     onClick={() => addPrimaryValue(index, attribute)}
-                                     className="text-xs sm:text-sm h-8 sm:h-9 w-full sm:w-auto"
-                                   >
-                                     <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1" />
-                                     <span className="hidden sm:inline">Add {attribute} Value</span>
-                                     <span className="sm:hidden">Add Value</span>
-                                   </Button>
-                                 </div>
-                               ) : (
-                                 /* Regular Attribute - Smart Input (Single or Comma-Separated) */
-                                 <div className="space-y-2">
-                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                     <Input
-                                       value={(() => {
-                                         const attrValue = variant.attributes?.[attribute]
-                                         if (Array.isArray(attrValue)) {
-                                           return attrValue.map(item => 
-                                             typeof item === 'object' && item.value ? item.value : item
-                                           ).join(', ')
-                                         }
-                                         return attrValue ?? ""
-                                       })()}
-                                       onChange={(e) => updateSmartAttribute(index, attribute, e.target.value)}
-                                       onBlur={() => handleAttributeBlur(index, attribute)}
-                                       placeholder={`Enter ${attribute} values`}
-                                       className="w-full text-sm sm:text-base h-9 sm:h-10"
-                                     />
-                                     <Input
-                                       type="number"
-                                       min="0"
-                                       value={variant.quantities?.[attribute] ?? ""}
-                                       onChange={(e) => updateSmartQuantity(index, attribute, e.target.value === '' ? '' : String(parseInt(e.target.value) || 0))}
-                                       placeholder="Quantity"
-                                       className="w-full text-sm sm:text-base h-9 sm:h-10"
-                                     />
-                                   </div>
-                                   <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">
-                                     Single value or comma-separated values (e.g., Red or Red, Blue, Green)
-                                   </p>
-                                 </div>
-                               )}
-                             </div>
-                           )
-                         })}
-                       </div>
-                     </div>
-                   )}
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <Label className="text-xs sm:text-sm">Variant Image URL</Label>
+                    <Input
+                      value={variant.image ?? ""}
+                      onChange={(e) => updateVariant(index, "image", e.target.value)}
+                      placeholder="https://example.com/image.jpg (optional)"
+                      className="text-sm sm:text-base h-9 sm:h-10"
+                    />
+                    {variant.image && (
+                      <div className="mt-2">
+                        <img 
+                          src={variant.image} 
+                          alt={variant.variant_name || "Variant"} 
+                          className="w-20 h-20 object-cover rounded border"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </CardContent>
@@ -2118,36 +1603,44 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                             View
                           </Button>
 
-                          {/* Edit Button */}
+                          {/* Edit Button - Opens dialog for re-upload */}
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => {
-                              const newUrl = prompt('Enter new variant image URL:', variantImg.imageUrl)
-                              if (newUrl && newUrl.trim()) {
-                                const updatedImages = [...formData.variantImages]
-                                updatedImages[index] = { ...updatedImages[index], imageUrl: newUrl.trim() }
-                                setFormData(prev => ({ ...prev, variantImages: updatedImages }))
-                              }
-                            }}
+                            onClick={() => handleEditVariantImage(index)}
                             className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
                           >
-                            <Link className="w-3 h-3 mr-0.5 sm:mr-1" />
+                            <Edit className="w-3 h-3 mr-0.5 sm:mr-1" />
                             Edit
                           </Button>
 
-                          {/* URLs Button */}
+                          {/* URLs Button - Quick URL edit with validation */}
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             onClick={() => {
-                              const newUrl = prompt('Enter variant image URL:')
+                              const newUrl = prompt('Enter variant image URL (must be HTTPS and an image file):', variantImg.imageUrl)
                               if (newUrl && newUrl.trim()) {
+                                const validation = validateImageUrl(newUrl.trim())
+                                if (!validation.valid) {
+                                  toast({
+                                    title: "Invalid URL",
+                                    description: validation.error || "Please enter a valid HTTPS image URL",
+                                    variant: "destructive",
+                                    duration: 3000,
+                                  })
+                                  return
+                                }
                                 const updatedImages = [...formData.variantImages]
                                 updatedImages[index] = { ...updatedImages[index], imageUrl: newUrl.trim() }
                                 setFormData(prev => ({ ...prev, variantImages: updatedImages }))
+                                toast({
+                                  title: "✅ URL Updated!",
+                                  description: "Variant image URL has been updated.",
+                                  duration: 2000,
+                                })
                               }
                             }}
                             className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
@@ -2243,6 +1736,68 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
               ))}
             </CardContent>
           </Card>
+
+          {/* Specification Images Section - Independent */}
+          <Card>
+            <CardHeader className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+                <div>
+                  <CardTitle className="text-base sm:text-lg">Specification Images</CardTitle>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                    Upload images for specifications (Max 2 images)
+                  </p>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                {[0, 1].map((index) => (
+                  <div key={index} className="space-y-2">
+                    <Label className="text-xs sm:text-sm">
+                      Image {index + 1} {index === 0 ? "(Optional)" : "(Optional)"}
+                    </Label>
+                    <MediaUpload
+                      type="image"
+                      value={specificationImages[index] || ""}
+                      onChange={async (url) => {
+                        // Update local state immediately for preview
+                        const newImages = [...specificationImages]
+                        if (url) {
+                          newImages[index] = url
+                        } else {
+                          newImages.splice(index, 1)
+                        }
+                        // Filter and limit images
+                        const limitedImages = newImages.filter(u => u && u.trim() !== '').slice(0, 2)
+                        // Update state immediately for preview
+                        setSpecificationImages(limitedImages)
+                        // Then save to database
+                        await updateSpecificationImages(newImages)
+                      }}
+                      onRemove={async () => {
+                        const newImages = [...specificationImages]
+                        newImages.splice(index, 1)
+                        // Update state immediately for preview
+                        const limitedImages = newImages.filter(u => u && u.trim() !== '')
+                        setSpecificationImages(limitedImages)
+                        // Then save to database
+                        await updateSpecificationImages(newImages)
+                      }}
+                      maxSize={5}
+                      aspectRatio={1}
+                      context="specification"
+                      productId={product?.id}
+                      label=""
+                      description=""
+                    />
+                  </div>
+                ))}
+              </div>
+              {specificationImages.length >= 2 && (
+                <p className="text-xs text-gray-500">Maximum 2 images allowed</p>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -2267,12 +1822,24 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
 
 
     {/* Variant Image Dialog */}
-    <Dialog open={showVariantImageDialog} onOpenChange={setShowVariantImageDialog}>
+    <Dialog open={showVariantImageDialog} onOpenChange={(open) => {
+      setShowVariantImageDialog(open)
+      if (!open) {
+        setEditingVariantImageIndex(null)
+        setEditingVariantImageUrl("")
+        setNewVariantImageUrl("")
+        setSelectedVariantForImage(null)
+      }
+    }}>
       <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader className="space-y-2">
-          <DialogTitle className="text-base sm:text-lg">Add Variant Image</DialogTitle>
+          <DialogTitle className="text-base sm:text-lg">
+            {editingVariantImageIndex !== null ? "Edit Variant Image" : "Add Variant Image"}
+          </DialogTitle>
           <DialogDescription className="text-xs sm:text-sm">
-            Upload an image for a product variant. The image will be automatically added to your product when uploaded. You can optionally assign it to specific attributes, or leave it unassigned to apply to the entire variant.
+            {editingVariantImageIndex !== null 
+              ? "Upload a new image to replace the existing one, or enter a new HTTPS image URL."
+              : "Upload an image for a product variant. The image will be automatically added to your product when uploaded. You can optionally assign it to specific attributes, or leave it unassigned to apply to the entire variant."}
           </DialogDescription>
         </DialogHeader>
         
@@ -2285,7 +1852,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                 value={selectedVariantForImage?.toString() || "none"}
                 onValueChange={(value) => {
                   setSelectedVariantForImage(value === "none" ? null : Number(value))
-                  setSelectedAttributesForImage([])
                 }}
               >
                 <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
@@ -2295,7 +1861,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                   <SelectItem value="none">No specific variant</SelectItem>
                   {formData.variants.map((variant, index) => (
                     <SelectItem key={variant.id} value={variant.id.toString()}>
-                      {variant.sku || `Variant ${index + 1}`} {variant.variantType ? `(${variant.variantType})` : ''}
+                      {variant.variant_name || variant.sku || `Variant ${index + 1}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -2303,239 +1869,20 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
             </div>
           )}
 
-          {/* Multiple Attribute Selection */}
-          {!restrictVariantType && selectedVariantForImage && (() => {
-            const selectedVariant = formData.variants.find(v => v.id === selectedVariantForImage)
-            if (!selectedVariant) return null
-
-            const availableAttributes: Array<{name: string, values: string[], isPrimary?: boolean}> = []
-            
-            // Add simple attributes (variant.attributes)
-            if (selectedVariant.attributes) {
-              Object.keys(selectedVariant.attributes).forEach(attr => {
-                if (!attr.endsWith('_raw')) {
-                  const value = selectedVariant.attributes[attr]
-                  
-                  // Check if this is a primary attribute from the config
-                  const isPrimaryAttribute = formData.variantConfig.primaryAttribute === attr ||
-                    (formData.variantConfig.type === 'multi-dependent' && 
-                     formData.variantConfig.primaryAttributes?.includes(attr))
-                  
-                  availableAttributes.push({
-                    name: attr,
-                    values: [value].filter(Boolean), // Convert single value to array
-                    isPrimary: isPrimaryAttribute
-                  })
-                }
-              })
-            }
-            
-            // Add primary attribute values from variant config
-            if (formData.variantConfig.primaryAttribute && selectedVariant.primaryValues) {
-              availableAttributes.push({
-                name: formData.variantConfig.primaryAttribute,
-                values: selectedVariant.primaryValues.map((pv: any) => pv.value || pv)
-              })
-            }
-            
-            // Add primary attributes from variant config (for multi-dependent)
-            if (formData.variantConfig.type === 'multi-dependent' && formData.variantConfig.primaryAttributes) {
-              formData.variantConfig.primaryAttributes.forEach(primaryAttr => {
-                // Check if this variant has values for this primary attribute
-                const variantPrimaryValues = selectedVariant.primaryValues?.filter((pv: any) => 
-                  pv.attribute === primaryAttr
-                ) || []
-                
-                if (variantPrimaryValues.length > 0) {
-                  availableAttributes.push({
-                    name: primaryAttr,
-                    values: variantPrimaryValues.map((pv: any) => pv.value || pv)
-                  })
-                }
-              })
-            }
-            
-            // Add variant-specific primary attribute (fallback)
-            if (selectedVariant.primaryAttribute && selectedVariant.primaryValues) {
-              // Only add if not already added from variant config
-              const alreadyAdded = availableAttributes.some(attr => attr.name === selectedVariant.primaryAttribute)
-              if (!alreadyAdded) {
-                availableAttributes.push({
-                  name: selectedVariant.primaryAttribute,
-                  values: selectedVariant.primaryValues.map((pv: any) => pv.value || pv)
-                })
-              }
-            }
-            
-            // Add multi-value attributes
-            if (selectedVariant.multiValues) {
-              Object.entries(selectedVariant.multiValues).forEach(([key, values]) => {
-                // Filter out _raw attributes
-                if (!key.endsWith('_raw')) {
-                  if (Array.isArray(values)) {
-                    availableAttributes.push({
-                      name: key,
-                      values: values
-                    })
-                  } else if (typeof values === 'string') {
-                    availableAttributes.push({
-                      name: key,
-                      values: values.split(',').map(v => v.trim())
-                    })
-                  }
-                }
-              })
-            }
-
-
-            return (
-        <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label>Select Attributes (Optional)</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSelectedAttributesForImage([])}
-                    disabled={selectedAttributesForImage.length === 0}
-                  >
-                    Clear All
-                  </Button>
-                </div>
-                <p className="text-xs text-gray-600">
-                  Choose one or more attributes to associate with this image, or leave empty to apply to the entire variant.
-                </p>
-                
-                {availableAttributes.length > 0 ? (
-                  <div className="space-y-4">
-                    {/* Add New Attribute Dropdown */}
-          <div className="space-y-2">
-                      <Label className="text-sm">Add Attribute</Label>
-                      <div className="flex gap-2">
-                        <Select
-                          value=""
-                          onValueChange={(attrName) => {
-                            if (attrName && !selectedAttributesForImage.some(sa => sa.name === attrName)) {
-                              setSelectedAttributesForImage(prev => [
-                                ...prev,
-                                { name: attrName, value: "" }
-                              ])
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="flex-1">
-                            <SelectValue placeholder="Select an attribute to add" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableAttributes
-                              .filter(attr => !selectedAttributesForImage.some(sa => sa.name === attr.name))
-                              .map((attr) => (
-                                <SelectItem key={attr.name} value={attr.name}>
-                                  {attr.name} {attr.isPrimary ? '(Primary)' : ''} ({attr.values.length} value{attr.values.length !== 1 ? 's' : ''})
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {/* Selected Attributes List */}
-                    {selectedAttributesForImage.length > 0 && (
-                      <div className="space-y-3">
-                        <Label className="text-sm font-medium">Selected Attributes:</Label>
-                        {selectedAttributesForImage.map((selectedAttr, index) => {
-                          const attrInfo = availableAttributes.find(a => a.name === selectedAttr.name)
-                          
-                          return (
-                            <div key={index} className="p-3 border rounded-lg space-y-2">
-                              <div className="flex items-center justify-between">
-                                <Label className="text-sm font-medium">
-                                  {selectedAttr.name} 
-                                  {attrInfo?.isPrimary && <span className="text-xs text-blue-600 ml-1">(Primary)</span>}
-                                </Label>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedAttributesForImage(prev => 
-                                      prev.filter((_, i) => i !== index)
-                                    )
-                                  }}
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-                              
-                              <div className="space-y-2">
-                                <Label className="text-xs">Value for {selectedAttr.name}</Label>
-                                <Select
-                                  value={selectedAttr.value || "any"}
-                                  onValueChange={(value) => {
-                                    setSelectedAttributesForImage(prev => 
-                                      prev.map((sa, i) => 
-                                        i === index 
-                                          ? { ...sa, value: value === "any" ? "" : value }
-                                          : sa
-                                      )
-                                    )
-                                  }}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={`Choose ${selectedAttr.name} value`} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="any">Any {selectedAttr.name}</SelectItem>
-                                    {attrInfo?.values.map((value) => (
-                                      <SelectItem key={value} value={value}>
-                                        {value}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-
-                    {/* Show selected attributes summary */}
-                    {selectedAttributesForImage.length > 0 && (
-                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <Label className="text-sm font-medium text-blue-800">Summary:</Label>
-                        <div className="mt-2 space-y-1">
-                          {selectedAttributesForImage.map((attr, index) => (
-                            <div key={index} className="text-xs text-blue-700">
-                              • {attr.name}: {attr.value || "any"}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <p className="text-sm text-yellow-800">
-                      <strong>No attributes found for this variant.</strong>
-                    </p>
-                    <p className="text-xs text-yellow-600 mt-1">
-                      This variant doesn't have any attributes defined. You can still upload an image without specifying any attributes.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )
-          })()}
-
           {/* Image Upload */}
           <div className="space-y-2">
-            <Label>Upload Image *</Label>
+            <Label>Upload Image {editingVariantImageIndex === null ? "*" : "(to replace existing)"}</Label>
             <MediaUpload
               type="image"
-              value={newVariantImageUrl}
-              onChange={handleVariantImageUpload}
-              onRemove={() => setNewVariantImageUrl("")}
+              value={editingVariantImageIndex !== null ? editingVariantImageUrl : newVariantImageUrl}
+              onChange={editingVariantImageIndex !== null ? handleEditVariantImageUpload : handleVariantImageUpload}
+              onRemove={() => {
+                if (editingVariantImageIndex !== null) {
+                  setEditingVariantImageUrl("")
+                } else {
+                  setNewVariantImageUrl("")
+                }
+              }}
               maxSize={10}
               aspectRatio={1}
               context="variant"
@@ -2544,22 +1891,77 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
               description=""
             />
           </div>
+
+          {/* URL Input Section */}
+          <div className="space-y-2">
+            <Label>Or Enter Image URL</Label>
+            <Input
+              type="url"
+              placeholder="https://example.com/image.jpg"
+              value={editingVariantImageIndex !== null ? editingVariantImageUrl : newVariantImageUrl}
+              onChange={(e) => {
+                const value = e.target.value
+                if (editingVariantImageIndex !== null) {
+                  setEditingVariantImageUrl(value)
+                } else {
+                  setNewVariantImageUrl(value)
+                }
+              }}
+              onBlur={(e) => {
+                const url = e.target.value.trim()
+                if (url) {
+                  const validation = validateImageUrl(url)
+                  if (!validation.valid) {
+                    toast({
+                      title: "Invalid URL",
+                      description: validation.error || "Please enter a valid HTTPS image URL",
+                      variant: "destructive",
+                      duration: 3000,
+                    })
+                  }
+                }
+              }}
+              className="text-sm sm:text-base"
+            />
+            <p className="text-xs text-gray-500">
+              URL must start with https:// and be an image file (.jpg, .png, .gif, .webp, etc.)
+            </p>
+          </div>
         </div>
 
-        {/* Simple close button */}
-        <div className="flex justify-end pt-4 border-t">
+        {/* Action buttons */}
+        <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0">
           <Button
             variant="outline"
             onClick={() => {
               setShowVariantImageDialog(false)
+              setEditingVariantImageIndex(null)
+              setEditingVariantImageUrl("")
               setNewVariantImageUrl("")
               setSelectedVariantForImage(null)
-              setSelectedAttributesForImage([])
             }}
+            className="w-full sm:w-auto"
           >
-            Close
+            Cancel
           </Button>
-        </div>
+          {editingVariantImageIndex !== null ? (
+            <Button
+              onClick={handleSaveEditedVariantImage}
+              disabled={!editingVariantImageUrl.trim()}
+              className="w-full sm:w-auto ml-0 sm:ml-2"
+            >
+              Save Changes
+            </Button>
+          ) : (
+            <Button
+              onClick={handleAddVariantImage}
+              disabled={!newVariantImageUrl.trim()}
+              className="w-full sm:w-auto ml-0 sm:ml-2"
+            >
+              Add Image
+            </Button>
+          )}
+        </DialogFooter>
 
       </DialogContent>
     </Dialog>

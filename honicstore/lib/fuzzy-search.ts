@@ -10,6 +10,7 @@
  */
 
 import Fuse from 'fuse.js'
+import type { IFuseOptions } from 'fuse.js'
 import { expandQueryWithSynonyms } from './search-synonyms'
 
 export interface SearchableProduct {
@@ -28,7 +29,7 @@ export interface SearchableProduct {
 /**
  * Fuse.js configuration optimized for e-commerce product search
  */
-const FUSE_OPTIONS: Fuse.IFuseOptions<SearchableProduct> = {
+const FUSE_OPTIONS: IFuseOptions<SearchableProduct> = {
   // Keys to search in, with weights (higher = more important)
   keys: [
     { name: 'name', weight: 3 },           // Product name is most important

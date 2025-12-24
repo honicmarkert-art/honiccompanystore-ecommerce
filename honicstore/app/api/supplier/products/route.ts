@@ -74,7 +74,10 @@ export async function GET(request: NextRequest) {
     // Use a filter that matches either supplier_id or user_id
     let query = supabase
       .from('products')
-      .select('*', { count: 'exact' })
+      .select(`
+        *,
+        product_variants (*)
+      `, { count: 'exact' })
       .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`) // Get products where supplier_id or user_id matches
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
@@ -95,9 +98,29 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // Transform products to include variants in simplified format
+    const transformedProducts = (products || []).map((product: any) => {
+      const transformedProduct = {
+        ...product,
+        variants: product.product_variants?.filter((v: any) => 
+          v && v.id && (v.variant_name || v.sku)
+        ).map((v: any) => ({
+          id: v.id,
+          variant_name: v.variant_name || '',
+          price: v.price,
+          stock_quantity: v.stock_quantity || 0,
+          sku: v.sku || null,
+          image: v.image || null
+        })) || []
+      }
+      // Remove the raw product_variants array
+      delete transformedProduct.product_variants
+      return transformedProduct
+    })
+
     return NextResponse.json({
       success: true,
-      products: products || [],
+      products: transformedProducts,
       pagination: {
         total: count || 0,
         limit,
@@ -237,7 +260,9 @@ export async function POST(request: NextRequest) {
       video,
       view360,
       importChina,
-      variantConfig
+      variantConfig,
+      variantImages,
+      specificationImages
     } = body
 
     // Validate required fields
@@ -310,6 +335,8 @@ export async function POST(request: NextRequest) {
         stock_quantity: calculatedStock || stockQuantity ? parseInt(String(stockQuantity || calculatedStock)) : null,
         specifications: specifications || {},
         variant_config: variantConfig || null,
+        variant_images: variantImages || [],
+        specification_images: specificationImages || [],
         video: video?.trim() || '',
         view360: view360?.trim() || '',
         import_china: importChina || false,
@@ -341,6 +368,8 @@ export async function POST(request: NextRequest) {
           variant_name: variant.variant_name?.trim() || '',
           price: variant.price ? parseFloat(variant.price) : parseFloat(price),
           stock_quantity: parsedStockQty,
+          sku: variant.sku?.trim() || null,
+          image: variant.image?.trim() || null,
           in_stock: parsedStockQty > 0
         }
       })
@@ -374,8 +403,24 @@ export async function POST(request: NextRequest) {
         variant_name: v.variant_name || '',
         price: v.price,
         stock_quantity: v.stock_quantity || 0,
-        stockQuantity: v.stock_quantity || 0 // Backward compatibility
-      })) || []
+        stockQuantity: v.stock_quantity || 0, // Backward compatibility
+        sku: v.sku || null,
+        image: v.image || null
+      })) || [],
+      variantImages: (() => {
+        const images = finalProduct.variant_images || []
+        // Normalize to ensure consistent format
+        const normalized = images.map((img: any): { imageUrl: string } => {
+          if (typeof img === 'string') {
+            return { imageUrl: img }
+          } else if (img && typeof img === 'object' && img.imageUrl) {
+            return { imageUrl: img.imageUrl }
+          }
+          return { imageUrl: String(img || '') }
+        }).filter((img: { imageUrl: string }) => img.imageUrl)
+        return normalized
+      })(),
+      specificationImages: finalProduct.specification_images || []
     }
 
     // Remove the raw product_variants array

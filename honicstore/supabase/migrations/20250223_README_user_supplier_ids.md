@@ -74,3 +74,6 @@ const { data: profile } = await supabase
 - The registration API includes a safety check to ensure IDs are generated even if the trigger fails
 - Existing users will get IDs assigned when you run the backfill script
 
+
+
+

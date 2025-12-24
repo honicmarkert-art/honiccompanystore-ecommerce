@@ -23,8 +23,6 @@ import { useRobustApi } from "@/hooks/use-robust-api"
 import { useInfiniteProducts } from "@/hooks/use-infinite-products"
 import { useCategoryFiltering } from "@/hooks/use-category-filtering"
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger"
-import { SearchModal } from "@/components/search-modal"
-import { SearchSuggestions } from "@/components/search-suggestions"
 import { 
   ProductGridSkeleton, 
   FilterSidebarSkeleton, 
@@ -112,6 +110,12 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 // import { useProducts } from "@/hooks/use-products" // Removed - using useProductsOptimized instead
@@ -235,8 +239,9 @@ function ProductsPageContent() {
 
   useEffect(() => {
     const initial = (urlSearchParams?.get('search') || '').trim()
-    // Only update when query differs to avoid loops
-    if (initial && initial !== searchTerm) {
+    // Sync input field with URL search param (both when set and when cleared)
+    // This ensures the input reflects the actual search query, not just what user is typing
+    if (initial !== searchTerm) {
       setSearchTerm(initial)
     }
     
@@ -261,58 +266,20 @@ function ProductsPageContent() {
       setSelectedSubCategories(urlSubCategories)
     }
   }, [urlSearchParams])
-  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
-  const [searchModalInitialTab, setSearchModalInitialTab] = useState<'text' | 'image'>('text')
-  const [imageSearchResults, setImageSearchResults] = useState<any[]>([])
-  const [imageSearchKeywords, setImageSearchKeywords] = useState<string[]>([])
-  const [showSuggestions, setShowSuggestions] = useState(false)
-  const [isSearchFocused, setIsSearchFocused] = useState(false)
 
   // Submit search (updates URL and triggers server-side filtering)
   const submitSearch = useCallback(() => {
     const query = (searchTerm || '').trim()
-    setShowSuggestions(false)
-    setIsSearchFocused(false)
     const params = new URLSearchParams(urlSearchParams?.toString() || '')
     if (query) {
       params.set('search', query)
     } else {
       params.delete('search')
     }
-    // keep other filters; drop returnTo to avoid loops
     params.delete('returnTo')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping when updating search
+    router.push(nextUrl, { scroll: false })
   }, [router, urlSearchParams, searchTerm])
-
-
-  // Handle image search results
-  const handleImageSearch = useCallback((products: any[], keywords: string[]) => {
-    setImageSearchResults(products)
-    setImageSearchKeywords(keywords)
-    // Clear other filters when doing image search
-    setSearchTerm("")
-  }, [])
-
-  // Handle text search from modal
-  const handleModalTextSearch = useCallback((query: string) => {
-    setSearchTerm(query)
-    // Clear image search results
-    setImageSearchResults([])
-    setImageSearchKeywords([])
-  }, [])
-
-  // Handle suggestion click
-  const handleSuggestionClick = useCallback((suggestion: string) => {
-    setSearchTerm(suggestion)
-    setShowSuggestions(false)
-    setIsSearchFocused(false)
-    // Preserve existing category params when applying a suggestion
-    const params = new URLSearchParams(urlSearchParams?.toString())
-    params.set('search', suggestion)
-    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping when selecting suggestion
-  }, [router, urlSearchParams])
 
   // Removed useRobustProducts hook - was causing duplicate API calls!
   // Filter functions are now implemented locally below
@@ -775,7 +742,10 @@ function ProductsPageContent() {
   // Pagination state - URL-based page number
   const [currentPage, setCurrentPage] = useState(1)
   const PRODUCTS_PER_PAGE = 120
-  const BATCH_SIZE = 24 // Load 24 at a time with infinite scroll
+  const BATCH_SIZE = 24 // Display 24 products at a time
+  // Request more products to account for client-side filtering (out-of-stock products)
+  // If ~20% are out of stock, request 30 to ensure we get ~24 visible products
+  const API_BATCH_SIZE = 30 // Request 30, filter to show ~24 visible
 
   // Convert category slugs to IDs for API filtering
   const { mainCategoryId, subCategoryIds, allCategoryIds } = useCategoryFiltering({
@@ -800,14 +770,17 @@ function ProductsPageContent() {
     return selectedSubCategories.map(s => map.get(s) || s)
   }, [selectedSubCategories, categoriesData.subCategories])
 
+  // Get actual search query from URL (not from input state) to prevent live search
+  const actualSearchQuery = (urlSearchParams?.get('search') || '').trim()
+
   const noResultsReason = useMemo(() => {
-    if (searchTerm) return 'search'
+    if (actualSearchQuery) return 'search'
     if (selectedSubCategories.length > 0) return 'sub category'
     if (selectedMainCategory) return 'category'
     if (activeBrand) return 'brand'
     if (priceRange[0] > 0 || priceRange[1] < 100000) return 'price range'
     return 'filters'
-  }, [searchTerm, selectedSubCategories.length, selectedMainCategory, activeBrand, priceRange])
+  }, [actualSearchQuery, selectedSubCategories.length, selectedMainCategory, activeBrand, priceRange])
 
 
 
@@ -827,11 +800,12 @@ function ProductsPageContent() {
     reset: infiniteReset,
     refresh: infiniteRefresh
   } = useInfiniteProducts({
-    limit: BATCH_SIZE,
+    limit: API_BATCH_SIZE, // Request more to account for filtering
     initialOffset, // Start from page offset
     // Server-side filtering with PostgreSQL full-text search
+    // Use URL search param instead of searchTerm state to prevent live search
     brand: activeBrand || undefined,
-    search: searchTerm || undefined,
+    search: actualSearchQuery || undefined,
     categories: isCategoryFilterActive ? allCategoryIds : undefined,
     sortBy: sortOrder === 'featured' ? 'featured' : sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
     sortOrder: sortOrder === 'featured' ? 'desc' : sortOrder === 'price-high' ? 'desc' : 'asc',
@@ -852,6 +826,7 @@ function ProductsPageContent() {
 
   // Reset products immediately when any filter changes to prevent showing old products
   // But only if we have valid category IDs or no category filter is active
+  // Note: searchTerm removed from dependencies - search only triggers on URL change (submit)
   useEffect(() => {
     // Don't reset if category filter is active but category IDs aren't ready yet
     if (isCategoryFilterActive && allCategoryIds.length === 0 && !categoriesLoading) {
@@ -859,7 +834,7 @@ function ProductsPageContent() {
       return
     }
     infiniteReset()
-  }, [selectedMainCategory, selectedSubCategories, activeBrand, searchTerm, priceRange, infiniteReset, isCategoryFilterActive, allCategoryIds.length, categoriesLoading])
+  }, [selectedMainCategory, selectedSubCategories, activeBrand, actualSearchQuery, priceRange, infiniteReset, isCategoryFilterActive, allCategoryIds.length, categoriesLoading])
   
   // Get page from URL on mount
   useEffect(() => {
@@ -1102,7 +1077,7 @@ function ProductsPageContent() {
   }))
 
   // Use server-side filtering with PostgreSQL full-text search
-  const products = imageSearchResults.length > 0 ? imageSearchResults : adaptedInfiniteProducts as any
+  const products = adaptedInfiniteProducts as any
 
   // Old shuffling system removed - now using smart shuffling system above
 
@@ -1167,7 +1142,8 @@ function ProductsPageContent() {
     
     // Always use the current products array from the API
     // Never fall back to shuffledProducts when filters are active - always show what API returns
-    const hasActiveFilters = searchTerm || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000
+    // Use actualSearchQuery (from URL) instead of searchTerm (input state) to prevent live search
+    const hasActiveFilters = actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000
     
     // If we have active filters, only use products from API (never shuffledProducts)
     // This ensures we show "no products found" message when filters return no results
@@ -1216,6 +1192,32 @@ function ProductsPageContent() {
       setTimeout(() => setShowSkeleton(false), 1000)
     }
   }, [displayedProducts.length])
+  
+  // Auto-load more products if we have fewer than BATCH_SIZE visible products after filtering
+  // This ensures we always show ~24 products even if some are filtered out (out-of-stock)
+  useEffect(() => {
+    // Only auto-load if:
+    // 1. We're not currently loading
+    // 2. We have more products available
+    // 3. We have fewer visible products than BATCH_SIZE
+    // 4. We're not in initial load state
+    if (
+      !infiniteLoading && 
+      !infiniteLoadingMore &&
+      infiniteHasMore &&
+      displayedProducts.length > 0 &&
+      displayedProducts.length < BATCH_SIZE &&
+      hasDataLoaded &&
+      !isInitialLoad
+    ) {
+      // Calculate how many more we need
+      const needed = BATCH_SIZE - displayedProducts.length
+      // Only load if we need at least 6 more (to avoid too many small requests)
+      if (needed >= 6) {
+        infiniteLoadMore()
+      }
+    }
+  }, [displayedProducts.length, infiniteLoading, infiniteLoadingMore, infiniteHasMore, infiniteLoadMore, BATCH_SIZE, hasDataLoaded, isInitialLoad])
   
   // More aggressive loading condition
   const isLoading = infiniteLoading || categoriesLoading || isInitialLoad || !hasDataLoaded
@@ -1285,10 +1287,6 @@ function ProductsPageContent() {
     }
   }, [handleUserActivity])
   
-  // Specific pause triggers for search and filters
-  const handleSearchActivity = useCallback(() => {
-    handleUserActivity()
-  }, [handleUserActivity])
   
   const handleFilterActivity = useCallback(() => {
     handleUserActivity()
@@ -1314,13 +1312,14 @@ function ProductsPageContent() {
     params.set('page', (currentPage + 1).toString())
     
     if (activeBrand) params.set('brand', activeBrand)
-    if (searchTerm) params.set('search', searchTerm)
+    // Use actualSearchQuery (from URL) instead of searchTerm (input state) to preserve actual search
+    if (actualSearchQuery) params.set('search', actualSearchQuery)
     // Sort parameter removed - use default sorting
     if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
     if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
     
     return `/products?${params.toString()}`
-  }, [currentPage, activeBrand, searchTerm, priceRange])
+  }, [currentPage, activeBrand, actualSearchQuery, priceRange])
 
   // Track prefetched products to avoid duplicate requests
   const prefetchedProductsRef = useRef<Set<number>>(new Set())
@@ -1775,7 +1774,7 @@ function ProductsPageContent() {
               onSubmit={(e: React.FormEvent) => {
                 e.preventDefault()
                 if (searchTerm.trim()) {
-                  handleModalTextSearch(searchTerm.trim())
+                  submitSearch()
                 }
               }} 
               suppressHydrationWarning
@@ -1805,64 +1804,20 @@ function ProductsPageContent() {
                 )}
                 value={searchTerm}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const value = e.target.value
-                  setSearchTerm(value)
-                  setShowSuggestions(true)
-                  handleSearchActivity()
-                  // If user manually cleared, remove search from URL immediately
-                  if (value.trim() === '') {
-                    const params = new URLSearchParams(urlSearchParams?.toString() || '')
-                    params.delete('search')
-                    params.delete('returnTo')
-                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping
-                  }
-                  // Debouncing is now handled by useEffect
+                  setSearchTerm(e.target.value)
                 }}
                 onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                  handleSearchActivity()
                   if (e.key === 'Enter') {
                     e.preventDefault()
                     submitSearch()
                   }
                 }}
-                onFocus={(e: React.FocusEvent<HTMLInputElement>) => {
-                  handleSearchActivity()
-                  setIsSearchFocused(true)
-                  if (searchTerm.length >= 2) {
-                    setShowSuggestions(true)
-                  }
-                }}
-                
-                onBlur={() => {
-                  // Delay hiding suggestions to allow clicks
-                  setTimeout(() => {
-                    setIsSearchFocused(false)
-                    setShowSuggestions(false)
-                  }, 200)
-                }}
                   suppressHydrationWarning
               />
-              
-              {/* Search Suggestions */}
-              <SearchSuggestions
-                query={searchTerm}
-                onSuggestionClick={handleSuggestionClick}
-                isVisible={showSuggestions && isSearchFocused}
-                className="mt-1"
-              />
-              
-              {/* Search Loading Indicator - removed since we're using client-side filtering */}
               
               {/* Search Submit Button */}
               <button
                 type="submit"
-                onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                  e.preventDefault()
-                  if (searchTerm.trim()) {
-                    submitSearch()
-                  }
-                }}
                 disabled={!searchTerm.trim()}
                 className={cn(
                   "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors z-10",
@@ -1873,24 +1828,6 @@ function ProductsPageContent() {
                 title="Search"
               >
                 <Search className="w-3 h-3 sm:w-4 sm:h-4" />
-              </button>
-              
-              {/* Image Search Button - Hidden on mobile when typing */}
-              <button
-                onClick={() => {
-                  setSearchModalInitialTab('image')
-                  setIsSearchModalOpen(true)
-                }}
-                className={cn(
-                  "absolute right-8 sm:right-10 md:right-12 top-1/2 -translate-y-1/2 px-1.5 sm:px-2 py-1 rounded flex items-center justify-center text-xs sm:text-sm text-yellow-500 hover:text-yellow-600 z-10",
-                  "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors whitespace-nowrap",
-                  // Hide on mobile when there's text in search input
-                  searchTerm.trim() ? "hidden sm:flex" : "flex"
-                )}
-                title="Search by image"
-              >
-                <Camera className="w-3.5 h-3.5 sm:h-4 sm:w-4 sm:hidden" />
-                <span className="hidden sm:inline text-xs sm:text-sm">Search by image</span>
               </button>
               
               {/* Clear Search Button */}
@@ -3623,36 +3560,6 @@ function ProductsPageContent() {
             </div>
           )}
 
-                {/* Image Search Results Indicator */}
-        {imageSearchResults.length > 0 && (
-          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Camera className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span className="text-blue-800 dark:text-blue-200 font-medium">
-                  Image Search Results ({imageSearchResults.length} products found)
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  setImageSearchResults([])
-                  setImageSearchKeywords([])
-                }}
-                className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
-              >
-                <X className="w-4 h-4" />
-              </button>
-                  </div>
-            {imageSearchKeywords.length > 0 && (
-              <div className="mt-2">
-                <span className="text-sm text-blue-700 dark:text-blue-300">Keywords: </span>
-                <span className="text-sm text-blue-600 dark:text-blue-400">
-                  {imageSearchKeywords.join(', ')}
-                </span>
-                </div>
-            )}
-              </div>
-        )}
 
                 {/* Products Grid */}
         {showSkeleton || isLoading ? (
@@ -3666,7 +3573,7 @@ function ProductsPageContent() {
             <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
               No products found
             </h3>
-            {(searchTerm || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
+            {(actualSearchQuery || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
               <div className={cn("text-sm mb-6 max-w-md mx-auto", themeClasses.textNeutralSecondary)}>
                 <p className="mb-2">Selected filters:</p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
@@ -3698,7 +3605,7 @@ function ProductsPageContent() {
                 </div>
               </div>
             )}
-            {(searchTerm || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
+            {(actualSearchQuery || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
               <Button
                 onClick={clearFilters}
                 className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
@@ -3830,7 +3737,23 @@ function ProductsPageContent() {
                         prefetch={false}
                         priority="low"
                       >
-                        <h3 className="text-xs font-semibold sm:text-xs md:text-[11px] lg:text-base hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 transition-all duration-300 line-clamp-2 overflow-hidden" suppressHydrationWarning>{product.name}</h3>
+                        <TooltipProvider delayDuration={200}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <h3 className="text-xs font-semibold sm:text-xs md:text-[11px] lg:text-base hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 transition-all duration-300 line-clamp-2 overflow-hidden cursor-pointer" suppressHydrationWarning>{product.name}</h3>
+                            </TooltipTrigger>
+                            <TooltipContent 
+                              className="text-xs max-w-xs sm:max-w-sm break-words !z-[99999]" 
+                              side="top" 
+                              align="start"
+                              sideOffset={8}
+                              avoidCollisions={true}
+                              collisionPadding={8}
+                            >
+                              <p className="whitespace-normal">{product.name}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </OptimizedLink>
                   {/* Stock/Sold status - on new line above ratings on mobile */}
                   <div className="sm:hidden text-[10px] mt-0.5" suppressHydrationWarning>
@@ -4284,16 +4207,13 @@ function ProductsPageContent() {
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value)
-                  handleSearchActivity()
               }}
-                onFocus={handleSearchActivity}
-                onKeyDown={(e) => {
-                  handleSearchActivity()
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    submitSearch()
-                  }
-                }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  submitSearch()
+                }
+              }}
             />
             </div>
           </div>
@@ -4325,7 +4245,6 @@ function ProductsPageContent() {
                     className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
                     onClick={() => {
                       setIsHamburgerMenuOpen(false)
-                      setIsSearchModalOpen(true)
                     }}
                   >
                     <Search className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
@@ -4533,16 +4452,6 @@ function ProductsPageContent() {
         </div>
       </div>
 
-      {/* Search Modal */}
-      <SearchModal
-        isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
-        onTextSearch={handleModalTextSearch}
-        onImageSearch={handleImageSearch}
-        currentSearchTerm={searchTerm}
-        onSearchTermChange={setSearchTerm}
-        initialTab={searchModalInitialTab}
-      />
 
 
       {/* China Import Modal */}

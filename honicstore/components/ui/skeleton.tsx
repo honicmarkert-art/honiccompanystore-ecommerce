@@ -40,9 +40,16 @@ function ProductImageSkeleton({ className }: { className?: string }) {
     <div className={cn("flex flex-col gap-3 sm:gap-4 lg:flex-row lg:gap-6", className)}>
       {/* Thumbnail Gallery (Left on LG screens, Top on SM screens) */}
       <div className="flex flex-col gap-2">
-        <div className="flex flex-row lg:flex-col gap-2 lg:max-h-[500px] lg:w-24 xl:w-28 pb-2 lg:pb-0">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <ShimmerSkeleton key={i} className="aspect-square w-16 lg:w-full rounded-md" />
+        {/* Mobile: Horizontal thumbnails */}
+        <div className="flex flex-row gap-2 pb-2 lg:hidden">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <ShimmerSkeleton key={i} className="aspect-square w-16 h-16 sm:w-20 sm:h-20 rounded-md flex-shrink-0" />
+          ))}
+        </div>
+        {/* Desktop: Vertical thumbnails */}
+        <div className="hidden lg:flex flex-col gap-2 lg:w-24 xl:w-28 lg:max-h-[500px]">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <ShimmerSkeleton key={i} className="aspect-square w-full rounded-md" />
           ))}
         </div>
       </div>

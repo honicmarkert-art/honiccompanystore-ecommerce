@@ -205,6 +205,18 @@ export async function GET(
         }).filter((img: { imageUrl: string }) => img.imageUrl)
         
         return normalized
+      })(),
+      specificationImages: (() => {
+        const images = product.specification_images || []
+        // Handle JSONB array - ensure it's always an array
+        if (typeof images === 'string') {
+          try {
+            return JSON.parse(images)
+          } catch {
+            return []
+          }
+        }
+        return Array.isArray(images) ? images : []
       })()
     }
 
@@ -337,6 +349,8 @@ export async function PUT(
     if (sanitizedUpdates.freeDelivery !== undefined) supabaseUpdates.free_delivery = sanitizedUpdates.freeDelivery
     if (sanitizedUpdates.sameDayDelivery !== undefined) supabaseUpdates.same_day_delivery = sanitizedUpdates.sameDayDelivery
     if (sanitizedUpdates.importChina !== undefined) supabaseUpdates.import_china = sanitizedUpdates.importChina
+    if (sanitizedUpdates.specificationImages !== undefined) supabaseUpdates.specification_images = sanitizedUpdates.specificationImages
+    if ((updates as any).specificationImages !== undefined) supabaseUpdates.specification_images = (updates as any).specificationImages
     if (sanitizedUpdates.variantConfig !== undefined) supabaseUpdates.variant_config = sanitizedUpdates.variantConfig
     // Ignore variantImages on update to prevent unintended additions; handled at upload time
 

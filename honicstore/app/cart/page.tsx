@@ -168,6 +168,17 @@ function CartPageContent() {
     })
     return grouped
   }, [cart])
+  
+  // Calculate supplier subtotals (memoized)
+  const supplierSubtotals = useMemo(() => {
+    const subtotals: { [key: string]: number } = {}
+    Object.entries(groupedCartItems).forEach(([supplierKey, items]) => {
+      subtotals[supplierKey] = items.reduce((total, item) => {
+        return total + (item.totalPrice || 0)
+      }, 0)
+    })
+    return subtotals
+  }, [groupedCartItems])
 
   const handleQuantityChange = useCallback((productId: number, variantId: string | undefined, delta: number) => {
     const currentItem = cart.find((item) => item.productId === productId)
@@ -929,6 +940,12 @@ function CartPageContent() {
                         const supplierRegion = (firstItem as any).supplierRegion || null
                         const supplierNation = (firstItem as any).supplierNation || null
                         const supplierCompanyLogo = (firstItem as any).supplierCompanyLogo || null
+                        const supplierSubtotal = supplierSubtotals[supplierKey] || 0
+                        
+                        // Calculate total items for this supplier
+                        const supplierTotalItems = supplierItems.reduce((total, item) => {
+                          return total + (item.totalQuantity || 0)
+                        }, 0)
                         
                         // Build location string - only region and nation (not location field)
                         const locationParts = []
@@ -979,6 +996,13 @@ function CartPageContent() {
                                     <span className="text-[10px] sm:text-xs md:text-sm truncate">{locationString}</span>
                                   </div>
                                 )}
+                                {/* Supplier Subtotal */}
+                                <div className="flex items-center gap-1 sm:gap-1.5 text-blue-600 dark:text-blue-400 font-semibold">
+                                  <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4 flex-shrink-0" />
+                                  <span className="text-[10px] sm:text-xs md:text-sm">
+                                    {formatPrice(supplierSubtotal)} ({supplierTotalItems} {supplierTotalItems === 1 ? 'item' : 'items'})
+                                  </span>
+                                </div>
                               </div>
                             )}
                             
