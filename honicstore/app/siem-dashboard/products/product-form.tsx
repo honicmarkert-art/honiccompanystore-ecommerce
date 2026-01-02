@@ -18,7 +18,7 @@ import { useCategories } from "@/hooks/use-categories"
 import { useBrands } from "@/hooks/use-brands"
 import { SelectWithAddOption } from "@/components/select-with-add-option"
 import { HierarchicalCategorySelector } from "@/components/hierarchical-category-selector"
-import { X, Plus, Upload, Image as ImageIcon, Eye, Trash2, Link, Edit } from "lucide-react"
+import { X, Plus, Upload, Image as ImageIcon, Eye, Trash2, Link } from "lucide-react"
 import { MediaUpload } from "@/components/media/media-upload"
 import { logger } from '@/lib/logger'
 
@@ -31,7 +31,7 @@ interface ProductFormProps {
   restrictVariantType?: boolean // Restrict variant type to primary-dependent for suppliers
 }
 
-export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false, hideImportChina = false, restrictVariantType = false }: ProductFormProps) {
+export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, hideImportChina = false, restrictVariantType = false }: ProductFormProps) {
   const { themeClasses } = useTheme()
   const { toast } = useToast()
   const { categories: rawCategories, isLoading: categoriesLoading, error: categoriesError } = useCategories()
@@ -59,9 +59,11 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
   const [isSuccess, setIsSuccess] = useState(false)
   const [showVariantImageDialog, setShowVariantImageDialog] = useState(false)
   const [selectedVariantForImage, setSelectedVariantForImage] = useState<number | null>(null)
+  // Attributes removed - simplified variant system
   const [newVariantImageUrl, setNewVariantImageUrl] = useState("")
-  const [editingVariantImageIndex, setEditingVariantImageIndex] = useState<number | null>(null)
-  const [editingVariantImageUrl, setEditingVariantImageUrl] = useState("")
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+  const [retryCount, setRetryCount] = useState(0)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -86,24 +88,29 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
       attribute?: {name: string, value: string}
       attributes?: Array<{name: string, value: string}>
     }>,
+    specificationImages: [] as string[],
     // Stock and delivery settings
     inStock: true,
     stockQuantity: "",
     freeDelivery: false,
     sameDayDelivery: false,
     importChina: false,
-        variantConfig: null,
+    variantConfig: {
+      type: (restrictVariantType ? 'primary-dependent' : 'simple') as 'simple' | 'primary-dependent' | 'multi-dependent',
+      primaryAttribute: '',
+      primaryAttributes: [] as string[],
+      attributeOrder: [] as string[],
+      dependencies: {} as Record<string, string[]>
+    },
     hasBeenUpdated: false
   })
 
+  // Attributes removed - simplified variant system
 
   // Dialog states for replacing prompts
   
-  // Specification fields state - text only (key-value pairs)
+  // Specification fields state
   const [specificationFields, setSpecificationFields] = useState<Array<{id: string, key: string, value: string}>>([])
-  
-  // Specification images state - separate independent section (max 2 images)
-  const [specificationImages, setSpecificationImages] = useState<string[]>([])
 
   // Initialize form with product data if editing
   useEffect(() => {
@@ -123,69 +130,59 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
         image: product.image ?? "",
         specifications: product.specifications || {},
         variants: (product.variants || []).map((variant: any) => {
-          // Simplified variant system: variant_name, price, stock_quantity, sku, image
+          // Use the new stock_quantities structure
+          const quantities = variant.quantities || {}
+          const attributes = variant.attributes ? { ...variant.attributes } : {}
+          
+          // Clean attributes by removing any remaining _quantity fields
+          Object.keys(attributes).forEach(key => {
+            if (key.endsWith('_quantity') || key === '_quantities' || key === 'quantities') {
+              delete attributes[key]
+            }
+          })
+          
           return {
-            id: variant.id,
-            variant_name: variant.variant_name || variant.name || '',
-            price: variant.price || product.price || 0,
-            stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
-            sku: variant.sku || '',
-            image: variant.image || ''
+            ...variant,
+            attributes: attributes, // Clean attributes
+            quantities: quantities // Quantities from stock_quantities column
           }
         }),
         video: product.video ?? "",
         view360: product.view360 ?? "",
         variantImages: product.variantImages || [],
+        specificationImages: product.specificationImages || product.specification_images || [],
         // Stock and delivery settings
         inStock: product.inStock !== undefined ? product.inStock : true,
         stockQuantity: product.stockQuantity?.toString() ?? "",
         freeDelivery: product.freeDelivery || false,
         importChina: product.importChina || product.import_china || false,
         sameDayDelivery: product.sameDayDelivery || false,
-        variantConfig: null,
+        variantConfig: product.variantConfig || {
+          type: restrictVariantType ? 'primary-dependent' : 'simple',
+          primaryAttribute: '',
+          primaryAttributes: [],
+          attributeOrder: [],
+          dependencies: {}
+        },
         hasBeenUpdated: false
       })
       
 
-      // Initialize specification fields (text only)
+      // Initialize specification fields
       if (product.specifications) {
-        const specFields = Object.entries(product.specifications).map(([key, value], index) => {
-          // Handle both old format (string) and new format (object with value)
-          let specValue = ''
-          
-          if (typeof value === 'string') {
-            specValue = value
-          } else if (typeof value === 'object' && value !== null) {
-            specValue = (value as any).value || ''
-          }
-          
-          return {
-            id: `spec-${index}`,
-            key: key,
-            value: specValue
-          }
-        })
+        const specFields = Object.entries(product.specifications).map(([key, value], index) => ({
+          id: `spec-${index}`,
+          key: key,
+          value: value as string
+        }))
         setSpecificationFields(specFields)
       }
-      
-      // Initialize specification images from product data if available
-      // Handle both array of strings and array of objects
-      if (product.specificationImages) {
-        const images = Array.isArray(product.specificationImages) 
-          ? product.specificationImages.map((img: any) => {
-              if (typeof img === 'string') return img
-              if (img && typeof img === 'object' && img.imageUrl) return img.imageUrl
-              if (img && typeof img === 'object' && img.url) return img.url
-              return String(img || '')
-            }).filter((url: string) => url && url.trim() !== '')
-          : []
-        
-        if (images.length > 0) {
-          setSpecificationImages(images.slice(0, 2))
-        }
-      }
+
+      // Attributes removed - simplified variant system
     }
     }, [product, categoriesLoading, brandsLoading])
+
+  // Attributes removed - simplified variant system
 
   // Auto-refresh product data after updating (5 seconds, one-time)
   useEffect(() => {
@@ -222,6 +219,23 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
 
   const handleInputChange = (field: string, value: any) => {
     
+    // Special handling for variant config changes
+    if (field === 'variantConfig') {
+      
+      // If changing from simple to multi-dependent, check if variants exist
+      if (formData.variantConfig?.type === 'simple' && value?.type === 'multi-dependent') {
+        if (formData.variants.length > 0) {
+          // Variants exist during type change - this might cause issues
+        }
+      }
+      
+      // If changing from multi-dependent to simple, warn about variant data
+      if (formData.variantConfig?.type === 'multi-dependent' && value?.type === 'simple') {
+        if (formData.variants.length > 0) {
+          // Variants exist during type change - variant data will be preserved but not used
+        }
+      }
+    }
     
     setFormData(prev => {
       const newData = {
@@ -259,7 +273,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
         f.id === id ? { ...f, [field]: value } : f
       )
       
-      // Update formData specifications with the updated fields (text only)
+      // Update formData specifications with the updated fields
       const newSpecs: Record<string, string> = {}
       updatedFields.forEach(f => {
         if (f.key.trim() && f.value.trim()) {
@@ -274,72 +288,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
       
       return updatedFields
     })
-  }
-
-  // Update specification images (separate independent section)
-  const updateSpecificationImages = async (images: string[]) => {
-    // Limit to max 2 images and filter out empty values
-    const limitedImages = images.filter(url => url && url.trim() !== '').slice(0, 2)
-    
-    // Update local state immediately for preview (before saving)
-    setSpecificationImages(limitedImages)
-    
-    // If editing an existing product, save to database immediately
-    if (product?.id) {
-      try {
-        const endpoint = hideImportChina 
-          ? `/api/supplier/products/${product.id}` 
-          : `/api/products/${product.id}`
-        
-        const response = await fetch(endpoint, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            id: product.id,
-            specificationImages: limitedImages
-          })
-        })
-        
-        if (!response.ok) {
-          throw new Error('Failed to save specification images')
-        }
-        
-        const updatedProduct = await response.json()
-        
-        // Update local state with the response (handle both admin and supplier API formats)
-        const savedImages = updatedProduct.product?.specificationImages || 
-                           updatedProduct.specificationImages || 
-                           limitedImages
-        
-        // Ensure we have an array of strings
-        const finalImages = Array.isArray(savedImages) 
-          ? savedImages.map((img: any) => {
-              if (typeof img === 'string') return img
-              if (img && typeof img === 'object' && img.imageUrl) return img.imageUrl
-              if (img && typeof img === 'object' && img.url) return img.url
-              return String(img || '')
-            }).filter((url: string) => url && url.trim() !== '').slice(0, 2)
-          : limitedImages
-        
-        setSpecificationImages(finalImages)
-        
-        toast({
-          title: "✅ Saved!",
-          description: "Specification images have been saved.",
-          duration: 2000,
-        })
-      } catch (error) {
-        console.error('Error saving specification images:', error)
-        toast({
-          title: "⚠️ Save Failed",
-          description: "Failed to save specification images. They will be saved when you submit the form.",
-          variant: "destructive",
-          duration: 3000,
-        })
-      }
-    }
   }
 
   const removeSpecificationField = (id: string) => {
@@ -378,11 +326,11 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
         ...prev.variants,
         {
           id: prev.variants.length + 1, // Use simple sequential ID
-          variant_name: '', // Variant name (e.g., "Red", "Large", "5V")
+          name: "",
+          image: "",
           price: parseFloat(prev.price) || 0, // Set default price to product price
-          stock_quantity: 0,
-          sku: '',
-          image: ''
+          sku: "",
+          stock_quantity: 0
         }
       ]
     }))
@@ -405,88 +353,20 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
   }
 
 
-  // Validate image URL (HTTPS and image file extension)
-  const validateImageUrl = (url: string): { valid: boolean; error?: string } => {
-    if (!url || !url.trim()) {
-      return { valid: false, error: "URL is required" }
-    }
-
-    const trimmedUrl = url.trim()
-
-    // Check if URL starts with https://
-    if (!trimmedUrl.startsWith('https://')) {
-      return { valid: false, error: "URL must start with https://" }
-    }
-
-    // Check if URL has a valid image file extension
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico']
-    const urlLower = trimmedUrl.toLowerCase()
-    const hasImageExtension = imageExtensions.some(ext => urlLower.includes(ext))
-
-    // Also check for common image URL patterns (e.g., from CDNs that might not have extensions)
-    const imagePatterns = [
-      /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|$)/i,
-      /\/image\//i,
-      /\/img\//i,
-      /\/photo\//i,
-      /\/picture\//i
-    ]
-
-    if (!hasImageExtension && !imagePatterns.some(pattern => pattern.test(trimmedUrl))) {
-      // Try to validate by checking if it's a valid URL
-      try {
-        const urlObj = new URL(trimmedUrl)
-        // If it's a valid URL but doesn't match image patterns, warn but allow
-        // (some CDNs serve images without extensions)
-        return { valid: true }
-      } catch {
-        return { valid: false, error: "Invalid URL format" }
-      }
-    }
-
-    return { valid: true }
-  }
-
   // Variant image functions
   const handleAddVariantImage = () => {
     if (newVariantImageUrl.trim()) {
-      const trimmedUrl = newVariantImageUrl.trim()
-      
-      const validation = validateImageUrl(trimmedUrl)
-      if (!validation.valid) {
-        toast({
-          title: "Invalid URL",
-          description: validation.error || "Please enter a valid HTTPS image URL",
-          variant: "destructive",
-          duration: 3000,
-        })
-        return
-      }
-
-      // Check if this image URL already exists to prevent duplicates
-      const alreadyExists = formData.variantImages.some(
-        img => img.imageUrl?.trim() === trimmedUrl
-      )
-      
-      if (alreadyExists) {
-        toast({
-          title: "Image Already Added",
-          description: "This image is already in your variant images list.",
-          variant: "destructive",
-          duration: 3000,
-        })
-        return
-      }
-
       setFormData(prev => ({
         ...prev,
         variantImages: [...prev.variantImages, {
           variantId: selectedVariantForImage || undefined,
-          imageUrl: trimmedUrl,
+          imageUrl: newVariantImageUrl.trim(),
+          attributes: undefined // Attributes removed - simplified variant system
         }]
       }))
       setNewVariantImageUrl("")
       setSelectedVariantForImage(null)
+      // Attributes removed
       setShowVariantImageDialog(false)
     }
   }
@@ -494,36 +374,19 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
   // Automatic variant image addition when image is uploaded
   const handleVariantImageUpload = (imageUrl: string) => {
     if (imageUrl.trim()) {
-      const trimmedUrl = imageUrl.trim()
-      
-      // Check if this image URL already exists to prevent duplicates
-      const alreadyExists = formData.variantImages.some(
-        img => img.imageUrl?.trim() === trimmedUrl
-      )
-      
-      if (alreadyExists) {
-        toast({
-          title: "Image Already Added",
-          description: "This image is already in your variant images list.",
-          duration: 3000,
-        })
-        // Still clear the form
-        setNewVariantImageUrl("")
-        setSelectedVariantForImage(null)
-        return
-      }
-      
       setFormData(prev => ({
         ...prev,
         variantImages: [...prev.variantImages, {
           variantId: selectedVariantForImage || undefined,
-          imageUrl: trimmedUrl,
+          imageUrl: imageUrl.trim(),
+          attributes: undefined // Attributes removed - simplified variant system
         }]
       }))
       
       // Clear the form
       setNewVariantImageUrl("")
       setSelectedVariantForImage(null)
+      // Attributes removed
       
       // Show success message
       toast({
@@ -533,119 +396,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
       })
       
       // Close dialog after a short delay to let user see the success message
-      setTimeout(() => {
-        setShowVariantImageDialog(false)
-      }, 1500)
-    }
-  }
-
-  // Handle editing variant image (replace with new upload or URL)
-  const handleEditVariantImage = (index: number) => {
-    const variantImg = formData.variantImages[index]
-    setEditingVariantImageIndex(index)
-    setEditingVariantImageUrl(variantImg.imageUrl || "")
-    setSelectedVariantForImage(variantImg.variantId || null)
-    setShowVariantImageDialog(true)
-  }
-
-  // Save edited variant image
-  const handleSaveEditedVariantImage = () => {
-    if (editingVariantImageIndex === null) return
-
-    // If URL is provided, validate it
-    if (editingVariantImageUrl.trim()) {
-      const trimmedUrl = editingVariantImageUrl.trim()
-      
-      const validation = validateImageUrl(trimmedUrl)
-      if (!validation.valid) {
-        toast({
-          title: "Invalid URL",
-          description: validation.error || "Please enter a valid HTTPS image URL",
-          variant: "destructive",
-          duration: 3000,
-        })
-        return
-      }
-
-      // Check if this image URL already exists in OTHER images (not the one being edited)
-      const alreadyExists = formData.variantImages.some(
-        (img, index) => index !== editingVariantImageIndex && img.imageUrl?.trim() === trimmedUrl
-      )
-      
-      if (alreadyExists) {
-        toast({
-          title: "Image Already Added",
-          description: "This image is already in your variant images list.",
-          variant: "destructive",
-          duration: 3000,
-        })
-        return
-      }
-
-      // Update the variant image URL
-      const updatedImages = [...formData.variantImages]
-      updatedImages[editingVariantImageIndex] = {
-        ...updatedImages[editingVariantImageIndex],
-        imageUrl: trimmedUrl
-      }
-      setFormData(prev => ({ ...prev, variantImages: updatedImages }))
-      
-      toast({
-        title: "✅ Variant Image Updated!",
-        description: "The variant image has been updated successfully.",
-        duration: 3000,
-      })
-    }
-
-    // Reset editing state
-    setEditingVariantImageIndex(null)
-    setEditingVariantImageUrl("")
-    setSelectedVariantForImage(null)
-    setNewVariantImageUrl("")
-    setShowVariantImageDialog(false)
-  }
-
-  // Handle variant image upload when editing
-  const handleEditVariantImageUpload = (imageUrl: string) => {
-    if (editingVariantImageIndex === null) return
-
-    if (imageUrl.trim()) {
-      const trimmedUrl = imageUrl.trim()
-      
-      // Check if this image URL already exists in OTHER images (not the one being edited)
-      const alreadyExists = formData.variantImages.some(
-        (img, index) => index !== editingVariantImageIndex && img.imageUrl?.trim() === trimmedUrl
-      )
-      
-      if (alreadyExists) {
-        toast({
-          title: "Image Already Added",
-          description: "This image is already in your variant images list.",
-          variant: "destructive",
-          duration: 3000,
-        })
-        return
-      }
-      
-      const updatedImages = [...formData.variantImages]
-      updatedImages[editingVariantImageIndex] = {
-        ...updatedImages[editingVariantImageIndex],
-        imageUrl: trimmedUrl
-      }
-      setFormData(prev => ({ ...prev, variantImages: updatedImages }))
-      
-      toast({
-        title: "✅ Variant Image Replaced!",
-        description: "The variant image has been replaced successfully.",
-        duration: 3000,
-      })
-
-      // Reset editing state
-      setEditingVariantImageIndex(null)
-      setEditingVariantImageUrl("")
-      setSelectedVariantForImage(null)
-      setNewVariantImageUrl("")
-      
       setTimeout(() => {
         setShowVariantImageDialog(false)
       }, 1500)
@@ -711,67 +461,314 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
     }
   }
 
+  // Attribute management functions - REMOVED: Simplified variant system
+  // All attribute-related functions removed - variants now only have SKU, price, and stock_quantity
+
+  // Removed functions: updateVariantAttribute, updateVariantQuantity, addPrimaryValue, updatePrimaryValue, 
+  // removePrimaryValue, addMultiValue, updateSmartAttribute, handleAttributeBlur, updateSmartQuantity
+
+  const _unused = () => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) => 
+        index === variantIndex 
+          ? { 
+              ...variant, 
+              attributes: { 
+                ...variant.attributes, 
+                [attribute]: value 
+              } 
+            }
+          : variant
+      )
+    }))
+  }
+
+  // Separate function for updating quantity fields
+  const updateVariantQuantity = (variantIndex: number, attribute: string, quantity: string) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) => 
+        index === variantIndex 
+          ? { 
+              ...variant, 
+              quantities: { 
+                ...variant.quantities, 
+                [attribute]: quantity 
+              } 
+            }
+          : variant
+      )
+    }))
+  }
+
+  // Helper functions for managing primary attribute values
+  const addPrimaryValue = (variantIndex: number, attribute?: string) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) => 
+        index === variantIndex 
+          ? { 
+              ...variant, 
+              primaryValues: [...(variant.primaryValues || []), { 
+                value: "", 
+                price: "", 
+                attribute: attribute || "" 
+              }]
+            }
+          : variant
+      )
+    }))
+  }
+
+  const updatePrimaryValue = (variantIndex: number, valueIndex: number, field: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) => 
+        index === variantIndex 
+          ? { 
+              ...variant, 
+              primaryValues: variant.primaryValues?.map((primaryValue: any, vIndex: number) => 
+                vIndex === valueIndex 
+                  ? { ...primaryValue, [field]: value }
+                  : primaryValue
+              ) || []
+            }
+          : variant
+      )
+    }))
+  }
+
+  const removePrimaryValue = (variantIndex: number, valueIndex: number) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) =>
+        index === variantIndex
+          ? {
+              ...variant,
+              primaryValues: variant.primaryValues?.filter((_: any, vIndex: number) => vIndex !== valueIndex) || []
+            }
+          : variant
+      )
+    }))
+  }
 
 
 
+  const addMultiValue = (variantIndex: number, attribute: string) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) =>
+        index === variantIndex
+          ? {
+              ...variant,
+              multiValues: {
+                ...variant.multiValues,
+                [attribute]: [...(variant.multiValues?.[attribute] || []), ""]
+              }
+            }
+          : variant
+      )
+    }))
+  }
+
+
+  // Smart attribute update - stores comma-separated values as arrays of objects in attributes
+  const updateSmartAttribute = (variantIndex: number, attribute: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) =>
+        index === variantIndex
+          ? {
+              ...variant,
+              // Store value in attributes - keep as string while typing, convert on blur
+              attributes: {
+                ...variant.attributes,
+                [attribute]: value // Keep as string for now, convert on blur
+              }
+            }
+          : variant
+      )
+    }))
+  }
+
+  // Convert comma-separated string to array of objects on blur
+  const handleAttributeBlur = (variantIndex: number, attribute: string) => {
+    const variant = formData.variants[variantIndex]
+    const value = variant.attributes?.[attribute]
+    
+    if (typeof value === 'string' && value.includes(',')) {
+      setFormData(prev => ({
+        ...prev,
+        variants: prev.variants.map((variant, index) =>
+          index === variantIndex
+            ? {
+                ...variant,
+                attributes: {
+                  ...variant.attributes,
+                  [attribute]: value.split(',').map(v => v.trim()).filter(v => v).map(v => ({ value: v }))
+                }
+              }
+            : variant
+        )
+      }))
+    }
+  }
+
+  // Smart quantity update - stores quantity in quantities
+  const updateSmartQuantity = (variantIndex: number, attribute: string, quantity: string) => {
+    setFormData(prev => ({
+      ...prev,
+      variants: prev.variants.map((variant, index) =>
+        index === variantIndex
+          ? {
+              ...variant,
+              quantities: {
+                ...variant.quantities,
+                [attribute]: quantity
+              }
+            }
+          : variant
+      )
+    }))
+  }
 
 
 
+  // Comprehensive validation function
+  const validateForm = (): { isValid: boolean; errors: Record<string, string> } => {
+    const errors: Record<string, string> = {}
+    
+    // Name validation
+    const nameTrimmed = (formData.name || '').trim()
+    if (!nameTrimmed) {
+      errors.name = "Product name is required"
+    } else if (nameTrimmed.length < 2) {
+      errors.name = "Product name must be at least 2 characters"
+    } else if (nameTrimmed.length > 255) {
+      errors.name = "Product name must be less than 255 characters"
+    }
+    
+    // Price validation
+    const priceNumber = parseFloat(String(formData.price || 0))
+    if (Number.isNaN(priceNumber) || priceNumber <= 0) {
+      errors.price = "Enter a valid price greater than 0"
+    } else if (priceNumber > 999999999) {
+      errors.price = "Price is too large (maximum: 999,999,999)"
+    }
+    
+    // Original price validation (if provided)
+    if (formData.originalPrice) {
+      const originalPriceNumber = parseFloat(String(formData.originalPrice))
+      if (!Number.isNaN(originalPriceNumber) && originalPriceNumber > 0) {
+        if (originalPriceNumber <= priceNumber) {
+          errors.originalPrice = "Original price must be greater than current price"
+        }
+      }
+    }
+    
+    // Category validation
+    const invalidSentinelValues = new Set(["__loading__", "__error__", "__empty__", "__add_new__", "__add_new_main__", "__add_new_sub__", "__no_subs__"])
+    if (!formData.category || invalidSentinelValues.has(formData.category)) {
+      errors.category = "Please select a valid category"
+    }
+    
+    // Category ID validation for new products
+    if (!product && !(formData as any).category_id) {
+      errors.category = "Please select a subcategory (it assigns the UUID)"
+    }
+    
+    // Brand validation
+    if (!formData.brand || invalidSentinelValues.has(formData.brand)) {
+      errors.brand = "Please select a valid brand"
+    }
+    
+    // SKU validation (optional but if provided, should be valid)
+    if (formData.sku && String(formData.sku).trim().length > 100) {
+      errors.sku = "SKU must be less than 100 characters"
+    }
+    
+    // Description validation (optional but if provided, should be reasonable)
+    if (formData.description && String(formData.description).length > 10000) {
+      errors.description = "Description is too long (maximum: 10,000 characters)"
+    }
+    
+    // Variant validation
+    if (formData.variants && Array.isArray(formData.variants)) {
+      formData.variants.forEach((variant, index) => {
+        // Variant name validation
+        if (!variant.name && !variant.variant_name) {
+          errors[`variant_${index}_name`] = `Variant ${index + 1} name is required`
+        }
+        
+        // Variant price validation
+        const variantPrice = parseFloat(String(variant.price || 0))
+        if (Number.isNaN(variantPrice) || variantPrice < 0) {
+          errors[`variant_${index}_price`] = `Variant ${index + 1} price must be a valid number`
+        }
+        
+        // Variant stock validation
+        const variantStock = parseInt(String(variant.stock_quantity || variant.stockQuantity || 0))
+        if (Number.isNaN(variantStock) || variantStock < 0) {
+          errors[`variant_${index}_stock`] = `Variant ${index + 1} stock must be a valid number`
+        }
+      })
+    }
+    
+    return {
+      isValid: Object.keys(errors).length === 0,
+      errors
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSubmitError(null)
+    setValidationErrors({})
     setIsSubmitting(true)
+    setRetryCount(0)
 
     try {
-      // Validate required fields with stricter checks
-      const nameTrimmed = (formData.name || '').trim()
-      const priceNumber = parseFloat(formData.price as unknown as string)
-      const invalidSentinelValues = new Set(["__loading__", "__error__", "__empty__", "__add_new__"])
-      const isCategoryInvalid = !formData.category || invalidSentinelValues.has(formData.category)
-      const isBrandInvalid = !formData.brand || invalidSentinelValues.has(formData.brand)
-
-      if (!nameTrimmed) {
-        toast({ title: "Validation Error", description: "Product name is required.", variant: "destructive" })
-        return
-      }
-
-      if (Number.isNaN(priceNumber) || priceNumber <= 0) {
-        toast({ title: "Validation Error", description: "Enter a valid price greater than 0.", variant: "destructive" })
-        return
-      }
-
-      if (isCategoryInvalid) {
-        toast({ title: "Validation Error", description: "Please select a category.", variant: "destructive" })
-        return
-      }
-
-      // Enforce category_id on create (new product has no id)
-      if (!product && !(formData as any).category_id) {
-        toast({ title: "Validation Error", description: "Please select a sub category (it assigns the UUID).", variant: "destructive" })
-        return
-      }
-
-      if (isBrandInvalid) {
-        toast({ title: "Validation Error", description: "Please select a brand.", variant: "destructive" })
-        return
-      }
-
-      // Prepare product data - calculate stock from simplified variants
-      const calculatedStock = (() => {
-        // If product has no variants, use the manual stock field
-        if (formData.variants.length === 0) {
-          return parseInt(formData.stockQuantity as string) || 0
-        }
-        
-        // Otherwise, calculate from variant stock_quantity
-        let total = 0
-        formData.variants.forEach(variant => {
-          const qty = typeof variant.stock_quantity === 'number' 
-            ? variant.stock_quantity 
-            : parseInt(String(variant.stock_quantity || 0)) || 0
-          total += qty
+      // Comprehensive validation
+      const validation = validateForm()
+      if (!validation.isValid) {
+        setValidationErrors(validation.errors)
+        const firstError = Object.values(validation.errors)[0]
+        toast({ 
+          title: "Validation Error", 
+          description: firstError || "Please check the form for errors", 
+          variant: "destructive" 
         })
-        return total
+        setIsSubmitting(false)
+        return
+      }
+
+      // Prepare product data with defensive programming
+      const calculatedStock = (() => {
+        try {
+          // If product has no variants, use the manual stock field
+          if (!formData.variants || formData.variants.length === 0) {
+            const stock = parseInt(String(formData.stockQuantity || 0))
+            return isNaN(stock) ? 0 : Math.max(0, stock)
+          }
+          
+          // Otherwise, auto-calculate from variant stock quantities
+          let total = 0
+          if (Array.isArray(formData.variants)) {
+            formData.variants.forEach(variant => {
+              if (variant && typeof variant === 'object') {
+                // Use simplified variant structure: stock_quantity or stockQuantity
+                const qty = variant.stock_quantity || variant.stockQuantity || 0
+                const parsedQty = typeof qty === 'number' ? qty : parseInt(String(qty)) || 0
+                total += Math.max(0, parsedQty) // Ensure non-negative
+              }
+            })
+          }
+          return total
+        } catch (error) {
+          console.error('Error calculating stock:', error)
+          return parseInt(String(formData.stockQuantity || 0)) || 0
+        }
       })()
 
       logger.log('🚀 Form Submit - Stock Data:', {
@@ -781,64 +778,171 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
         inStock: formData.inStock
       })
 
+      // Normalize variant configuration so non-primary attributes are preserved
+      const usedAttributesSet = new Set<string>()
+      formData.variants.forEach((variant: any) => {
+        if (variant?.attributes && typeof variant.attributes === 'object') {
+          Object.keys(variant.attributes).forEach(a => a && usedAttributesSet.add(a))
+        }
+        if (Array.isArray(variant?.primaryValues)) {
+          variant.primaryValues.forEach((pv: any) => {
+            if (pv?.attribute) usedAttributesSet.add(pv.attribute)
+          })
+        }
+      })
+
+      const usedAttributes = Array.from(usedAttributesSet)
+      const normalizedVariantConfig = (() => {
+        const vc = { ...(formData.variantConfig || {}) }
+        
+        
+        // Only auto-change type if no type is set and attributes exist
+        // If user explicitly chose 'simple', respect their choice even with attributes
+        if (usedAttributes.length > 0 && !vc.type) {
+          vc.type = 'multi-dependent'
+        } else if (usedAttributes.length > 0 && vc.type === 'simple') {
+          // Explicitly ensure the type stays 'simple'
+          vc.type = 'simple'
+        }
+        // Primary-dependent: ensure primaryAttribute
+        if (vc.type === 'primary-dependent' && !vc.primaryAttribute && usedAttributes.length > 0) {
+          vc.primaryAttribute = usedAttributes[0]
+        }
+        // For suppliers (restrictVariantType), set ALL used attributes as primaryAttributes even in primary-dependent mode
+        if (vc.type === 'primary-dependent' && restrictVariantType && usedAttributes.length > 0) {
+          vc.primaryAttributes = Array.from(new Set([...usedAttributes]))
+          // Ensure primaryAttribute is set to first attribute
+          if (!vc.primaryAttribute) {
+            vc.primaryAttribute = usedAttributes[0]
+          }
+        }
+        // Multi-dependent: ensure primaryAttributes/attributeOrder include used attributes
+        if (vc.type === 'multi-dependent') {
+          vc.primaryAttributes = Array.isArray(vc.primaryAttributes) && vc.primaryAttributes.length > 0
+            ? Array.from(new Set([...vc.primaryAttributes, ...usedAttributes]))
+            : usedAttributes
+        }
+        vc.attributeOrder = Array.isArray(vc.attributeOrder) && vc.attributeOrder.length > 0
+          ? Array.from(new Set([...vc.attributeOrder, ...usedAttributes]))
+          : usedAttributes
+        
+        return vc
+      })()
+
+      // Sanitize and prepare product data with defensive checks
       const productData = {
         ...formData,
-        price: parseFloat(formData.price),
-        originalPrice: parseFloat(formData.originalPrice) || parseFloat(formData.price),
-        rating: parseFloat(formData.rating) || 0,
-        reviews: parseInt(formData.reviews) || 0,
-        views: product?.views || 0,
-        video: formData.video || undefined,
-        view360: formData.view360 || undefined,
+        // Sanitize numeric fields
+        price: Math.max(0, parseFloat(String(formData.price || 0)) || 0),
+        originalPrice: formData.originalPrice 
+          ? Math.max(0, parseFloat(String(formData.originalPrice)) || 0)
+          : Math.max(0, parseFloat(String(formData.price || 0)) || 0),
+        rating: Math.max(0, Math.min(5, parseFloat(String(formData.rating || 0)) || 0)), // Clamp 0-5
+        reviews: Math.max(0, parseInt(String(formData.reviews || 0)) || 0),
+        views: Math.max(0, parseInt(String(product?.views || 0)) || 0),
+        
+        // Sanitize string fields
+        name: String(formData.name || '').trim(),
+        description: String(formData.description || '').trim(),
+        category: String(formData.category || '').trim(),
+        brand: String(formData.brand || '').trim(),
+        sku: String(formData.sku || '').trim(),
+        model: formData.model && String(formData.model).trim().length > 0 
+          ? String(formData.model).trim() 
+          : undefined, // Only include if has value
+        image: String(formData.image || '').trim(),
+        video: formData.video && String(formData.video).trim().length > 0 
+          ? String(formData.video).trim() 
+          : undefined,
+        view360: formData.view360 && String(formData.view360).trim().length > 0 
+          ? String(formData.view360).trim() 
+          : undefined,
+        
         // Stock and delivery data
-        stockQuantity: calculatedStock,
+        stockQuantity: Math.max(0, calculatedStock),
         inStock: (() => {
-          // If product has no variants, use the manual in-stock toggle
-          if (formData.variants.length === 0) {
-            return formData.inStock
+          try {
+            // If product has no variants, use the manual in-stock toggle
+            if (!formData.variants || formData.variants.length === 0) {
+              return formData.inStock !== false
+            }
+            
+            // Otherwise, auto-calculate from variant stock quantities
+            let total = 0
+            if (Array.isArray(formData.variants)) {
+              formData.variants.forEach(variant => {
+                if (variant && typeof variant === 'object') {
+                  const qty = variant.stock_quantity || variant.stockQuantity || 0
+                  const parsedQty = typeof qty === 'number' ? qty : parseInt(String(qty)) || 0
+                  total += Math.max(0, parsedQty)
+                }
+              })
+            }
+            return total > 0
+          } catch (error) {
+            console.error('Error calculating inStock:', error)
+            return formData.inStock !== false
           }
-          
-          // Otherwise, calculate from variant stock_quantity
-          let total = 0
-          formData.variants.forEach(variant => {
-            const qty = typeof variant.stock_quantity === 'number' 
-              ? variant.stock_quantity 
-              : parseInt(String(variant.stock_quantity || 0)) || 0
-            total += qty
-          })
-          return total > 0
         })(),
-        freeDelivery: formData.freeDelivery,
-        importChina: formData.importChina,
-        sameDayDelivery: formData.sameDayDelivery,
-        variantConfig: null,
-        // Include variant images data
-        variantImages: formData.variantImages,
-        // Include specification images (separate independent section)
-        specificationImages: specificationImages.filter(img => img && img.trim()),
-        // Include variants data with simplified structure
-        variants: formData.variants.map(variant => ({
-          id: variant.id,
-          variant_name: variant.variant_name || '',
-          price: parseFloat(variant.price) || parseFloat(formData.price) || 0,
-          stock_quantity: parseInt(String(variant.stock_quantity || 0)) || 0,
-          sku: variant.sku || '',
-          image: variant.image || ''
-        }))
+        freeDelivery: Boolean(formData.freeDelivery),
+        importChina: Boolean(formData.importChina),
+        sameDayDelivery: Boolean(formData.sameDayDelivery),
+        variantConfig: normalizedVariantConfig,
+        
+        // Include variant images data (ensure array)
+        variantImages: Array.isArray(formData.variantImages) ? formData.variantImages : [],
+        specificationImages: Array.isArray(formData.specificationImages) ? formData.specificationImages : [],
+        
+        // Include variants data with proper price handling and validation
+        variants: Array.isArray(formData.variants) 
+          ? formData.variants
+              .filter(variant => variant && typeof variant === 'object') // Filter invalid variants
+              .map(variant => {
+                const variantPrice = parseFloat(String(variant.price || formData.price || 0)) || 0
+                return {
+                  ...variant,
+                  name: variant.name || variant.variant_name || '',
+                  price: Math.max(0, variantPrice),
+                  stock_quantity: Math.max(0, parseInt(String(variant.stock_quantity || variant.stockQuantity || 0)) || 0),
+                  sku: variant.sku ? String(variant.sku).trim() : undefined,
+                  image: variant.image && String(variant.image).trim().length > 0 
+                    ? String(variant.image).trim() 
+                    : undefined
+                }
+              })
+          : []
       }
 
 
 
-      // Call onSave if provided
+      // Call onSave if provided with retry logic and timeout
       if (onSave) {
-        const updatedProduct: any = await onSave(productData)
+        const MAX_RETRIES = 2
+        const TIMEOUT_MS = 30000 // 30 seconds
         
+        let lastError: Error | null = null
         
-        // If we got updated product data back, refresh the form data
-        if (updatedProduct && typeof updatedProduct === 'object') {
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            setRetryCount(attempt)
+            
+            // Create a timeout promise
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Request timeout')), TIMEOUT_MS)
+            })
+            
+            // Race between the save operation and timeout
+            const updatedProduct: any = await Promise.race([
+              onSave(productData),
+              timeoutPromise
+            ]) as any
+            
+            // If we got updated product data back, refresh the form data
+            if (updatedProduct && typeof updatedProduct === 'object') {
           
           // Clear any pending variant image selections
           setSelectedVariantForImage(null)
+          // Attributes removed
           setNewVariantImageUrl("")
           
           setFormData(prev => ({
@@ -857,14 +961,21 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
             image: updatedProduct.image ?? prev.image,
             specifications: updatedProduct.specifications || prev.specifications,
             variants: (updatedProduct.variants || prev.variants).map((variant: any) => {
-              // Simplified variant system: variant_name, price, stock_quantity, sku, image
+              // Use the new stock_quantities structure
+              const quantities = variant.quantities || {}
+              const attributes = variant.attributes ? { ...variant.attributes } : {}
+              
+              // Clean attributes by removing any remaining _quantity fields
+              Object.keys(attributes).forEach(key => {
+                if (key.endsWith('_quantity') || key === '_quantities' || key === 'quantities') {
+                  delete attributes[key]
+                }
+              })
+              
               return {
-                id: variant.id,
-                variant_name: variant.variant_name || variant.name || '',
-                price: variant.price || 0,
-                stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
-                sku: variant.sku || '',
-                image: variant.image || ''
+                ...variant,
+                attributes: attributes, // Clean attributes
+                quantities: quantities // Quantities from stock_quantities column
               }
             }),
             video: updatedProduct.video ?? prev.video,
@@ -877,38 +988,39 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
             sameDayDelivery: updatedProduct.sameDayDelivery ?? prev.sameDayDelivery,
             importChina: updatedProduct.importChina ?? prev.importChina,
             // Variant configuration
-            variantConfig: null
-          }))
-          
-          // Update specification images if available
-          // Update specification images if available
-          if (updatedProduct.specificationImages && Array.isArray(updatedProduct.specificationImages)) {
-            const images = updatedProduct.specificationImages.map((img: any) => {
-              if (typeof img === 'string') return img
-              if (img && typeof img === 'object' && img.imageUrl) return img.imageUrl
-              if (img && typeof img === 'object' && img.url) return img.url
-              return String(img || '')
-            }).filter((url: string) => url && url.trim() !== '').slice(0, 2)
-            setSpecificationImages(images)
+              variantConfig: updatedProduct.variantConfig || prev.variantConfig
+            }))
+            
+            }
+            
+            // Success - break out of retry loop
+            break
+            
+          } catch (error: any) {
+            lastError = error
+            
+            // Check if it's a network error or timeout that we should retry
+            const isRetryableError = 
+              error?.message?.includes('timeout') ||
+              error?.message?.includes('network') ||
+              error?.message?.includes('fetch') ||
+              error?.code === 'ECONNRESET' ||
+              error?.code === 'ETIMEDOUT' ||
+              (error?.response?.status >= 500 && error?.response?.status < 600)
+            
+            if (attempt < MAX_RETRIES && isRetryableError) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)))
+              continue
+            }
+            
+            // Not retryable or max retries reached
+            throw error
           }
-          
-          // Update specification fields
-          if (updatedProduct.specifications) {
-            const specFields = Object.entries(updatedProduct.specifications).map(([key, value], index) => {
-              let specValue = ''
-              if (typeof value === 'string') {
-                specValue = value
-              } else if (typeof value === 'object' && value !== null) {
-                specValue = (value as any).value || ''
-              }
-              return {
-                id: `spec-${index}`,
-                key: key,
-                value: specValue
-              }
-            })
-            setSpecificationFields(specFields)
-          }
+        }
+        
+        if (lastError) {
+          throw lastError
         }
       }
 
@@ -916,30 +1028,81 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
       toast({
         title: "✅ Success!",
         description: product ? "Product updated successfully! Media section refreshed with latest data." : "Product created successfully!",
-        duration: 4000, // Show for 4 seconds
+        duration: 4000,
       })
 
       // Set success state for visual feedback
       setIsSuccess(true)
-      setTimeout(() => setIsSuccess(false), 2000) // Reset after 2 seconds
+      setTimeout(() => setIsSuccess(false), 2000)
 
       // Only close if autoCloseOnSave is true
       if (autoCloseOnSave) {
         onClose()
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Form submission error:', error)
+      
+      // Determine user-friendly error message
+      let errorMessage = "Failed to save product. Please try again."
+      
+      if (error?.message?.includes('timeout')) {
+        errorMessage = "Request timed out. Please check your connection and try again."
+      } else if (error?.message?.includes('network') || error?.message?.includes('fetch')) {
+        errorMessage = "Network error. Please check your internet connection and try again."
+      } else if (error?.response?.status === 401) {
+        errorMessage = "Your session has expired. Please log in again."
+      } else if (error?.response?.status === 403) {
+        errorMessage = "You don't have permission to perform this action."
+      } else if (error?.response?.status === 429) {
+        errorMessage = "Too many requests. Please wait a moment and try again."
+      } else if (error?.response?.status >= 500) {
+        errorMessage = "Server error. Please try again in a few moments."
+      } else if (error?.message) {
+        errorMessage = error.message
+      }
+      
+      setSubmitError(errorMessage)
+      
       toast({
         title: "Error",
-        description: "Failed to save product. Please try again.",
-        variant: "destructive"
+        description: errorMessage,
+        variant: "destructive",
+        duration: 5000
       })
     } finally {
       setIsSubmitting(false)
+      setRetryCount(0)
     }
   }
 
   return (
     <>
+      {/* Error Display */}
+      {submitError && (
+        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <div className="flex items-start gap-2">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800 dark:text-red-200">Error</p>
+              <p className="text-sm text-red-600 dark:text-red-300 mt-1">{submitError}</p>
+              {retryCount > 0 && (
+                <p className="text-xs text-red-500 dark:text-red-400 mt-1">
+                  Retry attempt {retryCount} of 2
+                </p>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setSubmitError(null)}
+              className="text-red-600 hover:text-red-800"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+      
       <form onSubmit={handleSubmit} className="space-y-6" suppressHydrationWarning>
         <Tabs defaultValue="basic" className="w-full">
           <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
@@ -956,10 +1119,25 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
               <Input
                 id="name"
                 value={formData.name}
-                onChange={(e) => handleInputChange("name", e.target.value)}
+                onChange={(e) => {
+                  handleInputChange("name", e.target.value)
+                  // Clear validation error when user types
+                  if (validationErrors.name) {
+                    setValidationErrors(prev => {
+                      const next = { ...prev }
+                      delete next.name
+                      return next
+                    })
+                  }
+                }}
                 placeholder="Enter product name"
                 required
+                className={validationErrors.name ? "border-red-500 focus-visible:ring-red-500" : ""}
+                maxLength={255}
               />
+              {validationErrors.name && (
+                <p className="text-xs text-red-500">{validationErrors.name}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -1087,19 +1265,30 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                       <Label>Stock Quantity (Auto-Calculated)</Label>
                       <div className="text-3xl font-bold text-green-600">
                         {(() => {
-                          // Calculate from variant stock_quantity (simplified variant system)
                           let total = 0
                           formData.variants.forEach(variant => {
-                            const qty = typeof variant.stock_quantity === 'number' 
-                              ? variant.stock_quantity 
-                              : parseInt(String(variant.stock_quantity || 0)) || 0
-                            total += qty
+                            // Check primaryValues quantities
+                            if (Array.isArray(variant.primaryValues)) {
+                              variant.primaryValues.forEach((pv: any) => {
+                                const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
+                                total += qty
+                              })
+                            }
+                            
+                            
+                            // Check quantities object
+                            if (variant.quantities && typeof variant.quantities === 'object') {
+                              Object.keys(variant.quantities).forEach(key => {
+                                const qty = parseInt(variant.quantities[key]) || 0
+                                total += qty
+                              })
+                            }
                           })
                           return total
                         })()} units
                       </div>
                       <p className="text-xs text-gray-600">
-                        Calculated by summing stock quantities from all variants.
+                        Calculated by summing all attribute quantities from variants.
                       </p>
                     </>
                   ) : (
@@ -1132,13 +1321,24 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                           return qty > 0 ? `${qty} units available` : 'Out of stock (toggle to override)'
                         }
                         
-                        // Calculate from variant stock_quantity (simplified variant system)
                         let total = 0
                         formData.variants.forEach(variant => {
-                          const qty = typeof variant.stock_quantity === 'number' 
-                            ? variant.stock_quantity 
-                            : parseInt(String(variant.stock_quantity || 0)) || 0
-                          total += qty
+                          // Count primary values quantities
+                          if (Array.isArray(variant.primaryValues)) {
+                            variant.primaryValues.forEach((pv: any) => {
+                              const qty = typeof pv.quantity === 'number' ? pv.quantity : parseInt(pv.quantity) || 0
+                              total += qty
+                            })
+                          }
+                          
+                          // Count quantities object
+                          if (variant.quantities) {
+                            Object.keys(variant.quantities).forEach(attr => {
+                              const qty = parseInt(variant.quantities[attr]) || 0
+                              total += qty
+                            })
+                          }
+                          
                         })
                         return total > 0 ? `Auto-calculated: ${total} units available` : 'Auto-calculated: Out of stock (override if needed)'
                       })()}
@@ -1219,19 +1419,40 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                 <Input
                   id="price"
                   type="number"
-                  step="1"
+                  step="0.01"
                   min="0"
+                  max="999999999"
                   value={formData.price}
-                  onChange={(e) => handleInputChange("price", e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    // Only allow positive numbers
+                    if (value === '' || (!isNaN(parseFloat(value)) && parseFloat(value) >= 0)) {
+                      handleInputChange("price", value)
+                      if (validationErrors.price) {
+                        setValidationErrors(prev => {
+                          const next = { ...prev }
+                          delete next.price
+                          return next
+                        })
+                      }
+                    }
+                  }}
                   placeholder="500"
                   required
-                  className="pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10"
+                  className={cn(
+                    "pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10",
+                    validationErrors.price ? "border-red-500 focus-visible:ring-red-500" : ""
+                  )}
                 />
                 <div className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
                   TZS
                 </div>
               </div>
-              <p className="text-[9px] sm:text-[10px] text-gray-500 leading-tight">Enter price in Tanzanian Shillings (minimum 500 TZS)</p>
+              {validationErrors.price ? (
+                <p className="text-xs text-red-500">{validationErrors.price}</p>
+              ) : (
+                <p className="text-[9px] sm:text-[10px] text-gray-500 leading-tight">Enter price in Tanzanian Shillings (minimum 500 TZS)</p>
+              )}
             </div>
 
             <div className="space-y-1.5 sm:space-y-2 sm:col-span-2">
@@ -1248,6 +1469,8 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
             </div>
           </div>
 
+                     {/* Attribute Management - REMOVED: Simplified variant system without attributes */}
+
           {/* Variants */}
           <Card>
             <CardHeader className="p-4 sm:p-6">
@@ -1257,16 +1480,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                   {formData.variants.length > 0 && (
                     <p className="text-xs sm:text-sm text-gray-600 mt-1 break-words">
                       Total Stock: <span className="font-bold text-green-600">
-                        {(() => {
-                          let total = 0
-                          formData.variants.forEach(variant => {
-                            const qty = typeof variant.stock_quantity === 'number' 
-                              ? variant.stock_quantity 
-                              : parseInt(String(variant.stock_quantity || 0)) || 0
-                            total += qty
-                          })
-                          return total
-                        })()}
+                        {formData.variants.reduce((sum, v) => sum + (parseInt(v.stock_quantity || v.stockQuantity || 0) || 0), 0)}
                       </span> units
                     </p>
                   )}
@@ -1282,7 +1496,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                 <div key={variant.id} className="border rounded-lg p-3 sm:p-4 space-y-3 sm:space-y-4">
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="font-medium text-sm sm:text-base truncate flex-1 min-w-0">
-                      {variant.variant_name || variant.sku ? `${variant.variant_name || variant.sku}` : `Variant ${index + 1}`}
+                      {variant.name || variant.variant_name || (variant.sku ? `Variant: ${variant.sku}` : `Variant ${index + 1}`)}
                     </h4>
                     <Button
                       type="button"
@@ -1295,86 +1509,81 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                     </Button>
                   </div>
                   
-                  {/* Simplified Variant Fields */}
-                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                  <div className="space-y-3 sm:space-y-4">
+                    {/* Variant Name */}
                     <div className="space-y-1.5 sm:space-y-2">
                       <Label className="text-xs sm:text-sm">Variant Name *</Label>
                       <Input
-                        value={variant.variant_name ?? ""}
-                        onChange={(e) => updateVariant(index, "variant_name", e.target.value)}
-                        placeholder="e.g., Red, Large, 5V"
+                        value={variant.name ?? variant.variant_name ?? ""}
+                        onChange={(e) => updateVariant(index, "name", e.target.value)}
+                        placeholder="e.g., Red, Large, 256GB"
                         className="text-sm sm:text-base h-9 sm:h-10"
                         required
                       />
                     </div>
-                    
+
+                    {/* Variant Image */}
                     <div className="space-y-1.5 sm:space-y-2">
-                      <Label className="text-xs sm:text-sm">SKU</Label>
-                      <Input
-                        value={variant.sku ?? ""}
-                        onChange={(e) => updateVariant(index, "sku", e.target.value)}
-                        placeholder="Variant SKU (optional)"
-                        className="text-sm sm:text-base h-9 sm:h-10"
+                      <Label className="text-xs sm:text-sm">Variant Image (Optional)</Label>
+                      <MediaUpload
+                        type="image"
+                        value={variant.image ?? ""}
+                        onChange={(url) => updateVariant(index, "image", url)}
+                        onRemove={() => updateVariant(index, "image", "")}
+                        maxSize={10}
+                        aspectRatio={1}
+                        context="variant"
+                        productId={product?.id}
+                        label=""
+                        description=""
                       />
                     </div>
-                  </div>
 
-                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
-                    <div className="space-y-1.5 sm:space-y-2">
-                      <Label className="text-xs sm:text-sm">Price (TZS) *</Label>
-                      <div className="relative">
+                    {/* Variant Details Grid */}
+                    <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-3">
+                      <div className="space-y-1.5 sm:space-y-2">
+                        <Label className="text-xs sm:text-sm">SKU</Label>
                         <Input
-                          type="number"
-                          step="1"
-                          min="0"
-                          value={variant.price ?? ""}
-                          onChange={(e) => updateVariant(index, "price", parseFloat(e.target.value) || 0)}
-                          placeholder="500"
-                          className="pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10"
-                          required
+                          value={variant.sku ?? ""}
+                          onChange={(e) => updateVariant(index, "sku", e.target.value)}
+                          placeholder="Variant SKU"
+                          className="text-sm sm:text-base h-9 sm:h-10"
                         />
-                        <div className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
-                          TZS
+                      </div>
+                      
+                      <div className="space-y-1.5 sm:space-y-2">
+                        <Label className="text-xs sm:text-sm">Price (TZS)</Label>
+                        <div className="relative">
+                          <Input
+                            type="number"
+                            step="1"
+                            min="0"
+                            value={variant.price ?? ""}
+                            onChange={(e) => updateVariant(index, "price", parseFloat(e.target.value) || 0)}
+                            placeholder="500"
+                            className="pr-10 sm:pr-12 text-sm sm:text-base h-9 sm:h-10"
+                          />
+                          <div className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-xs text-gray-500 pointer-events-none">
+                            TZS
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    
-                    <div className="space-y-1.5 sm:space-y-2">
-                      <Label className="text-xs sm:text-sm">Stock Quantity *</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={variant.stock_quantity ?? ""}
-                        onChange={(e) => updateVariant(index, "stock_quantity", parseInt(e.target.value) || 0)}
-                        placeholder="0"
-                        className="text-sm sm:text-base h-9 sm:h-10"
-                        required
-                      />
+                      
+                      <div className="space-y-1.5 sm:space-y-2">
+                        <Label className="text-xs sm:text-sm">Stock Quantity</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={variant.stock_quantity ?? variant.stockQuantity ?? ""}
+                          onChange={(e) => updateVariant(index, "stock_quantity", parseInt(e.target.value) || 0)}
+                          placeholder="0"
+                          className="text-sm sm:text-base h-9 sm:h-10"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-sm">Variant Image URL</Label>
-                    <Input
-                      value={variant.image ?? ""}
-                      onChange={(e) => updateVariant(index, "image", e.target.value)}
-                      placeholder="https://example.com/image.jpg (optional)"
-                      className="text-sm sm:text-base h-9 sm:h-10"
-                    />
-                    {variant.image && (
-                      <div className="mt-2">
-                        <img 
-                          src={variant.image} 
-                          alt={variant.variant_name || "Variant"} 
-                          className="w-20 h-20 object-cover rounded border"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none'
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
+                  {/* Attributes removed - simplified variant system */}
                 </div>
               ))}
             </CardContent>
@@ -1603,44 +1812,36 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                             View
                           </Button>
 
-                          {/* Edit Button - Opens dialog for re-upload */}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditVariantImage(index)}
-                            className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
-                          >
-                            <Edit className="w-3 h-3 mr-0.5 sm:mr-1" />
-                            Edit
-                          </Button>
-
-                          {/* URLs Button - Quick URL edit with validation */}
+                          {/* Edit Button */}
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             onClick={() => {
-                              const newUrl = prompt('Enter variant image URL (must be HTTPS and an image file):', variantImg.imageUrl)
+                              const newUrl = prompt('Enter new variant image URL:', variantImg.imageUrl)
                               if (newUrl && newUrl.trim()) {
-                                const validation = validateImageUrl(newUrl.trim())
-                                if (!validation.valid) {
-                                  toast({
-                                    title: "Invalid URL",
-                                    description: validation.error || "Please enter a valid HTTPS image URL",
-                                    variant: "destructive",
-                                    duration: 3000,
-                                  })
-                                  return
-                                }
                                 const updatedImages = [...formData.variantImages]
                                 updatedImages[index] = { ...updatedImages[index], imageUrl: newUrl.trim() }
                                 setFormData(prev => ({ ...prev, variantImages: updatedImages }))
-                                toast({
-                                  title: "✅ URL Updated!",
-                                  description: "Variant image URL has been updated.",
-                                  duration: 2000,
-                                })
+                              }
+                            }}
+                            className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
+                          >
+                            <Link className="w-3 h-3 mr-0.5 sm:mr-1" />
+                            Edit
+                          </Button>
+
+                          {/* URLs Button */}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const newUrl = prompt('Enter variant image URL:')
+                              if (newUrl && newUrl.trim()) {
+                                const updatedImages = [...formData.variantImages]
+                                updatedImages[index] = { ...updatedImages[index], imageUrl: newUrl.trim() }
+                                setFormData(prev => ({ ...prev, variantImages: updatedImages }))
                               }
                             }}
                             className="text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
@@ -1709,7 +1910,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
               )}
               
               {specificationFields.map((field) => (
-                <div key={field.id} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div key={field.id} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 border rounded-lg p-3 sm:p-4">
                   <Input
                     value={field.key ?? ""}
                     onChange={(e) => updateSpecificationField(field.id, 'key', e.target.value)}
@@ -1737,64 +1938,86 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
             </CardContent>
           </Card>
 
-          {/* Specification Images Section - Independent */}
+          {/* Specification Images - Separate Section */}
           <Card>
             <CardHeader className="p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
                 <div>
                   <CardTitle className="text-base sm:text-lg">Specification Images</CardTitle>
                   <p className="text-xs sm:text-sm text-gray-600 mt-1">
-                    Upload images for specifications (Max 2 images)
+                    Upload images to illustrate product specifications
                   </p>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-4 sm:p-6 space-y-3 sm:space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                {[0, 1].map((index) => (
-                  <div key={index} className="space-y-2">
-                    <Label className="text-xs sm:text-sm">
-                      Image {index + 1} {index === 0 ? "(Optional)" : "(Optional)"}
-                    </Label>
-                    <MediaUpload
-                      type="image"
-                      value={specificationImages[index] || ""}
-                      onChange={async (url) => {
-                        // Update local state immediately for preview
-                        const newImages = [...specificationImages]
-                        if (url) {
-                          newImages[index] = url
-                        } else {
-                          newImages.splice(index, 1)
-                        }
-                        // Filter and limit images
-                        const limitedImages = newImages.filter(u => u && u.trim() !== '').slice(0, 2)
-                        // Update state immediately for preview
-                        setSpecificationImages(limitedImages)
-                        // Then save to database
-                        await updateSpecificationImages(newImages)
-                      }}
-                      onRemove={async () => {
-                        const newImages = [...specificationImages]
-                        newImages.splice(index, 1)
-                        // Update state immediately for preview
-                        const limitedImages = newImages.filter(u => u && u.trim() !== '')
-                        setSpecificationImages(limitedImages)
-                        // Then save to database
-                        await updateSpecificationImages(newImages)
-                      }}
-                      maxSize={5}
-                      aspectRatio={1}
-                      context="specification"
-                      productId={product?.id}
-                      label=""
-                      description=""
-                    />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs sm:text-sm">Add Specification Image</Label>
+                  <span className="text-xs text-gray-500">
+                    {formData.specificationImages?.length || 0} / 3 images
+                  </span>
+                </div>
+                {formData.specificationImages && formData.specificationImages.length >= 3 ? (
+                  <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                    <p className="text-xs sm:text-sm text-yellow-800 dark:text-yellow-200">
+                      Maximum 3 specification images allowed. Remove an image to add a new one.
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  <MediaUpload
+                    type="image"
+                    value=""
+                    onChange={(url) => {
+                      // Add to specification_images array (max 3)
+                      setFormData(prev => {
+                        const currentImages = prev.specificationImages || []
+                        if (currentImages.length >= 3) {
+                          return prev // Don't add if limit reached
+                        }
+                        return {
+                          ...prev,
+                          specificationImages: [...currentImages, url]
+                        }
+                      })
+                    }}
+                    onRemove={() => {}}
+                    maxSize={10}
+                    aspectRatio={1}
+                    context="product"
+                    productId={product?.id}
+                    label=""
+                    description=""
+                  />
+                )}
               </div>
-              {specificationImages.length >= 2 && (
-                <p className="text-xs text-gray-500">Maximum 2 images allowed</p>
+              
+              {formData.specificationImages && formData.specificationImages.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
+                  {formData.specificationImages.map((imageUrl, index) => (
+                    <div key={index} className="relative group">
+                      <img 
+                        src={imageUrl} 
+                        alt={`Specification ${index + 1}`}
+                        className="w-full h-32 sm:h-40 object-cover rounded-lg border"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            specificationImages: prev.specificationImages?.filter((_, i) => i !== index) || []
+                          }))
+                        }}
+                        className="absolute top-2 right-2 h-6 w-6 p-0 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -1822,24 +2045,12 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
 
 
     {/* Variant Image Dialog */}
-    <Dialog open={showVariantImageDialog} onOpenChange={(open) => {
-      setShowVariantImageDialog(open)
-      if (!open) {
-        setEditingVariantImageIndex(null)
-        setEditingVariantImageUrl("")
-        setNewVariantImageUrl("")
-        setSelectedVariantForImage(null)
-      }
-    }}>
+    <Dialog open={showVariantImageDialog} onOpenChange={setShowVariantImageDialog}>
       <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader className="space-y-2">
-          <DialogTitle className="text-base sm:text-lg">
-            {editingVariantImageIndex !== null ? "Edit Variant Image" : "Add Variant Image"}
-          </DialogTitle>
+          <DialogTitle className="text-base sm:text-lg">Add Variant Image</DialogTitle>
           <DialogDescription className="text-xs sm:text-sm">
-            {editingVariantImageIndex !== null 
-              ? "Upload a new image to replace the existing one, or enter a new HTTPS image URL."
-              : "Upload an image for a product variant. The image will be automatically added to your product when uploaded. You can optionally assign it to specific attributes, or leave it unassigned to apply to the entire variant."}
+            Upload an image for a product variant. The image will be automatically added to your product when uploaded. You can optionally assign it to specific attributes, or leave it unassigned to apply to the entire variant.
           </DialogDescription>
         </DialogHeader>
         
@@ -1852,6 +2063,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                 value={selectedVariantForImage?.toString() || "none"}
                 onValueChange={(value) => {
                   setSelectedVariantForImage(value === "none" ? null : Number(value))
+                  // Attributes removed
                 }}
               >
                 <SelectTrigger className="text-sm sm:text-base h-9 sm:h-10">
@@ -1861,7 +2073,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
                   <SelectItem value="none">No specific variant</SelectItem>
                   {formData.variants.map((variant, index) => (
                     <SelectItem key={variant.id} value={variant.id.toString()}>
-                      {variant.variant_name || variant.sku || `Variant ${index + 1}`}
+                      {variant.sku || `Variant ${index + 1}`} {variant.variantType ? `(${variant.variantType})` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1869,20 +2081,16 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
             </div>
           )}
 
+          {/* Attributes removed - simplified variant system */}
+
           {/* Image Upload */}
           <div className="space-y-2">
-            <Label>Upload Image {editingVariantImageIndex === null ? "*" : "(to replace existing)"}</Label>
+            <Label>Upload Image *</Label>
             <MediaUpload
               type="image"
-              value={editingVariantImageIndex !== null ? editingVariantImageUrl : newVariantImageUrl}
-              onChange={editingVariantImageIndex !== null ? handleEditVariantImageUpload : handleVariantImageUpload}
-              onRemove={() => {
-                if (editingVariantImageIndex !== null) {
-                  setEditingVariantImageUrl("")
-                } else {
-                  setNewVariantImageUrl("")
-                }
-              }}
+              value={newVariantImageUrl}
+              onChange={handleVariantImageUpload}
+              onRemove={() => setNewVariantImageUrl("")}
               maxSize={10}
               aspectRatio={1}
               context="variant"
@@ -1891,77 +2099,22 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = false,
               description=""
             />
           </div>
-
-          {/* URL Input Section */}
-          <div className="space-y-2">
-            <Label>Or Enter Image URL</Label>
-            <Input
-              type="url"
-              placeholder="https://example.com/image.jpg"
-              value={editingVariantImageIndex !== null ? editingVariantImageUrl : newVariantImageUrl}
-              onChange={(e) => {
-                const value = e.target.value
-                if (editingVariantImageIndex !== null) {
-                  setEditingVariantImageUrl(value)
-                } else {
-                  setNewVariantImageUrl(value)
-                }
-              }}
-              onBlur={(e) => {
-                const url = e.target.value.trim()
-                if (url) {
-                  const validation = validateImageUrl(url)
-                  if (!validation.valid) {
-                    toast({
-                      title: "Invalid URL",
-                      description: validation.error || "Please enter a valid HTTPS image URL",
-                      variant: "destructive",
-                      duration: 3000,
-                    })
-                  }
-                }
-              }}
-              className="text-sm sm:text-base"
-            />
-            <p className="text-xs text-gray-500">
-              URL must start with https:// and be an image file (.jpg, .png, .gif, .webp, etc.)
-            </p>
-          </div>
         </div>
 
-        {/* Action buttons */}
-        <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-0">
+        {/* Simple close button */}
+        <div className="flex justify-end pt-4 border-t">
           <Button
             variant="outline"
             onClick={() => {
               setShowVariantImageDialog(false)
-              setEditingVariantImageIndex(null)
-              setEditingVariantImageUrl("")
               setNewVariantImageUrl("")
               setSelectedVariantForImage(null)
+              // Attributes removed
             }}
-            className="w-full sm:w-auto"
           >
-            Cancel
+            Close
           </Button>
-          {editingVariantImageIndex !== null ? (
-            <Button
-              onClick={handleSaveEditedVariantImage}
-              disabled={!editingVariantImageUrl.trim()}
-              className="w-full sm:w-auto ml-0 sm:ml-2"
-            >
-              Save Changes
-            </Button>
-          ) : (
-            <Button
-              onClick={handleAddVariantImage}
-              disabled={!newVariantImageUrl.trim()}
-              className="w-full sm:w-auto ml-0 sm:ml-2"
-            >
-              Add Image
-            </Button>
-          )}
-        </DialogFooter>
+        </div>
 
       </DialogContent>
     </Dialog>

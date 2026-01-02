@@ -23,6 +23,7 @@ import { useRobustApi } from "@/hooks/use-robust-api"
 import { useInfiniteProducts } from "@/hooks/use-infinite-products"
 import { useCategoryFiltering } from "@/hooks/use-category-filtering"
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger"
+// import { SearchSuggestions } from "@/components/search-suggestions" // Removed - no longer using suggestion dropdown
 import { 
   ProductGridSkeleton, 
   FilterSidebarSkeleton, 
@@ -205,6 +206,8 @@ function ProductsPageContent() {
   const { navigateWithPrefetch } = useOptimizedNavigation() // Optimized navigation
   const [searchTerm, setSearchTerm] = useState("")
   const [activeBrand, setActiveBrand] = useState<string | null>(null)
+  // Debounce timer for clearing search URL
+  const clearSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Categories scroll state
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
   const [showLeftArrow, setShowLeftArrow] = useState(false)
@@ -241,6 +244,11 @@ function ProductsPageContent() {
     const initial = (urlSearchParams?.get('search') || '').trim()
     // Sync input field with URL search param (both when set and when cleared)
     // This ensures the input reflects the actual search query, not just what user is typing
+    // Cancel any pending clear timeout when URL changes (prevents race conditions)
+    if (clearSearchTimeoutRef.current) {
+      clearTimeout(clearSearchTimeoutRef.current)
+      clearSearchTimeoutRef.current = null
+    }
     if (initial !== searchTerm) {
       setSearchTerm(initial)
     }
@@ -268,10 +276,11 @@ function ProductsPageContent() {
   }, [urlSearchParams])
 
   // Submit search (updates URL and triggers server-side filtering)
+  // Minimum 3 characters required
   const submitSearch = useCallback(() => {
     const query = (searchTerm || '').trim()
     const params = new URLSearchParams(urlSearchParams?.toString() || '')
-    if (query) {
+    if (query && query.length >= 3) {
       params.set('search', query)
     } else {
       params.delete('search')
@@ -789,10 +798,12 @@ function ProductsPageContent() {
   const initialOffset = (currentPage - 1) * PRODUCTS_PER_PAGE
 
   // Infinite scroll products hook for enhanced performance
+  // Wait for ads to load first before loading products
   const {
     products: infiniteProducts,
     loading: infiniteLoading,
     loadingMore: infiniteLoadingMore,
+    filtering: infiniteFiltering, // New: filtering state (doesn't clear products)
     hasMore: infiniteHasMore,
     error: infiniteError,
     totalCount: infiniteTotalCount,
@@ -813,7 +824,7 @@ function ProductsPageContent() {
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
     useOptimized: true,
     useMaterializedView: false,
-    enabled: !categoriesLoading && !noCategoryMatches // Disable fetching if filter has no matching category IDs
+    enabled: !adsLoading && !categoriesLoading && !noCategoryMatches // Wait for ads to load first, then load products
   })
 
   // Force refetch when category parameters change
@@ -824,16 +835,31 @@ function ProductsPageContent() {
     }
   }, [allCategoryIds, categoriesLoading, infiniteReset])
 
-  // Reset products immediately when any filter changes to prevent showing old products
-  // But only if we have valid category IDs or no category filter is active
-  // Note: searchTerm removed from dependencies - search only triggers on URL change (submit)
+  // Debounced filter reset to prevent rapid-fire API calls and rate limiting
+  // Reset products when filters change, but debounced to batch rapid changes
   useEffect(() => {
     // Don't reset if category filter is active but category IDs aren't ready yet
     if (isCategoryFilterActive && allCategoryIds.length === 0 && !categoriesLoading) {
       // Category filter is active but no matching IDs - this is expected, don't reset
       return
     }
-    infiniteReset()
+    
+    // Debounce filter changes: wait 300ms before resetting to batch rapid changes
+    // This prevents multiple API calls when user quickly changes multiple filters
+    const debounceTimer = setTimeout(() => {
+      // CRITICAL: When search query changes OR is cleared, do a hard reset (clear products) to prevent showing wrong products
+      // For other filters (category, brand, price), use soft reset to keep products visible during filtering
+      // Check if search query exists AND is not empty (not just undefined/null check)
+      const hasSearchQuery = actualSearchQuery && actualSearchQuery.trim().length > 0
+      // CRITICAL: Always do hard reset when search is involved (either active or just cleared)
+      // This ensures old search products don't persist when search is cleared
+      const shouldHardReset = hasSearchQuery || (actualSearchQuery === '' && products.length > 0)
+      infiniteReset(!shouldHardReset) // Hard reset (clear products) for search, soft reset for other filters
+    }, 300)
+    
+    return () => {
+      clearTimeout(debounceTimer)
+    }
   }, [selectedMainCategory, selectedSubCategories, activeBrand, actualSearchQuery, priceRange, infiniteReset, isCategoryFilterActive, allCategoryIds.length, categoriesLoading])
   
   // Get page from URL on mount
@@ -853,8 +879,9 @@ function ProductsPageContent() {
     setActiveBrand(null)
     setSearchTerm("")
     setSortOrder('price-low')
+    // CRITICAL: Do hard reset (clear products) when clearing filters to remove old search results
     // Reset infinite scroll - the hook will automatically refetch due to dependency changes
-    infiniteReset()
+    infiniteReset(true) // Hard reset to clear all products
   }, [infiniteReset])
 
   // Preload products for better performance
@@ -1046,9 +1073,9 @@ function ProductsPageContent() {
     variants.forEach((variant: any) => {
       if (variant.price) {
         const variantPrice = parseFloat(variant.price)
-        if (variantPrice < minPrice) {
-          minPrice = variantPrice
-        }
+            if (variantPrice < minPrice) {
+              minPrice = variantPrice
+            }
       }
     })
 
@@ -1128,32 +1155,46 @@ function ProductsPageContent() {
   }, [products, shuffledProducts])
 
   // When filters/search/categories change, reset the shuffle buffer so we only show the new filtered list
+  // CRITICAL: Also reset when actualSearchQuery changes (from URL) to clear old products
   useEffect(() => {
     setShuffledProducts([])
-  }, [activeBrand, searchTerm, selectedMainCategory, selectedSubCategories, priceRange])
+  }, [activeBrand, searchTerm, actualSearchQuery, selectedMainCategory, selectedSubCategories, priceRange])
 
   // Server-side filtering is now handled by the API!
   // Build the list to display (uses shuffled order when active)
   const displayedProducts = useMemo(() => {
-    // If we're loading, return empty to show skeleton
-    if (infiniteLoading) {
+    // Only show skeleton on initial load (loading), not when filtering (filtering keeps products visible)
+    if (infiniteLoading && infiniteProducts.length === 0) {
       return []
     }
+    // When filtering, keep showing existing products until new ones arrive
     
     // Always use the current products array from the API
     // Never fall back to shuffledProducts when filters are active - always show what API returns
     // Use actualSearchQuery (from URL) instead of searchTerm (input state) to prevent live search
     const hasActiveFilters = actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000
     
-    // If we have active filters, only use products from API (never shuffledProducts)
-    // This ensures we show "no products found" message when filters return no results
+    // CRITICAL: When search is active, ONLY use infiniteProducts (from API), never shuffledProducts or cached products
+    // This ensures we only show products that match the current search query
     if (hasActiveFilters) {
+      // CRITICAL FIX: When search is active, ONLY use infiniteProducts, never fall back to products
+      // This prevents showing wrong products from previous searches or cached data
+      // If infiniteProducts is empty, return empty array (don't show wrong products)
+      const productsToDisplay = actualSearchQuery 
+        ? infiniteProducts  // For search: ONLY use infiniteProducts, even if empty
+        : (infiniteProducts.length > 0 ? infiniteProducts : products)  // For other filters: can fallback
+      
       const seen = new Set<number>()
-      const uniqueProducts = products.filter((product: any) => {
+      const uniqueProducts = productsToDisplay.filter((product: any) => {
         if (seen.has(product.id)) return false
         seen.add(product.id)
         // Filter out out-of-stock products
-        const isInStock = product.inStock !== false && product.in_stock !== false
+        // CRITICAL: Be lenient - only filter out if BOTH fields are explicitly false
+        // If either is true or undefined/null, allow the product through
+        const inStock1 = product.inStock
+        const inStock2 = product.in_stock
+        // Only filter out if BOTH are explicitly false
+        const isInStock = !(inStock1 === false && inStock2 === false)
         return isInStock
       })
       return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
@@ -1171,12 +1212,16 @@ function ProductsPageContent() {
       return isInStock
     })
     return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
-  }, [products, shuffledProducts, PRODUCTS_PER_PAGE, searchTerm, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, infiniteLoading])
+  }, [infiniteProducts, products, shuffledProducts, PRODUCTS_PER_PAGE, actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, infiniteLoading])
 
   // Track initial load state - more aggressive loading
   const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [hasDataLoaded, setHasDataLoaded] = useState(false)
   const [showSkeleton, setShowSkeleton] = useState(true)
+  
+  // Delay showing "No products found" to wait for all search methods to complete
+  const [showNoProducts, setShowNoProducts] = useState(false)
+  const noProductsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   
   useEffect(() => {
     // Set initial load to false after a longer delay
@@ -1190,8 +1235,46 @@ function ProductsPageContent() {
       setHasDataLoaded(true)
       // Hide skeleton after data loads and a short delay
       setTimeout(() => setShowSkeleton(false), 1000)
+      // Cancel "No products found" delay if products are found
+      if (noProductsTimeoutRef.current) {
+        clearTimeout(noProductsTimeoutRef.current)
+        noProductsTimeoutRef.current = null
+      }
+      setShowNoProducts(false)
     }
   }, [displayedProducts.length])
+  
+  // Delay showing "No products found" message - wait for all search methods to complete
+  useEffect(() => {
+    // Clear any existing timeout
+    if (noProductsTimeoutRef.current) {
+      clearTimeout(noProductsTimeoutRef.current)
+      noProductsTimeoutRef.current = null
+    }
+    
+    // Only show "No products found" if:
+    // 1. Not loading or filtering (all methods completed)
+    // 2. No products displayed
+    // 3. After a delay (1500ms) to prevent flickering
+    const shouldShowNoProducts = !infiniteLoading && !infiniteFiltering && displayedProducts.length === 0
+    
+    if (shouldShowNoProducts) {
+      // Wait 1500ms before showing "No products found" to allow all search methods to complete
+      noProductsTimeoutRef.current = setTimeout(() => {
+        setShowNoProducts(true)
+      }, 1500)
+    } else {
+      // If products found or still loading, don't show the message
+      setShowNoProducts(false)
+    }
+    
+    return () => {
+      if (noProductsTimeoutRef.current) {
+        clearTimeout(noProductsTimeoutRef.current)
+        noProductsTimeoutRef.current = null
+      }
+    }
+  }, [infiniteLoading, infiniteFiltering, displayedProducts.length, actualSearchQuery])
   
   // Auto-load more products if we have fewer than BATCH_SIZE visible products after filtering
   // This ensures we always show ~24 products even if some are filtered out (out-of-stock)
@@ -1531,24 +1614,24 @@ function ProductsPageContent() {
     let selectedVariant: any = null
     let variantPrice: number = productPrice
     
-    try {
-      const response = await fetch(`/api/products/${productId}`)
-      if (response.ok) {
-        fullProductData = await response.json()
-        
+      try {
+        const response = await fetch(`/api/products/${productId}`)
+        if (response.ok) {
+          fullProductData = await response.json()
+          
         // Use simplified variant system - get variants from database
         const variants = fullProductData.variants || []
-        
-        // Check basic product stock before proceeding
+
+    // Check basic product stock before proceeding
         const stockCheck = checkProductStock(fullProductData)
-        if (!stockCheck.isAvailable) {
-          toast({
-            title: "Out of Stock",
-            description: stockCheck.message || "This product is currently unavailable.",
-            variant: "destructive",
-          })
-          return
-        }
+      if (!stockCheck.isAvailable) {
+        toast({
+          title: "Out of Stock",
+          description: stockCheck.message || "This product is currently unavailable.",
+          variant: "destructive",
+        })
+        return
+      }
         
         // If product has variants, auto-select first variant (like detail page)
         if (variants && variants.length > 0) {
@@ -1599,29 +1682,29 @@ function ProductsPageContent() {
         }
       }
     }
-    
-    // Auto-set quantity to 5 for products under 500 TZS
-    const quantity = variantPrice < 500 ? 5 : 1
-    
-    // Check if this is a China import item
+        
+        // Auto-set quantity to 5 for products under 500 TZS
+        const quantity = variantPrice < 500 ? 5 : 1
+        
+        // Check if this is a China import item
     const product = products.find((p: any) => p.id === productId) || fullProductData
-    if (product && (product.importChina || product.import_china)) {
-      // Show modal for China import items
-      setPendingCartItem({
-        productId,
-        quantity,
+        if (product && (product.importChina || product.import_china)) {
+          // Show modal for China import items
+          setPendingCartItem({
+            productId,
+            quantity,
         variantId: selectedVariant?.id?.toString(),
-        price: variantPrice
-      })
-      setShowChinaImportModal(true)
-      return
-    }
-    
+            price: variantPrice
+          })
+          setShowChinaImportModal(true)
+          return
+        }
+        
     // Add to cart - simplified variant system (like detail page)
     // Pass variantId (numeric ID from database), no attributes, price from database
     addItem(
-      productId, 
-      quantity, 
+        productId,
+        quantity,
       selectedVariant?.id?.toString(), // Variant ID from database
       {}, // No complex attributes
       variantPrice, // Price from database (will be validated by API)
@@ -1790,7 +1873,7 @@ function ProductsPageContent() {
               />
               <Input
                 type="text"
-                placeholder="Search for products..."
+                placeholder="Search for products... (min 3 chars)"
                 className={cn(
                     "w-full pl-8 sm:pl-10 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
                     // Adjust padding-right based on whether there's text and screen size
@@ -1804,28 +1887,73 @@ function ProductsPageContent() {
                 )}
                 value={searchTerm}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  setSearchTerm(e.target.value)
+                  const newValue = e.target.value
+                  setSearchTerm(newValue)
+                  
+                  // If input is cleared (empty), debounce URL clearing by 500ms
+                  if (!newValue.trim()) {
+                    // Clear any existing timeout
+                    if (clearSearchTimeoutRef.current) {
+                      clearTimeout(clearSearchTimeoutRef.current)
+                    }
+                    // Set new timeout to clear URL after 500ms (only if input remains empty)
+                    clearSearchTimeoutRef.current = setTimeout(() => {
+                      // Double-check that searchTerm is still empty (user might have typed again)
+                    const params = new URLSearchParams(urlSearchParams?.toString() || '')
+                      if (params.has('search')) {
+                    params.delete('search')
+                    params.delete('returnTo')
+                    const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+                        router.push(nextUrl, { scroll: false })
+                      }
+                      clearSearchTimeoutRef.current = null
+                    }, 500)
+                  } else {
+                    // If user is typing (not clearing), cancel any pending clear
+                    if (clearSearchTimeoutRef.current) {
+                      clearTimeout(clearSearchTimeoutRef.current)
+                      clearSearchTimeoutRef.current = null
+                    }
+                  }
                 }}
                 onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
+                    if (searchTerm.trim().length >= 3) {
                     submitSearch()
+                  }
                   }
                 }}
                   suppressHydrationWarning
               />
               
+              {/* Search Helper Message - Show when typing but less than 3 chars */}
+              {searchTerm.trim().length > 0 && searchTerm.trim().length < 3 && (
+                <div className={cn(
+                  "absolute top-full left-0 right-0 mt-1 z-50 rounded-lg shadow-lg border p-3",
+                  themeClasses.bgPrimary,
+                  themeClasses.borderNeutral,
+                  themeClasses.textNeutralSecondary
+                )}>
+                  <p className="text-xs sm:text-sm">
+                    Type at least 3 characters to search (e.g., "ard", "uno", "load")
+                  </p>
+                </div>
+              )}
+              
+              {/* Search Suggestions Dropdown - REMOVED per user request */}
+              
               {/* Search Submit Button */}
               <button
                 type="submit"
-                disabled={!searchTerm.trim()}
+                disabled={!searchTerm.trim() || searchTerm.trim().length < 3}
                 className={cn(
                   "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors z-10",
-                  searchTerm.trim() 
+                  searchTerm.trim() && searchTerm.trim().length >= 3
                     ? cn(darkHeaderFooterClasses.textNeutralSecondaryFixed, "hover:bg-neutral-200 dark:hover:bg-neutral-700")
-                    : "text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                    : "text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50"
                 )}
-                title="Search"
+                title={searchTerm.trim().length < 3 ? "Type at least 3 characters to search" : "Search"}
               >
                 <Search className="w-3 h-3 sm:w-4 sm:h-4" />
               </button>
@@ -1833,14 +1961,24 @@ function ProductsPageContent() {
               {/* Clear Search Button */}
               {searchTerm && (
                 <button
+                  type="button" // CRITICAL: Prevent form submission when clearing
                   onClick={() => {
                     setSearchTerm("")
-                    // Also clear URL immediately
+                    // Clear URL after 500ms debounce (only if input remains empty)
+                    if (clearSearchTimeoutRef.current) {
+                      clearTimeout(clearSearchTimeoutRef.current)
+                    }
+                    clearSearchTimeoutRef.current = setTimeout(() => {
+                      // Double-check that searchTerm is still empty (user might have typed again)
                     const params = new URLSearchParams(urlSearchParams?.toString() || '')
+                      if (params.has('search')) {
                     params.delete('search')
                     params.delete('returnTo')
                     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                    router.push(nextUrl, { scroll: false }) // Use scroll: false to prevent page jumping
+                        router.push(nextUrl, { scroll: false })
+                      }
+                      clearSearchTimeoutRef.current = null
+                    }, 500)
                   }}
                   className={cn(
                     // Adjust position: closer on mobile when camera button is hidden
@@ -3316,7 +3454,9 @@ function ProductsPageContent() {
               {infiniteLoading && infiniteTotalCount === 0 && displayedProducts.length === 0 ? (
                 "Loading products..."
               ) : (
-                `${Math.min(displayedProducts.length, infiniteTotalCount > 0 ? infiniteTotalCount : products.length)} of ${infiniteTotalCount > 0 ? infiniteTotalCount : (products.length > 0 ? products.length : displayedProducts.length)} products`
+                // CRITICAL FIX: Use infiniteTotalCount when available (from API), otherwise use displayedProducts.length
+                // This ensures accurate count display, especially for search results
+                `${displayedProducts.length}${infiniteTotalCount > 0 ? ` of ${infiniteTotalCount}` : ''} product${displayedProducts.length !== 1 ? 's' : ''}`
               )}
             </span>
           </div>
@@ -3498,11 +3638,12 @@ function ProductsPageContent() {
                 const decoration = getDecoration(promoItem.decoration)
                 
                 // For Free Shipping, wrap in a container that spans full width for sliding animation
+                // Truck icon should flip horizontally when moving right (point right)
                 if (isFreeShipping) {
                   return (
                     <div className="relative w-full overflow-hidden" style={{ minHeight: '1.5em' }}>
                       <span className={`inline-flex items-center gap-2 ${animationClass} absolute whitespace-nowrap`}>
-                        {decoration && <span className="flex-shrink-0">{decoration}</span>}
+                        <span className="flex-shrink-0 text-blue-500 animate-[flipTruck_25s_ease-in-out_infinite]">🚚</span>
                         <span>{promoItem.text}</span>
                       </span>
                     </div>
@@ -3562,24 +3703,28 @@ function ProductsPageContent() {
 
 
                 {/* Products Grid */}
-        {showSkeleton || isLoading ? (
-          // Skeleton Loading State
+        {(showSkeleton || (isLoading && infiniteProducts.length === 0) || (actualSearchQuery && infiniteProducts.length === 0 && (infiniteLoading || infiniteFiltering))) ? (
+          // Skeleton Loading State - show on initial load, when filtering, or when search is active and loading
           <div className="px-1 sm:px-2 lg:px-3">
             <ProductGridSkeleton count={24} />
           </div>
-        ) : (noCategoryMatches || (displayedProducts.length === 0 && !infiniteLoading)) ? (
+        ) : (noCategoryMatches || (displayedProducts.length === 0 && !infiniteLoading && !infiniteFiltering && showNoProducts)) ? (
           <div className="px-4 py-10 text-center">
             <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
-              No products found
+              {actualSearchQuery && actualSearchQuery.trim().length >= 3 
+                ? `No products found for "${actualSearchQuery}"` 
+                : actualSearchQuery && actualSearchQuery.trim().length > 0 && actualSearchQuery.trim().length < 3
+                ? `Please type at least 3 characters to search`
+                : "No products found"}
             </h3>
             {(actualSearchQuery || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
               <div className={cn("text-sm mb-6 max-w-md mx-auto", themeClasses.textNeutralSecondary)}>
                 <p className="mb-2">Selected filters:</p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                  {searchTerm && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs font-medium">
-                      Search: "{searchTerm}"
+                  {actualSearchQuery && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-blue-800 dark:text-blue-200 text-xs font-medium">
+                      Search: "{actualSearchQuery}"
                     </span>
                   )}
                   {selectedMainCategory && (
@@ -3626,7 +3771,12 @@ function ProductsPageContent() {
               <>
                 
                 {/* All Product Cards */}
-            {(shuffledProducts.length > 0 ? shuffledProducts : displayedProducts).map((product: any, index: number) => {
+                {/* CRITICAL FIX: When search/filters are active, ONLY use displayedProducts, never shuffledProducts */}
+                {/* This prevents showing wrong products from previous searches */}
+                {((actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000)
+                  ? displayedProducts
+                  : (shuffledProducts.length > 0 ? shuffledProducts : displayedProducts)
+                ).map((product: any, index: number) => {
             
             // Use simplified variant system - get minimum price from variants
             let effectivePrice = getMinimumPrice(product.price, product.variants)
@@ -3756,10 +3906,11 @@ function ProductsPageContent() {
                         </TooltipProvider>
                       </OptimizedLink>
                   {/* Stock/Sold status - on new line above ratings on mobile */}
-                  <div className="sm:hidden text-[10px] mt-0.5" suppressHydrationWarning>
+                  {/* Always show sold count, display "000 sold" if 0 or null */}
+                  <div className="sm:hidden text-[10px] mt-0" suppressHydrationWarning>
                     {(() => {
                       const isOutOfStock = !product.inStock && !product.in_stock
-                      const hasSoldCount = product.sold_count && product.sold_count > 0
+                      const soldCount = product.sold_count || 0
                       
                       if (isOutOfStock) {
                         return (
@@ -3767,29 +3918,31 @@ function ProductsPageContent() {
                             Out of Stock
                           </span>
                         )
-                      } else if (hasSoldCount) {
+                      } else {
                         return (
                           <span className={themeClasses.textNeutralSecondary} suppressHydrationWarning>
-                            {product.sold_count >= 1000 
-                              ? `${(product.sold_count / 1000).toFixed(1)}k+` 
-                              : `${product.sold_count}+`} sold
+                            {soldCount > 0 
+                              ? (soldCount >= 1000 
+                                  ? `${(soldCount / 1000).toFixed(1)}k+` 
+                                  : `${soldCount}+`)
+                              : '000'} sold
                           </span>
                         )
                       }
-                      return null
                     })()}
                   </div>
                   <div
                     className={cn(
-                      "flex flex-wrap items-center gap-1 text-[10px] mt-0.5 sm:text-xs min-h-[1.5rem]",
+                      "flex flex-wrap items-center gap-0.5 text-[10px] mt-0 sm:text-xs min-h-[1.5rem]",
                       themeClasses.textNeutralSecondary,
                     )}
                         suppressHydrationWarning
                   >
                     {/* Stock/Sold status - inline on desktop */}
+                    {/* Always show sold count, display "000 sold" if 0 or null */}
                     {(() => {
                       const isOutOfStock = !product.inStock && !product.in_stock
-                      const hasSoldCount = product.sold_count && product.sold_count > 0
+                      const soldCount = product.sold_count || 0
                       
                       if (isOutOfStock) {
                         return (
@@ -3797,39 +3950,53 @@ function ProductsPageContent() {
                             Out of Stock
                           </span>
                         )
-                      } else if (hasSoldCount) {
+                      } else {
                         return (
                           <>
                             <span className="hidden sm:inline text-xs whitespace-nowrap" suppressHydrationWarning>
-                              {product.sold_count >= 1000 
-                                ? `${(product.sold_count / 1000).toFixed(1)}k+` 
-                                : `${product.sold_count}+`} sold
+                              {soldCount > 0 
+                                ? (soldCount >= 1000 
+                                    ? `${(soldCount / 1000).toFixed(1)}k+` 
+                                    : `${soldCount}+`)
+                                : '000'} sold
                             </span>
-                            <span className="hidden sm:inline mx-0.5" suppressHydrationWarning>•</span>
+                            <span className="hidden sm:inline mx-0.5 text-[8px]" suppressHydrationWarning>•</span>
                           </>
                         )
                       }
-                      return null
                     })()}
-                    {/* Only show rating/reviews if rating > 0 or reviews > 0 */}
-                    {((product.rating && product.rating > 0) || (product.reviews && product.reviews > 0)) && (
-                      <div className="flex items-center gap-0.5 flex-shrink-0">
-                        {Array.from({ length: 5 }).map((_, i) => (
+                    {/* Rating: Show empty stars if rating is 0, filled stars if rating > 0 */}
+                    {/* Always show stars, but empty/unfilled if rating is 0 */}
+                    <div className="flex items-center gap-0 flex-shrink-0">
+                      {Array.from({ length: 5 }).map((_, i) => {
+                        const rating = product.rating || 0
+                        const hasRating = rating > 0
+                        return (
                           <Star
                             key={i}
                             className={`w-3 h-3 flex-shrink-0 ${
-                              i < Math.floor(product.rating || 0)
+                              hasRating && i < Math.floor(rating)
                                 ? "fill-yellow-400 text-yellow-400"
                                 : themeClasses.textNeutralSecondary
                             }`}
                             suppressHydrationWarning
                           />
-                        ))}
-                        {product.reviews && product.reviews > 0 && (
-                          <span className="whitespace-nowrap" suppressHydrationWarning>({product.reviews})</span>
+                        )
+                      })}
+                      {/* Show reviews count if > 0, otherwise show (0) */}
+                      <span className="whitespace-nowrap ml-0.5" suppressHydrationWarning>
+                        ({product.reviews || 0})
+                      </span>
+                      {/* Show views count: (0) if zero */}
+                      {product.views !== undefined && product.views !== null && (
+                        <>
+                          <span className="hidden sm:inline mx-0.5 text-[8px]" suppressHydrationWarning>•</span>
+                          <span className="whitespace-nowrap" suppressHydrationWarning>
+                            ({product.views || 0})
+                          </span>
+                        </>
                         )}
                       </div>
-                    )}
                   </div>
                   {hasFreeShipping && (
                     <div
@@ -3840,7 +4007,7 @@ function ProductsPageContent() {
                       <span>Free Shipping</span>
                     </div>
                   )}
-                      <div className="flex flex-wrap items-baseline gap-x-2 mt-0.5" suppressHydrationWarning>
+                      <div className="flex flex-wrap items-baseline gap-x-1.5 mt-0" suppressHydrationWarning>
                         {/* Main Price */}
                         <div className="text-sm font-bold sm:text-sm md:text-xs lg:text-lg" suppressHydrationWarning>
                           {formatPrice(effectivePrice)}
@@ -4208,12 +4375,12 @@ function ProductsPageContent() {
               onChange={(e) => {
                 setSearchTerm(e.target.value)
               }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  submitSearch()
-                }
-              }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    submitSearch()
+                  }
+                }}
             />
             </div>
           </div>

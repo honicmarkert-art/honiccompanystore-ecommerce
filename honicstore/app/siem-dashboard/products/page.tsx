@@ -244,8 +244,13 @@ function AdminProductsContent() {
                         console.log('⚠️ [DEBUG] No refreshed product data received')
                       }
                     } else {
-                      await addProduct(productData)
+                      const newProduct = await addProduct(productData)
                       toast({ title: 'Product created successfully' })
+                      
+                      // Load the newly created product into the form for further editing
+                      if (newProduct) {
+                        setEditingProduct(newProduct)
+                      }
                     }
                     
                     // Force refresh the products list to ensure UI is up to date

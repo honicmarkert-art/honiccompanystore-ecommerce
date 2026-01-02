@@ -230,6 +230,8 @@ function ProductDetailPageContent() {
   // Validate product ID (but don't return early - violates Rules of Hooks!)
   const isValidProductId = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
   
+  // Fetch product data FIRST with highest priority - show details immediately when available
+  // This fetch happens immediately on mount, before anything else
   const { 
     data: optimizedProduct, 
     isLoading: isOptimizedLoading, 
@@ -239,12 +241,51 @@ function ProductDetailPageContent() {
     params: { minimal: false, t: Date.now() }, // Cache busting
     ttl: 0, // No cache to force fresh data
     staleWhileRevalidate: false,
-    refetchOnWindowFocus: false
+    refetchOnWindowFocus: false,
+    enabled: !!productId && isValidProductId, // Only fetch if valid product ID
+    refetchOnMount: true // Fetch immediately on mount - PRIORITY
   })
   
   // Shared data cache for cross-page data
   const { set } = useSharedDataCache()
   const productIdNumber = Number.parseInt(params.id as string)
+  
+  // Direct product state for immediate display (bypasses hook delays)
+  const [directProduct, setDirectProduct] = useState<any>(null)
+  
+  // Direct fetch immediately on mount - bypasses rate limiting for faster load
+  const product = useMemo(() => {
+    if (directProduct && typeof directProduct === 'object' && 'id' in directProduct && directProduct.id) {
+      return directProduct
+    }
+    if (Array.isArray(products) && products.length > 0 && productIdNumber) {
+      const foundProduct = products.find((p) => p.id === productIdNumber)
+      if (foundProduct) {
+        return foundProduct
+      }
+    }
+    if (optimizedProduct && typeof optimizedProduct === 'object' && 'id' in optimizedProduct && optimizedProduct.id) {
+      return optimizedProduct as any
+    }
+    return undefined
+  }, [directProduct, products, productIdNumber, optimizedProduct])
+
+  useEffect(() => {
+    if (productIdNumber && isValidProductId && !directProduct && !product) {
+      fetch(`/api/products/${productIdNumber}?minimal=false&t=${Date.now()}`, {
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        priority: 'high' as RequestPriority
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.id) {
+            setDirectProduct(data)
+          }
+        })
+        .catch(() => {})
+    }
+  }, [productIdNumber, isValidProductId, directProduct, product])
 
   // Helpers for video rendering
   const isDirectVideoFile = (url?: string | null) => !!url && /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(url)
@@ -269,20 +310,6 @@ function ProductDetailPageContent() {
       setCurrency('TZS')
     }
   }, [currency, setCurrency])
-
-  // Optimized product finding with early return and memoization
-  // Must be defined before useEffect that uses it
-  const product = useMemo(() => {
-    // First try to use optimized product data (from prefetching)
-    if (optimizedProduct && typeof optimizedProduct === 'object' && 'id' in optimizedProduct && optimizedProduct.id) {
-      return optimizedProduct as any // Type assertion for now
-    }
-    
-    // Fallback to products array if optimized data not available
-    // Safety check: ensure products is an array before using it
-    if (!Array.isArray(products) || !products.length || !productIdNumber) return undefined
-    return products.find((p) => p.id === productIdNumber)
-  }, [optimizedProduct, products, productIdNumber])
 
   // Track product view - use ref to prevent multiple tracking calls
   const viewTrackingRef = useRef<Set<string>>(new Set())
@@ -568,17 +595,20 @@ function ProductDetailPageContent() {
   }, [products, product, relatedProductsRotation, isMobile, RELATED_PRODUCTS_COUNT_MOBILE, RELATED_PRODUCTS_COUNT_DESKTOP])
 
   // Fetch full product details when product is found
+  // This runs in parallel with optimizedProduct fetch - doesn't block product display
   useEffect(() => {
-    if (productIdNumber) {
+    if (productIdNumber && !fullProduct) {
       setIsLoadingFull(true)
       fetchFullProductDetails(productIdNumber).then((fullData) => {
-        setFullProduct(fullData)
+        if (fullData) {
+          setFullProduct(fullData)
+        }
         setIsLoadingFull(false)
       }).catch(() => {
         setIsLoadingFull(false)
       })
     }
-  }, [productIdNumber, fetchFullProductDetails])
+  }, [productIdNumber, fetchFullProductDetails, fullProduct])
 
   // Fetch variant images for the product with caching and rate limiting
   const fetchVariantImages = useCallback(async (productId: number, forceRefresh = false) => {
@@ -1732,8 +1762,9 @@ function ProductDetailPageContent() {
     )
   }
   
-  // Show loading state (after all hooks - respects Rules of Hooks)
-  if (isProductLoading) {
+  // Show loading skeleton ONLY when product data is completely unavailable (false/null)
+  // Product details show FIRST as soon as product data exists - priority over everything
+  if (!product) {
     return (
       <div className={cn("flex flex-col min-h-screen", themeClasses.mainBg, themeClasses.mainText)}>
         {/* Full Header - No skeleton needed as it's hardcoded */}
@@ -2339,26 +2370,14 @@ function ProductDetailPageContent() {
       )}
 
       <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-3 sm:px-6 lg:px-16 xl:px-24 2xl:px-32", themeClasses.mainBg, !fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
-        {/* Skeleton Loading State */}
-        {isLoading || isOptimizedLoading ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-2 lg:gap-2 xl:gap-3">
-            {/* Product Image Gallery Skeleton */}
-            <ProductImageSkeleton />
-            
-            {/* Product Info Skeleton */}
-            <div className="space-y-6">
-              <ProductInfoSkeleton />
-              <VariantSelectionSkeleton />
-              <div className="flex gap-3">
-                <ButtonSkeleton className="h-12 w-32" />
-                <ButtonSkeleton className="h-12 w-24" />
-              </div>
-            </div>
-          </div>
-        ) : (
+        {/* Show product details immediately when product data is available */}
+        {/* Priority: Product Details (first) > Ads > Images */}
+        {/* Skeleton only shows when data is false/null (not available) */}
+        {product ? (
           <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-2 lg:gap-2 xl:gap-3">
-          {/* Product Image Gallery */}
+          {/* Product Image Gallery - Show skeleton only if image data is not available (false/null) */}
+          {product.image ? (
           <div className="flex flex-col-reverse gap-3 sm:gap-4 lg:flex-row lg:gap-6">
             {/* Mobile: Horizontal Thumbnails (Top on SM screens) */}
             <div className="flex flex-col gap-2 lg:hidden">
@@ -2850,8 +2869,12 @@ function ProductDetailPageContent() {
               </div>
             </div>
           </div>
+          ) : (
+            // Show skeleton only if image data is not available (false/null)
+            <ProductImageSkeleton />
+          )}
 
-          {/* Product Details Container */}
+          {/* Product Details Container - Show immediately when product data is available */}
           <div className="flex flex-col gap-4 h-[650px] overflow-y-scroll scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] rounded-lg pl-4 pt-4 pb-4 pr-2">
             <div className="flex items-center gap-2">
               <span className={cn(
@@ -3875,13 +3898,31 @@ function ProductDetailPageContent() {
                     <p className={cn("font-medium text-sm", themeClasses.mainText)}>Return Policy</p>
                     <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>Full refund guarantee</p>
                   </div>
-                  <span className={cn("text-xs font-semibold text-blue-600 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded-full", themeClasses.mainText)}>30 Days</span>
+                  <span className={cn("text-xs font-semibold text-blue-600 bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded-full", themeClasses.mainText)}>
+                    {Math.max(1, Math.floor((productDisplayState.returnTimeValue || 7) * 0.7))} {productDisplayState.returnTimeType === 'days' ? 'Day' : 'Hour'}{Math.max(1, Math.floor((productDisplayState.returnTimeValue || 7) * 0.7)) !== 1 ? 's' : ''}
+                  </span>
                 </div>
               </div>
             </div>
           )}
           </div>
           </>
+        ) : (
+          // Show full skeleton only if product data is not available
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-2 lg:gap-2 xl:gap-3">
+            {/* Product Image Gallery Skeleton */}
+            <ProductImageSkeleton />
+            
+            {/* Product Info Skeleton */}
+            <div className="space-y-6">
+              <ProductInfoSkeleton />
+              <VariantSelectionSkeleton />
+              <div className="flex gap-3">
+                <ButtonSkeleton className="h-12 w-32" />
+                <ButtonSkeleton className="h-12 w-24" />
+              </div>
+            </div>
+          </div>
         )}
       </main>
 

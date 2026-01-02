@@ -97,7 +97,7 @@ function SupplierEditProductContent() {
       setIsSubmitting(true)
       
       // Prepare data for supplier API
-      const supplierProductData = {
+      const supplierProductData: any = {
         name: productData.name,
         description: productData.description || '',
         category: productData.category || '',
@@ -113,6 +113,11 @@ function SupplierEditProductContent() {
         video: productData.video || '',
         view360: productData.view360 || '',
         importChina: productData.importChina || false
+      }
+      
+      // Only include model if it has a value (avoid errors if column doesn't exist)
+      if (productData.model && String(productData.model).trim().length > 0) {
+        supplierProductData.model = String(productData.model).trim()
       }
 
       const response = await fetch(`/api/supplier/products/${productId}`, {

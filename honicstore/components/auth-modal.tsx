@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
-import { Eye, EyeOff, Mail, Lock, User, Phone, Store, CheckCircle, ArrowRight, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, User, Phone, Store, CheckCircle, ArrowRight } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
@@ -39,8 +39,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
   const [showVerificationMessage, setShowVerificationMessage] = useState(false)
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string>("")
   const [isResendingVerification, setIsResendingVerification] = useState(false)
-  const [showRedirectCard, setShowRedirectCard] = useState(false)
-  const [dashboardPath, setDashboardPath] = useState('/products')
+  // Removed redirect card state - redirect happens immediately via AuthContext
   
   // Check if this is a supplier flow (hide Google sign-in for suppliers)
   const isSupplierFlow = redirectUrl?.startsWith('/supplier') || 
@@ -244,27 +243,9 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
           sessionStorage.removeItem('pending_verification_email')
         }
         
-        // Determine dashboard path
-        setTimeout(() => {
-          let path = '/products'
-          // Check user role from auth context (will be updated after login)
-          if (user?.role === 'admin') {
-            path = '/'
-          } else if (user?.isSupplier || redirectUrl?.startsWith('/supplier')) {
-            path = '/supplier/dashboard'
-          } else {
-            path = redirectUrl || '/products'
-          }
-          
-          setDashboardPath(path)
-          setShowRedirectCard(true)
-          
-          // Auto-redirect after 3 seconds
-          setTimeout(() => {
-            router.push(path)
-            onClose()
-          }, 3000)
-        }, 100)
+        // Redirect immediately - no success card
+        // AuthContext will handle the redirect automatically
+        onClose()
       }
     } catch (error) {
       toast({
@@ -452,42 +433,9 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
           </DialogTitle>
         </DialogHeader>
 
-        {/* Redirect Card - Shows after successful login */}
-        {showRedirectCard && (
-          <Card className="mx-4 mt-4 mb-4 border-green-500 bg-green-50 dark:bg-green-950/20 shadow-lg">
-            <CardContent className="p-4">
-              <div className="flex flex-col items-center justify-center space-y-4">
-                <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
-                  <CheckCircle className="h-10 w-10 text-green-600 dark:text-green-400" />
-                </div>
-                <div className="text-center space-y-2">
-                  <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                    Login Successful!
-                  </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Redirecting you to your dashboard...
-                  </p>
-                </div>
-                <Button
-                  onClick={() => {
-                    router.push(dashboardPath)
-                    onClose()
-                  }}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  Go to Dashboard
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span>Redirecting automatically in a few seconds...</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* Redirect Card removed - redirect happens immediately via AuthContext */}
 
-        {!showRedirectCard && currentTab === 'login' ? (
+        {currentTab === 'login' ? (
           <Card className="border-0 shadow-none mt-4 bg-white dark:bg-gray-900">
             <CardHeader className="px-4 pb-1">
               <CardTitle className="text-sm text-gray-900 dark:text-gray-100">Sign In to Your Account</CardTitle>

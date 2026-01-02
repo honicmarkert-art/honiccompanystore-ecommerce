@@ -1,9 +1,193 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import DOMPurify from 'isomorphic-dompurify'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+// Security: Input validation constants (shared with route.ts)
+const VALIDATION_LIMITS = {
+  NAME_MIN: 2,
+  NAME_MAX: 255,
+  DESCRIPTION_MAX: 5000,
+  SKU_MAX: 100,
+  BRAND_MAX: 100,
+  CATEGORY_MAX: 100,
+  MODEL_MAX: 100,
+  PRICE_MIN: 0,
+  PRICE_MAX: 999999999,
+  URL_MAX: 2048,
+  VARIANTS_MAX: 100,
+  SPECIFICATION_IMAGES_MAX: 3
+}
+
+// Security: Validate product input data (for updates, some fields are optional)
+function validateProductUpdateInput(body: any): { valid: boolean; error?: string } {
+  // Name validation (if provided)
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string') {
+      return { valid: false, error: 'Name must be a string' }
+    }
+    const name = body.name.trim()
+    if (name.length < VALIDATION_LIMITS.NAME_MIN || name.length > VALIDATION_LIMITS.NAME_MAX) {
+      return { valid: false, error: `Name must be between ${VALIDATION_LIMITS.NAME_MIN} and ${VALIDATION_LIMITS.NAME_MAX} characters` }
+    }
+  }
+
+  // Price validation (if provided)
+  if (body.price !== undefined && body.price !== null) {
+    const price = parseFloat(String(body.price))
+    if (isNaN(price) || !isFinite(price)) {
+      return { valid: false, error: 'Price must be a valid number' }
+    }
+    if (price < VALIDATION_LIMITS.PRICE_MIN || price > VALIDATION_LIMITS.PRICE_MAX) {
+      return { valid: false, error: `Price must be between ${VALIDATION_LIMITS.PRICE_MIN} and ${VALIDATION_LIMITS.PRICE_MAX}` }
+    }
+  }
+
+  // Original price validation (if provided)
+  if (body.originalPrice !== undefined && body.originalPrice !== null) {
+    const originalPrice = parseFloat(String(body.originalPrice))
+    if (isNaN(originalPrice) || !isFinite(originalPrice)) {
+      return { valid: false, error: 'Original price must be a valid number' }
+    }
+    if (originalPrice < VALIDATION_LIMITS.PRICE_MIN || originalPrice > VALIDATION_LIMITS.PRICE_MAX) {
+      return { valid: false, error: `Original price must be between ${VALIDATION_LIMITS.PRICE_MIN} and ${VALIDATION_LIMITS.PRICE_MAX}` }
+    }
+    // Check originalPrice >= price if both are provided
+    if (body.price !== undefined && originalPrice < parseFloat(String(body.price))) {
+      return { valid: false, error: 'Original price must be greater than or equal to price' }
+    }
+  }
+
+  // Description validation (if provided)
+  if (body.description !== undefined && body.description !== null) {
+    if (typeof body.description !== 'string') {
+      return { valid: false, error: 'Description must be a string' }
+    }
+    if (body.description.length > VALIDATION_LIMITS.DESCRIPTION_MAX) {
+      return { valid: false, error: `Description must not exceed ${VALIDATION_LIMITS.DESCRIPTION_MAX} characters` }
+    }
+  }
+
+  // SKU validation (if provided)
+  if (body.sku !== undefined && body.sku !== null) {
+    if (typeof body.sku !== 'string') {
+      return { valid: false, error: 'SKU must be a string' }
+    }
+    if (body.sku.length > VALIDATION_LIMITS.SKU_MAX) {
+      return { valid: false, error: `SKU must not exceed ${VALIDATION_LIMITS.SKU_MAX} characters` }
+    }
+  }
+
+  // Brand validation (if provided)
+  if (body.brand !== undefined && body.brand !== null) {
+    if (typeof body.brand !== 'string') {
+      return { valid: false, error: 'Brand must be a string' }
+    }
+    if (body.brand.length > VALIDATION_LIMITS.BRAND_MAX) {
+      return { valid: false, error: `Brand must not exceed ${VALIDATION_LIMITS.BRAND_MAX} characters` }
+    }
+  }
+
+  // Category validation (if provided)
+  if (body.category !== undefined && body.category !== null) {
+    if (typeof body.category !== 'string') {
+      return { valid: false, error: 'Category must be a string' }
+    }
+    if (body.category.length > VALIDATION_LIMITS.CATEGORY_MAX) {
+      return { valid: false, error: `Category must not exceed ${VALIDATION_LIMITS.CATEGORY_MAX} characters` }
+    }
+  }
+
+  // Model validation (if provided)
+  if (body.model !== undefined && body.model !== null) {
+    if (typeof body.model !== 'string') {
+      return { valid: false, error: 'Model must be a string' }
+    }
+    if (body.model.length > VALIDATION_LIMITS.MODEL_MAX) {
+      return { valid: false, error: `Model must not exceed ${VALIDATION_LIMITS.MODEL_MAX} characters` }
+    }
+  }
+
+  // URL validation (image, video, view360)
+  const urlFields = ['image', 'video', 'view360']
+  for (const field of urlFields) {
+    if (body[field] !== undefined && body[field] !== null) {
+      if (typeof body[field] !== 'string') {
+        return { valid: false, error: `${field} must be a string` }
+      }
+      if (body[field].length > VALIDATION_LIMITS.URL_MAX) {
+        return { valid: false, error: `${field} URL must not exceed ${VALIDATION_LIMITS.URL_MAX} characters` }
+      }
+      // Basic URL format validation (allow relative URLs too)
+      if (body[field].startsWith('http://') || body[field].startsWith('https://')) {
+        try {
+          new URL(body[field])
+        } catch {
+          return { valid: false, error: `${field} must be a valid URL` }
+        }
+      }
+    }
+  }
+
+  // Variants validation (if provided)
+  if (body.variants !== undefined) {
+    if (!Array.isArray(body.variants)) {
+      return { valid: false, error: 'Variants must be an array' }
+    }
+    if (body.variants.length > VALIDATION_LIMITS.VARIANTS_MAX) {
+      return { valid: false, error: `Maximum ${VALIDATION_LIMITS.VARIANTS_MAX} variants allowed` }
+    }
+    for (let i = 0; i < body.variants.length; i++) {
+      const variant = body.variants[i]
+      if (variant.price !== undefined) {
+        const variantPrice = parseFloat(String(variant.price))
+        if (isNaN(variantPrice) || !isFinite(variantPrice) || variantPrice < 0) {
+          return { valid: false, error: `Variant ${i + 1} price must be a valid positive number` }
+        }
+      }
+      if (variant.stock_quantity !== undefined || variant.stockQuantity !== undefined) {
+        const qty = variant.stock_quantity || variant.stockQuantity
+        const parsedQty = parseInt(String(qty))
+        if (isNaN(parsedQty) || parsedQty < 0) {
+          return { valid: false, error: `Variant ${i + 1} stock quantity must be a valid non-negative integer` }
+        }
+      }
+    }
+  }
+
+  // Stock quantity validation (if provided)
+  if (body.stockQuantity !== undefined && body.stockQuantity !== null) {
+    const stockQty = parseInt(String(body.stockQuantity))
+    if (isNaN(stockQty) || stockQty < 0) {
+      return { valid: false, error: 'Stock quantity must be a valid non-negative integer' }
+    }
+  }
+
+  // Specification images validation (if provided)
+  if (body.specificationImages !== undefined) {
+    if (!Array.isArray(body.specificationImages)) {
+      return { valid: false, error: 'Specification images must be an array' }
+    }
+    if (body.specificationImages.length > VALIDATION_LIMITS.SPECIFICATION_IMAGES_MAX) {
+      return { valid: false, error: `Maximum ${VALIDATION_LIMITS.SPECIFICATION_IMAGES_MAX} specification images allowed` }
+    }
+    // Validate each image URL
+    for (let i = 0; i < body.specificationImages.length; i++) {
+      const img = body.specificationImages[i]
+      if (typeof img !== 'string') {
+        return { valid: false, error: `Specification image ${i + 1} must be a valid URL string` }
+      }
+      if (img.length > VALIDATION_LIMITS.URL_MAX) {
+        return { valid: false, error: `Specification image ${i + 1} URL must not exceed ${VALIDATION_LIMITS.URL_MAX} characters` }
+      }
+    }
+  }
+
+  return { valid: true }
+}
 
 // GET - Get a single product (only if it belongs to the supplier)
 export async function GET(
@@ -118,8 +302,13 @@ export async function GET(
 
   } catch (error) {
     console.error('Supplier product GET error:', error)
+    // Security: Sanitize error messages in production
+    const isProduction = process.env.NODE_ENV === 'production'
+    const errorMessage = isProduction 
+      ? 'An unexpected error occurred' 
+      : (error instanceof Error ? error.message : 'An unexpected error occurred')
     return NextResponse.json(
-      { success: false, error: 'An unexpected error occurred' },
+      { success: false, error: errorMessage },
       { status: 500 }
     )
   }
@@ -197,6 +386,17 @@ export async function PUT(
     }
 
     const body = await request.json()
+    
+    // Security: Comprehensive input validation
+    const validation = validateProductUpdateInput(body)
+    if (!validation.valid) {
+      return NextResponse.json(
+        { success: false, error: validation.error },
+        { status: 400 }
+      )
+    }
+
+    // Extract only the fields we need
     const {
       name,
       description,
@@ -206,6 +406,7 @@ export async function PUT(
       originalPrice,
       image,
       sku,
+      model,
       inStock,
       stockQuantity,
       specifications,
@@ -215,8 +416,18 @@ export async function PUT(
       importChina,
       variantConfig,
       variantImages,
-      specificationImages
+      specificationImages,
+      ...rest // Ignore any other unexpected fields
     } = body
+
+    // Security: Sanitize HTML in description to prevent XSS
+    let sanitizedDescription = description
+    if (description !== undefined && description !== null && typeof description === 'string') {
+      sanitizedDescription = DOMPurify.sanitize(description, {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+        ALLOWED_ATTR: []
+      })
+    }
 
     // Generate slug from product name if name is being updated
     let productSlug: string | undefined = undefined
@@ -274,7 +485,7 @@ export async function PUT(
       updateData.name = name.trim()
       if (productSlug) updateData.slug = productSlug
     }
-    if (description !== undefined) updateData.description = description?.trim() || ''
+    if (sanitizedDescription !== undefined) updateData.description = sanitizedDescription?.trim() || ''
     if (category !== undefined) updateData.category = category?.trim() || ''
     if (categoryId !== undefined) updateData.category_id = categoryId
     if (brand !== undefined) updateData.brand = brand?.trim() || ''
@@ -282,6 +493,11 @@ export async function PUT(
     if (originalPrice !== undefined) updateData.original_price = originalPrice ? parseFloat(originalPrice) : null
     if (image !== undefined) updateData.image = image?.trim() || ''
     if (sku !== undefined) updateData.sku = sku?.trim() || ''
+    // Only include model if it's provided and has a non-empty value
+    // Skip model entirely if empty/undefined to avoid errors if column doesn't exist
+    if (model !== undefined && model !== null && String(model).trim().length > 0) {
+      updateData.model = String(model).trim()
+    }
     if (inStock !== undefined) updateData.in_stock = inStock
     if (calculatedStock !== null || stockQuantity !== undefined) {
       updateData.stock_quantity = calculatedStock !== null ? calculatedStock : (stockQuantity ? parseInt(String(stockQuantity)) : null)
@@ -295,19 +511,170 @@ export async function PUT(
     if (importChina !== undefined) updateData.import_china = importChina
     updateData.user_id = user.id // Ensure user_id is set
 
+    // Update product - use .eq() only since we already verified ownership
+    // RLS will handle permission check
     const { data: product, error } = await supabase
       .from('products')
       .update(updateData)
       .eq('id', id)
-      .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`) // Double check ownership
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) {
       console.error('Error updating product:', error)
+      
+      // If the error is about a missing column, try updating without that column
+      if (error.code === '42703' && error.message?.includes('model')) {
+        console.warn('Model column does not exist, retrying update without model field')
+        delete updateData.model
+        
+        const { data: retryProduct, error: retryError } = await supabase
+          .from('products')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .maybeSingle()
+        
+        if (retryError) {
+          console.error('Error updating product (retry):', retryError)
+          return NextResponse.json(
+            { success: false, error: 'Failed to update product: ' + retryError.message },
+            { status: 500 }
+          )
+        }
+        
+        if (!retryProduct) {
+          // Update might have succeeded but RLS blocked the select - fetch separately
+          const { data: fetchedProduct } = await supabase
+            .from('products')
+            .select(`
+              *,
+              product_variants (*)
+            `)
+            .eq('id', id)
+            .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`)
+            .maybeSingle()
+          
+          if (fetchedProduct) {
+            // Update succeeded, use fetched product
+            const transformedProduct = {
+              ...fetchedProduct,
+              variants: fetchedProduct.product_variants?.map((v: any) => ({
+                id: v.id,
+                variant_name: v.variant_name || '',
+                price: v.price,
+                stock_quantity: v.stock_quantity || 0,
+                stockQuantity: v.stock_quantity || 0,
+                sku: v.sku || null,
+                image: v.image || null
+              })) || [],
+              variantImages: fetchedProduct.variant_images || [],
+              specificationImages: fetchedProduct.specification_images || []
+            }
+            
+            delete transformedProduct.product_variants
+            
+            return NextResponse.json({
+              success: true,
+              product: transformedProduct
+            })
+          }
+          
+          return NextResponse.json(
+            { success: false, error: 'Product not found or update failed' },
+            { status: 404 }
+          )
+        }
+        
+        // Fetch complete product with variants
+        const { data: finalProduct, error: fetchError } = await supabase
+          .from('products')
+          .select(`
+            *,
+            product_variants (*)
+          `)
+          .eq('id', id)
+          .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`)
+          .maybeSingle()
+        
+        if (fetchError || !finalProduct) {
+          return NextResponse.json(
+            { success: false, error: 'Failed to fetch updated product' },
+            { status: 500 }
+          )
+        }
+        
+        const transformedProduct = {
+          ...finalProduct,
+          variants: finalProduct.product_variants?.map((v: any) => ({
+            id: v.id,
+            variant_name: v.variant_name || '',
+            price: v.price,
+            stock_quantity: v.stock_quantity || 0,
+            stockQuantity: v.stock_quantity || 0,
+            sku: v.sku || null,
+            image: v.image || null
+          })) || [],
+          variantImages: finalProduct.variant_images || [],
+          specificationImages: finalProduct.specification_images || []
+        }
+        
+        delete transformedProduct.product_variants
+        
+        return NextResponse.json({
+          success: true,
+          product: transformedProduct
+        })
+      } else {
+        return NextResponse.json(
+          { success: false, error: 'Failed to update product: ' + error.message },
+          { status: 500 }
+        )
+      }
+    }
+
+    // If update returned null, check if update actually succeeded by fetching the product
+    if (!product) {
+      // Update might have succeeded but RLS blocked the select - fetch separately
+      const { data: fetchedProduct } = await supabase
+        .from('products')
+        .select(`
+          *,
+          product_variants (*)
+        `)
+        .eq('id', id)
+        .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`)
+        .maybeSingle()
+      
+      if (fetchedProduct) {
+        // Update succeeded, use fetched product
+        const transformedProduct = {
+          ...fetchedProduct,
+          variants: fetchedProduct.product_variants?.map((v: any) => ({
+            id: v.id,
+            variant_name: v.variant_name || '',
+            price: v.price,
+            stock_quantity: v.stock_quantity || 0,
+            stockQuantity: v.stock_quantity || 0,
+            sku: v.sku || null,
+            image: v.image || null
+          })) || [],
+          variantImages: fetchedProduct.variant_images || [],
+          specificationImages: fetchedProduct.specification_images || []
+        }
+        
+        delete transformedProduct.product_variants
+        
+        return NextResponse.json({
+          success: true,
+          product: transformedProduct
+        })
+      }
+      
+      // Product not found or update failed
       return NextResponse.json(
-        { success: false, error: 'Failed to update product' },
-        { status: 500 }
+        { success: false, error: 'Product not found or update failed' },
+        { status: 404 }
       )
     }
 
@@ -354,10 +721,18 @@ export async function PUT(
         product_variants (*)
       `)
       .eq('id', id)
-      .single()
+      .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`)
+      .maybeSingle()
+
+    if (fetchError || !completeProduct) {
+      return NextResponse.json(
+        { success: false, error: 'Failed to fetch updated product' },
+        { status: 500 }
+      )
+    }
 
     // Transform variants to match expected format (simplified structure)
-    const finalProduct = completeProduct || product
+    const finalProduct = completeProduct
     const transformedProduct = {
       ...finalProduct,
       variants: finalProduct.product_variants?.map((v: any) => ({
@@ -395,8 +770,25 @@ export async function PUT(
 
   } catch (error) {
     console.error('Supplier product PUT error:', error)
+    // Security: Sanitize error messages in production
+    const isProduction = process.env.NODE_ENV === 'production'
+    let errorMessage = 'An unexpected error occurred'
+    
+    if (!isProduction && error instanceof Error) {
+      errorMessage = error.message
+    } else if (isProduction && error instanceof Error) {
+      // Map common database errors to user-friendly messages
+      if (error.message.includes('23505')) {
+        errorMessage = 'A product with this information already exists'
+      } else if (error.message.includes('42703')) {
+        errorMessage = 'Invalid field specified'
+      } else if (error.message.includes('23502')) {
+        errorMessage = 'Required field is missing'
+      }
+    }
+    
     return NextResponse.json(
-      { success: false, error: 'An unexpected error occurred' },
+      { success: false, error: errorMessage },
       { status: 500 }
     )
   }
@@ -481,8 +873,13 @@ export async function DELETE(
 
   } catch (error) {
     console.error('Supplier product DELETE error:', error)
+    // Security: Sanitize error messages in production
+    const isProduction = process.env.NODE_ENV === 'production'
+    const errorMessage = isProduction 
+      ? 'An unexpected error occurred' 
+      : (error instanceof Error ? error.message : 'An unexpected error occurred')
     return NextResponse.json(
-      { success: false, error: 'An unexpected error occurred' },
+      { success: false, error: errorMessage },
       { status: 500 }
     )
   }

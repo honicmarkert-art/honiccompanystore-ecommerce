@@ -69,6 +69,9 @@ export async function GET(request: NextRequest) {
     const brand = searchParams.get('brand')
     const search = searchParams.get('search')
 
+    // Track which search methods were used (for test page display)
+    const searchMethodsUsed = new Set<string>()
+
     // Server-side filtering parameters
     const minPrice = searchParams.get('minPrice')
     const maxPrice = searchParams.get('maxPrice')
@@ -246,19 +249,35 @@ export async function GET(request: NextRequest) {
       }
     } else {
     }
+    // Variables for search normalization (declared at higher scope to avoid duplicates)
+    let normalized: string = ''
+    let sanitizedForQuery: string = ''
+    
     // Full-text search using search_vector (PostgreSQL full-text search)
     // Note: search_vector doesn't handle typos - exact word matching only
     // For typo tolerance, we'll add fuzzy matching in JavaScript after fetching
     if (search && search.trim().length > 0) {
-      const sanitized = securityUtils.sanitizeInput(search.trim())
+      // Normalize search query to handle variations like "loadcell", "load-cell", "5 kg", etc.
+      // Also preserve original query for model numbers like "CZL-616-C"
+      const { normalizeSearchQuery, generateSearchVariations } = await import('@/lib/search-normalize')
+      normalized = normalizeSearchQuery(search.trim())
+      const searchVariations = generateSearchVariations(search.trim())
+      sanitizedForQuery = securityUtils.sanitizeInput(normalized)
+      // Also try original query (useful for model numbers stored exactly as entered)
+      const originalSanitized = securityUtils.sanitizeInput(search.trim().toLowerCase())
       try {
         // Use PostgreSQL full-text search with search_vector column
-        // This will find products with exact word matches
-        queryBuilder = queryBuilder.textSearch('search_vector', sanitized, { type: 'websearch' })
+        // Try normalized query first, then original query if different
+        // Combine both using OR for better model number matching (e.g., "CZL-616-C" vs "CZL616C")
+        const searchQuery = sanitizedForQuery !== originalSanitized 
+          ? `${sanitizedForQuery} | ${originalSanitized}` // OR operator in PostgreSQL text search
+          : sanitizedForQuery
+        queryBuilder = queryBuilder.textSearch('search_vector', searchQuery, { type: 'websearch' })
       } catch (searchError: any) {
         // Fallback to ILIKE if search_vector doesn't exist or has issues
         logger.log(`Search vector error, falling back to ILIKE: ${searchError.message}`)
-        const searchTerms = sanitized.split(/\s+/).filter(Boolean)
+        // Use normalized search terms for fallback too
+        const searchTerms = sanitizedForQuery.split(/\s+/).filter(Boolean)
         if (searchTerms.length > 0) {
           queryBuilder = queryBuilder.or(
             searchTerms.map(term => `name.ilike.%${term}%,description.ilike.%${term}%,brand.ilike.%${term}%,category.ilike.%${term}%`).join(',')
@@ -283,18 +302,18 @@ export async function GET(request: NextRequest) {
     
     if (!search || !search.trim()) {
       // Only apply database sorting when NOT searching (search results sorted by relevance in JS)
-      // Handle featured sort option (only if is_featured column exists)
-      // For now, treat 'featured' sort same as 'created_at' to avoid errors if column doesn't exist
-      if (sortBy === 'featured') {
-        // When sorting by featured, sort by created_at (featured will be handled in transformation if column exists)
-        queryBuilder = queryBuilder.order('created_at', { ascending: false })
-      } else {
-        const sortField = validSortFields.includes(sortBy) ? sortBy : 'created_at'
-        const ascending = sortOrder.toLowerCase() === 'asc'
-        
-        // Sort by selected field (featured prioritization handled in transformation if column exists)
-        queryBuilder = queryBuilder.order(sortField, { ascending })
-      }
+    // Handle featured sort option (only if is_featured column exists)
+    // For now, treat 'featured' sort same as 'created_at' to avoid errors if column doesn't exist
+    if (sortBy === 'featured') {
+      // When sorting by featured, sort by created_at (featured will be handled in transformation if column exists)
+      queryBuilder = queryBuilder.order('created_at', { ascending: false })
+    } else {
+      const sortField = validSortFields.includes(sortBy) ? sortBy : 'created_at'
+      const ascending = sortOrder.toLowerCase() === 'asc'
+      
+      // Sort by selected field (featured prioritization handled in transformation if column exists)
+      queryBuilder = queryBuilder.order(sortField, { ascending })
+    }
     }
     // When searching, we don't apply database sorting - relevance sorting happens in JavaScript below
 
@@ -382,9 +401,17 @@ export async function GET(request: NextRequest) {
     }
     // Apply search filter to count query using search_vector
     if (search && search.trim().length > 0) {
-      const sanitized = securityUtils.sanitizeInput(search.trim())
+      // Normalize search query for count query too
+      const { normalizeSearchQuery } = await import('@/lib/search-normalize')
+      const normalized = normalizeSearchQuery(search.trim())
+      const sanitized = securityUtils.sanitizeInput(normalized)
+      const originalSanitized = securityUtils.sanitizeInput(search.trim().toLowerCase())
       try {
-        countQuery = countQuery.textSearch('search_vector', sanitized, { type: 'websearch' })
+        // Try both normalized and original query for better model number matching
+        const searchQuery = sanitized !== originalSanitized 
+          ? `${sanitized} | ${originalSanitized}` // OR operator in PostgreSQL text search
+          : sanitized
+        countQuery = countQuery.textSearch('search_vector', searchQuery, { type: 'websearch' })
       } catch (searchError: any) {
         // Fallback to ILIKE if search_vector doesn't exist
         logger.log(`Count query search vector error, falling back to ILIKE: ${searchError.message}`)
@@ -409,52 +436,89 @@ export async function GET(request: NextRequest) {
       totalCount = count
     }
 
-    // Always return what's actually in the database (even if empty)
-    if (!products || products.length === 0) {
-      logger.log('No products found in database - returning empty array')
+    // Products are already filtered by search at database level
+    let filteredProducts = products || []
+
+    // If searching, always try fuzzy search even if initial query returned 0 results
+    // This allows us to catch typos and find products that don't match exactly
+    // Minimum 3 characters required for search
+    if (search && search.trim().length >= 3) {
+      // Use already normalized query from PostgreSQL search above
+      // normalized and sanitizedForQuery are already defined above
+      const sanitized = sanitizedForQuery.toLowerCase()
+      const queryWords = sanitized.split(/\s+/).filter(w => w.length > 0)
       
-      // Return with pagination info even when empty
-      const paginationInfo = {
-        limit: limitNum,
-        offset: offsetNum,
-        total: totalCount,
-        hasMore: false,
-        currentPage: Math.floor(offsetNum / limitNum) + 1,
-        totalPages: Math.ceil(totalCount / limitNum) || 0
+      // Sort initial PostgreSQL results by relevance BEFORE fuzzy search
+      // This ensures best matches are prioritized even before fuzzy search runs
+      
+      const countMatchingWords = (name: string, words: string[]): number => {
+        return words.filter(word => name.includes(word)).length
       }
       
-      return createSecureResponse({
-        products: [],
-        pagination: paginationInfo
-      }, {
-        cacheControl: 'public, s-maxage=60, stale-while-revalidate=300',
-        headers: {
-          'X-Products-Count': '0',
-          'X-Total-Count': totalCount.toString(),
-          'X-Database-Status': 'EMPTY'
+      filteredProducts = filteredProducts.sort((a: any, b: any) => {
+        const aName = (a.name || '').toLowerCase()
+        const bName = (b.name || '').toLowerCase()
+        
+        // Products that match ALL words come first
+        const aMatchesAll = queryWords.length > 0 && queryWords.every(word => aName.includes(word))
+        const bMatchesAll = queryWords.length > 0 && queryWords.every(word => bName.includes(word))
+        if (aMatchesAll && !bMatchesAll) return -1
+        if (!aMatchesAll && bMatchesAll) return 1
+        
+        // Among products matching all words, prioritize those matching more words
+        if (aMatchesAll && bMatchesAll) {
+          const aWordCount = countMatchingWords(aName, queryWords)
+          const bWordCount = countMatchingWords(bName, queryWords)
+          if (aWordCount !== bWordCount) return bWordCount - aWordCount
         }
+        
+        // Exact name match
+        const aExactName = aName === sanitized
+        const bExactName = bName === sanitized
+        if (aExactName && !bExactName) return -1
+        if (!aExactName && bExactName) return 1
+        
+        // Name contains query
+        const aNameContains = aName.includes(sanitized)
+        const bNameContains = bName.includes(sanitized)
+        if (aNameContains && !bNameContains) return -1
+        if (!aNameContains && bNameContains) return 1
+        
+        return 0
       })
-    }
-    
-    // Products are already filtered by search at database level
-    let filteredProducts = products
-
-    // If searching, add typo tolerance and sort by relevance
-    if (search && search.trim().length > 0) {
-      const sanitized = securityUtils.sanitizeInput(search.trim()).toLowerCase()
-      const searchWords = sanitized.split(/\s+/).filter(Boolean)
+      // Initialize search methods tracking (always used for search)
+      searchMethodsUsed.add('postgresql')
+      searchMethodsUsed.add('normalization')
       
-      // If few or no results from exact search, try fuzzy matching for typos
-      // This helps when user makes typos like "adruino" instead of "arduino"
-      const needsFuzzyMatch = filteredProducts.length < 5
-      if (needsFuzzyMatch) {
-        // Fetch more products for fuzzy matching (without search filter)
+      // sanitized and queryWords are already defined above for sorting
+      // Reuse them here instead of redeclaring
+      const searchWords = queryWords
+      
+      // ROBUST FUZZY SEARCH: Always use comprehensive matching for all searches
+      // Combines: Levenshtein distance + Fuse.js + Custom matching + Synonyms + All fields
+      // Runs all methods simultaneously to catch typos and variations
+      // Always run fuzzy search to catch typos and improve search quality
+      
+      // Mark fuzzy search methods as used (they will always run)
+      // comprehensiveSearch uses all methods: Fuse.js, Levenshtein, Synonyms, Custom scoring
+      searchMethodsUsed.add('fuse')
+      searchMethodsUsed.add('levenshtein') // Always runs in comprehensiveSearch
+      searchMethodsUsed.add('custom')
+      searchMethodsUsed.add('synonym')
+      searchMethodsUsed.add('cache')
+      
+      try {
+        // Import robust fuzzy search utilities and metrics
+        const { comprehensiveSearch, extractSearchableText } = await import('@/lib/robust-fuzzy-search')
+        const { measureSearchPerformance } = await import('@/lib/search-metrics')
+        
+        // Fetch more products for comprehensive fuzzy matching (without search filter)
         // Use a broader search to get candidates for fuzzy matching
         const fuzzyQuery = publicClient
           .from('products')
-          .select('id, name, description, category, brand, price, image, rating, reviews, in_stock, stock_quantity, free_delivery, same_day_delivery, import_china, is_new, updated_at, variant_config, sold_count, supplier_verified, product_variants (*)')
+          .select('id, name, description, category, brand, price, image, rating, reviews, in_stock, stock_quantity, free_delivery, same_day_delivery, import_china, is_new, updated_at, variant_config, sold_count, supplier_verified, model, sku, specifications, product_variants (*)')
           .eq('is_hidden', false)
-          .limit(1000) // Get more products for fuzzy matching
+          .limit(2000) // Increased limit for better fuzzy matching coverage
         
         // Apply other filters (same as main query)
         if (category) fuzzyQuery.eq('category_id', category)
@@ -479,7 +543,7 @@ export async function GET(request: NextRequest) {
           const supabaseClient = createClient(supabaseUrl, supabaseAnonKey)
           
           const { data: productData } = await supabaseClient
-            .from('products')
+          .from('products')
             .select('supplier_id, user_id')
             .eq('id', supplierByProduct)
             .single()
@@ -501,50 +565,464 @@ export async function GET(request: NextRequest) {
           }
         }
         
-        const { data: fuzzyProducts } = await fuzzyQuery
-        if (fuzzyProducts && fuzzyProducts.length > 0) {
+        const { data: fuzzyProducts, error: fuzzyError } = await fuzzyQuery
+        
+        if (fuzzyError) {
+          logger.log(`Fuzzy query error: ${fuzzyError.message || JSON.stringify(fuzzyError)}`)
+        }
+        
+        // Use fuzzyProducts if available, otherwise fall back to initial products array
+        // This ensures fuzzy search always runs even if the database query returns empty
+        const productsForFuzzySearch = (fuzzyProducts && fuzzyProducts.length > 0) 
+          ? fuzzyProducts 
+          : (products && products.length > 0 ? products : [])
+        
+        logger.log(`Fuzzy search: ${productsForFuzzySearch.length} products available for matching (fuzzyProducts: ${fuzzyProducts?.length || 0}, initial products: ${products?.length || 0})`)
+        
+        if (productsForFuzzySearch.length > 0) {
+          // Prepare products for robust fuzzy search (include all fields)
+          const searchableProducts = productsForFuzzySearch.map((p: any) => ({
+            id: p.id,
+            name: p.name || '',
+            description: p.description || '',
+            category: p.category || '',
+            brand: p.brand || '',
+            price: p.price || 0,
+            model: p.model || '',
+            sku: p.sku || '',
+            specifications: p.specifications || {},
+            variants: (p.product_variants || []).map((v: any) => ({
+              variant_name: v.variant_name || '',
+              sku: v.sku || '',
+              model: v.model || ''
+            }))
+          }))
+          
+          // Use comprehensive fuzzy search with all methods (with performance tracking)
+          // Always use lower threshold to catch typos - be more lenient for better typo detection
+          // Very low threshold to catch typos like "lodicell" -> "load cell"
+          const minScoreThreshold = filteredProducts.length === 0 ? 0.01 : filteredProducts.length < 5 ? 0.1 : 0.2
+          const { result: fuzzyResults, executionTime } = measureSearchPerformance(
+            sanitized,
+            'fuzzy',
+            () => comprehensiveSearch(searchableProducts, sanitized, {
+              maxResults: limitNum || 100,
+              combineMethods: true,
+              useCache: true, // Enable caching
+              minScore: minScoreThreshold // Lower threshold when no exact matches
+            })
+          )
+          
+          // Log fuzzy search attempt (always runs for all searches to catch typos)
+          logger.log(`Fuzzy search executed for "${sanitized}": ${fuzzyResults.length} fuzzy results found (${filteredProducts.length} exact matches, threshold: ${minScoreThreshold})`)
+          
+          // Levenshtein is already marked as used above (always runs in comprehensiveSearch)
+          // Log if any Levenshtein matches were found
+          const hasLevenshtein = fuzzyResults.some((r: any) => r.matchType === 'levenshtein')
+          if (hasLevenshtein) {
+            logger.log(`Levenshtein distance found ${fuzzyResults.filter((r: any) => r.matchType === 'levenshtein').length} matches for "${sanitized}"`)
+          }
+          
+          // Log performance for monitoring
+          if (executionTime > 1000) { // Log slow searches (> 1 second)
+            logger.log(`Slow fuzzy search detected: "${sanitized}" took ${executionTime}ms`)
+          }
+          
           // Combine exact matches with fuzzy matches (exact matches prioritized)
+          // Preserve matchType and searchScore from fuzzy results
           const exactMatchIds = new Set(filteredProducts.map((p: any) => p.id))
-          const fuzzyMatches = fuzzyProducts.filter((p: any) => !exactMatchIds.has(p.id))
-          filteredProducts = [...filteredProducts, ...fuzzyMatches]
+          const fuzzyMatches = fuzzyResults
+            .filter((result: any) => !exactMatchIds.has(result.id))
+            .map((result: any) => {
+              // Find original product data
+              const originalProduct = productsForFuzzySearch.find((p: any) => p.id === result.id)
+              // Preserve matchType and searchScore from fuzzy search
+              return {
+                ...(originalProduct || result.product || result),
+                matchType: result.matchType || 'fuzzy',
+                searchScore: result.searchScore || 0
+              }
+            })
+          
+          // Mark exact matches with matchType
+          filteredProducts = filteredProducts.map((p: any) => ({
+            ...p,
+            matchType: p.matchType || 'exact-postgresql',
+            searchScore: p.searchScore || 1
+          }))
+          
+          // Prioritize exact matches, then add fuzzy matches
+          // Merge results: exact matches first, then fuzzy matches sorted by quality
+          const allProducts = [...filteredProducts, ...fuzzyMatches]
+          
+          // Sort by match quality: best matches first
+          filteredProducts = allProducts.sort((a: any, b: any) => {
+            const aName = (a.name || '').toLowerCase()
+            const bName = (b.name || '').toLowerCase()
+            const queryLower = sanitized.toLowerCase()
+            const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0)
+            
+            // Helper function to count how many query words appear in a name
+            const countMatchingWords = (name: string, words: string[]): number => {
+              return words.filter(word => name.includes(word)).length
+            }
+            
+            // PRIORITY 1: Products that match ALL words in query come FIRST
+            const aMatchesAll = queryWords.every(word => aName.includes(word))
+            const bMatchesAll = queryWords.every(word => bName.includes(word))
+            if (aMatchesAll && !bMatchesAll) return -1
+            if (!aMatchesAll && bMatchesAll) return 1
+            
+            // PRIORITY 2: Products that match MORE words come before those matching fewer
+            if (aMatchesAll && bMatchesAll) {
+              const aWordCount = countMatchingWords(aName, queryWords)
+              const bWordCount = countMatchingWords(bName, queryWords)
+              if (aWordCount !== bWordCount) return bWordCount - aWordCount
+            } else if (!aMatchesAll && !bMatchesAll) {
+              const aWordCount = countMatchingWords(aName, queryWords)
+              const bWordCount = countMatchingWords(bName, queryWords)
+              if (aWordCount !== bWordCount) return bWordCount - aWordCount
+            }
+            
+            // PRIORITY 3: Exact name match (name equals query) beats name contains
+            const aExactName = aName === queryLower
+            const bExactName = bName === queryLower
+            if (aExactName && !bExactName) return -1
+            if (!aExactName && bExactName) return 1
+            
+            // PRIORITY 4: Products with search term in name come before those without
+            const aNameContains = aName.includes(queryLower)
+            const bNameContains = bName.includes(queryLower)
+            if (aNameContains && !bNameContains) return -1
+            if (!aNameContains && bNameContains) return 1
+            
+            // PRIORITY 5: Name starts with query beats name contains
+            if (aNameContains && bNameContains) {
+              const aStartsWith = aName.startsWith(queryLower)
+              const bStartsWith = bName.startsWith(queryLower)
+              if (aStartsWith && !bStartsWith) return -1
+              if (!aStartsWith && bStartsWith) return 1
+            }
+            
+            // PRIORITY 4: Exact matches always come before fuzzy matches
+            const aIsExact = a.matchType?.startsWith('exact') || false
+            const bIsExact = b.matchType?.startsWith('exact') || false
+            if (aIsExact && !bIsExact) return -1
+            if (!aIsExact && bIsExact) return 1
+            
+            // PRIORITY 5: Within exact matches, prioritize by match type
+            if (aIsExact && bIsExact) {
+              const typeOrder: Record<string, number> = {
+                'exact-name': 5,
+                'exact-brand': 4,
+                'exact-model': 3,
+                'exact-sku': 2,
+                'exact-postgresql': 1
+              }
+              const aOrder = typeOrder[a.matchType] || 0
+              const bOrder = typeOrder[b.matchType] || 0
+              if (aOrder !== bOrder) return bOrder - aOrder
+            }
+            
+            // PRIORITY 6: Fuse matches are better than Levenshtein
+            if (!aIsExact && !bIsExact) {
+              if (a.matchType === 'fuse' && b.matchType === 'levenshtein') return -1
+              if (a.matchType === 'levenshtein' && b.matchType === 'fuse') return 1
+            }
+            
+            // PRIORITY 7: Sort by search score (higher is better)
+            const scoreDiff = (b.searchScore || 0) - (a.searchScore || 0)
+            if (Math.abs(scoreDiff) > 0.01) return scoreDiff // Significant difference
+            
+            // PRIORITY 8: Final tiebreaker - prefer shorter names (more specific)
+            return aName.length - bName.length
+          })
+        } else {
+          // No products available for fuzzy search (database might be empty or filters too restrictive)
+          logger.log(`Fuzzy search attempted for "${sanitized}" but no products available for matching`)
+        }
+      } catch (fuzzyError: any) {
+        // Log error but don't fail the request - fuzzy search is optional enhancement
+        logger.log(`Fuzzy search error for "${sanitized}": ${fuzzyError.message || JSON.stringify(fuzzyError)}`)
+      }
+      
+      // FALLBACK: Always try substring match using ILIKE as a supplement to catch products that might be missed
+      // This ensures we show products containing the search term even if fuzzy search didn't match well
+      // Use original search query (not normalized) for substring matching to catch exact character matches
+      const originalSearchQuery = search.trim().toLowerCase()
+      
+      // Check if any existing results actually contain the query string (in name, description, or specs)
+      const hasGoodMatch = filteredProducts.length > 0 && filteredProducts.some((p: any) => {
+        const nameLower = (p.name || '').toLowerCase()
+        const descLower = (p.description || '').toLowerCase()
+        const specsText = p.specifications && typeof p.specifications === 'object'
+          ? Object.entries(p.specifications).map(([k, v]) => `${k} ${v}`).join(' ').toLowerCase()
+          : ''
+        return nameLower.includes(originalSearchQuery) || descLower.includes(originalSearchQuery) || specsText.includes(originalSearchQuery)
+      })
+      
+      logger.log(`Checking substring fallback: filteredProducts.length=${filteredProducts.length}, hasGoodMatch=${hasGoodMatch}, originalSearchQuery="${originalSearchQuery}", length=${originalSearchQuery.length}`)
+      
+      // Run substring fallback if: no results OR existing results don't contain the query
+      // This ensures we always try to find products that contain the search term
+      if ((filteredProducts.length === 0 || !hasGoodMatch) && originalSearchQuery.length >= 3) {
+        logger.log(`Running ILIKE substring fallback for "${originalSearchQuery}" (${filteredProducts.length} existing results, hasGoodMatch: ${hasGoodMatch})`)
+        
+        try {
+          // Escape special characters for ILIKE (%, _)
+          const escapedQuery = escapeSqlWildcards(originalSearchQuery)
+          
+          // Use PostgreSQL ILIKE for efficient substring matching with original query
+          // Check ALL fields: name, description, brand, category, model, SKU, and specifications
+          // This ensures we find products even if the search term appears in description or specs
+          const fallbackQuery = publicClient
+            .from('products')
+            .select('id, name, description, category, brand, price, image, rating, reviews, in_stock, stock_quantity, free_delivery, same_day_delivery, import_china, is_new, updated_at, variant_config, sold_count, supplier_verified, model, sku, specifications, product_variants (*)')
+            .eq('is_hidden', false)
+            .or(`name.ilike.%${escapedQuery}%,description.ilike.%${escapedQuery}%,brand.ilike.%${escapedQuery}%,category.ilike.%${escapedQuery}%,model.ilike.%${escapedQuery}%,sku.ilike.%${escapedQuery}%`)
+            .limit(limitNum || 200) // Increased limit to check more products
+          
+          // Apply same filters as main query
+          if (category) fallbackQuery.eq('category_id', category)
+          if (brand) fallbackQuery.eq('brand', brand)
+          if (minPrice) {
+            const min = parseFloat(minPrice)
+            if (!isNaN(min) && min >= 0) fallbackQuery.gte('price', min)
+          }
+          if (maxPrice) {
+            const max = parseFloat(maxPrice)
+            if (!isNaN(max) && max >= 0) fallbackQuery.lte('price', max)
+          }
+          if (inStock === 'true') fallbackQuery.eq('in_stock', true)
+          if (isChina === 'true') fallbackQuery.eq('import_china', true)
+          if (supplier) fallbackQuery.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
+          
+          if (categories !== undefined && categories !== null) {
+            const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
+            if (categoryList.length > 0) {
+              fallbackQuery.in('category_id', categoryList)
+            }
+          }
+          
+          const { data: fallbackProducts, error: fallbackError } = await fallbackQuery
+          
+          logger.log(`Substring fallback query executed for "${originalSearchQuery}": found ${fallbackProducts?.length || 0} products, error: ${fallbackError ? fallbackError.message : 'none'}`)
+
+        if (fallbackError) {
+            logger.log(`Substring fallback query error: ${fallbackError.message || JSON.stringify(fallbackError)}`)
+          } else if (fallbackProducts && fallbackProducts.length > 0) {
+            // Score and sort substring matches (PostgreSQL already filtered, but we score for ranking)
+            // Check ALL fields: name, description, brand, category, model, SKU, and specifications
+            const scored = fallbackProducts.map((p: any) => {
+              const nameLower = (p.name || '').toLowerCase()
+              const descLower = (p.description || '').toLowerCase()
+              const brandLower = (p.brand || '').toLowerCase()
+              const categoryLower = (p.category || '').toLowerCase()
+              const modelLower = ((p.model || '').toString()).toLowerCase()
+              const skuLower = ((p.sku || '').toString()).toLowerCase()
+              
+              // Extract specifications text for matching (check all spec keys and values)
+              let specsText = ''
+              if (p.specifications && typeof p.specifications === 'object') {
+                specsText = Object.entries(p.specifications)
+                  .map(([key, value]) => `${key} ${value}`)
+                  .join(' ')
+          .toLowerCase()
+              }
+              
+              let score = 0
+              
+              // Name contains gets highest score
+              if (nameLower.includes(originalSearchQuery)) score += 100
+              // Description contains gets high score (important for terms like "strain")
+              if (descLower.includes(originalSearchQuery)) score += 80
+              // Brand contains gets medium score
+              if (brandLower.includes(originalSearchQuery)) score += 50
+              // Category contains gets lower score
+              if (categoryLower.includes(originalSearchQuery)) score += 25
+              // Model contains gets medium-high score
+              if (modelLower.includes(originalSearchQuery)) score += 60
+              // SKU contains gets medium-high score
+              if (skuLower.includes(originalSearchQuery)) score += 60
+              // Specifications contain gets medium score (checks all spec keys and values)
+              if (specsText.includes(originalSearchQuery)) score += 40
+              
+              return { ...p, score, matchType: 'substring', searchScore: score / 100 }
+            })
+            
+            // Sort by score (highest first), then by name
+            scored.sort((a, b) => {
+              if (b.score !== a.score) return b.score - a.score
+              return (a.name || '').localeCompare(b.name || '')
+            })
+            
+            // Patch in_stock and inStock for all substring fallback products
+            // CRITICAL: Ensure these fields are always set correctly to prevent frontend filtering
+            // Also ensure all required fields are present for transformation
+            const scoredWithStock = scored.map(prod => {
+              // Determine stock status from multiple sources
+              const stockQuantity = typeof prod.stock_quantity === 'number' ? prod.stock_quantity : (typeof prod.stockQuantity === 'number' ? prod.stockQuantity : (prod.stock_quantity || 0))
+              const dbInStock = typeof prod.in_stock === 'boolean' ? prod.in_stock : (stockQuantity > 0)
+              const frontendInStock = typeof prod.inStock === 'boolean' ? prod.inStock : dbInStock
+              
+              // Ensure all required fields exist (some might be missing from substring query)
+              return {
+                ...prod,
+                // Always set both fields explicitly to ensure frontend doesn't filter them out
+                in_stock: dbInStock,
+                inStock: frontendInStock,
+                stock_quantity: stockQuantity,
+                stockQuantity: stockQuantity,
+                // Ensure required fields have defaults if missing
+                price: prod.price || 0,
+                original_price: prod.original_price || prod.price || 0,
+                rating: prod.rating || 0,
+                reviews: prod.reviews || 0,
+                image: prod.image || null,
+                category: prod.category || '',
+                brand: prod.brand || '',
+                description: prod.description || '',
+                // Ensure product_variants is an array
+                product_variants: Array.isArray(prod.product_variants) ? prod.product_variants : []
+              }
+            })
+            
+            // If we had no results or no good matches, use substring results
+            // Otherwise, merge substring results with existing (avoid duplicates)
+            if (filteredProducts.length === 0 || !hasGoodMatch) {
+              // Replace with substring results (they're better matches)
+              filteredProducts = scoredWithStock
+              logger.log(`Substring fallback replaced results: ${filteredProducts.length} products containing "${originalSearchQuery}"`)
+            } else {
+              // Merge: add substring results that aren't already in filteredProducts
+              const existingIds = new Set(filteredProducts.map((p: any) => p.id))
+              const newSubstringResults = scoredWithStock.filter((p: any) => !existingIds.has(p.id))
+              filteredProducts = [...filteredProducts, ...newSubstringResults]
+              logger.log(`Substring fallback merged ${newSubstringResults.length} new products (${filteredProducts.length} total)`)
+            }
+            
+            // Mark substring method as used
+            searchMethodsUsed.add('substring')
+          } else {
+            logger.log(`Substring fallback found no products containing "${originalSearchQuery}"`)
+          }
+        } catch (fallbackError: any) {
+          logger.log(`Substring fallback error: ${fallbackError.message || JSON.stringify(fallbackError)}`)
         }
       }
       
-      // Calculate relevance score with typo tolerance
+      // Enhanced relevance scoring with typo tolerance
+      // Uses both custom scoring AND robust fuzzy search results
+      // PRIORITY: Products with search term in name get highest priority
+      // Then exact brand matches get high priority
+      // Includes: name, brand, model, SKU, category, description, specs, variants
       const scoredProducts = filteredProducts.map((p: any) => {
         const nameLower = (p.name || '').toLowerCase()
         const brandLower = (p.brand || '').toLowerCase()
         const categoryLower = (p.category || '').toLowerCase()
         const descLower = (p.description || '').toLowerCase()
-        const fullText = `${nameLower} ${brandLower} ${categoryLower} ${descLower}`
+        const modelLower = ((p.model || '').toString()).toLowerCase()
+        const skuLower = ((p.sku || '').toString()).toLowerCase()
+        
+        // Include specifications and variants in searchable text
+        let specsText = ''
+        if (p.specifications && typeof p.specifications === 'object') {
+          specsText = Object.entries(p.specifications)
+            .map(([key, value]) => `${key} ${value}`)
+            .join(' ')
+            .toLowerCase()
+        }
+        
+        let variantsText = ''
+        if (p.product_variants && Array.isArray(p.product_variants)) {
+          variantsText = p.product_variants
+            .map((v: any) => `${v.variant_name || ''} ${v.sku || ''} ${v.model || ''}`)
+            .join(' ')
+            .toLowerCase()
+        }
+        
+        const fullText = `${nameLower} ${brandLower} ${categoryLower} ${descLower} ${modelLower} ${skuLower} ${specsText} ${variantsText}`
         
         let score = 0
         
-        // Exact match gets highest score
-        if (nameLower === sanitized) score += 1000
-        if (brandLower === sanitized) score += 800
+        // Check if product matches ALL words in query (for multi-word queries)
+        const queryWords = sanitized.split(/\s+/).filter(w => w.length > 0)
+        const matchesAllWords = queryWords.length > 1 && queryWords.every(word => nameLower.includes(word))
         
-        // Name starts with query gets high score
-        if (nameLower.startsWith(sanitized)) score += 500
-        if (brandLower.startsWith(sanitized)) score += 400
+        // PRIORITY 1: Exact name match gets highest score
+        if (nameLower === sanitized) score += 2000
         
-        // Name contains exact query gets high score
-        if (nameLower.includes(sanitized)) score += 300
-        if (brandLower.includes(sanitized)) score += 200
+        // PRIORITY 1.5: Name matches ALL words in query (for multi-word queries like "arduino uno")
+        if (matchesAllWords) score += 1800 // Very high score for matching all words
+        
+        // PRIORITY 2: Name contains full query (exact phrase in name)
+        if (nameLower.includes(sanitized)) score += 1500
+        
+        // PRIORITY 3: Exact brand match gets very high score
+        if (brandLower === sanitized) score += 1200
+        
+        // PRIORITY 4: Exact model match gets very high score
+        if (modelLower === sanitized) score += 1100
+        
+        // PRIORITY 5: Exact SKU match gets very high score
+        if (skuLower === sanitized) score += 1100
+        
+        // PRIORITY 6: Name starts with query gets high score
+        if (nameLower.startsWith(sanitized)) score += 1000
+        
+        // PRIORITY 7: Brand starts with query gets high score
+        if (brandLower.startsWith(sanitized)) score += 800
+        
+        // PRIORITY 8: Model starts with query gets high score
+        if (modelLower.startsWith(sanitized)) score += 700
+        
+        // PRIORITY 9: Brand contains exact query gets high score
+        if (brandLower.includes(sanitized)) score += 600
+        
+        // PRIORITY 10: Model contains exact query gets high score
+        if (modelLower.includes(sanitized)) score += 550
+        
+        // PRIORITY 11: SKU contains exact query gets high score
+        if (skuLower.includes(sanitized)) score += 500
+        
+        // Lower priority: Name contains query (but not exact phrase)
+        if (nameLower.includes(sanitized) && nameLower !== sanitized && !nameLower.startsWith(sanitized)) {
+          score += 400
+        }
+        
+        // Specifications match
+        if (specsText.includes(sanitized)) score += 300
+        
+        // Variants match
+        if (variantsText.includes(sanitized)) score += 350
         
         // Check individual words with typo tolerance
+        // PRIORITY: Word in name > Word in brand > Word in category > Word in description
         searchWords.forEach(word => {
-          // Exact word matches (highest priority)
-          if (nameLower === word) score += 400
-          if (nameLower.startsWith(word)) score += 200
-          if (nameLower.includes(word)) score += 100
+          // PRIORITY: Word in name gets highest score
+          if (nameLower === word) score += 800
+          if (nameLower.startsWith(word)) score += 500
+          if (nameLower.includes(word)) score += 300
           
-          if (brandLower === word) score += 300
-          if (brandLower.startsWith(word)) score += 150
-          if (brandLower.includes(word)) score += 75
+          // PRIORITY: Word in brand gets high score
+          if (brandLower === word) score += 600
+          if (brandLower.startsWith(word)) score += 400
+          if (brandLower.includes(word)) score += 250
           
+          // PRIORITY: Word in model gets high score
+          if (modelLower === word) score += 550
+          if (modelLower.startsWith(word)) score += 350
+          if (modelLower.includes(word)) score += 200
+          
+          // PRIORITY: Word in SKU gets high score
+          if (skuLower === word) score += 500
+          if (skuLower.includes(word)) score += 200
+          
+          // Lower priority: Category, description, specs, variants
           if (categoryLower.includes(word)) score += 50
           if (descLower.includes(word)) score += 25
+          if (specsText.includes(word)) score += 100
+          if (variantsText.includes(word)) score += 150
           
           // Quick typo check: if search word is similar to name/brand (for cases like "adruino" → "arduino")
           if (word.length >= 4) {
@@ -559,8 +1037,8 @@ export async function GET(request: NextRequest) {
                 }
                 diff += Math.abs(nw.length - word.length)
                 if (diff <= 2 && diff > 0) {
-                  // Typo match in name - give good score
-                  score += 150 - (diff * 30)
+                  // Typo match in name - give good score (higher priority)
+                  score += 250 - (diff * 40)  // Increased from 150-30
                 }
               }
             }
@@ -576,8 +1054,8 @@ export async function GET(request: NextRequest) {
                 }
                 diff += Math.abs(bw.length - word.length)
                 if (diff <= 2 && diff > 0) {
-                  // Typo match in brand - give good score
-                  score += 100 - (diff * 20)
+                  // Typo match in brand - give good score (increased weight)
+                  score += 200 - (diff * 30)  // Increased from 100-20
                 }
               }
             }
@@ -611,13 +1089,13 @@ export async function GET(request: NextRequest) {
                 // If similar (within maxDiff), give score
                 if (charDiff <= maxDiff) {
                   const similarity = 1 - (charDiff / Math.max(productWord.length, word.length))
-                  const similarityScore = similarity * 60 // Higher base score for typos
+                  const similarityScore = similarity * 80 // Increased base score for typos (from 60)
                   
-                  // Higher score if match is in name or brand
+                  // PRIORITY: Higher score if match is in name (highest), then brand
                   if (nameLower.includes(productWord)) {
-                    score += similarityScore * 1.5
+                    score += similarityScore * 2.5  // Increased from 1.5 - name gets highest priority
                   } else if (brandLower.includes(productWord)) {
-                    score += similarityScore * 1.2
+                    score += similarityScore * 2.0  // Increased from 1.2 - brand gets high priority
                   } else if (categoryLower.includes(productWord)) {
                     score += similarityScore * 0.8
                   } else {
@@ -633,12 +1111,69 @@ export async function GET(request: NextRequest) {
       })
       
       // Sort by score (highest first) and extract products
+      // PRIORITY: Products with search term in name get highest priority
+      // Then products with exact brand matches
       // Include products with score > 0 (some match found, including fuzzy matches)
       // Lower threshold for fuzzy matches to include typo-tolerant results
-      const minScore = needsFuzzyMatch ? 10 : 0 // Lower threshold when using fuzzy matching
-      filteredProducts = scoredProducts
+      const minScore = 10 // Lower threshold for relevance scoring (fuzzy search always runs)
+      
+      // Sort by score, but prioritize products where search term appears in name
+      // Enhanced to prioritize products matching ALL words in multi-word queries
+          filteredProducts = scoredProducts
         .filter(({ score }) => score > minScore)
-        .sort((a, b) => b.score - a.score)
+        .sort((a, b) => {
+          const aName = (a.product.name || '').toLowerCase()
+          const bName = (b.product.name || '').toLowerCase()
+          const searchLower = sanitized.toLowerCase()
+          const searchWords = searchLower.split(/\s+/).filter(w => w.length > 0)
+          
+          // Helper function to count how many query words appear in a name
+          const countMatchingWords = (name: string, words: string[]): number => {
+            return words.filter(word => name.includes(word)).length
+          }
+          
+          // PRIORITY 1: Products that match ALL words in query come FIRST
+          const aMatchesAll = searchWords.length > 0 && searchWords.every(word => aName.includes(word))
+          const bMatchesAll = searchWords.length > 0 && searchWords.every(word => bName.includes(word))
+          if (aMatchesAll && !bMatchesAll) return -1
+          if (!aMatchesAll && bMatchesAll) return 1
+          
+          // PRIORITY 2: Among products matching all words, prioritize those matching MORE words
+          if (aMatchesAll && bMatchesAll) {
+            const aWordCount = countMatchingWords(aName, searchWords)
+            const bWordCount = countMatchingWords(bName, searchWords)
+            if (aWordCount !== bWordCount) return bWordCount - aWordCount
+          } else if (!aMatchesAll && !bMatchesAll) {
+            const aWordCount = countMatchingWords(aName, searchWords)
+            const bWordCount = countMatchingWords(bName, searchWords)
+            if (aWordCount !== bWordCount) return bWordCount - aWordCount
+          }
+          
+          // PRIORITY 3: Exact name match (name equals query) beats name contains
+          const aExactName = aName === searchLower
+          const bExactName = bName === searchLower
+          if (aExactName && !bExactName) return -1
+          if (!aExactName && bExactName) return 1
+          
+          // PRIORITY 4: If one has search term in name and other doesn't, prioritize the one with name match
+          const aHasInName = aName.includes(searchLower)
+          const bHasInName = bName.includes(searchLower)
+          
+          if (aHasInName && !bHasInName) return -1  // a comes first
+          if (!aHasInName && bHasInName) return 1   // b comes first
+          
+          // PRIORITY 5: If both or neither have in name, check exact brand match
+          const aBrand = (a.product.brand || '').toLowerCase()
+          const bBrand = (b.product.brand || '').toLowerCase()
+          const aExactBrand = aBrand === searchLower
+          const bExactBrand = bBrand === searchLower
+          
+          if (aExactBrand && !bExactBrand) return -1  // a comes first
+          if (!aExactBrand && bExactBrand) return 1   // b comes first
+          
+          // PRIORITY 6: If both or neither have exact brand match, sort by score
+          return b.score - a.score
+        })
         .slice(0, limitNum || 100) // Limit results to prevent too many fuzzy matches
         .map(({ product }) => product)
       
@@ -648,8 +1183,13 @@ export async function GET(request: NextRequest) {
       }
       
       // Log for debugging (remove in production)
-      if (needsFuzzyMatch && filteredProducts.length > 0) {
-        logger.log(`Fuzzy matching found ${filteredProducts.length} products for query: "${sanitized}"`)
+      // Fuzzy search always runs, so log when we have results
+      if (filteredProducts.length > 0) {
+        const exactCount = filteredProducts.filter((p: any) => p.matchType?.startsWith('exact')).length
+        const fuzzyCount = filteredProducts.length - exactCount
+        if (fuzzyCount > 0) {
+          logger.log(`Search completed for "${sanitized}": ${exactCount} exact matches, ${fuzzyCount} fuzzy matches`)
+        }
       }
     }
 
@@ -822,9 +1362,12 @@ export async function GET(request: NextRequest) {
       ? 'no-cache, no-store, must-revalidate' 
       : 'public, s-maxage=1800, stale-while-revalidate=3600'
 
-    return createSecureResponse(responseData, {
-      cacheControl,
-      headers: {
+    // Build search methods header (only if search was performed)
+    const searchMethodsHeader = search && search.trim().length > 0 
+      ? Array.from(searchMethodsUsed).join(',')
+      : undefined
+    
+    const responseHeaders: Record<string, string> = {
         'X-Cache': 'MISS',
         'X-Payload-Size': minimal ? 'minimal' : 'full',
         'X-Products-Count': transformedProducts.length.toString(),
@@ -834,7 +1377,16 @@ export async function GET(request: NextRequest) {
         'X-Cache-Hit-Rate': '0',
         'X-Data-Source': 'PRODUCTS_TABLE',
         'Cache-Control': cacheControl,
-      }
+    }
+    
+    // Add search methods header if search was performed
+    if (searchMethodsHeader) {
+      responseHeaders['X-Search-Methods-Used'] = searchMethodsHeader
+    }
+    
+    return createSecureResponse(responseData, {
+      cacheControl,
+      headers: responseHeaders
     })
   } catch (error) {
     console.error('Error reading products:', error)
@@ -978,7 +1530,7 @@ export async function POST(request: NextRequest) {
         const qty = typeof variant.stock_quantity === 'number' 
           ? variant.stock_quantity 
           : (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : parseInt(String(variant.stock_quantity || 0)) || 0)
-        calculatedTotalStock += qty
+            calculatedTotalStock += qty
       })
     }
 
@@ -1201,9 +1753,9 @@ export async function PUT(request: NextRequest) {
         updates.variants.forEach((variant: any) => {
           const qty = typeof variant.stock_quantity === 'number' ? variant.stock_quantity : 
                       (typeof variant.stockQuantity === 'number' ? variant.stockQuantity : 0)
-          calculatedTotalStock += qty
-        })
-      }
+              calculatedTotalStock += qty
+            })
+          }
       logger.log('Calculated total stock from simplified variants:', calculatedTotalStock)
 
       // Only update product stock from variants if there are actually variants

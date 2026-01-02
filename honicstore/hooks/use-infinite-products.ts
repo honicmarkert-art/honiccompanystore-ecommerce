@@ -56,11 +56,12 @@ interface InfiniteProductsReturn {
   products: Product[]
   loading: boolean
   loadingMore: boolean
+  filtering: boolean // New: filtering state (keeps products visible)
   hasMore: boolean
   error: string | null
   totalCount: number
   loadMore: () => Promise<void>
-  reset: () => void
+  reset: (clearProducts?: boolean) => void
   refresh: () => Promise<void>
 }
 
@@ -88,6 +89,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [filtering, setFiltering] = useState(false) // New state: filtering without clearing products
   const [hasMore, setHasMore] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [totalCount, setTotalCount] = useState(0)
@@ -101,25 +103,35 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
   const cooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Track previous category signature to avoid no-op cache clears
   const prevCategoriesSigRef = useRef<string | null>(null)
+  // Request deduplication: track in-flight requests by URL to prevent duplicate API calls
+  const inFlightRequestsRef = useRef<Map<string, Promise<any>>>(new Map())
 
-  // Reset function - clears all products immediately
-  const reset = useCallback(() => {
+  // Reset function - clears all products immediately (for initial load or major changes)
+  const reset = useCallback((clearProducts: boolean = true) => {
     // Abort any in-flight request when resetting
     if (abortControllerRef.current) {
       try { abortControllerRef.current.abort() } catch {}
       abortControllerRef.current = null
     }
     lastResetAtRef.current = Date.now()
-    // Clear products immediately - this ensures previous search results are removed
-    setProducts([])
+    // Only clear products if explicitly requested (not for filter changes)
+    if (clearProducts) {
+      setProducts([])
+      // CRITICAL: When clearing products (e.g., for search), set loading to true immediately
+      // This prevents showing "No products found" during the gap between reset and fetch
+      setLoading(true)
+      setFiltering(false)
+    } else {
+      // Soft reset: keep products visible, just indicate filtering
+      setFiltering(true)
+      setLoading(false)
+    }
     setOffset(initialOffset)
     setHasMore(true)
     setError(null)
     setTotalCount(0)
     hasMoreRef.current = true
     loadingRef.current = false
-    // Also clear loading states to show fresh loading state
-    setLoading(false)
     setLoadingMore(false)
   }, [initialOffset])
 
@@ -132,13 +144,22 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     if (abortControllerRef.current) {
       try { abortControllerRef.current.abort() } catch {}
     }
+    // Clear in-flight requests map when starting new fetch to prevent stale requests
+    inFlightRequestsRef.current.clear()
     abortControllerRef.current = new AbortController()
     loadingRef.current = true
     
     if (isLoadMore) {
       setLoadingMore(true)
     } else {
-      setLoading(true)
+      // If we have existing products, use filtering state instead of loading
+      if (products.length > 0) {
+        setFiltering(true)
+        setLoading(false)
+      } else {
+        setLoading(true)
+        setFiltering(false)
+      }
     }
     
     setError(null)
@@ -157,7 +178,10 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
           params.append('category', category)
         }
       if (brand) params.append('brand', brand)
-      if (search) params.append('search', search)
+      // Only send search query if it has at least 3 characters (matches API requirement)
+      if (search && String(search).trim().length >= 3) {
+        params.append('search', String(search).trim())
+      }
       params.append('limit', limit.toString())
       params.append('offset', currentOffset.toString())
       params.append('sortBy', sortBy) // Changed from sort_by to sortBy for consistency
@@ -192,13 +216,31 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
         params.append('enriched', 'true')
       }
       
-      // Add cache busting
-      params.append('t', Date.now().toString())
+      // Only add cache busting for search queries to allow caching for regular browsing
+      // This significantly reduces API calls and prevents rate limiting
+      const isSearching = !!search && String(search).trim().length > 0
+      if (isSearching) {
+        params.append('t', Date.now().toString())
+      }
 
       const fullUrl = `${url}?${params.toString()}`
       
+      // Request deduplication: if same request is in-flight, reuse it to prevent duplicate API calls
+      const existingRequest = inFlightRequestsRef.current.get(fullUrl)
+      if (existingRequest) {
+        try {
+          const data = await existingRequest
+          // Request completed, remove from map
+          inFlightRequestsRef.current.delete(fullUrl)
+          return data
+        } catch (err) {
+          // Request failed, remove from map
+          inFlightRequestsRef.current.delete(fullUrl)
+          throw err
+        }
+      }
+      
       // For search queries, reduce cache to avoid stale results
-      const isSearching = !!search && String(search).trim().length > 0
       // Fetch with a single retry on 429 rate limit using short exponential backoff with jitter
       const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -206,22 +248,36 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
         return await fetchWithCache(fullUrl, { ttlMs: isSearching ? 1000 : 30_000, swrMs: isSearching ? 0 : 180_000, signal: abortControllerRef.current?.signal })
       }
 
-      let data: any
-      try {
-        data = await fetchOnce()
-      } catch (err: any) {
-        const message = err?.message || ''
-        const status = (err as any)?.status
-        const isRateLimited = status === 429 || /429|too many requests|rate limit/i.test(message)
-        if (isRateLimited) {
-          // Backoff: 400ms base + small jitter, single retry
-          const backoffMs = 400 + Math.floor(Math.random() * 300)
-          await sleep(backoffMs)
-          data = await fetchOnce()
-        } else {
-          throw err
+      // Create request promise and store it for deduplication
+      const requestPromise = (async () => {
+        try {
+          let data: any
+          try {
+            data = await fetchOnce()
+          } catch (err: any) {
+            const message = err?.message || ''
+            const status = (err as any)?.status
+            const isRateLimited = status === 429 || /429|too many requests|rate limit/i.test(message)
+            if (isRateLimited) {
+              // Backoff: 400ms base + small jitter, single retry
+              const backoffMs = 400 + Math.floor(Math.random() * 300)
+              await sleep(backoffMs)
+              data = await fetchOnce()
+            } else {
+              throw err
+            }
+          }
+          return data
+        } finally {
+          // Remove from in-flight map when done (success or failure)
+          inFlightRequestsRef.current.delete(fullUrl)
         }
-      }
+      })()
+
+      // Store request for deduplication
+      inFlightRequestsRef.current.set(fullUrl, requestPromise)
+      
+      const data = await requestPromise
       
       // API returns {products: [...], pagination: {...}}
       const newProducts = Array.isArray(data) ? data : (data.products || [])
@@ -245,13 +301,30 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       setHasMore(hasMoreData)
 
       // Transform products to ensure importChina field is properly mapped
-      const transformedProducts = newProducts.map((product: any) => product)
+      // CRITICAL: Ensure all products have required fields for frontend filtering
+      const transformedProducts = newProducts.map((product: any) => {
+        // Ensure inStock and in_stock fields are always set correctly
+        const hasInStock = product.inStock !== undefined ? product.inStock : (product.in_stock !== undefined ? product.in_stock : true)
+        const hasInStock2 = product.in_stock !== undefined ? product.in_stock : hasInStock
+        
+        return {
+          ...product,
+          // Always set both fields to prevent frontend filtering issues
+          inStock: hasInStock,
+          in_stock: hasInStock2
+        }
+      })
 
       // Update products
       if (isLoadMore) {
         setProducts(prev => [...prev, ...transformedProducts])
       } else {
         setProducts(transformedProducts)
+      }
+      
+      // Log for debugging (only in development)
+      if (process.env.NODE_ENV === 'development' && transformedProducts.length > 0) {
+        console.log(`[useInfiniteProducts] Set ${transformedProducts.length} products, first product:`, transformedProducts[0]?.name, transformedProducts[0]?.inStock, transformedProducts[0]?.in_stock)
       }
 
       // Update offset
@@ -268,10 +341,11 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     } finally {
       setLoading(false)
       setLoadingMore(false)
+      setFiltering(false) // Clear filtering state when fetch completes
       loadingRef.current = false
       abortControllerRef.current = null
     }
-  }, [enabled, limit, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier])
+  }, [enabled, limit, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier, products.length])
 
   // Load more function
   const loadMore = useCallback(async () => {
@@ -301,12 +375,18 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     }
 
     // Debounced cooldown to avoid immediate double-fetch after reset
-    reset()
+    // CRITICAL: For search queries, do hard reset (clear products) to prevent showing wrong products
+    // For other filters, use soft reset to keep products visible during filtering
+    const isSearchActive = search && search.trim().length > 0
+    reset(isSearchActive) // Hard reset (clear products) for search, soft reset for other filters
+    
     if (cooldownTimeoutRef.current) {
       clearTimeout(cooldownTimeoutRef.current)
       cooldownTimeoutRef.current = null
     }
-    const cooldownMs = 500 + Math.floor(Math.random() * 300) // 500–800ms
+    // Reduced cooldown from 500-800ms to 200-400ms for faster response
+    // Still prevents double-fetch but reduces perceived latency
+    const cooldownMs = 200 + Math.floor(Math.random() * 200) // 200–400ms
     cooldownTimeoutRef.current = setTimeout(() => {
       fetchProducts(initialOffset, false)
     }, cooldownMs)

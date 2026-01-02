@@ -6,46 +6,46 @@ import { logger } from '@/lib/logger'
 export async function GET(request: NextRequest) {
   try {
     logger.log('🛒 [CART GET] ========== API ROUTE CALLED ==========')
-    const { user, error: authError, response, supabase } = await validateAuth(request)
-    
-    if (authError || !user) {
-      logger.error('Cart API: Authentication error:', authError)
-      return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
-    }
-    
+  const { user, error: authError, response, supabase } = await validateAuth(request)
+  
+  if (authError || !user) {
+    logger.error('Cart API: Authentication error:', authError)
+    return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
+  }
+
     logger.log('🛒 [CART GET] User authenticated:', { userId: user.id })
 
     // Fetch cart items with product details, variant information, and supplier info
     // Note: We can't directly join product_variants from cart_items, so we'll fetch it separately
     let { data, error: cartErr } = await supabase
-      .from('cart_items')
-      .select(`
+    .from('cart_items')
+    .select(`
+      id, 
+      product_id, 
+      variant_id, 
+      quantity, 
+      price,
+      currency,
+      applied_discount,
+      created_at,
+      updated_at,
+      products (
         id, 
-        product_id, 
-        variant_id, 
-        quantity, 
+        name, 
+        image, 
         price,
-        currency,
-        applied_discount,
-        created_at,
-        updated_at,
-        products (
-          id, 
-          name, 
-          image, 
-          price,
-          original_price,
-          in_stock,
+        original_price,
+        in_stock,
           stock_quantity,
           supplier_id,
           user_id
-        )
-      `)
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
+      )
+    `)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
 
     // Check for cart query error immediately
-    if (cartErr) {
+  if (cartErr) {
       logger.error('🛒 [CART GET] Failed to fetch cart:', cartErr)
       // Sanitize error message to prevent JSON parsing issues
       const errorMessage = cartErr?.message ? String(cartErr.message).substring(0, 200) : 'Database query failed'
@@ -224,9 +224,9 @@ export async function GET(request: NextRequest) {
       }
     } else {
       logger.log('🛒 [CART GET] Step 2a: Skipped (no supplier IDs found)')
-    }
+  }
 
-    // Transform and group data for frontend consumption
+  // Transform and group data for frontend consumption
     // SECURITY: Remove supplier_id and user_id (UUIDs) from product object before sending to client
     // But keep them temporarily for server-side supplier lookup
     const rawCartItems = (data || []).map((item: any) => {
@@ -247,23 +247,23 @@ export async function GET(request: NextRequest) {
       : 'TZS' // Default to TZS
     
     return {
-      id: item.id,
-      productId: item.product_id,
+    id: item.id,
+    productId: item.product_id,
       variantId: normalizedVariantId,
-      quantity: item.quantity,
-      price: item.price,
+    quantity: item.quantity,
+    price: item.price,
       currency: normalizedCurrency,
-      appliedDiscount: item.applied_discount,
-      createdAt: item.created_at,
-      updatedAt: item.updated_at,
+    appliedDiscount: item.applied_discount,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
       product: productWithoutIds, // Product without supplier_id/user_id UUIDs
       _supplierId: supplierId // Temporary server-side only field (will be removed)
     }
     })
 
-    // Group cart items by product ID
-    const groupedCartItems: { [key: number]: any } = {}
-    
+  // Group cart items by product ID
+  const groupedCartItems: { [key: number]: any } = {}
+  
     // Use for...of loop instead of forEach to support async/await
     for (const item of rawCartItems) {
     const productId = item.productId
@@ -395,12 +395,12 @@ export async function GET(request: NextRequest) {
     groupedCartItems[productId].variants.push(variantToAdd)
     
     // Update totals
-      groupedCartItems[productId].totalQuantity += item.quantity
-      groupedCartItems[productId].totalPrice += item.price * item.quantity
+    groupedCartItems[productId].totalQuantity += item.quantity
+    groupedCartItems[productId].totalPrice += item.price * item.quantity
     }
-    
-    // Convert grouped items back to array
-    const cartItems = Object.values(groupedCartItems)
+  
+  // Convert grouped items back to array
+  const cartItems = Object.values(groupedCartItems)
 
     logger.log('🛒 [CART GET] Step 4: Final cart items before sending', {
     totalItems: cartItems.length,
@@ -419,13 +419,13 @@ export async function GET(request: NextRequest) {
     }))
     })
 
-    // Calculate totals manually
-    const totals = {
-      total_items: cartItems.reduce((sum, item) => sum + item.totalQuantity, 0),
-      subtotal: cartItems.reduce((sum, item) => sum + item.totalPrice, 0),
-      total_discount: cartItems.reduce((sum, item) => sum + ((item.appliedDiscount || 0) * item.totalQuantity), 0),
-      final_total: cartItems.reduce((sum, item) => sum + (item.totalPrice - ((item.appliedDiscount || 0) * item.totalQuantity)), 0)
-    }
+  // Calculate totals manually
+  const totals = {
+    total_items: cartItems.reduce((sum, item) => sum + item.totalQuantity, 0),
+    subtotal: cartItems.reduce((sum, item) => sum + item.totalPrice, 0),
+    total_discount: cartItems.reduce((sum, item) => sum + ((item.appliedDiscount || 0) * item.totalQuantity), 0),
+    final_total: cartItems.reduce((sum, item) => sum + (item.totalPrice - ((item.appliedDiscount || 0) * item.totalQuantity)), 0)
+  }
 
     // Ensure variant_name and supplier info are always included in response (even if null)
     // SECURITY: Do NOT expose supplierId (UUID) or _supplierId to client - only send display name and safe info
@@ -460,25 +460,25 @@ export async function GET(request: NextRequest) {
         }))
       } : null
     })
-    
-    const finalResponse = NextResponse.json({ 
+
+  const finalResponse = NextResponse.json({ 
       items: finalCartItems,
-      totals
-    }, { 
-      status: 200,
-      headers: {
-        'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+    totals
+  }, { 
+    status: 200,
+    headers: {
+      'Cache-Control': 'private, no-cache, no-store, must-revalidate',
         'X-Cart-Items': finalCartItems.length.toString()
-      }
-    })
+    }
+  })
     
     logger.log('🛒 [CART GET] Step 6: Response sent to client', {
       status: 200,
       itemsCount: finalCartItems.length
-    })
+  })
 
-    copyCookies(response, finalResponse)
-    return finalResponse
+  copyCookies(response, finalResponse)
+  return finalResponse
   } catch (error: any) {
     logger.error('🛒 [CART GET] Unexpected error:', {
       error: error?.message || error,
@@ -813,7 +813,7 @@ export async function POST(request: NextRequest) {
       supplierLocation,
       supplierRegion
     })
-    
+
     const partialStockResponse = {
       success: true,
       message: `Added ${adjustedQuantity} items to cart (maximum available).`,
@@ -1069,7 +1069,7 @@ export async function POST(request: NextRequest) {
         
         // Update to maximum available
         const { error: updateError } = await supabase
-          .from('cart_items')
+      .from('cart_items')
           .update({ quantity: availableStock })
           .eq('id', matchingItem.id)
         
@@ -1164,12 +1164,12 @@ export async function POST(request: NextRequest) {
   const { error: insertError } = await supabase
     .from('cart_items')
     .insert({
-      user_id: user.id,
-      product_id: productId,
-      variant_id: variantId,
-      quantity,
+        user_id: user.id,
+        product_id: productId,
+        variant_id: variantId,
+        quantity,
       price: finalPrice,
-      currency: 'USD'
+        currency: 'USD'
     })
   
   if (insertError) {
@@ -1182,7 +1182,7 @@ export async function POST(request: NextRequest) {
       variantId
     })
     logger.error('Failed to insert cart item:', insertError)
-    return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
+      return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
   }
   
   console.log('🛒 [CART ADD] Step 4: ✅✅✅ SUCCESS - Added new cart item', { 
@@ -1203,7 +1203,7 @@ export async function POST(request: NextRequest) {
     supplierLocation,
     supplierRegion
   })
-  
+
   const finalResponse = NextResponse.json({ 
     success: true, 
     message: 'Item added to cart successfully',

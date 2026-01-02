@@ -116,13 +116,19 @@ export async function GET(request: NextRequest) {
 // POST /api/stock - Update stock for products (admin only)
 export async function POST(request: NextRequest) {
   try {
+    // SECURITY: Require admin authentication
+    const { validateServerSession } = await import('@/lib/security-server')
+    const { requireAdmin } = await import('@/lib/admin-auth')
+    
+    const session = await validateServerSession(request)
+    if (!requireAdmin(session)) {
+      return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 401 })
+    }
+    
     // Import admin client for admin operations
     const { createClient } = await import('@supabase/supabase-js')
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
     const adminClient = createClient(supabaseUrl, supabaseServiceKey)
-    
-    // TODO: Add proper admin authentication here
-    // For now, this endpoint should be protected by middleware or admin guard
     
     const { productId, stockQuantity, inStock } = await request.json()
     

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/hooks/use-theme'
 import { useCurrency } from '@/contexts/currency-context'
@@ -114,46 +114,64 @@ function SupplierProductsContent() {
     }
   }
 
-  const fetchProducts = async (showLoading = true) => {
-    try {
-      if (showLoading) {
-        setLoading(true)
-      }
-      const response = await fetch('/api/supplier/products?limit=1000', {
-        credentials: 'include'
-      })
-      if (!response.ok) {
-        throw new Error(`Failed to fetch products: ${response.status}`)
-      }
-      const data = await response.json().catch(async (error) => {
-        const text = await response.text()
-        if (text.includes('<!DOCTYPE')) {
-          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+  // Security: Debounce function to prevent excessive API calls
+  const fetchTimeoutRef = useRef<NodeJS.Timeout>()
+  
+  const fetchProducts = useCallback(async (showLoading = true) => {
+    // Clear any pending fetch
+    if (fetchTimeoutRef.current) {
+      clearTimeout(fetchTimeoutRef.current)
+    }
+    
+    // For initial load, execute immediately; for refreshes, debounce
+    const executeFetch = async () => {
+      try {
+        if (showLoading) {
+          setLoading(true)
         }
-        throw error
-      })
-      
-      if (data.success) {
-        setProducts(data.products || [])
-      } else {
+        const response = await fetch('/api/supplier/products?limit=1000', {
+          credentials: 'include'
+        })
+        if (!response.ok) {
+          throw new Error(`Failed to fetch products: ${response.status}`)
+        }
+        const data = await response.json().catch(async (error) => {
+          const text = await response.text()
+          if (text.includes('<!DOCTYPE')) {
+            throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+          }
+          throw error
+        })
+        
+        if (data.success) {
+          setProducts(data.products || [])
+        } else {
+          toast({
+            title: 'Error',
+            description: data.error || 'Failed to fetch products',
+            variant: 'destructive'
+          })
+        }
+      } catch (error) {
         toast({
           title: 'Error',
-          description: data.error || 'Failed to fetch products',
+          description: 'Failed to fetch products',
           variant: 'destructive'
         })
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch products',
-        variant: 'destructive'
-      })
-    } finally {
-      if (showLoading) {
-        setLoading(false)
+      } finally {
+        if (showLoading) {
+          setLoading(false)
+        }
       }
     }
-  }
+    
+    // Debounce non-loading calls (like refresh)
+    if (!showLoading) {
+      fetchTimeoutRef.current = setTimeout(executeFetch, 300)
+    } else {
+      await executeFetch()
+    }
+  }, [toast])
 
   const handleRefresh = async () => {
     setIsRefreshing(true)
@@ -324,7 +342,7 @@ function SupplierProductsContent() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6 max-w-full overflow-hidden">
+    <div className="space-y-4 sm:space-y-6 max-w-full overflow-x-hidden px-2 sm:px-0">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
         <div>
@@ -334,42 +352,38 @@ function SupplierProductsContent() {
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
-          {/* Product Count Display */}
-          {currentPlan && (
-            <div className={cn("text-xs sm:text-sm px-2 sm:px-3 py-1.5 rounded-md border text-center sm:text-left", themeClasses.cardBorder, themeClasses.cardBg)}>
-              <span className={cn(themeClasses.textNeutralSecondary)}>
-                Products limit: <span className={cn("font-semibold", themeClasses.mainText)}>{products.length}</span>
-                {currentPlan.max_products !== null && (
-                  <>
-                    {' / '}
-                    <span className={cn("font-semibold", 
-                      products.length >= currentPlan.max_products 
-                        ? "text-red-600 dark:text-red-400" 
-                        : products.length >= currentPlan.max_products * 0.8
-                        ? "text-yellow-600 dark:text-yellow-400"
+          {/* Product Count Display and Refresh Button - In one row on mobile */}
+          <div className="flex flex-row items-center gap-2 w-full sm:w-auto">
+            {currentPlan && (
+              <div className={cn("text-xs sm:text-sm px-2 sm:px-3 py-1.5 rounded-md border flex-1 sm:flex-initial text-center sm:text-left", themeClasses.cardBorder, themeClasses.cardBg)}>
+                <div className={cn("flex flex-col gap-0.5", themeClasses.textNeutralSecondary)}>
+                  <span>
+                    Products limit: <span className={cn("font-semibold", 
+                      currentPlan.max_products === null 
+                        ? "text-green-600 dark:text-green-400" 
                         : themeClasses.mainText
                     )}>
-                      {currentPlan.max_products}
+                      {currentPlan.max_products === null ? 'Unlimited' : currentPlan.max_products}
                     </span>
-                  </>
-                )}
-                {currentPlan.max_products === null && (
-                  <span className={cn("ml-1 text-green-600 dark:text-green-400")}>Unlimited</span>
-                )}
-              </span>
-            </div>
-          )}
-          {/* Refresh Button */}
-          <Button
-            variant="outline"
-            onClick={handleRefresh}
-            disabled={isRefreshing || loading}
-            className="flex items-center gap-2 text-sm sm:text-base w-full sm:w-auto justify-center"
-            title="Refresh products"
-          >
-            <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
+                  </span>
+                  <span>
+                    Current product: <span className={cn("font-semibold", themeClasses.mainText)}>{products.length}</span>
+                  </span>
+                </div>
+              </div>
+            )}
+            {/* Refresh Button */}
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={isRefreshing || loading}
+              className="flex items-center gap-2 text-sm sm:text-base flex-shrink-0 justify-center h-auto py-1.5 px-3"
+              title="Refresh products"
+            >
+              <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          </div>
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <Button 
               className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-neutral-950 text-sm sm:text-base w-full sm:w-auto justify-center"
@@ -401,7 +415,9 @@ function SupplierProductsContent() {
                 }}
                 onSave={async (productData) => {
                   try {
-                    // Check product limit before saving (for all plans)
+                    // OPTIMISTIC UI CHECK: This provides immediate feedback but is NOT a security measure.
+                    // The server enforces the actual limit. Users cannot bypass this by modifying client-side code.
+                    // This check is for UX only - the API will reject requests that exceed limits.
                     const productCount = products.length
                     const planSlug = currentPlan?.slug
                     const maxProducts = currentPlan?.max_products
@@ -498,8 +514,23 @@ function SupplierProductsContent() {
                       if (result.success) {
                         toast({ title: 'Product updated successfully' })
                         await fetchProducts()
-                        setIsAddDialogOpen(false)
-                        setEditingProduct(null)
+                        
+                        // Update the editing product with the latest data from server
+                        if (result.product) {
+                          const updatedProduct = result.product
+                          // Transform product to match expected format
+                          if (updatedProduct.variants) {
+                            updatedProduct.variants = updatedProduct.variants.map((variant: any) => ({
+                              ...variant,
+                              stockQuantity: variant.stock_quantity || variant.stockQuantity || 0,
+                              stock_quantity: variant.stock_quantity || variant.stockQuantity || 0
+                            }))
+                          }
+                          setEditingProduct(updatedProduct)
+                        }
+                        // Don't close dialog - keep form open for further edits
+                        // setIsAddDialogOpen(false)
+                        // setEditingProduct(null)
                       } else {
                         throw new Error(result.error || 'Failed to update product')
                       }
@@ -515,7 +546,22 @@ function SupplierProductsContent() {
                         toast({ title: 'Product created successfully' })
                         await fetchProducts()
                         await fetchCurrentPlan() // Refresh plan info
-                        setIsAddDialogOpen(false)
+                        
+                        // Load the newly created product into the form for further editing
+                        if (result.product) {
+                          const newProduct = result.product
+                          // Transform product to match expected format
+                          if (newProduct.variants) {
+                            newProduct.variants = newProduct.variants.map((variant: any) => ({
+                              ...variant,
+                              stockQuantity: variant.stock_quantity || variant.stockQuantity || 0,
+                              stock_quantity: variant.stock_quantity || variant.stockQuantity || 0
+                            }))
+                          }
+                          setEditingProduct(newProduct)
+                        }
+                        // Don't close dialog - keep form open for further edits
+                        // setIsAddDialogOpen(false)
                       } else {
                         // Handle product limit error
                         if (result.maxProducts !== undefined) {
@@ -602,52 +648,52 @@ function SupplierProductsContent() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 md:gap-4 w-full">
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder, "w-full overflow-hidden")}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-6">
-            <CardTitle className={cn("text-xs sm:text-sm font-medium", themeClasses.textNeutralSecondary)}>
+            <CardTitle className={cn("text-xs sm:text-sm font-medium truncate flex-1", themeClasses.textNeutralSecondary)}>
               Total Products
             </CardTitle>
-            <Package className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+            <Package className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0 ml-2" />
           </CardHeader>
           <CardContent className="p-3 sm:p-6 pt-0">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold">{stats.totalProducts}</div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{stats.totalProducts}</div>
           </CardContent>
         </Card>
 
-        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder, "w-full overflow-hidden")}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-6">
-            <CardTitle className={cn("text-xs sm:text-sm font-medium", themeClasses.textNeutralSecondary)}>
+            <CardTitle className={cn("text-xs sm:text-sm font-medium truncate", themeClasses.textNeutralSecondary)}>
               Active Products
             </CardTitle>
-            <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+            <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0 ml-2" />
           </CardHeader>
           <CardContent className="p-3 sm:p-6 pt-0">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold">{stats.activeProducts}</div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{stats.activeProducts}</div>
           </CardContent>
         </Card>
 
-        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder, "w-full overflow-hidden")}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-6">
-            <CardTitle className={cn("text-xs sm:text-sm font-medium", themeClasses.textNeutralSecondary)}>
+            <CardTitle className={cn("text-xs sm:text-sm font-medium truncate", themeClasses.textNeutralSecondary)}>
               Total Views
             </CardTitle>
-            <Eye className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+            <Eye className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0 ml-2" />
           </CardHeader>
           <CardContent className="p-3 sm:p-6 pt-0">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold">{stats.totalViews.toLocaleString()}</div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{stats.totalViews.toLocaleString()}</div>
           </CardContent>
         </Card>
 
-        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+        <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder, "w-full overflow-hidden")}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 sm:p-6">
-            <CardTitle className={cn("text-xs sm:text-sm font-medium", themeClasses.textNeutralSecondary)}>
+            <CardTitle className={cn("text-xs sm:text-sm font-medium truncate flex-1", themeClasses.textNeutralSecondary)}>
               Avg Rating
             </CardTitle>
-            <Star className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+            <Star className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground flex-shrink-0 ml-2" />
           </CardHeader>
           <CardContent className="p-3 sm:p-6 pt-0">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold">{stats.avgRating}</div>
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{stats.avgRating}</div>
           </CardContent>
         </Card>
       </div>
@@ -703,7 +749,7 @@ function SupplierProductsContent() {
         </CardContent>
       </Card>
 
-      {/* Products Table */}
+      {/* Products Table - Desktop / Mobile Cards */}
       <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
         <CardHeader className="p-4 sm:p-6">
           <CardTitle className={cn("text-base sm:text-lg", themeClasses.mainText)}>
@@ -711,129 +757,227 @@ function SupplierProductsContent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 sm:p-6">
-          <div className="overflow-x-auto max-w-full">
-            <table className="w-full min-w-[800px]">
-              <thead>
-                <tr className={cn("border-b", themeClasses.cardBorder)}>
-                  <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium w-8 sm:w-12 text-xs sm:text-sm", themeClasses.mainText)}>No.</th>
-                  <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm w-32 sm:w-48", themeClasses.mainText)}>Product</th>
-                  <th className={cn("hidden sm:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Category</th>
-                  <th className={cn("hidden md:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Brand</th>
-                  <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Price</th>
-                  <th className={cn("hidden lg:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Variants</th>
-                  <th className={cn("hidden md:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Views</th>
-                  <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredProducts.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="py-12 text-center">
-                      <div className={cn("text-center", themeClasses.textNeutralSecondary)}>
-                        <Package className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                        <p className="text-lg font-semibold mb-2">No products found</p>
-                        <p className="text-sm">
-                          {searchTerm || selectedBrand !== 'all' 
-                            ? 'Try adjusting your filters' 
-                            : 'Get started by adding your first product'}
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredProducts.map((product, idx) => (
-                    <tr key={product.id} className={cn("border-b", themeClasses.cardBorder)}>
-                      <td className="py-2 sm:py-3 px-2 sm:px-4 align-top text-xs sm:text-sm">{idx + 1}</td>
-                      <td className="py-2 sm:py-3 px-2 sm:px-4 w-32 sm:w-48">
-                        <div className="flex items-center space-x-2 sm:space-x-3">
+          {filteredProducts.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className={cn("text-center", themeClasses.textNeutralSecondary)}>
+                <Package className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                <p className="text-lg font-semibold mb-2">No products found</p>
+                <p className="text-sm">
+                  {searchTerm || selectedBrand !== 'all' 
+                    ? 'Try adjusting your filters' 
+                    : 'Get started by adding your first product'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Mobile Card View */}
+              <div className="block sm:hidden">
+                <div className="space-y-3 p-3 sm:p-4">
+                  {filteredProducts.map((product, idx) => (
+                    <div 
+                      key={product.id} 
+                      className={cn(
+                        "border rounded-lg p-3 sm:p-4 space-y-3 w-full",
+                        "overflow-hidden",
+                        themeClasses.cardBorder, 
+                        themeClasses.cardBg
+                      )}
+                      style={{ marginBottom: '0.75rem' }}
+                    >
+                      <div className="flex items-start gap-3 w-full">
+                        {/* Product Image - Responsive */}
+                        <div className="flex-shrink-0">
                           {product.image ? (
-                            <Image
-                              src={product.image}
-                              alt={product.name}
-                              width={32}
-                              height={32}
-                              className="rounded-md object-cover w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0"
-                            />
+                            <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-md overflow-hidden bg-gray-100">
+                              <Image
+                                src={product.image}
+                                alt={product.name}
+                                fill
+                                sizes="(max-width: 640px) 64px, 80px"
+                                className="object-cover"
+                                unoptimized
+                              />
+                            </div>
                           ) : (
-                            <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-200 rounded-md flex items-center justify-center flex-shrink-0">
-                              <Package className="h-3 w-3 sm:h-4 sm:w-4 text-gray-400" />
+                            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center flex-shrink-0">
+                              <Package className="h-6 w-6 sm:h-8 sm:w-8 text-gray-400" />
                             </div>
                           )}
-                          <div className="min-w-0 flex-1 overflow-hidden">
-                            <p className={cn("font-medium text-xs truncate", themeClasses.mainText)}>
-                              {product.name}
-                            </p>
-                            <p className={cn("text-[9px] sm:text-[10px] truncate", themeClasses.textNeutralSecondary)}>
-                              SKU: {product.sku}
-                            </p>
+                        </div>
+                        
+                        {/* Product Info - Flexible */}
+                        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                          <p className={cn("font-medium text-sm sm:text-base leading-tight line-clamp-2", themeClasses.mainText)}>
+                            {product.name}
+                          </p>
+                          <p className={cn("text-xs sm:text-sm truncate", themeClasses.textNeutralSecondary)}>
+                            SKU: {product.sku || 'N/A'}
+                          </p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
+                              {formatPrice(product.price)}
+                            </span>
+                            {product.original_price && product.original_price > product.price && (
+                              <span className={cn("text-xs sm:text-sm line-through", themeClasses.textNeutralSecondary)}>
+                                {formatPrice(product.original_price)}
+                              </span>
+                            )}
                           </div>
                         </div>
-                      </td>
-                      <td className="hidden sm:table-cell py-2 sm:py-3 px-2 sm:px-4">
-                        <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>{product.category}</span>
-                      </td>
-                      <td className="hidden md:table-cell py-2 sm:py-3 px-2 sm:px-4">
-                        <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>{product.brand}</span>
-                      </td>
-                      <td className="py-2 sm:py-3 px-2 sm:px-4">
-                        <span className={cn("font-medium text-xs sm:text-sm", themeClasses.mainText)}>
-                          {formatPrice(product.price)}
+                        
+                        {/* Actions Menu */}
+                        <div className="flex-shrink-0">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9 flex-shrink-0">
+                                <MoreHorizontal className="h-4 w-4 sm:h-5 sm:w-5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+                              <DropdownMenuItem
+                                onClick={() => handleEditProduct(product)}
+                                className={themeClasses.buttonGhostHoverBg}
+                              >
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteProduct(product.id)}
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                      
+                      {/* Footer Info */}
+                      <div className="flex items-center justify-between text-xs sm:text-sm pt-2 border-t" style={{ borderColor: 'inherit', opacity: 0.3 }}>
+                        <span className={cn("truncate flex-1", themeClasses.textNeutralSecondary)}>
+                          {product.category}
                         </span>
-                        {product.original_price && product.original_price > product.price && (
-                          <span className={cn("text-[10px] sm:text-xs line-through ml-1 block sm:inline", themeClasses.textNeutralSecondary)}>
-                            {formatPrice(product.original_price)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="hidden lg:table-cell py-2 sm:py-3 px-2 sm:px-4">
-                        <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>
-                          {(() => {
-                            // Count only valid variants (those with id and variant_name or sku)
-                            if (!product.variants || !Array.isArray(product.variants)) {
-                              return 0
-                            }
-                            return product.variants.filter((v: any) => 
-                              v && v.id && (v.variant_name || v.sku)
-                            ).length
-                          })()}
+                        <span className={cn("ml-2 flex-shrink-0", themeClasses.textNeutralSecondary)}>
+                          Views: {(product.views || 0).toLocaleString()}
                         </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={themeClasses.mainText}>
-                          {(product.views || 0).toLocaleString()}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-                            <DropdownMenuItem
-                              onClick={() => handleEditProduct(product)}
-                              className={themeClasses.buttonGhostHoverBg}
-                            >
-                              <Edit className="h-4 w-4 mr-2" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleDeleteProduct(product.id)}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </td>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Desktop Table View */}
+              <div className="hidden sm:block overflow-x-auto max-w-full">
+                <table className="w-full">
+                  <thead>
+                    <tr className={cn("border-b", themeClasses.cardBorder)}>
+                      <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium w-8 sm:w-12 text-xs sm:text-sm", themeClasses.mainText)}>No.</th>
+                      <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm w-32 sm:w-48", themeClasses.mainText)}>Product</th>
+                      <th className={cn("hidden sm:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Category</th>
+                      <th className={cn("hidden md:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Brand</th>
+                      <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Price</th>
+                      <th className={cn("hidden lg:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Variants</th>
+                      <th className={cn("hidden md:table-cell text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Views</th>
+                      <th className={cn("text-left py-2 sm:py-3 px-2 sm:px-4 font-medium text-xs sm:text-sm", themeClasses.mainText)}>Actions</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredProducts.map((product, idx) => (
+                      <tr key={product.id} className={cn("border-b", themeClasses.cardBorder)}>
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 align-top text-xs sm:text-sm">{idx + 1}</td>
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 w-32 sm:w-48">
+                          <div className="flex items-center space-x-2 sm:space-x-3">
+                            {product.image ? (
+                              <Image
+                                src={product.image}
+                                alt={product.name}
+                                width={32}
+                                height={32}
+                                className="rounded-md object-cover w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-200 rounded-md flex items-center justify-center flex-shrink-0">
+                                <Package className="h-3 w-3 sm:h-4 sm:w-4 text-gray-400" />
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1 overflow-hidden">
+                              <p className={cn("font-medium text-xs truncate", themeClasses.mainText)}>
+                                {product.name}
+                              </p>
+                              <p className={cn("text-[9px] sm:text-[10px] truncate", themeClasses.textNeutralSecondary)}>
+                                SKU: {product.sku}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="hidden sm:table-cell py-2 sm:py-3 px-2 sm:px-4">
+                          <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>{product.category}</span>
+                        </td>
+                        <td className="hidden md:table-cell py-2 sm:py-3 px-2 sm:px-4">
+                          <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>{product.brand}</span>
+                        </td>
+                        <td className="py-2 sm:py-3 px-2 sm:px-4">
+                          <span className={cn("font-medium text-xs sm:text-sm", themeClasses.mainText)}>
+                            {formatPrice(product.price)}
+                          </span>
+                          {product.original_price && product.original_price > product.price && (
+                            <span className={cn("text-[10px] sm:text-xs line-through ml-1 block sm:inline", themeClasses.textNeutralSecondary)}>
+                              {formatPrice(product.original_price)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="hidden lg:table-cell py-2 sm:py-3 px-2 sm:px-4">
+                          <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>
+                            {(() => {
+                              // Count only valid variants (those with id and variant_name or sku)
+                              if (!product.variants || !Array.isArray(product.variants)) {
+                                return 0
+                              }
+                              return product.variants.filter((v: any) => 
+                                v && v.id && (v.variant_name || v.sku)
+                              ).length
+                            })()}
+                          </span>
+                        </td>
+                        <td className="hidden md:table-cell py-2 sm:py-3 px-2 sm:px-4">
+                          <span className={cn("text-xs sm:text-sm", themeClasses.mainText)}>
+                            {(product.views || 0).toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="py-2 sm:py-3 px-2 sm:px-4">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+                              <DropdownMenuItem
+                                onClick={() => handleEditProduct(product)}
+                                className={themeClasses.buttonGhostHoverBg}
+                              >
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteProduct(product.id)}
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

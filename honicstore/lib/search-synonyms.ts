@@ -109,7 +109,11 @@ export const SEARCH_SYNONYMS: Record<string, string[]> = {
  * @param query - Original search query
  * @returns Array of search terms including synonyms
  */
-export function expandQueryWithSynonyms(query: string): string[] {
+/**
+ * Expand query with synonyms (OPTIMIZED: Limited to 1-2 synonyms per term)
+ * Never expands SKUs or model numbers
+ */
+export function expandQueryWithSynonyms(query: string, maxSynonymsPerTerm: number = 2): string[] {
   const terms = new Set<string>()
   const normalizedQuery = query.toLowerCase().trim()
   
@@ -122,19 +126,36 @@ export function expandQueryWithSynonyms(query: string): string[] {
   // Add each word
   words.forEach(word => terms.add(word))
   
-  // Check for exact phrase matches in synonym map
-  if (SEARCH_SYNONYMS[normalizedQuery]) {
-    SEARCH_SYNONYMS[normalizedQuery].forEach(synonym => terms.add(synonym))
+  // Skip expansion for SKUs/model numbers (typically alphanumeric patterns like "CZL616C", "ABC123")
+  const isModelOrSku = /^[A-Z0-9-]+$/i.test(query) && query.length <= 20
+  
+  if (isModelOrSku) {
+    // Don't expand SKUs or model numbers
+    return Array.from(terms)
   }
   
-  // Check for word matches
+  // Check for exact phrase matches in synonym map (limit to maxSynonymsPerTerm)
+  if (SEARCH_SYNONYMS[normalizedQuery]) {
+    SEARCH_SYNONYMS[normalizedQuery]
+      .slice(0, maxSynonymsPerTerm)
+      .forEach(synonym => terms.add(synonym))
+  }
+  
+  // Check for word matches (limit to maxSynonymsPerTerm per word)
   words.forEach(word => {
+    // Skip single characters and model-like patterns
+    if (word.length < 2 || /^[A-Z0-9-]+$/i.test(word)) return
+    
     if (SEARCH_SYNONYMS[word]) {
-      SEARCH_SYNONYMS[word].forEach(synonym => {
-        terms.add(synonym)
-        // Also add individual words from multi-word synonyms
-        synonym.split(/\s+/).forEach(subWord => terms.add(subWord))
-      })
+      SEARCH_SYNONYMS[word]
+        .slice(0, maxSynonymsPerTerm)
+        .forEach(synonym => {
+          terms.add(synonym)
+          // Also add individual words from multi-word synonyms (but limit)
+          synonym.split(/\s+/).forEach(subWord => {
+            if (subWord.length >= 2) terms.add(subWord)
+          })
+        })
     }
   })
   

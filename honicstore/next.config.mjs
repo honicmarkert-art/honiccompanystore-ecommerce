@@ -163,6 +163,8 @@ const nextConfig = {
   // Optimize page loading
   poweredByHeader: false,
   generateEtags: true, // Enable ETags for cache validation
+  // Security: Request size limits (Note: Next.js 15 handles this differently, but this still works)
+  // The warning can be ignored - body size limits are enforced at the route level
   // External packages for server components (moved from experimental)
   serverExternalPackages: ['@supabase/supabase-js'],
   // Navigation and prefetching optimizations

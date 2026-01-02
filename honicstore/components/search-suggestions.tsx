@@ -1,133 +1,146 @@
-"use client"
+'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
-import { Search, Clock } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Search, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTheme } from '@/hooks/use-theme'
+import Link from 'next/link'
+
+interface SearchSuggestion {
+  name: string
+  id: number
+  category?: string
+  brand?: string
+}
 
 interface SearchSuggestionsProps {
   query: string
-  onSuggestionClick: (suggestion: string) => void
-  isVisible: boolean
-  className?: string
+  onSelect?: (query: string) => void
+  minChars?: number
+  maxSuggestions?: number
 }
 
 export function SearchSuggestions({ 
   query, 
-  onSuggestionClick, 
-  isVisible, 
-  className 
+  onSelect,
+  minChars = 3,
+  maxSuggestions = 8 
 }: SearchSuggestionsProps) {
-  const [suggestions, setSuggestions] = useState<string[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [selectedIndex, setSelectedIndex] = useState(-1)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([])
+  const [loading, setLoading] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const { themeClasses } = useTheme()
+  const timeoutRef = useRef<NodeJS.Timeout>()
 
-  // Fetch suggestions when query changes
   useEffect(() => {
-    if (!query || query.length < 2) {
+    // Clear previous timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+
+    const trimmedQuery = query.trim()
+    
+    // Only show suggestions if query has minimum characters
+    if (trimmedQuery.length < minChars) {
       setSuggestions([])
+      setShowDropdown(false)
       return
     }
 
-    const fetchSuggestions = async () => {
-      setIsLoading(true)
+    // Debounce API call
+    timeoutRef.current = setTimeout(async () => {
+      setLoading(true)
       try {
-        const response = await fetch(`/api/search-suggestions?q=${encodeURIComponent(query)}`)
-        const data = await response.json()
-        setSuggestions(data.suggestions || [])
+        const response = await fetch(
+          `/api/products/suggestions?q=${encodeURIComponent(trimmedQuery)}&limit=${maxSuggestions}`
+        )
+        
+        if (response.ok) {
+          const data = await response.json()
+          setSuggestions(data.suggestions || [])
+          setShowDropdown(data.suggestions && data.suggestions.length > 0)
+        } else {
+          setSuggestions([])
+          setShowDropdown(false)
+        }
       } catch (error) {
-        console.error('Error fetching suggestions:', error)
+        console.error('Failed to fetch suggestions:', error)
         setSuggestions([])
+        setShowDropdown(false)
       } finally {
-        setIsLoading(false)
+        setLoading(false)
+      }
+    }, 300) // 300ms debounce
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
       }
     }
+  }, [query, minChars, maxSuggestions])
 
-    const debounceTimer = setTimeout(fetchSuggestions, 300)
-    return () => clearTimeout(debounceTimer)
-  }, [query])
-
-  // Handle keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isVisible || suggestions.length === 0) return
-
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault()
-          setSelectedIndex(prev => 
-            prev < suggestions.length - 1 ? prev + 1 : prev
-          )
-          break
-        case 'ArrowUp':
-          e.preventDefault()
-          setSelectedIndex(prev => prev > 0 ? prev - 1 : -1)
-          break
-        case 'Enter':
-          e.preventDefault()
-          if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
-            onSuggestionClick(suggestions[selectedIndex])
-          }
-          break
-        case 'Escape':
-          setSelectedIndex(-1)
-          break
-      }
+  const handleSelect = (suggestion: SearchSuggestion) => {
+    if (onSelect) {
+      onSelect(suggestion.name)
     }
+    setShowDropdown(false)
+  }
 
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isVisible, suggestions, selectedIndex, onSuggestionClick])
-
-  // Reset selected index when suggestions change
-  useEffect(() => {
-    setSelectedIndex(-1)
-  }, [suggestions])
-
-  if (!isVisible || (!isLoading && suggestions.length === 0)) {
+  if (!showDropdown && !loading) {
     return null
   }
 
   return (
-    <div 
-      ref={containerRef}
-      className={cn(
-        "absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto",
-        className
-      )}
-    >
-      {isLoading ? (
-        <div className="p-3 text-center text-gray-500 dark:text-gray-400">
-          <div className="animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full mx-auto"></div>
-          <p className="text-sm mt-2">Searching...</p>
-        </div>
-      ) : (
-        <div className="py-1">
-          {suggestions.map((suggestion, index) => (
-            <button
-              key={suggestion}
-              onClick={() => onSuggestionClick(suggestion)}
-              className={cn(
-                "w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2",
-                selectedIndex === index && "bg-gray-100 dark:bg-gray-700"
-              )}
-            >
-              <Search className="w-3 h-3 text-gray-400 flex-shrink-0" />
-              <span className="truncate">{suggestion}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      
-      {/* Recent searches placeholder */}
-      {!isLoading && suggestions.length === 0 && query.length >= 2 && (
-        <div className="p-3 text-center text-gray-500 dark:text-gray-400">
-          <Clock className="w-4 h-4 mx-auto mb-2" />
-          <p className="text-sm">No suggestions found</p>
-        </div>
-      )}
+    <div className="absolute top-full left-0 right-0 mt-1 z-50">
+      <div
+        className={cn(
+          "rounded-lg shadow-lg border overflow-hidden",
+          themeClasses.bgPrimary,
+          themeClasses.borderNeutral
+        )}
+      >
+        {loading ? (
+          <div className="p-4 flex items-center justify-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+              Searching...
+            </span>
+          </div>
+        ) : suggestions.length > 0 ? (
+          <div className="max-h-64 overflow-y-auto">
+            {suggestions.map((suggestion) => (
+              <Link
+                key={suggestion.id || suggestion.text || suggestion.name}
+                href={`/products?search=${encodeURIComponent(suggestion.text || suggestion.name)}`}
+                onClick={() => handleSelect(suggestion)}
+                className={cn(
+                  "block px-4 py-3 hover:bg-opacity-50 transition-colors border-b last:border-b-0",
+                  themeClasses.bgHover,
+                  themeClasses.borderNeutral
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <Search className={cn("w-4 h-4 mt-0.5 flex-shrink-0", themeClasses.textNeutralSecondary)} />
+                  <div className="flex-1 min-w-0">
+                    <div className={cn("font-medium truncate", themeClasses.textNeutralPrimary)}>
+                      {suggestion.name}
+                    </div>
+                    {(suggestion.brand || suggestion.category) && (
+                      <div className={cn("text-xs mt-0.5 truncate", themeClasses.textNeutralSecondary)}>
+                        {[suggestion.brand, suggestion.category].filter(Boolean).join(' • ')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : query.length >= minChars ? (
+          <div className={cn("p-4 text-sm text-center", themeClasses.textNeutralSecondary)}>
+            No suggestions found
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
-
-

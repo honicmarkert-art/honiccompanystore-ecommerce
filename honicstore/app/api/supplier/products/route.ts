@@ -1,9 +1,176 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import DOMPurify from 'isomorphic-dompurify'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+// Security: Input validation constants
+const VALIDATION_LIMITS = {
+  NAME_MIN: 2,
+  NAME_MAX: 255,
+  DESCRIPTION_MAX: 5000,
+  SKU_MAX: 100,
+  BRAND_MAX: 100,
+  CATEGORY_MAX: 100,
+  MODEL_MAX: 100,
+  PRICE_MIN: 0,
+  PRICE_MAX: 999999999,
+  URL_MAX: 2048,
+  SEARCH_MAX: 100,
+  LIMIT_MAX: 1000,
+  LIMIT_DEFAULT: 50,
+  VARIANTS_MAX: 100,
+  SPECIFICATION_IMAGES_MAX: 3
+}
+
+// Security: Validate product input data
+function validateProductInput(body: any): { valid: boolean; error?: string } {
+  // Name validation
+  if (!body.name || typeof body.name !== 'string') {
+    return { valid: false, error: 'Name is required and must be a string' }
+  }
+  const name = body.name.trim()
+  if (name.length < VALIDATION_LIMITS.NAME_MIN || name.length > VALIDATION_LIMITS.NAME_MAX) {
+    return { valid: false, error: `Name must be between ${VALIDATION_LIMITS.NAME_MIN} and ${VALIDATION_LIMITS.NAME_MAX} characters` }
+  }
+
+  // Price validation
+  if (body.price === undefined || body.price === null) {
+    return { valid: false, error: 'Price is required' }
+  }
+  const price = parseFloat(String(body.price))
+  if (isNaN(price) || !isFinite(price)) {
+    return { valid: false, error: 'Price must be a valid number' }
+  }
+  if (price < VALIDATION_LIMITS.PRICE_MIN || price > VALIDATION_LIMITS.PRICE_MAX) {
+    return { valid: false, error: `Price must be between ${VALIDATION_LIMITS.PRICE_MIN} and ${VALIDATION_LIMITS.PRICE_MAX}` }
+  }
+
+  // Original price validation
+  if (body.originalPrice !== undefined && body.originalPrice !== null) {
+    const originalPrice = parseFloat(String(body.originalPrice))
+    if (isNaN(originalPrice) || !isFinite(originalPrice)) {
+      return { valid: false, error: 'Original price must be a valid number' }
+    }
+    if (originalPrice < VALIDATION_LIMITS.PRICE_MIN || originalPrice > VALIDATION_LIMITS.PRICE_MAX) {
+      return { valid: false, error: `Original price must be between ${VALIDATION_LIMITS.PRICE_MIN} and ${VALIDATION_LIMITS.PRICE_MAX}` }
+    }
+    if (originalPrice < price) {
+      return { valid: false, error: 'Original price must be greater than or equal to price' }
+    }
+  }
+
+  // Description validation
+  if (body.description && typeof body.description === 'string') {
+    if (body.description.length > VALIDATION_LIMITS.DESCRIPTION_MAX) {
+      return { valid: false, error: `Description must not exceed ${VALIDATION_LIMITS.DESCRIPTION_MAX} characters` }
+    }
+  }
+
+  // SKU validation
+  if (body.sku && typeof body.sku === 'string') {
+    if (body.sku.length > VALIDATION_LIMITS.SKU_MAX) {
+      return { valid: false, error: `SKU must not exceed ${VALIDATION_LIMITS.SKU_MAX} characters` }
+    }
+  }
+
+  // Brand validation
+  if (body.brand && typeof body.brand === 'string') {
+    if (body.brand.length > VALIDATION_LIMITS.BRAND_MAX) {
+      return { valid: false, error: `Brand must not exceed ${VALIDATION_LIMITS.BRAND_MAX} characters` }
+    }
+  }
+
+  // Category validation
+  if (body.category && typeof body.category === 'string') {
+    if (body.category.length > VALIDATION_LIMITS.CATEGORY_MAX) {
+      return { valid: false, error: `Category must not exceed ${VALIDATION_LIMITS.CATEGORY_MAX} characters` }
+    }
+  }
+
+  // Model validation
+  if (body.model && typeof body.model === 'string') {
+    if (body.model.length > VALIDATION_LIMITS.MODEL_MAX) {
+      return { valid: false, error: `Model must not exceed ${VALIDATION_LIMITS.MODEL_MAX} characters` }
+    }
+  }
+
+  // URL validation (image, video, view360)
+  const urlFields = ['image', 'video', 'view360']
+  for (const field of urlFields) {
+    if (body[field] && typeof body[field] === 'string') {
+      if (body[field].length > VALIDATION_LIMITS.URL_MAX) {
+        return { valid: false, error: `${field} URL must not exceed ${VALIDATION_LIMITS.URL_MAX} characters` }
+      }
+      // Basic URL format validation (allow relative URLs too)
+      if (body[field].startsWith('http://') || body[field].startsWith('https://')) {
+        try {
+          new URL(body[field])
+        } catch {
+          return { valid: false, error: `${field} must be a valid URL` }
+        }
+      }
+    }
+  }
+
+  // Variants validation
+  if (body.variants !== undefined) {
+    if (!Array.isArray(body.variants)) {
+      return { valid: false, error: 'Variants must be an array' }
+    }
+    if (body.variants.length > VALIDATION_LIMITS.VARIANTS_MAX) {
+      return { valid: false, error: `Maximum ${VALIDATION_LIMITS.VARIANTS_MAX} variants allowed` }
+    }
+    for (let i = 0; i < body.variants.length; i++) {
+      const variant = body.variants[i]
+      if (variant.price !== undefined) {
+        const variantPrice = parseFloat(String(variant.price))
+        if (isNaN(variantPrice) || !isFinite(variantPrice) || variantPrice < 0) {
+          return { valid: false, error: `Variant ${i + 1} price must be a valid positive number` }
+        }
+      }
+      if (variant.stock_quantity !== undefined || variant.stockQuantity !== undefined) {
+        const qty = variant.stock_quantity || variant.stockQuantity
+        const parsedQty = parseInt(String(qty))
+        if (isNaN(parsedQty) || parsedQty < 0) {
+          return { valid: false, error: `Variant ${i + 1} stock quantity must be a valid non-negative integer` }
+        }
+      }
+    }
+  }
+
+  // Stock quantity validation
+  if (body.stockQuantity !== undefined && body.stockQuantity !== null) {
+    const stockQty = parseInt(String(body.stockQuantity))
+    if (isNaN(stockQty) || stockQty < 0) {
+      return { valid: false, error: 'Stock quantity must be a valid non-negative integer' }
+    }
+  }
+
+  // Specification images validation
+  if (body.specificationImages !== undefined) {
+    if (!Array.isArray(body.specificationImages)) {
+      return { valid: false, error: 'Specification images must be an array' }
+    }
+    if (body.specificationImages.length > VALIDATION_LIMITS.SPECIFICATION_IMAGES_MAX) {
+      return { valid: false, error: `Maximum ${VALIDATION_LIMITS.SPECIFICATION_IMAGES_MAX} specification images allowed` }
+    }
+    // Validate each image URL
+    for (let i = 0; i < body.specificationImages.length; i++) {
+      const img = body.specificationImages[i]
+      if (typeof img !== 'string') {
+        return { valid: false, error: `Specification image ${i + 1} must be a valid URL string` }
+      }
+      if (img.length > VALIDATION_LIMITS.URL_MAX) {
+        return { valid: false, error: `Specification image ${i + 1} URL must not exceed ${VALIDATION_LIMITS.URL_MAX} characters` }
+      }
+    }
+  }
+
+  return { valid: true }
+}
 
 // GET - Fetch products for the authenticated supplier
 export async function GET(request: NextRequest) {
@@ -63,11 +230,35 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get query parameters
+    // Get query parameters with validation
     const { searchParams } = new URL(request.url)
-    const limit = parseInt(searchParams.get('limit') || '50')
-    const offset = parseInt(searchParams.get('offset') || '0')
-    const search = searchParams.get('search')
+    
+    // Validate and clamp limit
+    let limit = VALIDATION_LIMITS.LIMIT_DEFAULT
+    const limitParam = searchParams.get('limit')
+    if (limitParam) {
+      const parsedLimit = parseInt(limitParam)
+      if (!isNaN(parsedLimit) && parsedLimit > 0) {
+        limit = Math.min(parsedLimit, VALIDATION_LIMITS.LIMIT_MAX)
+      }
+    }
+
+    // Validate and clamp offset
+    let offset = 0
+    const offsetParam = searchParams.get('offset')
+    if (offsetParam) {
+      const parsedOffset = parseInt(offsetParam)
+      if (!isNaN(parsedOffset) && parsedOffset >= 0) {
+        offset = parsedOffset
+      }
+    }
+
+    // Validate and limit search length
+    let search: string | null = null
+    const searchParam = searchParams.get('search')
+    if (searchParam) {
+      search = searchParam.slice(0, VALIDATION_LIMITS.SEARCH_MAX)
+    }
 
     // Build query - suppliers can only see their own products
     // Check both supplier_id and user_id for compatibility
@@ -131,8 +322,13 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Supplier products GET error:', error)
+    // Security: Sanitize error messages in production
+    const isProduction = process.env.NODE_ENV === 'production'
+    const errorMessage = isProduction 
+      ? 'An unexpected error occurred' 
+      : (error instanceof Error ? error.message : 'An unexpected error occurred')
     return NextResponse.json(
-      { success: false, error: 'An unexpected error occurred' },
+      { success: false, error: errorMessage },
       { status: 500 }
     )
   }
@@ -244,6 +440,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
+    
+    // Security: Comprehensive input validation
+    const validation = validateProductInput(body)
+    if (!validation.valid) {
+      return NextResponse.json(
+        { success: false, error: validation.error },
+        { status: 400 }
+      )
+    }
+
+    // Extract only the fields we need
     const {
       name,
       description,
@@ -253,6 +460,7 @@ export async function POST(request: NextRequest) {
       originalPrice,
       image,
       sku,
+      model,
       inStock,
       stockQuantity,
       specifications,
@@ -262,15 +470,17 @@ export async function POST(request: NextRequest) {
       importChina,
       variantConfig,
       variantImages,
-      specificationImages
+      specificationImages,
+      ...rest // Ignore any other unexpected fields
     } = body
 
-    // Validate required fields
-    if (!name || !price) {
-      return NextResponse.json(
-        { success: false, error: 'Name and price are required' },
-        { status: 400 }
-      )
+    // Security: Sanitize HTML in description to prevent XSS
+    let sanitizedDescription = description
+    if (description && typeof description === 'string') {
+      sanitizedDescription = DOMPurify.sanitize(description, {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+        ALLOWED_ATTR: []
+      })
     }
 
     // Generate slug from product name
@@ -323,7 +533,7 @@ export async function POST(request: NextRequest) {
       .insert({
         name: name.trim(),
         slug: productSlug,
-        description: description?.trim() || '',
+        description: sanitizedDescription?.trim() || '',
         category: category?.trim() || '',
         category_id: categoryId,
         brand: brand?.trim() || '',
@@ -331,6 +541,10 @@ export async function POST(request: NextRequest) {
         original_price: originalPrice ? parseFloat(originalPrice) : null,
         image: image?.trim() || '',
         sku: sku?.trim() || '',
+        // Only include model if it has a non-empty value (avoid errors if column doesn't exist)
+        ...(model !== undefined && model !== null && String(model).trim().length > 0 
+          ? { model: String(model).trim() } 
+          : {}),
         in_stock: inStock !== false,
         stock_quantity: calculatedStock || stockQuantity ? parseInt(String(stockQuantity || calculatedStock)) : null,
         specifications: specifications || {},
@@ -433,8 +647,25 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Supplier products POST error:', error)
+    // Security: Sanitize error messages in production
+    const isProduction = process.env.NODE_ENV === 'production'
+    let errorMessage = 'An unexpected error occurred'
+    
+    if (!isProduction && error instanceof Error) {
+      errorMessage = error.message
+    } else if (isProduction && error instanceof Error) {
+      // Map common database errors to user-friendly messages
+      if (error.message.includes('23505')) {
+        errorMessage = 'A product with this information already exists'
+      } else if (error.message.includes('42703')) {
+        errorMessage = 'Invalid field specified'
+      } else if (error.message.includes('23502')) {
+        errorMessage = 'Required field is missing'
+      }
+    }
+    
     return NextResponse.json(
-      { success: false, error: 'An unexpected error occurred' },
+      { success: false, error: errorMessage },
       { status: 500 }
     )
   }
