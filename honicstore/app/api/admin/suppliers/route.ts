@@ -1,17 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData, CACHE_TTL } from '@/lib/database-optimization'
+import { logError, createErrorResponse } from '@/lib/error-handler'
+import { logger } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 // GET /api/admin/suppliers - Fetch all suppliers with their plan information
 export async function GET(request: NextRequest) {
-  try {
-    // Validate admin access
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_suppliers_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/suppliers',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Check cache
+      const cacheKey = 'admin_suppliers_all'
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            'X-Cache': 'HIT',
+            'Cache-Control': 'private, max-age=120' // 2 minutes cache
+          }
+        })
+      }
+
+      // Validate admin access
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_suppliers_get',
+          endpoint: '/api/admin/suppliers'
+        })
+        return authError
+      }
 
     const supabase = createAdminSupabaseClient()
     
@@ -50,13 +91,14 @@ export async function GET(request: NextRequest) {
       .eq('is_supplier', true)
       .order('created_at', { ascending: false })
 
-    if (suppliersError) {
-      console.error('[API][Admin][Suppliers] Database error:', suppliersError)
-      return NextResponse.json(
-        { error: 'Failed to fetch suppliers', details: suppliersError.message, code: suppliersError.code },
-        { status: 500 }
-      )
-    }
+      if (suppliersError) {
+        logError(suppliersError, {
+          userId: user.id,
+          action: 'admin_suppliers_get',
+          endpoint: '/api/admin/suppliers'
+        })
+        return createErrorResponse(suppliersError, 500)
+      }
 
     // Fetch all plans in one query
     const planIds = [...new Set((suppliers || []).map((s: any) => s.supplier_plan_id).filter(Boolean))]
@@ -69,7 +111,7 @@ export async function GET(request: NextRequest) {
         .in('id', planIds)
 
       if (plansError) {
-        console.error('[API][Admin][Suppliers] Plans fetch error:', plansError)
+        logger.warn('[API][Admin][Suppliers] Plans fetch error:', plansError)
         // Don't fail the whole request if plans can't be fetched
       } else {
         plansMap = (plans || []).reduce((acc: Record<string, any>, plan: any) => {
@@ -121,19 +163,30 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({
-      success: true,
-      suppliers: transformedSuppliers,
-      count: transformedSuppliers.length
-    })
+      const responseData = {
+        success: true,
+        suppliers: transformedSuppliers,
+        count: transformedSuppliers.length
+      }
 
-  } catch (error: any) {
-    console.error('[API][Admin][Suppliers] Unexpected error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error', details: error?.message || 'Unknown error', stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined },
-      { status: 500 }
-    )
-  }
+      // Cache response (2 minutes TTL)
+      setCachedData(cacheKey, responseData, 120000)
+
+      return NextResponse.json(responseData, {
+        headers: {
+          'X-Cache': 'MISS',
+          'Cache-Control': 'private, max-age=120'
+        }
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        action: 'admin_suppliers_get',
+        endpoint: '/api/admin/suppliers'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 

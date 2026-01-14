@@ -78,7 +78,7 @@ export function useProductsOptimized(options: UseProductsOptimizedOptions = {}):
   ) => {
     const cacheKey = generateCacheKey(filters, offset)
     
-    // Check cache first
+    // Check in-memory cache first
     if (cache.has(cacheKey)) {
       const cachedData = cache.get(cacheKey)
       if (isLoadMore) {
@@ -87,7 +87,34 @@ export function useProductsOptimized(options: UseProductsOptimizedOptions = {}):
         setProducts(cachedData.products)
       }
       setHasMore(cachedData.hasMore)
+      setIsLoading(false)
+      setIsLoadingMore(false)
       return
+    }
+    
+    // Also check sessionStorage for persistent cache across navigations
+    if (typeof window !== 'undefined' && !isLoadMore) {
+      try {
+        const storageKey = `products_cache_${cacheKey}`
+        const stored = sessionStorage.getItem(storageKey)
+        if (stored) {
+          const cachedData = JSON.parse(stored)
+          const now = Date.now()
+          // Check if cache is still valid (30 minutes)
+          if (cachedData && (now - cachedData.timestamp) < 30 * 60 * 1000) {
+            setProducts(cachedData.products)
+            setHasMore(cachedData.hasMore)
+            setOffset(offset + limit)
+            setIsLoading(false)
+            setIsLoadingMore(false)
+            // Also update in-memory cache
+            setCache(prev => new Map(prev).set(cacheKey, cachedData))
+            return
+          }
+        }
+      } catch (e) {
+        // Ignore storage errors
+      }
     }
 
     // Rate limiting check
@@ -146,12 +173,23 @@ export function useProductsOptimized(options: UseProductsOptimizedOptions = {}):
 
       const newProducts = await response.json()
       
-      // Cache the response
-      setCache(prev => new Map(prev).set(cacheKey, {
+      // Cache the response in memory
+      const cacheData = {
         products: newProducts,
         hasMore: newProducts.length === limit,
         timestamp: Date.now()
-      }))
+      }
+      setCache(prev => new Map(prev).set(cacheKey, cacheData))
+      
+      // Also cache in sessionStorage for persistence across navigations
+      if (typeof window !== 'undefined' && !isLoadMore) {
+        try {
+          const storageKey = `products_cache_${cacheKey}`
+          sessionStorage.setItem(storageKey, JSON.stringify(cacheData))
+        } catch (e) {
+          // Ignore storage errors (quota exceeded, etc.)
+        }
+      }
 
       if (isLoadMore) {
         setProducts(prev => [...prev, ...newProducts])
@@ -162,7 +200,6 @@ export function useProductsOptimized(options: UseProductsOptimizedOptions = {}):
       setHasMore(newProducts.length === limit)
       setOffset(offset + limit)
     } catch (err) {
-      console.error('Error fetching products:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch products')
     } finally {
       setIsLoading(false)

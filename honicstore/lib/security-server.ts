@@ -45,8 +45,6 @@ const rateLimitStore = new Map<string, { count: number; resetTime: number }>()
 
 export async function validateServerSession(_request: NextRequest): Promise<UserSession | null> {
 	try {
-		console.log('🔍 [DEBUG] validateServerSession: Starting validation...')
-		
 		const cookieStore = await cookies()
 		
 		// Try to get access token - check both possible cookie names
@@ -72,17 +70,12 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 						const decoded = Buffer.from(base64String, 'base64').toString('utf-8')
 						const parsed = JSON.parse(decoded)
 						accessToken = parsed.access_token
-						console.log('✅ Successfully extracted access token from auth token cookie')
-					} catch (e) {
-						console.log('❌ Could not extract access token:', e)
-					}
+						} catch (e) {
+						}
 				}
 			}
 		
-		console.log('🔍 [DEBUG] validateServerSession: Access token found:', !!accessToken)
-		
 		if (!accessToken) {
-			console.log('❌ [DEBUG] validateServerSession: No access token found')
 			return null
 		}
 
@@ -92,36 +85,21 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 		const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 		
 		if (!supabaseUrl || !supabaseAnonKey) {
-			console.log('❌ [DEBUG] validateServerSession: Missing Supabase env vars')
 			return null
 		}
 		
 		const supabase = createClient(supabaseUrl, supabaseAnonKey)
-		console.log('🔍 [DEBUG] validateServerSession: Regular client created:', !!supabase)
-		
-		console.log('🔍 [DEBUG] validateServerSession: Getting user from token...')
 		const { data: { user }, error } = await supabase.auth.getUser(accessToken)
-		console.log('🔍 [DEBUG] validateServerSession: User validation result:', {
-			hasUser: !!user,
-			userId: user?.id,
-			userEmail: user?.email,
-			error: error?.message
-		})
-		
 		if (error || !user) {
-			console.log('❌ [DEBUG] validateServerSession: User validation failed:', error?.message)
 			return null
 		}
 
 		// Use admin client only for profile fetch (database operations)
 		const admin = supabaseAdmin()
-		console.log('🔍 [DEBUG] validateServerSession: Admin client for profile:', !!admin)
 		if (!admin) {
-			console.log('❌ [DEBUG] validateServerSession: Failed to create admin client for profile')
 			return null
 		}
 
-		console.log('🔍 [DEBUG] validateServerSession: Fetching profile...')
 		const { data: profile, error: profileError } = await admin
 			.from('profiles')
 			.select('*')
@@ -131,14 +109,6 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 		// Handle case where profile is returned as array instead of single object
 		const profileData = Array.isArray(profile) ? profile[0] : profile
 		
-		console.log('🔍 [DEBUG] validateServerSession: Profile fetch result:', {
-			hasProfile: !!profileData,
-			profileId: profileData?.id,
-			isAdmin: profileData?.is_admin,
-			profileError: profileError?.message,
-			fullProfile: profileData
-		})
-
 		const result: UserSession = {
 			id: user.id,
 			email: user.email || '',
@@ -146,13 +116,6 @@ export async function validateServerSession(_request: NextRequest): Promise<User
 			isAuthenticated: true,
 			profile: profileData
 		}
-		
-		console.log('✅ [DEBUG] validateServerSession: Session validated successfully:', {
-			userId: result.id,
-			email: result.email,
-			role: result.role,
-			isAdmin: profileData?.is_admin
-		})
 		
 		return result
 	} catch (error) {

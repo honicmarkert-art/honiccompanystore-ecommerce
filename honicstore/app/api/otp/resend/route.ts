@@ -130,7 +130,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error resending OTP:', error)
     return NextResponse.json(
       { error: 'Failed to resend OTP' },
       { status: 500 }

@@ -25,7 +25,20 @@ export default function ForgotPasswordPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!email) {
+    // SECURITY: Sanitize email input
+    const sanitizeInput = (input: string): string => {
+      return input
+        .trim()
+        .replace(/[<>]/g, '') // Remove HTML tags
+        .replace(/javascript:/gi, '') // Remove javascript: protocol
+        .replace(/on\w+=/gi, '') // Remove event handlers
+        .substring(0, 255) // Limit length
+        .toLowerCase()
+    }
+    
+    const sanitizedEmail = sanitizeInput(email)
+    
+    if (!sanitizedEmail) {
       toast({
         title: "Error",
         description: "Please enter your email address",
@@ -34,11 +47,21 @@ export default function ForgotPasswordPage() {
       return
     }
 
+    // SECURITY: Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(sanitizedEmail)) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid email address",
+        variant: "destructive"
+      })
+      return
+    }
+
     setIsLoading(true)
     
     try {
-      console.log('📧 Requesting password reset for:', email)
-      const result = await resetPassword(email)
+      const result = await resetPassword(sanitizedEmail)
       
       if (result.success) {
         setIsSuccess(true)
@@ -46,9 +69,7 @@ export default function ForgotPasswordPage() {
           title: "Email Sent",
           description: "Password reset instructions have been sent to your email. Please check your inbox and spam folder.",
         })
-        console.log('✅ Password reset email sent successfully')
-      } else {
-        console.error('❌ Password reset failed:', result.error)
+        } else {
         toast({
           title: "Error",
           description: result.error || "Failed to send reset email. Please check your email address and try again.",
@@ -56,7 +77,6 @@ export default function ForgotPasswordPage() {
         })
       }
     } catch (error: any) {
-      console.error('❌ Password reset exception:', error)
       toast({
         title: "Error",
         description: error?.message || "An unexpected error occurred. Please try again.",

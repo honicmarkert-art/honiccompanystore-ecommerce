@@ -27,7 +27,6 @@ export async function POST(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     
     if (authError || !user) {
-      console.log('❌ [PLAN ASSIGNMENT API] Unauthorized - no user session')
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }

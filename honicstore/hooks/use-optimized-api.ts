@@ -130,8 +130,7 @@ export function useOptimizedApi<T>({
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
         setError(err.message)
-        console.error(`API Error for ${endpoint}:`, err)
-      }
+        }
     } finally {
       setIsLoading(false)
       abortControllerRef.current = null

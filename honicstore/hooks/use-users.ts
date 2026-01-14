@@ -38,13 +38,11 @@ export function useUsers() {
         const errorData = await response.json()
         const errorMessage = errorData.error || 'Failed to fetch users'
         setError(errorMessage)
-        console.error('Failed to fetch users:', errorMessage)
-      }
+        }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Network error'
       setError(errorMessage)
-      console.error('Error fetching users:', error)
-    } finally {
+      } finally {
       setIsLoading(false)
       setIsInitialized(true)
     }
@@ -74,7 +72,6 @@ export function useUsers() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to add user'
       setError(errorMessage)
-      console.error('Error adding user:', error)
       throw error
     }
   }
@@ -107,7 +104,6 @@ export function useUsers() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to update user'
       setError(errorMessage)
-      console.error('Error updating user:', error)
       throw error
     }
   }
@@ -131,7 +127,6 @@ export function useUsers() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to delete user'
       setError(errorMessage)
-      console.error('Error deleting user:', error)
       throw error
     }
   }

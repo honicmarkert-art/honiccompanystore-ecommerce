@@ -142,11 +142,9 @@ export async function POST(request: NextRequest) {
             .remove([oldFileName])
           
           if (deleteError) {
-            console.error('Error deleting old logo:', deleteError)
             // Continue with upload even if deletion fails (non-critical)
           }
         } catch (deleteErr) {
-          console.error('Exception while deleting old logo:', deleteErr)
           // Continue with upload even if deletion fails (non-critical)
         }
       }
@@ -162,8 +160,6 @@ export async function POST(request: NextRequest) {
       })
 
     if (error) {
-      console.error('Storage upload error:', error)
-      
       // Check if it's a bucket not found error
       if (error.message && error.message.includes('Bucket not found')) {
         return NextResponse.json(
@@ -193,7 +189,6 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
 
     if (updateError) {
-      console.error('Error updating profile:', updateError)
       // Try to delete uploaded file if profile update fails
       await adminSupabase.storage
         .from('service-images')
@@ -212,7 +207,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error in supplier logo upload:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

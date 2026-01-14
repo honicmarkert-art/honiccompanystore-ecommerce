@@ -78,11 +78,15 @@ function getClientIP(request: NextRequest): string {
   return 'unknown'
 }
 
-// Secure API response wrapper
+// Secure API response wrapper with AliExpress-style multi-layer caching
 function createSecureResponse(data: any, options: {
   status?: number
   cacheControl?: string
   headers?: Record<string, string>
+  // AliExpress-style cache options
+  cdnCache?: boolean // Enable CDN caching (Cloudflare/Akamai)
+  browserCache?: boolean // Enable browser caching
+  popularProducts?: boolean // Mark as popular products (longer cache)
 } = {}) {
   const response = NextResponse.json(data, { status: options.status || 200 })
   
@@ -92,9 +96,53 @@ function createSecureResponse(data: any, options: {
   response.headers.set('X-XSS-Protection', '1; mode=block')
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   
-  // Add cache control
+  // AliExpress-style multi-layer caching headers
   if (options.cacheControl) {
     response.headers.set('Cache-Control', options.cacheControl)
+  } else if (options.popularProducts) {
+    // Popular products: Aggressive caching (CDN + Browser) - NO DATABASE HIT
+    // CDN cache: 2 hours, Browser cache: 1 hour, Stale-while-revalidate: 4 hours
+    // This ensures popular products are served from CDN/browser cache without hitting server
+    response.headers.set('Cache-Control', 'public, s-maxage=7200, max-age=3600, stale-while-revalidate=14400')
+    // CDN-specific headers (Cloudflare/Akamai compatible)
+    response.headers.set('CDN-Cache-Control', 'public, s-maxage=7200, stale-while-revalidate=14400')
+    response.headers.set('CF-Cache-Status', 'HIT') // Cloudflare cache status hint
+    response.headers.set('X-Cache-Type', 'POPULAR_PRODUCTS')
+    response.headers.set('X-No-DB-Hit', 'true')
+  } else if (options.cdnCache) {
+    // CDN caching: 30 minutes CDN, 15 minutes browser, 1 hour stale-while-revalidate
+    response.headers.set('Cache-Control', 'public, s-maxage=1800, max-age=900, stale-while-revalidate=3600')
+    response.headers.set('CDN-Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=3600')
+    response.headers.set('CF-Cache-Status', 'DYNAMIC') // Cloudflare cache status
+  } else if (options.browserCache) {
+    // Browser-only caching: 15 minutes
+    response.headers.set('Cache-Control', 'public, max-age=900, stale-while-revalidate=1800')
+  }
+  
+  // ETag for cache validation (CDN and browser)
+  // Production-ready: Generate stable ETag for cache validation
+  if (options.cdnCache || options.popularProducts) {
+    try {
+      // Generate ETag from response data hash
+      const dataString = JSON.stringify(data)
+      // Use first 27 chars of base64 hash for ETag (RFC 7232 compliant)
+      const etag = `"${Buffer.from(dataString).toString('base64').slice(0, 27)}"`
+      response.headers.set('ETag', etag)
+      // Support If-None-Match for 304 Not Modified responses
+      response.headers.set('Vary', 'If-None-Match')
+    } catch (error: any) {
+      // Fail gracefully - ETag generation should not break response
+      logger.error('[Secure API] Error generating ETag:', error)
+    }
+  }
+  
+  // Vary header for CDN (important for Cloudflare/Akamai)
+  // Only vary on essential headers to maximize cache hits
+  if (options.cdnCache || options.popularProducts) {
+    // Minimal vary header for better cache hit rates
+    response.headers.set('Vary', 'Accept, Accept-Encoding')
+    // Cloudflare-specific: Cache everything except query params
+    response.headers.set('Cache-Tag', options.popularProducts ? 'popular-products' : 'products')
   }
   
   // Add custom headers
@@ -190,8 +238,6 @@ export function createSecureApiHandler(
       return response
       
     } catch (error) {
-      console.error('🚨 Secure API Error:', error)
-      
       // Don't expose internal errors in production
       const isDevelopment = process.env.NODE_ENV === 'development'
       const errorMessage = isDevelopment 

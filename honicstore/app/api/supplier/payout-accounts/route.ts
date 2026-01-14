@@ -4,6 +4,9 @@ import { getSupabaseClient } from '@/lib/supabase-server'
 import { encryptPayoutAccount, decryptPayoutAccount } from '@/lib/payout-encryption'
 import { cookies } from 'next/headers'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData, CACHE_TTL, generateCacheKey, clearCache } from '@/lib/database-optimization'
+import { createErrorResponse, logError } from '@/lib/error-handler'
 import { logger } from '@/lib/logger'
 
 export const runtime = 'nodejs'
@@ -11,19 +14,20 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/supplier/payout-accounts - Get all payout accounts for the supplier
 export async function GET(request: NextRequest) {
-  try {
-    // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
-    if (!rateLimitResult.allowed) {
-      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-        endpoint: '/api/supplier/payout-accounts',
-        reason: rateLimitResult.reason
-      }, request)
-      return NextResponse.json(
-        { success: false, error: rateLimitResult.reason },
-        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
-      )
-    }
+  return performanceMonitor.measure('supplier_payout_accounts_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/payout-accounts',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
+        )
+      }
 
     const headers = { 'Content-Type': 'application/json' }
     const cookieStore = await cookies()
@@ -57,60 +61,84 @@ export async function GET(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (!profile?.is_supplier) {
-      return NextResponse.json(
-        { success: false, error: 'User is not a supplier' },
-        { status: 403, headers }
-      )
+      if (!profile?.is_supplier) {
+        logSecurityEvent('FORBIDDEN_ACCESS_ATTEMPT', user.id, {
+          endpoint: '/api/supplier/payout-accounts',
+          action: 'GET',
+          reason: 'Not a supplier'
+        })
+        return NextResponse.json(
+          { success: false, error: 'User is not a supplier' },
+          { status: 403, headers }
+        )
+      }
+
+      // Check cache
+      const cacheKey = generateCacheKey('supplier_payout_accounts', { supplierId: user.id })
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json({
+          success: true,
+          accounts: cachedData.accounts || [],
+          cached: true
+        })
+      }
+
+      // Fetch payout accounts
+      const { data: accounts, error: accountsError } = await adminSupabase
+        .from('supplier_payout_accounts')
+        .select('*')
+        .eq('supplier_id', user.id)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: false })
+
+      if (accountsError) {
+        logError(accountsError, {
+          context: 'supplier_payout_accounts_get',
+          userId: user.id
+        })
+        return createErrorResponse(accountsError, 'Failed to fetch payout accounts', 500)
+      }
+
+      // Decrypt sensitive fields before returning to client
+      const decryptedAccounts = (accounts || []).map(account => decryptPayoutAccount(account))
+
+      const responseData = {
+        accounts: decryptedAccounts
+      }
+
+      // Cache response (15 minutes TTL)
+      setCachedData(cacheKey, responseData, CACHE_TTL.USER_PROFILE)
+
+      return NextResponse.json({
+        success: true,
+        ...responseData
+      })
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_payout_accounts_get'
+      })
+      return createErrorResponse(error, 'Internal server error', 500)
     }
-
-    // Fetch payout accounts
-    const { data: accounts, error: accountsError } = await adminSupabase
-      .from('supplier_payout_accounts')
-      .select('*')
-      .eq('supplier_id', user.id)
-      .order('is_default', { ascending: false })
-      .order('created_at', { ascending: false })
-
-    if (accountsError) {
-      logger.error('Error fetching payout accounts:', accountsError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch payout accounts' },
-        { status: 500, headers }
-      )
-    }
-
-    // Decrypt sensitive fields before returning to client
-    const decryptedAccounts = (accounts || []).map(account => decryptPayoutAccount(account))
-
-    return NextResponse.json({
-      success: true,
-      accounts: decryptedAccounts
-    })
-  } catch (error: any) {
-    logger.error('Error in GET /api/supplier/payout-accounts:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
+  })
 }
 
 // POST /api/supplier/payout-accounts - Create a new payout account
 export async function POST(request: NextRequest) {
-  try {
-    // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
-    if (!rateLimitResult.allowed) {
-      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-        endpoint: '/api/supplier/payout-accounts',
-        reason: rateLimitResult.reason
-      }, request)
-      return NextResponse.json(
-        { success: false, error: rateLimitResult.reason },
-        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
-      )
-    }
+  return performanceMonitor.measure('supplier_payout_accounts_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/payout-accounts',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
+        )
+      }
 
     const headers = { 'Content-Type': 'application/json' }
     const cookieStore = await cookies()
@@ -192,12 +220,17 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (!profile?.is_supplier) {
-      return NextResponse.json(
-        { error: 'User is not a supplier' },
-        { status: 403 }
-      )
-    }
+      if (!profile?.is_supplier) {
+        logSecurityEvent('FORBIDDEN_ACCESS_ATTEMPT', user.id, {
+          endpoint: '/api/supplier/payout-accounts',
+          action: 'POST',
+          reason: 'Not a supplier'
+        })
+        return NextResponse.json(
+          { error: 'User is not a supplier' },
+          { status: 403 }
+        )
+      }
 
     // If setting as default, unset other default accounts
     if (is_default) {
@@ -236,27 +269,37 @@ export async function POST(request: NextRequest) {
       .select()
       .single()
 
-    if (createError) {
-      logger.error('Error creating payout account:', createError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to create payout account' },
-        { status: 500, headers }
-      )
+      if (createError) {
+        logError(createError, {
+          context: 'supplier_payout_accounts_post',
+          userId: user.id,
+          accountType: account_type
+        })
+        return createErrorResponse(createError, 'Failed to create payout account', 500)
+      }
+
+      // Clear cache
+      clearCache()
+
+      // Decrypt sensitive fields before returning to client
+      const decryptedAccount = decryptPayoutAccount(account)
+
+      logSecurityEvent('SUPPLIER_PAYOUT_ACCOUNT_CREATED', user.id, {
+        accountId: account.id,
+        accountType: account_type,
+        endpoint: '/api/supplier/payout-accounts'
+      })
+
+      return NextResponse.json({
+        success: true,
+        account: decryptedAccount
+      })
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_payout_accounts_post'
+      })
+      return createErrorResponse(error, 'Internal server error', 500)
     }
-
-    // Decrypt sensitive fields before returning to client
-    const decryptedAccount = decryptPayoutAccount(account)
-
-    return NextResponse.json({
-      success: true,
-      account: decryptedAccount
-    })
-  } catch (error: any) {
-    logger.error('Error in POST /api/supplier/payout-accounts:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
+  })
 }
 

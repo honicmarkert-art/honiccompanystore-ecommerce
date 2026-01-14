@@ -4,6 +4,10 @@ import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 import { v4 as uuidv4 } from 'uuid'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { buildUrl } from '@/lib/url-utils'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData, CACHE_TTL, clearCache } from '@/lib/database-optimization'
+import { createErrorResponse, logError } from '@/lib/error-handler'
 import { 
   createCheckoutLink, 
   formatAmountForClickPesa,
@@ -18,19 +22,20 @@ export const dynamic = 'force-dynamic'
 
 // POST /api/supplier/payment/premium - Create payment for premium plan upgrade
 export async function POST(request: NextRequest) {
-  try {
-    // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
-    if (!rateLimitResult.allowed) {
-      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-        endpoint: '/api/supplier/payment/premium',
-        reason: rateLimitResult.reason
-      }, request)
-      return NextResponse.json(
-        { success: false, error: rateLimitResult.reason },
-        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
-      )
-    }
+  return performanceMonitor.measure('supplier_payment_premium_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/payment/premium',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
+        )
+      }
 
     const headers = { 'Content-Type': 'application/json' }
     // Use regular client for authentication check
@@ -195,22 +200,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
-                   process.env.NEXT_PUBLIC_APP_URL ||
-                   (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined)
-    
-    if (!baseUrl) {
-      console.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
-      return NextResponse.json(
-        { error: 'Server configuration error: Base URL not configured. Please set NEXT_PUBLIC_SITE_URL or NEXT_PUBLIC_APP_URL environment variable.' },
-        { status: 500 }
-      )
-    }
-    
-    const webhookUrl = `${baseUrl}/api/webhooks/supplier-upgrade` // Use existing webhook
-    // Return directly to supplier dashboard after payment (user is already authenticated)
-    const returnUrl = `${baseUrl}/supplier/dashboard?payment=success&referenceId=${referenceId}`
-    const cancelUrl = `${baseUrl}/supplier/dashboard?payment=cancelled&referenceId=${referenceId}`
+    const webhookUrl = buildUrl('/api/webhooks/supplier-upgrade')
+    const returnUrl = buildUrl('/supplier/dashboard', { payment: 'success', referenceId })
+    const cancelUrl = buildUrl('/supplier/dashboard', { payment: 'cancelled', referenceId })
 
     logger.log('Creating ClickPesa checkout link for premium plan payment:', {
       referenceId,
@@ -245,20 +237,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({
-      success: true,
-      checkoutUrl: checkoutResult.checkoutLink,
-      referenceId: referenceId
-    })
-  } catch (error: any) {
-    logger.error('Error creating payment link for premium plan:', error)
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: error?.message || 'Failed to create payment link' 
-      },
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
+      logSecurityEvent('SUPPLIER_PREMIUM_PAYMENT_INITIATED', user.id, {
+        planId,
+        referenceId,
+        amount: expectedAmount,
+        currency,
+        endpoint: '/api/supplier/payment/premium'
+      })
+
+      return NextResponse.json({
+        success: true,
+        checkoutUrl: checkoutResult.checkoutLink,
+        referenceId: referenceId
+      })
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_payment_premium_post',
+        userId: user?.id,
+        planId: body?.planId
+      })
+      return createErrorResponse(error, 'Failed to create payment link', 500)
+    }
+  })
 }
 

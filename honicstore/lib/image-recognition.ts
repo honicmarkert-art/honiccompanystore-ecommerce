@@ -128,7 +128,6 @@ export async function analyzeImage(imageBuffer: Buffer): Promise<ImageAnalysisRe
     }
 
   } catch (error) {
-    console.error('Image analysis error:', error)
     return {
       labels: [],
       objects: [],

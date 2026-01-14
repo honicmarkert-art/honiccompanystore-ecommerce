@@ -28,7 +28,6 @@ function getKey(): Buffer {
       throw new Error('PAYOUT_ENCRYPTION_KEY environment variable is required for production')
     }
     // For development, use a default key (not secure, but allows development)
-    console.warn('⚠️ PAYOUT_ENCRYPTION_KEY not set. Using default key for development only.')
     return crypto.createHash('sha256').update('dev-key-change-in-production').digest()
   }
   
@@ -66,7 +65,6 @@ export function encryptPayoutData(text: string): string {
 
     return combined.toString('base64')
   } catch (error) {
-    console.error('Encryption error:', error)
     throw new Error('Failed to encrypt payout data')
   }
 }
@@ -98,7 +96,6 @@ export function decryptPayoutData(encryptedText: string): string {
 
     return decrypted
   } catch (error) {
-    console.error('Decryption error:', error)
     // Return original if decryption fails (might be plain text for existing data)
     throw new Error('Failed to decrypt payout data')
   }
@@ -195,7 +192,6 @@ export function decryptPayoutAccount(account: {
       }
     }
   } catch (error) {
-    console.error('Error decrypting payout account:', error)
     // If decryption fails, return original (might be plain text or corrupted)
     return account
   }

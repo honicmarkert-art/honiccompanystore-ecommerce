@@ -34,7 +34,6 @@ function ResetPasswordContent() {
         const { data: { session }, error } = await supabaseClient.auth.getSession()
         
         if (error) {
-          console.error('Session error:', error)
           setIsValidToken(false)
           return
         }
@@ -56,7 +55,6 @@ function ResetPasswordContent() {
           }
         }
       } catch (error) {
-        console.error('Error checking session:', error)
         setIsValidToken(false)
       }
     }
@@ -67,10 +65,21 @@ function ResetPasswordContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
+    // SECURITY: Validate password length before processing
     if (!password || !confirmPassword) {
       toast({
         title: "Error",
         description: "Please fill in all fields",
+        variant: "destructive"
+      })
+      return
+    }
+
+    // SECURITY: Limit password length to prevent DoS
+    if (password.length > 128) {
+      toast({
+        title: "Error",
+        description: "Password is too long (maximum 128 characters)",
         variant: "destructive"
       })
       return
@@ -94,7 +103,7 @@ function ResetPasswordContent() {
       return
     }
 
-    // Password validation: at least one uppercase, one lowercase, one number
+    // SECURITY: Password validation: at least one uppercase, one lowercase, one number
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/
     if (!passwordRegex.test(password)) {
       toast({

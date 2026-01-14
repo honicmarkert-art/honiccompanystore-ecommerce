@@ -100,7 +100,6 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
             }
           } catch (error) {
             // If check fails, show verification message (safer default)
-            console.error('Error checking verification status:', error)
             setPendingVerificationEmail(pendingEmail)
             setShowVerificationMessage(true)
             setLoginForm(prev => ({ ...prev, email: pendingEmail }))
@@ -161,7 +160,6 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     const handleCloseModal = () => {
       if (isOpen && !registeredEmail) {
         // Only close if we don't have a registered email (meaning we're not switching to login)
-        console.log('📢 Received close-auth-modal event')
         setTimeout(() => {
           onClose()
         }, 500)
@@ -208,7 +206,20 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     setIsLoading(true)
     setAuthError("")
     
-    if (!loginForm.email || !loginForm.password) {
+    // SECURITY: Sanitize inputs to prevent XSS
+    const sanitizeInput = (input: string): string => {
+      return input
+        .trim()
+        .replace(/[<>]/g, '') // Remove HTML tags
+        .replace(/javascript:/gi, '') // Remove javascript: protocol
+        .replace(/on\w+=/gi, '') // Remove event handlers
+        .substring(0, 255) // Limit length
+    }
+    
+    const sanitizedEmail = sanitizeInput(loginForm.email).toLowerCase()
+    const sanitizedPassword = loginForm.password // Don't sanitize password (may contain special chars)
+    
+    if (!sanitizedEmail || !sanitizedPassword) {
       toast({
         title: "Error",
         description: "Please fill in all fields",
@@ -218,8 +229,20 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
       return
     }
 
+    // SECURITY: Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(sanitizedEmail)) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid email address",
+        variant: "destructive"
+      })
+      setIsLoading(false)
+      return
+    }
+
     try {
-      const result = await signIn(loginForm.email, loginForm.password, rememberMe, true)
+      const result = await signIn(sanitizedEmail, sanitizedPassword, rememberMe, true)
       if (!result.success) {
         // Check if error is due to email not verified
         const errorType = (result as any).type
@@ -287,31 +310,70 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
     setIsLoading(true)
     setAuthError("")
     
+    // SECURITY: Sanitize inputs to prevent XSS
+    const sanitizeInput = (input: string, maxLength: number = 255): string => {
+      return input
+        .trim()
+        .replace(/[<>]/g, '') // Remove HTML tags
+        .replace(/javascript:/gi, '') // Remove javascript: protocol
+        .replace(/on\w+=/gi, '') // Remove event handlers
+        .substring(0, maxLength) // Limit length
+    }
+    
+    // Sanitize all inputs
+    const sanitizedFullName = sanitizeInput(registerForm.fullName, 100)
+    const sanitizedEmail = sanitizeInput(registerForm.email, 255).toLowerCase()
+    const sanitizedPhone = registerForm.phone ? sanitizeInput(registerForm.phone, 20) : ''
+    const password = registerForm.password // Don't sanitize password (may contain special chars)
+    const confirmPassword = registerForm.confirmPassword // Don't sanitize password
+    
     // Clear previous errors
     setAuthError("")
     
     // Basic validation
-    if (!registerForm.fullName || !registerForm.email || !registerForm.password || !registerForm.confirmPassword) {
+    if (!sanitizedFullName || !sanitizedEmail || !password || !confirmPassword) {
       setAuthError("Please fill in all required fields")
       setIsLoading(false)
       return
     }
 
-    if (registerForm.password !== registerForm.confirmPassword) {
+    // SECURITY: Validate name format (letters, spaces, hyphens, apostrophes only)
+    const nameRegex = /^[a-zA-Z\s'-]+$/
+    if (!nameRegex.test(sanitizedFullName)) {
+      setAuthError("Name can only contain letters, spaces, hyphens, and apostrophes")
+      setIsLoading(false)
+      return
+    }
+
+    // SECURITY: Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(sanitizedEmail)) {
+      setAuthError("Please enter a valid email address")
+      setIsLoading(false)
+      return
+    }
+
+    if (password !== confirmPassword) {
       setAuthError("Passwords do not match")
       setIsLoading(false)
       return
     }
 
-    if (registerForm.password.length < 8) {
+    if (password.length < 8) {
       setAuthError("Password must be at least 8 characters long")
+      setIsLoading(false)
+      return
+    }
+
+    if (password.length > 128) {
+      setAuthError("Password is too long (maximum 128 characters)")
       setIsLoading(false)
       return
     }
 
     // Check password strength
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/
-    if (!passwordRegex.test(registerForm.password)) {
+    if (!passwordRegex.test(password)) {
       setAuthError("Password must contain at least one uppercase letter, one lowercase letter, and one number")
       setIsLoading(false)
       return
@@ -326,11 +388,11 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
 
     try {
       const result = await signUp(
-        registerForm.fullName,
-        registerForm.email,
-        registerForm.password,
-        registerForm.confirmPassword,
-        registerForm.phone
+        sanitizedFullName,
+        sanitizedEmail,
+        password,
+        confirmPassword,
+        sanitizedPhone || undefined
       )
       
       if (result.success) {
@@ -392,7 +454,6 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
         toast({ title: "Registration Failed", description: result.error || "Please check your information and try again.", variant: "destructive" })
       }
     } catch (error) {
-      console.error('Registration error:', error)
       setAuthError("Network error. Please check your connection and try again.")
       toast({
         title: "Network Error",

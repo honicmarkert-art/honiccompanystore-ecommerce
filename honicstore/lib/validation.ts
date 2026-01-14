@@ -1,202 +1,206 @@
+/**
+ * Production-ready input validation utilities
+ * Provides comprehensive validation with security in mind
+ */
+
 import { z } from 'zod'
 
-// Common validation schemas
-export const emailSchema = z.string().email('Invalid email format')
-export const phoneSchema = z.string().regex(/^\+?[\d\s\-\(\)]+$/, 'Invalid phone number format')
-export const urlSchema = z.string().url('Invalid URL format')
-export const slugSchema = z.string().regex(/^[a-z0-9\-]+$/, 'Invalid slug format')
+/**
+ * Common validation schemas
+ */
+export const ValidationSchemas = {
+  email: z
+    .string()
+    .email('Please enter a valid email address')
+    .min(5, 'Email must be at least 5 characters')
+    .max(255, 'Email is too long')
+    .toLowerCase()
+    .trim(),
 
-// Sanitization functions
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password is too long')
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+      'Password must contain uppercase, lowercase, number, and special character'
+    ),
+
+  name: z
+    .string()
+    .min(2, 'Name must be at least 2 characters')
+    .max(50, 'Name is too long')
+    .regex(/^[a-zA-Z\s'-]+$/, 'Name can only contain letters, spaces, hyphens, and apostrophes')
+    .trim(),
+
+  url: z
+    .string()
+    .url('Please enter a valid URL')
+    .max(2048, 'URL is too long'),
+
+  phone: z
+    .string()
+    .regex(/^\+?[1-9]\d{1,14}$/, 'Please enter a valid phone number')
+    .max(20, 'Phone number is too long'),
+
+  uuid: z.string().uuid('Invalid ID format'),
+} as const
+
+/**
+ * Sanitize string input to prevent XSS attacks
+ */
 export function sanitizeString(input: string): string {
+  if (typeof input !== 'string') {
+    return ''
+  }
+
   return input
-    .replace(/[<>]/g, '') // Remove HTML tags
+    .trim()
+    .replace(/[<>]/g, '') // Remove potential HTML tags
     .replace(/javascript:/gi, '') // Remove javascript: protocol
     .replace(/on\w+=/gi, '') // Remove event handlers
-    .replace(/data:/gi, '') // Remove data: protocol
-    .trim()
+    .substring(0, 10000) // Limit length
 }
 
-export function sanitizeHtml(input: string): string {
-  return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove script tags
-    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '') // Remove iframe tags
-    .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '') // Remove event handlers
-    .replace(/javascript:/gi, '') // Remove javascript: protocol
-}
-
-export function sanitizeNumber(input: string | number): number {
-  const num = typeof input === 'string' ? parseFloat(input) : input
-  return isNaN(num) ? 0 : Math.max(0, num) // Ensure non-negative
-}
-
-// API validation schemas
-export const productSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(255, 'Name too long'),
-  description: z.string().max(2000, 'Description too long').optional(),
-  price: z.number().min(0, 'Price must be positive'),
-  category: z.string().min(1, 'Category is required'),
-  image: urlSchema.optional(),
-  stock_quantity: z.number().int().min(0, 'Stock must be non-negative').optional(),
-  sku: z.string().max(100, 'SKU too long').optional(),
-  brand: z.string().max(100, 'Brand name too long').optional(),
-  inStock: z.boolean().optional(),
-  freeDelivery: z.boolean().optional(),
-  sameDayDelivery: z.boolean().optional()
-})
-
-export const orderSchema = z.object({
-  items: z.array(z.object({
-    productId: z.number().int().positive('Invalid product ID'),
-    quantity: z.number().int().positive('Quantity must be positive'),
-    price: z.number().min(0, 'Price must be non-negative')
-  })).min(1, 'At least one item required'),
-  deliveryOption: z.enum(['pickup', 'shipping']),
-  customerInfo: z.object({
-    name: z.string().min(1, 'Name is required').max(255, 'Name too long'),
-    email: emailSchema,
-    phone: phoneSchema.optional(),
-    address: z.string().max(500, 'Address too long').optional()
-  }),
-  paymentMethod: z.enum(['clickpesa', 'cash_on_delivery']).optional()
-})
-
-export const userSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(8, 'Password must be at least 8 characters')
-    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Password must contain uppercase, lowercase, and number'),
-  full_name: z.string().min(1, 'Full name is required').max(255, 'Name too long').optional(),
-  phone: phoneSchema.optional()
-})
-
-export const adminSettingsSchema = z.object({
-  companyName: z.string().min(1, 'Company name is required').max(255, 'Name too long'),
-  companyColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color format'),
-  companyTagline: z.string().max(255, 'Tagline too long').optional(),
-  companyLogo: urlSchema.optional(),
-  mainHeadline: z.string().max(500, 'Headline too long').optional(),
-  heroBackgroundImage: urlSchema.optional(),
-  heroTaglineAlignment: z.enum(['left', 'center', 'right']).optional(),
-  websiteUrl: urlSchema.optional(),
-  contactEmail: emailSchema.optional(),
-  contactPhone: phoneSchema.optional(),
-  address: z.string().max(500, 'Address too long').optional(),
-  currency: z.string().length(3, 'Currency must be 3 characters').optional(),
-  timezone: z.string().optional(),
-  language: z.string().length(2, 'Language must be 2 characters').optional()
-})
-
-// Advertisement validation
-export const advertisementSchema = z.object({
-  title: z.string().min(1, 'Title is required').max(255, 'Title too long'),
-  description: z.string().max(1000, 'Description too long').optional(),
-  media_url: urlSchema,
-  media_type: z.enum(['image', 'video']),
-  link_url: urlSchema.optional(),
-  is_active: z.boolean().optional(),
-  display_order: z.number().int().min(0, 'Display order must be non-negative').optional()
-})
-
-// Service image validation
-export const serviceImageSchema = z.object({
-  serviceType: z.enum(['retail', 'prototyping', 'pcb', 'ai', 'stem', 'home']),
-  images: z.array(urlSchema).max(10, 'Maximum 10 images per service'),
-  rotationTime: z.number().int().min(3, 'Rotation time must be at least 3 seconds').max(30, 'Rotation time must be at most 30 seconds')
-})
-
-// Rate limiting validation
-export const rateLimitSchema = z.object({
-  windowMs: z.number().int().positive('Window must be positive'),
-  maxRequests: z.number().int().positive('Max requests must be positive')
-})
-
-// Security validation
-export const securitySettingsSchema = z.object({
-  twoFactorAuth: z.boolean().optional(),
-  sessionTimeout: z.number().int().min(5, 'Session timeout must be at least 5 minutes').max(480, 'Session timeout must be at most 8 hours').optional(),
-  passwordPolicy: z.enum(['weak', 'medium', 'strong']).optional(),
-  loginAttempts: z.number().int().min(3, 'Login attempts must be at least 3').max(10, 'Login attempts must be at most 10').optional(),
-  lockoutDuration: z.number().int().min(5, 'Lockout duration must be at least 5 minutes').max(60, 'Lockout duration must be at most 60 minutes').optional()
-})
-
-// Validation helper functions
-export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { success: boolean; data?: T; errors?: string[] } {
+/**
+ * Sanitize URL to prevent open redirect attacks
+ */
+export function sanitizeUrl(url: string, allowedDomains?: string[]): string {
   try {
-    const result = schema.parse(data)
-    return { success: true, data: result }
+    const parsed = new URL(url)
+    
+    // If allowed domains are specified, validate against them
+    if (allowedDomains && allowedDomains.length > 0) {
+      const isAllowed = allowedDomains.some((domain) => {
+        return parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)
+      })
+      
+      if (!isAllowed) {
+        throw new Error('URL domain not allowed')
+      }
+    }
+    
+    // Only allow http and https protocols
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('Invalid URL protocol')
+    }
+    
+    return parsed.toString()
+  } catch {
+    // Return safe fallback
+    return '/'
+  }
+}
+
+/**
+ * Validate and sanitize email address
+ */
+export function validateAndSanitizeEmail(email: string): {
+  isValid: boolean
+  sanitized?: string
+  error?: string
+} {
+  try {
+    const result = ValidationSchemas.email.parse(email)
+    return {
+      isValid: true,
+      sanitized: result,
+    }
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return { 
-        success: false, 
-        errors: error.errors.map(err => `${err.path.join('.')}: ${err.message}`)
+      return {
+        isValid: false,
+        error: error.errors[0]?.message || 'Invalid email address',
       }
     }
-    return { success: false, errors: ['Validation failed'] }
-  }
-}
-
-export function sanitizeAndValidate<T>(schema: z.ZodSchema<T>, data: any): { success: boolean; data?: T; errors?: string[] } {
-  // Sanitize string fields
-  if (typeof data === 'object' && data !== null) {
-    const sanitized = { ...data }
-    for (const key in sanitized) {
-      if (typeof sanitized[key] === 'string') {
-        sanitized[key] = sanitizeString(sanitized[key])
-      }
-    }
-    return validateInput(schema, sanitized)
-  }
-  
-  return validateInput(schema, data)
-}
-
-// SQL injection prevention
-export function escapeSqlString(input: string): string {
-  return input
-    .replace(/'/g, "''") // Escape single quotes
-    .replace(/;/g, '') // Remove semicolons
-    .replace(/--/g, '') // Remove SQL comments
-    .replace(/\/\*/g, '') // Remove block comment start
-    .replace(/\*\//g, '') // Remove block comment end
-}
-
-// XSS prevention
-export function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;')
-}
-
-// File upload validation
-export function validateFileUpload(file: File, options: {
-  maxSize?: number
-  allowedTypes?: string[]
-  allowedExtensions?: string[]
-}): { valid: boolean; error?: string } {
-  const { maxSize = 10 * 1024 * 1024, allowedTypes = [], allowedExtensions = [] } = options
-  
-  if (file.size > maxSize) {
-    return { valid: false, error: `File size exceeds ${maxSize / 1024 / 1024}MB limit` }
-  }
-  
-  if (allowedTypes.length > 0 && !allowedTypes.includes(file.type)) {
-    return { valid: false, error: `File type ${file.type} not allowed` }
-  }
-  
-  if (allowedExtensions.length > 0) {
-    const extension = file.name.split('.').pop()?.toLowerCase()
-    if (!extension || !allowedExtensions.includes(extension)) {
-      return { valid: false, error: `File extension .${extension} not allowed` }
+    return {
+      isValid: false,
+      error: 'Invalid email address',
     }
   }
-  
-  return { valid: true }
 }
 
+/**
+ * Validate password strength
+ */
+export function validatePasswordStrength(password: string): {
+  isValid: boolean
+  strength: 'weak' | 'medium' | 'strong'
+  errors: string[]
+} {
+  const errors: string[] = []
+  let strength: 'weak' | 'medium' | 'strong' = 'weak'
 
+  if (password.length < 8) {
+    errors.push('Password must be at least 8 characters')
+  }
 
+  if (!/[a-z]/.test(password)) {
+    errors.push('Password must contain at least one lowercase letter')
+  }
 
+  if (!/[A-Z]/.test(password)) {
+    errors.push('Password must contain at least one uppercase letter')
+  }
 
+  if (!/\d/.test(password)) {
+    errors.push('Password must contain at least one number')
+  }
+
+  if (!/[@$!%*?&]/.test(password)) {
+    errors.push('Password must contain at least one special character (@$!%*?&)')
+  }
+
+  // Calculate strength
+  if (errors.length === 0) {
+    if (password.length >= 12 && /[@$!%*?&]/.test(password)) {
+      strength = 'strong'
+    } else {
+      strength = 'medium'
+    }
+  }
+
+  return {
+    isValid: errors.length === 0,
+    strength,
+    errors,
+  }
+}
+
+/**
+ * Rate limiting helper for client-side validation
+ */
+class RateLimiter {
+  private attempts: Map<string, { count: number; resetAt: number }> = new Map()
+  private readonly maxAttempts: number
+  private readonly windowMs: number
+
+  constructor(maxAttempts: number = 5, windowMs: number = 60000) {
+    this.maxAttempts = maxAttempts
+    this.windowMs = windowMs
+  }
+
+  check(key: string): { allowed: boolean; retryAfter?: number } {
+    const now = Date.now()
+    const record = this.attempts.get(key)
+
+    if (!record || now > record.resetAt) {
+      this.attempts.set(key, { count: 1, resetAt: now + this.windowMs })
+      return { allowed: true }
+    }
+
+    if (record.count >= this.maxAttempts) {
+      const retryAfter = Math.ceil((record.resetAt - now) / 1000)
+      return { allowed: false, retryAfter }
+    }
+
+    record.count++
+    return { allowed: true }
+  }
+
+  reset(key: string): void {
+    this.attempts.delete(key)
+  }
+}
+
+export const validationRateLimiter = new RateLimiter(5, 60000)

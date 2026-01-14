@@ -45,8 +45,7 @@ export default function SupplierSupportPage() {
         setPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
-      console.error('Error fetching current plan:', error)
-    }
+      }
   }
 
   const isFreePlan = currentPlan?.slug === 'free'
@@ -106,7 +105,6 @@ export default function SupplierSupportPage() {
         })
       }
     } catch (error) {
-      console.error('Support request error:', error)
       toast({
         title: 'Error',
         description: 'Failed to send support request. Please try again.',
@@ -124,7 +122,7 @@ export default function SupplierSupportPage() {
       description: 'Get help via email',
       available: true,
       responseTime: '24-48 hours',
-      contact: 'support@honiccompanystore.com'
+      contact: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'
     },
     {
       icon: MessageCircle,
@@ -272,7 +270,6 @@ export default function SupplierSupportPage() {
                         // Redirect to payment page
                         window.location.href = `/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`
                       } catch (error: any) {
-                        console.error('Error initiating upgrade:', error)
                         toast({
                           title: 'Error',
                           description: error.message || 'Failed to initiate upgrade. Please try again.',

@@ -88,7 +88,6 @@ export function useStock(): UseStockReturn {
       })
 
     } catch (err) {
-      console.error('Error fetching stock:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch stock data')
       toast({
         title: "Stock Error",

@@ -82,7 +82,6 @@ export function useOrders() {
       const data = await response.json()
       setOrders(data.orders || [])
     } catch (err) {
-      console.error('Error fetching orders:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch orders')
     } finally {
       setLoading(false)
@@ -107,7 +106,6 @@ export function useOrders() {
       const data = await response.json()
       return data // The API returns the order directly, not wrapped in { order }
     } catch (err) {
-      console.error('Error fetching order by number:', err)
       throw err
     }
   }, [isAuthenticated])
@@ -130,7 +128,6 @@ export function useOrders() {
       const data = await response.json()
       return data.order
     } catch (err) {
-      console.error('Error fetching order:', err)
       throw err
     }
   }, [isAuthenticated])
@@ -156,7 +153,6 @@ export function useOrders() {
       const data = await response.json()
       return data.order
     } catch (err) {
-      console.error('Error creating order:', err)
       throw err
     }
   }, [isAuthenticated])
@@ -182,7 +178,6 @@ export function useOrders() {
       const data = await response.json()
       return data.order
     } catch (err) {
-      console.error('Error updating order:', err)
       throw err
     }
   }, [isAuthenticated])
@@ -216,7 +211,6 @@ export function useOrders() {
       
       return statusHistory
     } catch (err) {
-      console.error('Error fetching status history:', err)
       // Return basic status history as fallback
       return [
         {

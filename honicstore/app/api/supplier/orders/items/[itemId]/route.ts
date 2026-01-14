@@ -11,7 +11,7 @@ export async function PATCH(
 ) {
   try {
     const { itemId } = await params
-    
+
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
@@ -28,14 +28,13 @@ export async function PATCH(
 
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
-    
+
     if (authError || !user) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
       )
     }
-
     // Check if user is a supplier
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
@@ -49,7 +48,6 @@ export async function PATCH(
         { status: 403 }
       )
     }
-
     const body = await request.json()
     const { status } = body
 
@@ -59,7 +57,6 @@ export async function PATCH(
         { status: 400 }
       )
     }
-
     // Validate status value
     const validStatuses = ['confirmed', 'shipped', 'delivered', 'picked_up', 'cancelled']
     if (!validStatuses.includes(status)) {
@@ -68,7 +65,6 @@ export async function PATCH(
         { status: 400 }
       )
     }
-
     // First, verify that the item belongs to a product owned by this supplier
     const { data: orderItem, error: itemError } = await supabase
       .from('confirmed_order_items')
@@ -87,7 +83,6 @@ export async function PATCH(
         { status: 404 }
       )
     }
-
     // Check if the product belongs to this supplier
     const { data: product, error: productError } = await supabase
       .from('products')
@@ -101,7 +96,6 @@ export async function PATCH(
         { status: 404 }
       )
     }
-
     // Verify ownership
     if (product.user_id !== user.id && product.supplier_id !== user.id) {
       return NextResponse.json(
@@ -109,7 +103,6 @@ export async function PATCH(
         { status: 403 }
       )
     }
-
     // Validate status transition
     const currentStatus = orderItem.status
     const validTransitions: Record<string, string[]> = {
@@ -119,17 +112,15 @@ export async function PATCH(
       'picked_up': [], // Final state (customer action)
       'cancelled': [] // Final state
     }
-
     if (!validTransitions[currentStatus]?.includes(status)) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: `Invalid status transition. Cannot change from '${currentStatus}' to '${status}'. Valid transitions: ${validTransitions[currentStatus]?.join(', ') || 'none'}` 
+        {
+          success: false,
+          error: `Invalid status transition. Cannot change from '${currentStatus}' to '${status}'. Valid transitions: ${validTransitions[currentStatus]?.join(', ') || 'none'}`
         },
         { status: 400 }
       )
     }
-
     // Get delivery option from confirmed_order to determine correct final status
     const { data: confirmedOrder, error: orderError } = await supabase
       .from('confirmed_orders')
@@ -144,7 +135,6 @@ export async function PATCH(
     if (status === 'picked_up' && confirmedOrder?.delivery_option === 'shipping') {
       finalStatus = 'delivered'
     }
-
     // IMPORTANT: Find ALL items from this supplier in this order
     // Get all products owned by this supplier
     const { data: supplierProducts, error: supplierProductsError } = await supabase
@@ -153,13 +143,11 @@ export async function PATCH(
       .or(`user_id.eq.${user.id},supplier_id.eq.${user.id}`)
 
     if (supplierProductsError) {
-      console.error('Error fetching supplier products:', supplierProductsError)
       return NextResponse.json(
         { success: false, error: 'Failed to fetch supplier products' },
         { status: 500 }
       )
     }
-
     const supplierProductIds = supplierProducts?.map(p => p.id) || []
 
     if (supplierProductIds.length === 0) {
@@ -168,7 +156,6 @@ export async function PATCH(
         { status: 404 }
       )
     }
-
     // Find ALL confirmed_order_items from this supplier in this order
     // that can be updated to the new status
     const { data: allSupplierItems, error: allItemsError } = await supabase
@@ -178,13 +165,11 @@ export async function PATCH(
       .in('product_id', supplierProductIds)
 
     if (allItemsError) {
-      console.error('Error fetching all supplier items:', allItemsError)
       return NextResponse.json(
         { success: false, error: 'Failed to fetch supplier items', details: allItemsError.message },
         { status: 500 }
       )
     }
-
     // Filter items that can be updated to the new status
     // Use the same validTransitions as the initial validation
     const itemsToUpdate = (allSupplierItems || []).filter(item => {
@@ -205,7 +190,6 @@ export async function PATCH(
         { status: 400 }
       )
     }
-
     const itemIdsToUpdate = itemsToUpdate.map(item => item.id)
 
     // Update ALL items from this supplier in this order
@@ -216,13 +200,11 @@ export async function PATCH(
       .select('id, status, product_id, confirmed_order_id')
 
     if (updateError) {
-      console.error('Error updating order items status:', updateError)
       return NextResponse.json(
         { success: false, error: 'Failed to update items status', details: updateError.message },
         { status: 500 }
       )
     }
-
     return NextResponse.json({
       success: true,
       itemsUpdated: updatedItems?.length || 0,
@@ -231,11 +213,9 @@ export async function PATCH(
     })
 
   } catch (error: any) {
-    console.error('Error in supplier order item status update API:', error)
     return NextResponse.json(
       { success: false, error: 'Internal server error', details: error.message },
       { status: 500 }
     )
   }
 }
-

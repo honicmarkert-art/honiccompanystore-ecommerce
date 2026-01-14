@@ -22,6 +22,7 @@ function SupplierEditProductContent() {
   const [product, setProduct] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [productKey, setProductKey] = useState(0) // Key to force form re-render when product updates
 
   useEffect(() => {
     if (productId) {
@@ -29,9 +30,11 @@ function SupplierEditProductContent() {
     }
   }, [productId])
 
-  const fetchProduct = async () => {
+  const fetchProduct = async (silent = false) => {
     try {
-      setLoading(true)
+      if (!silent) {
+        setLoading(true)
+      }
       const response = await fetch(`/api/supplier/products/${productId}`, {
         credentials: 'include'
       })
@@ -52,15 +55,27 @@ function SupplierEditProductContent() {
       
       const data = await response.json()
 
+
       if (data.success && data.product) {
         // Transform product data to match form format
+        // Form expects numbers for originalPrice/stockQuantity (it converts to string internally)
         const transformedProduct = {
           ...data.product,
-          originalPrice: data.product.original_price,
-          inStock: data.product.in_stock,
-          stockQuantity: data.product.stock_quantity,
-          view360: data.product.view_360,
-          importChina: data.product.import_china,
+          // Use camelCase from API if available, otherwise fallback to snake_case
+          // Keep as numbers (form will convert to strings internally)
+          originalPrice: (data.product.originalPrice !== null && data.product.originalPrice !== undefined)
+            ? Number(data.product.originalPrice)
+            : (data.product.original_price !== null && data.product.original_price !== undefined 
+              ? Number(data.product.original_price)
+              : null),
+          stockQuantity: (data.product.stockQuantity !== null && data.product.stockQuantity !== undefined)
+            ? Number(data.product.stockQuantity)
+            : (data.product.stock_quantity !== null && data.product.stock_quantity !== undefined 
+              ? Number(data.product.stock_quantity)
+              : null),
+          inStock: data.product.inStock !== undefined ? data.product.inStock : (data.product.in_stock !== undefined ? data.product.in_stock : true),
+          view360: data.product.view360 || data.product.view_360 || '',
+          importChina: data.product.importChina !== undefined ? data.product.importChina : (data.product.import_china || false),
           // Ensure variants use simplified structure for suppliers
           variants: (data.product.variants || []).map((variant: any) => ({
             id: variant.id,
@@ -70,6 +85,8 @@ function SupplierEditProductContent() {
             stockQuantity: variant.stock_quantity || variant.stockQuantity || 0
           }))
         }
+        
+        
         setProduct(transformedProduct)
       } else {
         toast({
@@ -88,7 +105,9 @@ function SupplierEditProductContent() {
       })
       router.push('/supplier/products')
     } finally {
-      setLoading(false)
+      if (!silent) {
+        setLoading(false)
+      }
     }
   }
 
@@ -120,6 +139,7 @@ function SupplierEditProductContent() {
         supplierProductData.model = String(productData.model).trim()
       }
 
+
       const response = await fetch(`/api/supplier/products/${productId}`, {
         method: 'PUT',
         headers: {
@@ -141,13 +161,67 @@ function SupplierEditProductContent() {
 
       const result = await response.json()
 
+
       if (result.success) {
         toast({
           title: 'Success',
           description: 'Product updated successfully!',
         })
-        router.push('/supplier/products')
-        return result.product
+        
+        // Update local product state with saved data (no page refresh/navigation)
+        // Transform the response to match form format - form expects numbers, not strings
+        if (result.product) {
+          const updatedProduct = {
+            ...result.product,
+            // Use camelCase from API if available, otherwise fallback to snake_case
+            // Keep as numbers (form converts to strings internally)
+            originalPrice: (result.product.originalPrice !== null && result.product.originalPrice !== undefined)
+              ? Number(result.product.originalPrice)
+              : (result.product.original_price !== null && result.product.original_price !== undefined 
+                ? Number(result.product.original_price)
+                : null),
+            stockQuantity: (result.product.stockQuantity !== null && result.product.stockQuantity !== undefined)
+              ? Number(result.product.stockQuantity)
+              : (result.product.stock_quantity !== null && result.product.stock_quantity !== undefined 
+                ? Number(result.product.stock_quantity)
+                : null),
+            inStock: result.product.inStock !== undefined ? result.product.inStock : (result.product.in_stock !== undefined ? result.product.in_stock : true),
+            view360: result.product.view360 || result.product.view_360 || '',
+            importChina: result.product.importChina !== undefined ? result.product.importChina : (result.product.import_china || false),
+            variants: (result.product.variants || result.product.product_variants || []).map((variant: any) => ({
+              id: variant.id,
+              variant_name: variant.variant_name || '',
+              price: variant.price || 0,
+              stock_quantity: variant.stock_quantity || variant.stockQuantity || 0,
+              stockQuantity: variant.stock_quantity || variant.stockQuantity || 0
+            }))
+          }
+          
+          
+          // Update state - form's useEffect will detect the change and update smoothly
+          setProduct(updatedProduct)
+        }
+        
+        // Return product with camelCase fields for form's internal update
+        const transformedForForm = result.product ? {
+          ...result.product,
+          originalPrice: (result.product.originalPrice !== null && result.product.originalPrice !== undefined)
+            ? Number(result.product.originalPrice)
+            : (result.product.original_price !== null && result.product.original_price !== undefined 
+              ? Number(result.product.original_price)
+              : null),
+          stockQuantity: (result.product.stockQuantity !== null && result.product.stockQuantity !== undefined)
+            ? Number(result.product.stockQuantity)
+            : (result.product.stock_quantity !== null && result.product.stock_quantity !== undefined 
+              ? Number(result.product.stock_quantity)
+              : null),
+          inStock: result.product.inStock !== undefined ? result.product.inStock : (result.product.in_stock !== undefined ? result.product.in_stock : true),
+          view360: result.product.view360 || result.product.view_360 || null,
+          importChina: result.product.importChina !== undefined ? result.product.importChina : (result.product.import_china || false)
+        } : result.product
+        
+        // Don't navigate away - stay on edit page
+        return transformedForForm
       } else {
         throw new Error(result.error || 'Failed to update product')
       }
@@ -201,15 +275,18 @@ function SupplierEditProductContent() {
 
         {/* Product Form */}
         <div className={cn("border-2 rounded-lg p-6", themeClasses.cardBg, themeClasses.cardBorder)}>
-          <ProductForm
-            product={product}
-            onClose={() => router.push('/supplier/products')}
-            onSave={handleSave}
-            autoCloseOnSave={false}
-            hideImportChina={true}
-            restrictVariantType={true}
-            hideAttributesAndVariants={true}
-          />
+          {product && (
+            <ProductForm
+              key={`product-${productId}`}
+              product={product}
+              onClose={() => router.push('/supplier/products')}
+              onSave={handleSave}
+              autoCloseOnSave={false}
+              hideImportChina={true}
+              restrictVariantType={true}
+              hideAttributesAndVariants={true}
+            />
+          )}
         </div>
     </>
   )

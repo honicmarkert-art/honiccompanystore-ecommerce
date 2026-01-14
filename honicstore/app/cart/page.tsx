@@ -1812,7 +1812,7 @@ function CartPageContent() {
         }}
         onCancel={() => {
           // Open contact support
-          window.open('mailto:support@honic.co?subject=Quantity Inquiry&body=I need assistance with ordering smaller quantities of products under 500 TZS', '_blank')
+          window.open(`mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honic.co'}?subject=Quantity Inquiry&body=I need assistance with ordering smaller quantities of products under 500 TZS`, '_blank')
           setIsQuantityWarningModalOpen(false)
           setQuantityWarningItem(null)
         }}

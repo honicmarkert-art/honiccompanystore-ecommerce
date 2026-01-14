@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL'
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY'
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are required')
+}
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Simple in-memory rate limiting
@@ -16,20 +19,17 @@ function checkRateLimit(ip: string): boolean {
   const now = Date.now()
   const key = ip
   const current = requestCounts.get(key)
-  
+
   if (!current || now > current.resetTime) {
     requestCounts.set(key, { count: 1, resetTime: now + RATE_LIMIT_WINDOW })
     return true
   }
-  
   if (current.count >= RATE_LIMIT) {
     return false
   }
-  
   current.count++
   return true
 }
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -38,16 +38,15 @@ export async function GET(
     // Rate limiting check
     const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown'
     if (!checkRateLimit(ip)) {
-      return NextResponse.json({ 
-        error: 'Too many requests. Please try again later.' 
-      }, { 
+      return NextResponse.json({
+        error: 'Too many requests. Please try again later.'
+      }, {
         status: 429,
         headers: {
           'Retry-After': '60'
         }
       })
     }
-
     const { id } = await params
     const productId = id
     const { searchParams } = new URL(request.url)
@@ -57,7 +56,6 @@ export async function GET(
     if (!productId) {
       return NextResponse.json({ error: 'Product ID is required' }, { status: 400 })
     }
-
     logger.log(`🔍 Fetching variant images for product ${productId}, limit: ${limit}`)
 
     // Fetch variant images from the product's variant_images field
@@ -68,12 +66,10 @@ export async function GET(
       .single()
 
     if (error) {
-      console.error('Error fetching product variant images:', error)
       return NextResponse.json({ error: 'Failed to fetch variant images' }, { status: 500 })
     }
-
     const allVariantImages = product?.variant_images || []
-    
+
     // Limit to first N images for better performance
     const variantImages = allVariantImages.slice(0, limit)
 
@@ -87,9 +83,8 @@ export async function GET(
     } : {
       'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300'
     }
-
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       variantImages,
       total: allVariantImages.length,
       returned: variantImages.length
@@ -98,7 +93,6 @@ export async function GET(
     })
 
   } catch (error) {
-    console.error('Error in variant images API:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

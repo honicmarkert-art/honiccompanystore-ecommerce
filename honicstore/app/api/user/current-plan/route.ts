@@ -38,7 +38,6 @@ export async function GET(request: NextRequest) {
       .single()
 
     if (profileError) {
-      console.error('Error fetching profile:', profileError)
       return NextResponse.json(
         { success: false, error: 'Failed to fetch profile' },
         { status: 500 }
@@ -141,7 +140,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error fetching current plan:', error)
     return NextResponse.json(
       { success: false, error: 'An unexpected error occurred' },
       { status: 500 }

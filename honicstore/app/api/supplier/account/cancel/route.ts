@@ -103,7 +103,6 @@ export async function POST(request: NextRequest) {
       .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`)
 
     if (productsError) {
-      console.error('Error hiding products:', productsError)
       // Don't fail the request, just log the error
     }
 
@@ -117,7 +116,6 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
 
     if (profileDeleteError) {
-      console.error('Error deleting profile:', profileDeleteError)
       // Continue with auth deletion even if profile deletion fails
       // (profile might get auto-deleted via cascade when we delete from auth)
     }
@@ -127,7 +125,6 @@ export async function POST(request: NextRequest) {
     const { error: authDeleteError } = await adminSupabase.auth.admin.deleteUser(user.id)
 
     if (authDeleteError) {
-      console.error('Error deleting user from auth:', authDeleteError)
       return NextResponse.json(
         { error: 'Failed to delete user account', details: authDeleteError.message },
         { status: 500 }
@@ -139,7 +136,6 @@ export async function POST(request: NextRequest) {
       message: 'Account deleted successfully'
     })
   } catch (error: any) {
-    console.error('Error deleting account:', error)
     return NextResponse.json(
       { error: 'Internal server error', details: error.message },
       { status: 500 }

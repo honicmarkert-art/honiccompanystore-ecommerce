@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
+import { validateAdminAccess } from '@/lib/admin-auth'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData } from '@/lib/database-optimization'
+import { logError, createErrorResponse } from '@/lib/error-handler'
 
 // Comprehensive validation schema for all admin settings
 const adminSettingsSchema = z.object({
@@ -85,12 +90,14 @@ const adminSettingsSchema = z.object({
     securityAlerts: z.boolean()
   }).optional(),
   
+  // SECURITY: API keys are never returned to client. Only boolean flags indicating if keys are configured.
   apiKeys: z.object({
-    googleMaps: z.string(),
-    dpoPayment: z.string(),
-    stripe: z.string(),
-    emailService: z.string(),
-    smsService: z.string()
+    googleMaps: z.string().optional(), // Only public key can be returned
+    // Server-side keys are never exposed - only boolean flags
+    dpoPaymentConfigured: z.boolean().optional(),
+    stripeConfigured: z.boolean().optional(),
+    emailServiceConfigured: z.boolean().optional(),
+    smsServiceConfigured: z.boolean().optional()
   }).optional(),
   
   security: z.object({
@@ -141,373 +148,495 @@ const adminSettingsSchema = z.object({
   }).optional()
 })
 
-export async function GET(request: NextRequest) {
-  try {
-    // Create Supabase client
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return request.cookies.get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            // This will be handled by the response
-          },
-          remove(name: string, options: any) {
-            // This will be handled by the response
-          },
-        },
-      }
-    )
-
-    // Get admin settings from admin_settings table
-    
-    const { data: settings, error: settingsError } = await supabase
-      .from('admin_settings')
-      .select('*')
-      .eq('id', 1)
-      .single()
-
-    if (settingsError) {
-      console.error('❌ [Admin Settings API] Error fetching admin settings:', settingsError)
-      // Return default settings if no settings exist or table doesn't exist
-      return NextResponse.json({
-        companyName: 'honiccompanystore',
-        companyColor: '#3B82F6',
-        companyTagline: 'technology, innovation',
-        companyLogo: '/android-chrome-512x512.png',
-        mainHeadline: 'The leading B2B ecommerce platform for global trade',
-        heroBackgroundImage: '',
-        heroTaglineAlignment: 'left',
-        serviceRetailImage: '',
-        servicePrototypingImage: '',
-        servicePcbImage: '',
-        serviceAiImage: '',
-        serviceStemImage: '',
-        websiteUrl: 'https://honic-co.com',
-        contactEmail: 'contact@honic-co.com',
-        contactPhone: '+255 123 456 789',
-        address: 'Dar es Salaam, Tanzania',
-        currency: 'TZS',
-        timezone: 'Africa/Dar_es_Salaam',
-        language: 'en',
-        theme: 'system',
-        primaryColor: '#3B82F6',
-        secondaryColor: '#6B7280',
-        accentColor: '#F59E0B',
-        navTranslucent: true,
-        navOpacity: 0.95,
-        navTheme: 'auto',
-        footerTheme: 'dark',
-        footerColumns: 5,
-        productsPerRowMobile: 3,
-        productsPerRowTablet: 4,
-        productsPerRowDesktop: 5,
-        productCardSpacing: 4,
-        productCardRadius: 0.5,
-        cartCompactMode: true,
-        cartItemSpacing: 0,
-        showClearCartButton: false,
-        showSaveForLater: true,
-        mobileNavHeight: 'h-4',
-        mobileFontSize: 'text-xs',
-        mobileCategoryIconsSmall: true,
-        mobileFooterColumns: 3,
-        notifications: {
-          email: true,
-          sms: false,
-          push: true,
-          orderUpdates: true,
-          promotional: false,
-          securityAlerts: true
-        },
-        apiKeys: {
-          googleMaps: 'KNsu7C7EvTn1CgWdh03Af_3NGjs',
-          dpoPayment: 'your-dpo-api-key',
-          stripe: 'your-stripe-api-key',
-          emailService: '',
-          smsService: ''
-        },
-        security: {
-          twoFactorAuth: false,
-          sessionTimeout: 30,
-          passwordPolicy: 'strong',
-          loginAttempts: 5,
-          lockoutDuration: 15
-        },
-        performance: {
-          cacheEnabled: true,
-          imageOptimization: true,
-          cdnEnabled: false,
-          lazyLoading: true,
-          preloadCritical: true
-        },
-        seo: {
-          metaTitle: 'honiccompanystore - Shopping',
-          metaDescription: 'Your trusted source for technology and innovation',
-          metaKeywords: 'technology, innovation, electronics, arduino',
-          ogImage: '/og-image.png',
-          favicon: '/favicon.ico'
-        },
-        socialLinks: {
-          facebook: '',
-          instagram: '',
-          youtube: ''
-        },
-        paymentSettings: {
-          defaultCurrency: 'TZS',
-          supportedCurrencies: ['TZS', 'USD', 'EUR'],
-          paymentMethods: ['card', 'mobile_money', 'bank_transfer'],
-          shippingCost: 5000
-        },
-        businessHours: {
-          monday: { open: '09:00', close: '18:00', closed: false },
-          tuesday: { open: '09:00', close: '18:00', closed: false },
-          wednesday: { open: '09:00', close: '18:00', closed: false },
-          thursday: { open: '09:00', close: '18:00', closed: false },
-          friday: { open: '09:00', close: '18:00', closed: false },
-          saturday: { open: '09:00', close: '16:00', closed: false },
-          sunday: { open: '10:00', close: '14:00', closed: false }
-        }
-      })
-    }
-
-    // Map database fields to API response format (see mappedSettings below)
-    
-    const mappedSettings = {
-      companyName: settings.company_name || 'honiccompanystore',
-      companyColor: settings.company_color || '#3B82F6',
-      companyTagline: settings.company_tagline || 'technology, innovation',
-      companyLogo: settings.company_logo || '/android-chrome-512x512.png',
-      mainHeadline: settings.main_headline || 'The leading B2B ecommerce platform for global trade',
-      heroBackgroundImage: settings.hero_background_image || '',
-      heroTaglineAlignment: settings.hero_tagline_alignment || 'left',
-      serviceRetailImages: settings.service_retail_images || [],
-      servicePrototypingImages: settings.service_prototyping_images || [],
-      servicePcbImages: settings.service_pcb_images || [],
-      serviceAiImages: settings.service_ai_images || [],
-      serviceStemImages: settings.service_stem_images || [],
-      serviceHomeImages: settings.service_home_images || [],
-      serviceImageRotationTime: settings.service_image_rotation_time || 5,
-      // Legacy single image support
-      serviceRetailImage: settings.service_retail_image || '',
-      servicePrototypingImage: settings.service_prototyping_image || '',
-      servicePcbImage: settings.service_pcb_image || '',
-      serviceAiImage: settings.service_ai_image || '',
-      serviceStemImage: settings.service_stem_image || '',
-      websiteUrl: settings.website_url || 'https://honic-co.com',
-      contactEmail: settings.contact_email || 'contact@honic-co.com',
-      contactPhone: settings.contact_phone || '+255 123 456 789',
-      address: settings.address || 'Dar es Salaam, Tanzania',
-      currency: settings.currency || 'TZS',
-      timezone: settings.timezone || 'Africa/Dar_es_Salaam',
-      language: settings.language || 'en',
-      theme: settings.theme || 'system',
-      primaryColor: settings.primary_color || '#3B82F6',
-      secondaryColor: settings.secondary_color || '#6B7280',
-      accentColor: settings.accent_color || '#F59E0B',
-      navTranslucent: settings.nav_translucent ?? true,
-      navOpacity: settings.nav_opacity || 0.95,
-      navTheme: settings.nav_theme || 'auto',
-      footerTheme: settings.footer_theme || 'dark',
-      footerColumns: settings.footer_columns || 5,
-      productsPerRowMobile: settings.products_per_row_mobile || 3,
-      productsPerRowTablet: settings.products_per_row_tablet || 4,
-      productsPerRowDesktop: settings.products_per_row_desktop || 5,
-      productCardSpacing: settings.product_card_spacing || 4,
-      productCardRadius: settings.product_card_radius || 0.5,
-      cartCompactMode: settings.cart_compact_mode ?? true,
-      cartItemSpacing: settings.cart_item_spacing || 0,
-      showClearCartButton: settings.show_clear_cart_button ?? false,
-      showSaveForLater: settings.show_save_for_later ?? true,
-      mobileNavHeight: settings.mobile_nav_height || 'h-4',
-      mobileFontSize: settings.mobile_font_size || 'text-xs',
-      mobileCategoryIconsSmall: settings.mobile_category_icons_small ?? true,
-      mobileFooterColumns: settings.mobile_footer_columns || 3,
-      notifications: settings.notifications || {
-        email: true,
-        sms: false,
-        push: true,
-        orderUpdates: true,
-        promotional: false,
-        securityAlerts: true
-      },
-      apiKeys: settings.api_keys || {
-        googleMaps: 'KNsu7C7EvTn1CgWdh03Af_3NGjs',
-        dpoPayment: 'your-dpo-api-key',
-        stripe: 'your-stripe-api-key',
-        emailService: '',
-        smsService: ''
-      },
-      security: settings.security || {
-        twoFactorAuth: false,
-        sessionTimeout: 30,
-        passwordPolicy: 'strong',
-        loginAttempts: 5,
-        lockoutDuration: 15
-      },
-      performance: settings.performance || {
-        cacheEnabled: true,
-        imageOptimization: true,
-        cdnEnabled: false,
-        lazyLoading: true,
-        preloadCritical: true
-      },
-      seo: settings.seo || {
-        metaTitle: 'honiccompanystore - Shopping',
-        metaDescription: 'Your trusted source for technology and innovation',
-        metaKeywords: 'technology, innovation, electronics, arduino',
-        ogImage: '/og-image.png',
-        favicon: '/favicon.ico'
-      },
-      socialLinks: settings.social_links || {
-        facebook: '',
-        instagram: '',
-        youtube: ''
-      },
-      paymentSettings: settings.payment_settings || {
-        defaultCurrency: 'TZS',
-        supportedCurrencies: ['TZS', 'USD', 'EUR'],
-        paymentMethods: ['card', 'mobile_money', 'bank_transfer'],
-        shippingCost: 5000
-      },
-      businessHours: settings.business_hours || {
-        monday: { open: '09:00', close: '18:00', closed: false },
-        tuesday: { open: '09:00', close: '18:00', closed: false },
-        wednesday: { open: '09:00', close: '18:00', closed: false },
-        thursday: { open: '09:00', close: '18:00', closed: false },
-        friday: { open: '09:00', close: '18:00', closed: false },
-        saturday: { open: '09:00', close: '16:00', closed: false },
-        sunday: { open: '10:00', close: '14:00', closed: false }
-      }
-    }
-    // debug removed
-    
-    return NextResponse.json(mappedSettings)
-
-  } catch (error) {
-    console.error('Error in admin settings GET:', error)
-    const message = String((error as any)?.message || '')
-    const isNetworkFailure =
-      message.includes('ENOTFOUND') ||
-      message.includes('fetch failed') ||
-      message.includes('getaddrinfo')
-
-    if (isNetworkFailure) {
-      // Serve the same safe defaults as above when Supabase is unreachable
-      return NextResponse.json({
-        companyName: 'honiccompanystore',
-        companyColor: '#3B82F6',
-        companyTagline: 'technology, innovation',
-        companyLogo: '/android-chrome-512x512.png',
-        mainHeadline: 'The leading B2B ecommerce platform for global trade',
-        heroBackgroundImage: '',
-        heroTaglineAlignment: 'left',
-        serviceRetailImage: '',
-        servicePrototypingImage: '',
-        servicePcbImage: '',
-        serviceAiImage: '',
-        serviceStemImage: '',
-        websiteUrl: 'https://honic-co.com',
-        contactEmail: 'contact@honic-co.com',
-        contactPhone: '+255 123 456 789',
-        address: 'Dar es Salaam, Tanzania',
-        currency: 'TZS',
-        timezone: 'Africa/Dar_es_Salaam',
-        language: 'en',
-        theme: 'system',
-        primaryColor: '#3B82F6',
-        secondaryColor: '#6B7280',
-        accentColor: '#F59E0B',
-        navTranslucent: true,
-        navOpacity: 0.95,
-        navTheme: 'auto',
-        footerTheme: 'dark',
-        footerColumns: 5,
-        productsPerRowMobile: 3,
-        productsPerRowTablet: 4,
-        productsPerRowDesktop: 5,
-        productCardSpacing: 4,
-        productCardRadius: 0.5,
-        cartCompactMode: true,
-        cartItemSpacing: 0,
-        showClearCartButton: false,
-        showSaveForLater: true,
-        mobileNavHeight: 'h-4',
-        mobileFontSize: 'text-xs',
-        mobileCategoryIconsSmall: true,
-        mobileFooterColumns: 3,
-        notifications: {
-          email: true,
-          sms: false,
-          push: true,
-          orderUpdates: true,
-          promotional: false,
-          securityAlerts: true
-        },
-        apiKeys: {
-          googleMaps: 'KNsu7C7EvTn1CgWdh03Af_3NGjs',
-          dpoPayment: 'your-dpo-api-key',
-          stripe: 'your-stripe-api-key',
-          emailService: '',
-          smsService: ''
-        },
-        security: {
-          twoFactorAuth: false,
-          sessionTimeout: 30,
-          passwordPolicy: 'strong',
-          loginAttempts: 5,
-          lockoutDuration: 15
-        },
-        performance: {
-          cacheEnabled: true,
-          imageOptimization: true,
-          cdnEnabled: false,
-          lazyLoading: true,
-          preloadCritical: true
-        },
-        seo: {
-          metaTitle: 'honiccompanystore - Shopping',
-          metaDescription: 'Your trusted source for technology and innovation',
-          metaKeywords: 'technology, innovation, electronics, arduino',
-          ogImage: '/og-image.png',
-          favicon: '/favicon.ico'
-        },
-        socialLinks: {
-          facebook: '',
-          instagram: '',
-          youtube: ''
-        },
-        paymentSettings: {
-          defaultCurrency: 'TZS',
-          supportedCurrencies: ['TZS', 'USD', 'EUR'],
-          paymentMethods: ['card', 'mobile_money', 'bank_transfer'],
-          shippingCost: 5000
-        },
-        businessHours: {
-          monday: { open: '09:00', close: '18:00', closed: false },
-          tuesday: { open: '09:00', close: '18:00', closed: false },
-          wednesday: { open: '09:00', close: '18:00', closed: false },
-          thursday: { open: '09:00', close: '18:00', closed: false },
-          friday: { open: '09:00', close: '18:00', closed: false },
-          saturday: { open: '09:00', close: '16:00', closed: false },
-          sunday: { open: '10:00', close: '14:00', closed: false }
-        }
-      })
-    }
-
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+// SECURITY: Helper function to return only boolean flags for API keys (never actual keys)
+function getApiKeysStatus() {
+  return {
+    googleMaps: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '', // Only public key can be returned
+    // Server-side keys are never exposed - only boolean flags
+    dpoPaymentConfigured: !!process.env.DPO_PAYMENT_API_KEY,
+    stripeConfigured: !!process.env.STRIPE_API_KEY,
+    emailServiceConfigured: !!process.env.EMAIL_SERVICE_API_KEY,
+    smsServiceConfigured: !!process.env.SMS_SERVICE_API_KEY
   }
 }
 
+export async function GET(request: NextRequest) {
+  return performanceMonitor.measure('admin_settings_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/settings',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Check cache
+      const cacheKey = 'admin_settings_all'
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            'X-Cache': 'HIT',
+            'Cache-Control': 'private, max-age=300' // 5 minutes cache
+          }
+        })
+      }
+
+      // Validate admin access
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        // Don't try to read the response body - it will be consumed by the return
+        // Just log the status code and return the error response
+        const errorMessage = authError.status === 403 
+          ? 'Admin privileges required' 
+          : authError.status === 401 
+          ? 'Authentication required'
+          : 'Admin authentication failed'
+        
+        // Only log non-403 errors (403 is expected for non-admin users)
+        if (authError.status !== 403) {
+          logError(new Error(errorMessage), {
+            userId: user?.id,
+            action: 'admin_settings_get',
+            endpoint: '/api/admin/settings',
+            authErrorStatus: authError.status,
+            authErrorStatusText: authError.statusText
+          })
+        }
+        return authError
+      }
+
+      // Create Supabase client
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            get(name: string) {
+              return request.cookies.get(name)?.value
+            },
+            set(name: string, value: string, options: any) {
+              // This will be handled by the response
+            },
+            remove(name: string, options: any) {
+              // This will be handled by the response
+            },
+          },
+        }
+      )
+
+      // Get admin settings from admin_settings table
+      
+      const { data: settings, error: settingsError } = await supabase
+        .from('admin_settings')
+        .select('*')
+        .eq('id', 1)
+        .single()
+
+      if (settingsError) {
+        logError(settingsError, {
+          userId: user.id,
+          action: 'admin_settings_get',
+          endpoint: '/api/admin/settings'
+        })
+        // Return default settings if no settings exist or table doesn't exist
+        const defaultSettings = {
+          companyName: 'honiccompanystore',
+          companyColor: '#3B82F6',
+          companyTagline: 'technology, innovation',
+          companyLogo: '/android-chrome-512x512.png',
+          mainHeadline: 'The leading B2B ecommerce platform for global trade',
+          heroBackgroundImage: '',
+          heroTaglineAlignment: 'left',
+          serviceRetailImage: '',
+          servicePrototypingImage: '',
+          servicePcbImage: '',
+          serviceAiImage: '',
+          serviceStemImage: '',
+          websiteUrl: process.env.NEXT_PUBLIC_WEBSITE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://honic-co.com',
+          contactEmail: process.env.CONTACT_EMAIL || 'contact@honic-co.com',
+          contactPhone: '+255 123 456 789',
+          address: 'Dar es Salaam, Tanzania',
+          currency: 'TZS',
+          timezone: 'Africa/Dar_es_Salaam',
+          language: 'en',
+          theme: 'system',
+          primaryColor: '#3B82F6',
+          secondaryColor: '#6B7280',
+          accentColor: '#F59E0B',
+          navTranslucent: true,
+          navOpacity: 0.95,
+          navTheme: 'auto',
+          footerTheme: 'dark',
+          footerColumns: 5,
+          productsPerRowMobile: 3,
+          productsPerRowTablet: 4,
+          productsPerRowDesktop: 5,
+          productCardSpacing: 4,
+          productCardRadius: 0.5,
+          cartCompactMode: true,
+          cartItemSpacing: 0,
+          showClearCartButton: false,
+          showSaveForLater: true,
+          mobileNavHeight: 'h-4',
+          mobileFontSize: 'text-xs',
+          mobileCategoryIconsSmall: true,
+          mobileFooterColumns: 3,
+          notifications: {
+            email: true,
+            sms: false,
+            push: true,
+            orderUpdates: true,
+            promotional: false,
+            securityAlerts: true
+          },
+          apiKeys: getApiKeysStatus(),
+          security: {
+            twoFactorAuth: false,
+            sessionTimeout: 30,
+            passwordPolicy: 'strong',
+            loginAttempts: 5,
+            lockoutDuration: 15
+          },
+          performance: {
+            cacheEnabled: true,
+            imageOptimization: true,
+            cdnEnabled: false,
+            lazyLoading: true,
+            preloadCritical: true
+          },
+          seo: {
+            metaTitle: 'honiccompanystore - Shopping',
+            metaDescription: 'Your trusted source for technology and innovation',
+            metaKeywords: 'technology, innovation, electronics, arduino',
+            ogImage: '/og-image.png',
+            favicon: '/favicon.ico'
+          },
+          socialLinks: {
+            facebook: '',
+            instagram: '',
+            youtube: ''
+          },
+          paymentSettings: {
+            defaultCurrency: 'TZS',
+            supportedCurrencies: ['TZS', 'USD', 'EUR'],
+            paymentMethods: ['card', 'mobile_money', 'bank_transfer'],
+            shippingCost: 5000
+          },
+          businessHours: {
+            monday: { open: '09:00', close: '18:00', closed: false },
+            tuesday: { open: '09:00', close: '18:00', closed: false },
+            wednesday: { open: '09:00', close: '18:00', closed: false },
+            thursday: { open: '09:00', close: '18:00', closed: false },
+            friday: { open: '09:00', close: '18:00', closed: false },
+            saturday: { open: '09:00', close: '16:00', closed: false },
+            sunday: { open: '10:00', close: '14:00', closed: false }
+          }
+        }
+
+        // Cache default settings
+        setCachedData(cacheKey, defaultSettings, 300000)
+
+        return NextResponse.json(defaultSettings, {
+          headers: {
+            'X-Cache': 'MISS',
+            'Cache-Control': 'private, max-age=300'
+          }
+        })
+      }
+
+      // Map database fields to API response format (see mappedSettings below)
+      
+      const mappedSettings = {
+        companyName: settings.company_name || 'honiccompanystore',
+        companyColor: settings.company_color || '#3B82F6',
+        companyTagline: settings.company_tagline || 'technology, innovation',
+        companyLogo: settings.company_logo || '/android-chrome-512x512.png',
+        mainHeadline: settings.main_headline || 'The leading B2B ecommerce platform for global trade',
+        heroBackgroundImage: settings.hero_background_image || '',
+        heroTaglineAlignment: settings.hero_tagline_alignment || 'left',
+        serviceRetailImages: settings.service_retail_images || [],
+        servicePrototypingImages: settings.service_prototyping_images || [],
+        servicePcbImages: settings.service_pcb_images || [],
+        serviceAiImages: settings.service_ai_images || [],
+        serviceStemImages: settings.service_stem_images || [],
+        serviceHomeImages: settings.service_home_images || [],
+        serviceImageRotationTime: settings.service_image_rotation_time || 5,
+        // Legacy single image support
+        serviceRetailImage: settings.service_retail_image || '',
+        servicePrototypingImage: settings.service_prototyping_image || '',
+        servicePcbImage: settings.service_pcb_image || '',
+        serviceAiImage: settings.service_ai_image || '',
+        serviceStemImage: settings.service_stem_image || '',
+        websiteUrl: settings.website_url || process.env.NEXT_PUBLIC_WEBSITE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://honic-co.com',
+        contactEmail: settings.contact_email || 'contact@honic-co.com',
+        contactPhone: settings.contact_phone || '+255 123 456 789',
+        address: settings.address || 'Dar es Salaam, Tanzania',
+        currency: settings.currency || 'TZS',
+        timezone: settings.timezone || 'Africa/Dar_es_Salaam',
+        language: settings.language || 'en',
+        theme: settings.theme || 'system',
+        primaryColor: settings.primary_color || '#3B82F6',
+        secondaryColor: settings.secondary_color || '#6B7280',
+        accentColor: settings.accent_color || '#F59E0B',
+        navTranslucent: settings.nav_translucent ?? true,
+        navOpacity: settings.nav_opacity || 0.95,
+        navTheme: settings.nav_theme || 'auto',
+        footerTheme: settings.footer_theme || 'dark',
+        footerColumns: settings.footer_columns || 5,
+        productsPerRowMobile: settings.products_per_row_mobile || 3,
+        productsPerRowTablet: settings.products_per_row_tablet || 4,
+        productsPerRowDesktop: settings.products_per_row_desktop || 5,
+        productCardSpacing: settings.product_card_spacing || 4,
+        productCardRadius: settings.product_card_radius || 0.5,
+        cartCompactMode: settings.cart_compact_mode ?? true,
+        cartItemSpacing: settings.cart_item_spacing || 0,
+        showClearCartButton: settings.show_clear_cart_button ?? false,
+        showSaveForLater: settings.show_save_for_later ?? true,
+        mobileNavHeight: settings.mobile_nav_height || 'h-4',
+        mobileFontSize: settings.mobile_font_size || 'text-xs',
+        mobileCategoryIconsSmall: settings.mobile_category_icons_small ?? true,
+        mobileFooterColumns: settings.mobile_footer_columns || 3,
+        notifications: settings.notifications || {
+          email: true,
+          sms: false,
+          push: true,
+          orderUpdates: true,
+          promotional: false,
+          securityAlerts: true
+        },
+        // SECURITY: Never return actual API keys. Only return status flags.
+        // If settings.api_keys exists, merge with current status but never expose actual keys
+        apiKeys: settings.api_keys ? {
+          ...getApiKeysStatus(),
+          // Preserve googleMaps if it was set in database (it's public anyway)
+          googleMaps: (settings.api_keys as any)?.googleMaps || getApiKeysStatus().googleMaps
+        } : getApiKeysStatus(),
+        security: settings.security || {
+          twoFactorAuth: false,
+          sessionTimeout: 30,
+          passwordPolicy: 'strong',
+          loginAttempts: 5,
+          lockoutDuration: 15
+        },
+        performance: settings.performance || {
+          cacheEnabled: true,
+          imageOptimization: true,
+          cdnEnabled: false,
+          lazyLoading: true,
+          preloadCritical: true
+        },
+        seo: settings.seo || {
+          metaTitle: 'honiccompanystore - Shopping',
+          metaDescription: 'Your trusted source for technology and innovation',
+          metaKeywords: 'technology, innovation, electronics, arduino',
+          ogImage: '/og-image.png',
+          favicon: '/favicon.ico'
+        },
+        socialLinks: settings.social_links || {
+          facebook: '',
+          instagram: '',
+          youtube: ''
+        },
+        paymentSettings: settings.payment_settings || {
+          defaultCurrency: 'TZS',
+          supportedCurrencies: ['TZS', 'USD', 'EUR'],
+          paymentMethods: ['card', 'mobile_money', 'bank_transfer'],
+          shippingCost: 5000
+        },
+        businessHours: settings.business_hours || {
+          monday: { open: '09:00', close: '18:00', closed: false },
+          tuesday: { open: '09:00', close: '18:00', closed: false },
+          wednesday: { open: '09:00', close: '18:00', closed: false },
+          thursday: { open: '09:00', close: '18:00', closed: false },
+          friday: { open: '09:00', close: '18:00', closed: false },
+          saturday: { open: '09:00', close: '16:00', closed: false },
+          sunday: { open: '10:00', close: '14:00', closed: false }
+        }
+      }
+      // debug removed
+      
+      // Cache response (5 minutes TTL)
+      setCachedData(cacheKey, mappedSettings, 300000)
+
+      return NextResponse.json(mappedSettings, {
+        headers: {
+          'X-Cache': 'MISS',
+          'Cache-Control': 'private, max-age=300'
+        }
+      })
+
+    } catch (error) {
+      logError(error, {
+        action: 'admin_settings_get',
+        endpoint: '/api/admin/settings'
+      })
+      
+      const message = String((error as any)?.message || '')
+      const isNetworkFailure =
+        message.includes('ENOTFOUND') ||
+        message.includes('fetch failed') ||
+        message.includes('getaddrinfo')
+
+      if (isNetworkFailure) {
+        // Serve the same safe defaults as above when Supabase is unreachable
+        return NextResponse.json({
+          companyName: 'honiccompanystore',
+          companyColor: '#3B82F6',
+          companyTagline: 'technology, innovation',
+          companyLogo: '/android-chrome-512x512.png',
+          mainHeadline: 'The leading B2B ecommerce platform for global trade',
+          heroBackgroundImage: '',
+          heroTaglineAlignment: 'left',
+          serviceRetailImage: '',
+          servicePrototypingImage: '',
+          servicePcbImage: '',
+          serviceAiImage: '',
+          serviceStemImage: '',
+          websiteUrl: process.env.NEXT_PUBLIC_WEBSITE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://honic-co.com',
+          contactEmail: process.env.CONTACT_EMAIL || 'contact@honic-co.com',
+          contactPhone: '+255 123 456 789',
+          address: 'Dar es Salaam, Tanzania',
+          currency: 'TZS',
+          timezone: 'Africa/Dar_es_Salaam',
+          language: 'en',
+          theme: 'system',
+          primaryColor: '#3B82F6',
+          secondaryColor: '#6B7280',
+          accentColor: '#F59E0B',
+          navTranslucent: true,
+          navOpacity: 0.95,
+          navTheme: 'auto',
+          footerTheme: 'dark',
+          footerColumns: 5,
+          productsPerRowMobile: 3,
+          productsPerRowTablet: 4,
+          productsPerRowDesktop: 5,
+          productCardSpacing: 4,
+          productCardRadius: 0.5,
+          cartCompactMode: true,
+          cartItemSpacing: 0,
+          showClearCartButton: false,
+          showSaveForLater: true,
+          mobileNavHeight: 'h-4',
+          mobileFontSize: 'text-xs',
+          mobileCategoryIconsSmall: true,
+          mobileFooterColumns: 3,
+          notifications: {
+            email: true,
+            sms: false,
+            push: true,
+            orderUpdates: true,
+            promotional: false,
+            securityAlerts: true
+          },
+          apiKeys: getApiKeysStatus(),
+          security: {
+            twoFactorAuth: false,
+            sessionTimeout: 30,
+            passwordPolicy: 'strong',
+            loginAttempts: 5,
+            lockoutDuration: 15
+          },
+          performance: {
+            cacheEnabled: true,
+            imageOptimization: true,
+            cdnEnabled: false,
+            lazyLoading: true,
+            preloadCritical: true
+          },
+          seo: {
+            metaTitle: 'honiccompanystore - Shopping',
+            metaDescription: 'Your trusted source for technology and innovation',
+            metaKeywords: 'technology, innovation, electronics, arduino',
+            ogImage: '/og-image.png',
+            favicon: '/favicon.ico'
+          },
+          socialLinks: {
+            facebook: '',
+            instagram: '',
+            youtube: ''
+          },
+          paymentSettings: {
+            defaultCurrency: 'TZS',
+            supportedCurrencies: ['TZS', 'USD', 'EUR'],
+            paymentMethods: ['card', 'mobile_money', 'bank_transfer'],
+            shippingCost: 5000
+          },
+          businessHours: {
+            monday: { open: '09:00', close: '18:00', closed: false },
+            tuesday: { open: '09:00', close: '18:00', closed: false },
+            wednesday: { open: '09:00', close: '18:00', closed: false },
+            thursday: { open: '09:00', close: '18:00', closed: false },
+            friday: { open: '09:00', close: '18:00', closed: false },
+            saturday: { open: '09:00', close: '16:00', closed: false },
+            sunday: { open: '10:00', close: '14:00', closed: false }
+          }
+        })
+      }
+
+      return createErrorResponse(error, 500)
+    }
+  })
+}
+
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
+  return performanceMonitor.measure('admin_settings_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/settings',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Validate admin access
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        // Don't try to read the response body - it will be consumed by the return
+        // Just log the status code and return the error response
+        const errorMessage = authError.status === 403 
+          ? 'Admin privileges required' 
+          : authError.status === 401 
+          ? 'Authentication required'
+          : 'Admin authentication failed'
+        
+        // Only log non-403 errors (403 is expected for non-admin users)
+        if (authError.status !== 403) {
+          logError(new Error(errorMessage), {
+            userId: user?.id,
+            action: 'admin_settings_post',
+            endpoint: '/api/admin/settings',
+            authErrorStatus: authError.status,
+            authErrorStatusText: authError.statusText
+          })
+        }
+        return authError
+      }
+
+      const body = await request.json()
     
     // Validate input
     let validatedData
@@ -516,8 +645,8 @@ export async function POST(request: NextRequest) {
       validatedData = adminSettingsSchema.parse(body)
       logger.log('✅ Validation passed')
     } catch (validationError) {
-      console.error('❌ Validation error:', validationError)
-      console.error('❌ Request body:', JSON.stringify(body, null, 2))
+      logger.error('Validation error:', validationError)
+      logger.error('Request body:', JSON.stringify(body, null, 2))
       return NextResponse.json({ 
         error: 'Validation failed', 
         details: validationError instanceof Error ? validationError.message : 'Unknown validation error',
@@ -649,7 +778,23 @@ export async function POST(request: NextRequest) {
     if (validatedData.mobileCategoryIconsSmall !== undefined) dbData.mobile_category_icons_small = validatedData.mobileCategoryIconsSmall
     if (validatedData.mobileFooterColumns !== undefined) dbData.mobile_footer_columns = validatedData.mobileFooterColumns
     if (validatedData.notifications !== undefined) dbData.notifications = validatedData.notifications
-    if (validatedData.apiKeys !== undefined) dbData.api_keys = validatedData.apiKeys
+    // SECURITY: Only allow updating public API keys (googleMaps) and boolean flags
+    // Never allow saving server-side API keys (DPO, Stripe, Email, SMS)
+    if (validatedData.apiKeys !== undefined) {
+      const safeApiKeys: any = {}
+      // Only allow updating googleMaps (public key)
+      if ((validatedData.apiKeys as any)?.googleMaps !== undefined) {
+        safeApiKeys.googleMaps = (validatedData.apiKeys as any).googleMaps
+      }
+      // Preserve boolean flags but never allow setting them to true if keys don't exist
+      // These are read-only and determined by environment variables
+      const currentStatus = getApiKeysStatus()
+      safeApiKeys.dpoPaymentConfigured = currentStatus.dpoPaymentConfigured
+      safeApiKeys.stripeConfigured = currentStatus.stripeConfigured
+      safeApiKeys.emailServiceConfigured = currentStatus.emailServiceConfigured
+      safeApiKeys.smsServiceConfigured = currentStatus.smsServiceConfigured
+      dbData.api_keys = safeApiKeys
+    }
     if (validatedData.security !== undefined) dbData.security = validatedData.security
     if (validatedData.performance !== undefined) dbData.performance = validatedData.performance
     if (validatedData.seo !== undefined) dbData.seo = validatedData.seo
@@ -685,18 +830,14 @@ export async function POST(request: NextRequest) {
       updateError = upsertError
     }
 
-    if (updateError) {
-      console.error('❌ [Admin Settings API] Database update error:', updateError)
-      console.error('❌ [Admin Settings API] Error details:', JSON.stringify(updateError, null, 2))
-      return NextResponse.json(
-        { 
-          error: 'Failed to update admin settings',
-          details: updateError.message || 'Unknown database error',
-          code: updateError.code || 'UNKNOWN'
-        },
-        { status: 500 }
-      )
-    }
+      if (updateError) {
+        logError(updateError, {
+          userId: user.id,
+          action: 'admin_settings_post',
+          endpoint: '/api/admin/settings'
+        })
+        return createErrorResponse(updateError, 500)
+      }
 
     
 
@@ -708,35 +849,44 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (verifyError) {
-      console.error('⚠️ [Admin Settings API] Verification select failed:', verifyError)
+      logger.warn('Verification select failed:', verifyError)
     } else {
       
       if (dbData.hero_background_image && verifyRow?.hero_background_image !== dbData.hero_background_image) {
-        console.warn('⚠️ [Admin Settings API] Mismatch after update:', {
+        logger.warn('Mismatch after update:', {
           attempted: dbData.hero_background_image,
           stored: verifyRow?.hero_background_image
         })
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Admin settings updated successfully',
-      heroBackgroundImage: verifyRow?.hero_background_image ?? dbData.hero_background_image
-    })
+      // Clear cache
+      setCachedData('admin_settings_all', null, 0)
 
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Invalid admin settings data', details: error.errors },
-        { status: 400 }
-      )
+      // Log admin action
+      logSecurityEvent('ADMIN_SETTINGS_UPDATED', user.id, {
+        endpoint: '/api/admin/settings'
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: 'Admin settings updated successfully',
+        heroBackgroundImage: verifyRow?.hero_background_image ?? dbData.hero_background_image
+      })
+
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return NextResponse.json(
+          { error: 'Invalid admin settings data', details: error.errors },
+          { status: 400 }
+        )
+      }
+
+      logError(error, {
+        action: 'admin_settings_post',
+        endpoint: '/api/admin/settings'
+      })
+      return createErrorResponse(error, 500)
     }
-
-    console.error('Error in admin settings POST:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
+  })
 }

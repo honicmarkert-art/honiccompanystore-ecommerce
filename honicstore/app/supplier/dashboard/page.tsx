@@ -107,8 +107,7 @@ function SupplierDashboardContent() {
     ]).catch(error => {
       // Ignore AbortError - it's expected when component unmounts or requests are cancelled
       if (error.name !== 'AbortError') {
-        console.error('Error loading dashboard data:', error)
-      }
+        }
     })
     
     // Cleanup: abort all pending requests when component unmounts or effect re-runs
@@ -134,8 +133,7 @@ function SupplierDashboardContent() {
         setPlanPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
-      console.error('Error fetching current plan:', error)
-    } finally {
+      } finally {
       setLoadingPlan(false)
     }
   }
@@ -192,8 +190,7 @@ function SupplierDashboardContent() {
     } catch (error: any) {
       // Ignore AbortError - it's expected when request is cancelled
       if (error.name !== 'AbortError' && !controller.signal.aborted) {
-        console.error('Error fetching dashboard stats:', error)
-      }
+        }
     } finally {
       // Only update loading state if request wasn't aborted
       if (!controller.signal.aborted) {
@@ -308,8 +305,7 @@ function SupplierDashboardContent() {
     } catch (error: any) {
       // Ignore AbortError - it's expected when request is cancelled
       if (error.name !== 'AbortError' && !controller.signal.aborted) {
-        console.error('Error fetching top products and orders:', error)
-      }
+        }
     } finally {
       // Only update loading state if request wasn't aborted
       if (!controller.signal.aborted) {

@@ -78,8 +78,19 @@ export function OptimizedLink({
     }
   }, [])
 
-  // Handle click with prefetch
+  // Handle click with prefetch and state saving
   const handleClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>) => {
+    // Save current page state before navigation
+    if (typeof window !== 'undefined') {
+      try {
+        const currentPath = window.location.pathname
+        const scrollKey = `scroll_${currentPath}`
+        sessionStorage.setItem(scrollKey, window.scrollY.toString())
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+
     // Ensure prefetch is complete before navigation
     if (!isPrefetched && (prefetch === 'always' || prefetch === true)) {
       e.preventDefault()

@@ -71,7 +71,6 @@ export async function GET(request: NextRequest) {
     const { data: products, error } = await query
 
     if (error) {
-      console.error('Error fetching products by category:', error)
       return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 })
     }
 
@@ -90,7 +89,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error in products by category API:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

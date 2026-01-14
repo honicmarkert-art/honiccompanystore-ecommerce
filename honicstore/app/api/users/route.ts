@@ -14,7 +14,6 @@ export async function GET() {
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Error fetching users:', error)
       return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 })
     }
 
@@ -33,7 +32,6 @@ export async function GET() {
 
     return NextResponse.json(transformedUsers)
   } catch (error) {
-    console.error('Error reading users:', error)
     return NextResponse.json({ error: 'Failed to read users' }, { status: 500 })
   }
 }
@@ -59,7 +57,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Error adding user:', error)
       return NextResponse.json({ error: 'Failed to add user' }, { status: 500 })
     }
 
@@ -78,7 +75,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(transformedUser, { status: 201 })
   } catch (error) {
-    console.error('Error adding user:', error)
     return NextResponse.json({ error: 'Failed to add user' }, { status: 500 })
   }
 }
@@ -104,7 +100,6 @@ export async function PUT(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Error updating user:', error)
       return NextResponse.json({ error: 'Failed to update user' }, { status: 500 })
     }
 
@@ -127,7 +122,6 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json(transformedUser)
   } catch (error) {
-    console.error('Error updating user:', error)
     return NextResponse.json({ error: 'Failed to update user' }, { status: 500 })
   }
 }
@@ -148,13 +142,11 @@ export async function DELETE(request: NextRequest) {
       .eq('id', id)
 
     if (error) {
-      console.error('Error deleting user:', error)
       return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Error deleting user:', error)
     return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 })
   }
 } 

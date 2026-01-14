@@ -43,7 +43,6 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Error validating OTP:', error)
     return NextResponse.json(
       { error: 'Failed to validate OTP' },
       { status: 500 }

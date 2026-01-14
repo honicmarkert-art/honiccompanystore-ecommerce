@@ -33,17 +33,19 @@ export function InfiniteScrollTrigger({
     const element = elementRef.current
     if (!element || !hasMore || loading) return
 
-    // Create new observer
+    // Create observer with aggressive early detection - triggers after ~3 scrolls (2000px)
+    // This ensures products are fetched and displayed well before user reaches them
     observerRef.current = new IntersectionObserver(
       (entries) => {
         const [entry] = entries
+        // Trigger immediately when element enters detection zone - no delays
         if (entry.isIntersecting && hasMore && !loading) {
           onLoadMore()
         }
       },
       {
-        rootMargin: '200px', // Trigger earlier for smoother experience
-        threshold: 0.1
+        rootMargin: '2000px', // Aggressive: Triggers 2000px (~3 viewport heights) before bottom
+        threshold: 0.01 // Triggers when just 1% of trigger element enters detection zone
       }
     )
 
@@ -61,10 +63,10 @@ export function InfiniteScrollTrigger({
     <div className="w-full">
       {children}
       
-      {/* Loading skeleton */}
-      {loading && (
+      {/* Loading skeleton - only show for load-more (when children exist means we already have products) */}
+      {loading && children && (
         <div className="pt-4">
-          <ProductGridSkeleton count={24} />
+          <ProductGridSkeleton count={20} />
         </div>
       )}
       

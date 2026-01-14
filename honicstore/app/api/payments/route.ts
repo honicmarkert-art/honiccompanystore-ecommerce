@@ -35,7 +35,6 @@ export async function POST(request: NextRequest) {
     const { data: user, error: authError } = await userSupabase.auth.getUser()
     
     if (authError || !user?.user) {
-      console.error('Authentication failed:', authError)
       return NextResponse.json(
         { error: 'Authentication failed' },
         { status: 401 }
@@ -89,7 +88,6 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.user.id)
 
     if (updateError) {
-      console.error('Failed to update order:', updateError)
       return NextResponse.json(
         { error: 'Payment processed but failed to update order' },
         { status: 500 }
@@ -110,7 +108,6 @@ export async function POST(request: NextRequest) {
       })
 
     if (logError) {
-      console.error('Failed to log payment transaction:', logError)
       // Don't fail the request, just log the error
     }
 
@@ -120,7 +117,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Payment processing error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -157,7 +153,6 @@ export async function GET(request: NextRequest) {
     const { data: user, error: authError } = await userSupabase.auth.getUser()
     
     if (authError || !user?.user) {
-      console.error('Authentication failed:', authError)
       return NextResponse.json(
         { error: 'Authentication failed' },
         { status: 401 }
@@ -175,7 +170,6 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false })
 
     if (paymentsError) {
-      console.error('Failed to fetch payments:', paymentsError)
       return NextResponse.json(
         { error: 'Failed to fetch payment history' },
         { status: 500 }
@@ -188,7 +182,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Payments fetch error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

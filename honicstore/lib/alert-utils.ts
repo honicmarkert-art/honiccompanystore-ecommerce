@@ -31,7 +31,6 @@ export const showAlert = (type: 'success' | 'error' | 'warning' | 'info', messag
     globalAlertHandler(alertConfig)
   } else {
     // Fallback to browser alert if no handler is set
-    console.warn('No alert handler set, falling back to browser alert')
     window.alert(`${title ? title + ': ' : ''}${message}`)
   }
 }

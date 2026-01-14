@@ -3,23 +3,64 @@ import { validateAdminAccess } from '@/lib/admin-auth'
 import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 import { sendAbandonedCartEmail } from '@/lib/user-email-service'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData } from '@/lib/database-optimization'
+import { logError, createErrorResponse } from '@/lib/error-handler'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 // GET /api/admin/emails/abandoned-carts - Get abandoned carts
 export async function GET(request: NextRequest) {
-  try {
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_emails_abandoned_carts_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/emails/abandoned-carts',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
 
-    const supabase = createAdminSupabaseClient()
-    const { searchParams } = new URL(request.url)
-    const limit = parseInt(searchParams.get('limit') || '50')
-    const offset = parseInt(searchParams.get('offset') || '0')
-    const recovered = searchParams.get('recovered') === 'true'
+      const { searchParams } = new URL(request.url)
+      const limit = parseInt(searchParams.get('limit') || '50')
+      const offset = parseInt(searchParams.get('offset') || '0')
+      const recovered = searchParams.get('recovered') === 'true'
+
+      // Generate cache key
+      const cacheKey = `admin_abandoned_carts_${limit}_${offset}_${recovered}`
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            'X-Cache': 'HIT',
+            'Cache-Control': 'private, max-age=60' // 1 minute cache
+          }
+        })
+      }
+
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_emails_abandoned_carts_get',
+          endpoint: '/api/admin/emails/abandoned-carts'
+        })
+        return authError
+      }
+
+      const supabase = createAdminSupabaseClient()
 
     let query = supabase
       .from('abandoned_carts')
@@ -33,10 +74,14 @@ export async function GET(request: NextRequest) {
 
     const { data: carts, error, count } = await query
 
-    if (error) {
-      logger.error('Error fetching abandoned carts:', error)
-      return NextResponse.json({ error: 'Failed to fetch abandoned carts' }, { status: 500 })
-    }
+      if (error) {
+        logError(error, {
+          userId: user.id,
+          action: 'admin_emails_abandoned_carts_get',
+          endpoint: '/api/admin/emails/abandoned-carts'
+        })
+        return createErrorResponse(error, 500)
+      }
 
     // Get user emails for carts with user_id
     const userIds = [...new Set((carts || []).map((c: any) => c.user_id).filter(Boolean))]
@@ -53,33 +98,71 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const enrichedCarts = (carts || []).map((cart: any) => ({
-      ...cart,
-      user_email: cart.user_id ? userEmails[cart.user_id] : null
-    }))
+      const enrichedCarts = (carts || []).map((cart: any) => ({
+        ...cart,
+        user_email: cart.user_id ? userEmails[cart.user_id] : null
+      }))
 
-    return NextResponse.json({
-      carts: enrichedCarts,
-      pagination: {
-        limit,
-        offset,
-        total: count || 0
+      const responseData = {
+        carts: enrichedCarts,
+        pagination: {
+          limit,
+          offset,
+          total: count || 0
+        }
       }
-    })
 
-  } catch (error: any) {
-    logger.error('Error in abandoned carts GET:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
+      // Cache response (1 minute TTL)
+      setCachedData(cacheKey, responseData, 60000)
+
+      return NextResponse.json(responseData, {
+        headers: {
+          'X-Cache': 'MISS',
+          'Cache-Control': 'private, max-age=60'
+        }
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        action: 'admin_emails_abandoned_carts_get',
+        endpoint: '/api/admin/emails/abandoned-carts'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 // POST /api/admin/emails/abandoned-carts/send - Send abandoned cart emails
 export async function POST(request: NextRequest) {
-  try {
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_emails_abandoned_carts_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/emails/abandoned-carts',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_emails_abandoned_carts_post',
+          endpoint: '/api/admin/emails/abandoned-carts'
+        })
+        return authError
+      }
 
     const supabase = createAdminSupabaseClient()
     const body = await request.json()
@@ -97,10 +180,14 @@ export async function POST(request: NextRequest) {
       .in('id', cartIdsToProcess)
       .eq('recovered', false)
 
-    if (fetchError) {
-      logger.error('Error fetching carts:', fetchError)
-      return NextResponse.json({ error: 'Failed to fetch carts' }, { status: 500 })
-    }
+      if (fetchError) {
+        logError(fetchError, {
+          userId: user.id,
+          action: 'admin_emails_abandoned_carts_post',
+          endpoint: '/api/admin/emails/abandoned-carts'
+        })
+        return createErrorResponse(fetchError, 500)
+      }
 
     const results = []
     for (const cart of carts || []) {
@@ -139,6 +226,9 @@ export async function POST(request: NextRequest) {
         const items = cartData.items || []
         const total = cart.total_amount || cartData.total || 0
 
+        // Import buildUrl for URL generation
+        const { buildUrl } = await import('@/lib/url-utils')
+
         // Send email
         const emailResult = await sendAbandonedCartEmail(userEmail, {
           items: items.map((item: any) => ({
@@ -148,7 +238,7 @@ export async function POST(request: NextRequest) {
             image: item.product?.image || item.image
           })),
           total,
-          cartUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/cart`
+          cartUrl: buildUrl('/cart')
         })
 
         if (emailResult.success) {
@@ -185,17 +275,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      results,
-      sent: results.filter(r => r.success).length,
-      failed: results.filter(r => !r.success).length
-    })
+      // Log admin action
+      logSecurityEvent('ABANDONED_CART_EMAILS_SENT', user.id, {
+        cartCount: cartIdsToProcess.length,
+        sent: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        endpoint: '/api/admin/emails/abandoned-carts'
+      })
 
-  } catch (error: any) {
-    logger.error('Error in abandoned carts send POST:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
+      // Clear cache
+      setCachedData(`admin_abandoned_carts_*`, null, 0) // Invalidate all abandoned cart caches
+
+      return NextResponse.json({
+        success: true,
+        results,
+        sent: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        action: 'admin_emails_abandoned_carts_post',
+        endpoint: '/api/admin/emails/abandoned-carts'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 

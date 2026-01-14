@@ -282,7 +282,6 @@ export async function GET(request: NextRequest) {
     const { data: products, error, count } = await query
 
     if (error) {
-      console.error('Error fetching supplier products:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to fetch products' },
         { status: 500 }
@@ -321,7 +320,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Supplier products GET error:', error)
     // Security: Sanitize error messages in production
     const isProduction = process.env.NODE_ENV === 'production'
     const errorMessage = isProduction 
@@ -563,7 +561,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Error creating product:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to create product: ' + error.message },
         { status: 500 }
@@ -593,7 +590,6 @@ export async function POST(request: NextRequest) {
         .insert(variantRecords)
 
       if (variantError) {
-        console.error('Error creating variants:', variantError)
         // Don't fail the entire request, but log the error
       }
     }
@@ -646,7 +642,6 @@ export async function POST(request: NextRequest) {
     }, { status: 201 })
 
   } catch (error) {
-    console.error('Supplier products POST error:', error)
     // Security: Sanitize error messages in production
     const isProduction = process.env.NODE_ENV === 'production'
     let errorMessage = 'An unexpected error occurred'

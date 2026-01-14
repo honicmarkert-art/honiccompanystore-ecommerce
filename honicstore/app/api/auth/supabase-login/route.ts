@@ -41,7 +41,6 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Supabase login error:', error)
     return NextResponse.json(
       { 
         success: false,

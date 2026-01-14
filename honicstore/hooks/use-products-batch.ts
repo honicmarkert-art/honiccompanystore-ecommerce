@@ -127,8 +127,7 @@ export function useProductsBatch(options: UseProductsBatchOptions = {}): UseProd
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch products'
       setError(errorMessage)
-      console.error('Batch products fetch error:', err)
-    } finally {
+      } finally {
       setIsLoading(false)
     }
   }, [enabled, batchSize, cacheTime, clearExpiredCache, getCacheKey])

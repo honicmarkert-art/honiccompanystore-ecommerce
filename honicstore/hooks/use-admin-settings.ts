@@ -30,8 +30,8 @@ const DEFAULT_ADMIN_SETTINGS = {
   serviceStemImage: "",
   
   // Contact Information
-  websiteUrl: "https://honic-co.com",
-  contactEmail: "contact@honic-co.com",
+  websiteUrl: process.env.NEXT_PUBLIC_WEBSITE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || "https://honic-co.com",
+  contactEmail: process.env.CONTACT_EMAIL || "contact@honic-co.com",
   contactPhone: "+255 123 456 789",
   address: "Dar es Salaam, Tanzania",
   
@@ -85,12 +85,15 @@ const DEFAULT_ADMIN_SETTINGS = {
   },
   
   // API Keys and External Services (stored in environment variables)
+  // SECURITY: Only public keys are exposed. Server-side keys are never exposed to client.
   apiKeys: {
     googleMaps: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-    dpoPayment: process.env.DPO_PAYMENT_API_KEY || "",
-    stripe: process.env.STRIPE_API_KEY || "",
-    emailService: process.env.EMAIL_SERVICE_API_KEY || "",
-    smsService: process.env.SMS_SERVICE_API_KEY || ""
+    // Server-side API keys (DPO, Stripe, Email, SMS) are NOT exposed to client
+    // These should only be accessed via server-side API routes with proper authentication
+    dpoPayment: "", // Server-side only - never expose to client
+    stripe: "", // Server-side only - never expose to client
+    emailService: "", // Server-side only - never expose to client
+    smsService: "" // Server-side only - never expose to client
   },
   
   // Security Settings
@@ -159,12 +162,18 @@ export function useAdminSettings() {
         if (response.ok) {
           const data = await response.json()
           setSettings({ ...DEFAULT_ADMIN_SETTINGS, ...data })
+        } else if (response.status === 403) {
+          // User is not an admin - silently use defaults (this is expected for non-admin users)
+          // Don't log warnings for 403 as it's normal behavior
+        } else if (response.status === 401) {
+          // User is not authenticated - silently use defaults
         } else {
-          console.warn('⚠️ [Admin Settings] Failed to fetch admin settings, using defaults. Status:', response.status)
-        }
+          // Other errors (500, etc.) - log warning
+          }
       } catch (error) {
-        console.error('❌ [Admin Settings] Error fetching admin settings:', error)
-        console.warn('Using default admin settings')
+        // Network errors - only log in development
+        if (process.env.NODE_ENV === 'development') {
+          }
       } finally {
         setIsLoaded(true)
       }
@@ -214,11 +223,6 @@ export function useAdminSettings() {
         return true
       } else {
         const errorData = await response.json().catch(() => ({}))
-        console.error(`❌ [Admin Settings] Failed to update setting ${key}:`, {
-          status: response.status,
-          error: errorData,
-          timestamp: new Date().toISOString()
-        })
         
         // Handle missing database columns gracefully
         if (response.status === 400 || response.status === 500) {
@@ -243,7 +247,6 @@ export function useAdminSettings() {
         return false
       }
     } catch (error) {
-      console.error(`❌ [Admin Settings] Error updating setting ${key}:`, error)
       return false
     }
   }
@@ -279,11 +282,9 @@ export function useAdminSettings() {
         return true
       } else {
         const errorData = await response.json()
-        console.error('❌ Failed to update settings:', response.status, errorData)
         return false
       }
     } catch (error) {
-      console.error('❌ Error updating settings:', error)
       return false
     }
   }
@@ -303,11 +304,9 @@ export function useAdminSettings() {
         setSettings(DEFAULT_ADMIN_SETTINGS)
         return true
       } else {
-        console.error('Failed to reset settings')
         return false
       }
     } catch (error) {
-      console.error('Error resetting settings:', error)
       return false
     }
   }

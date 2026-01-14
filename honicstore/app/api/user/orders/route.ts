@@ -77,15 +77,6 @@ export async function GET(request: NextRequest) {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
-    console.log('📦 [ORDERS API] Query result:', {
-      hasOrders: !!orders,
-      ordersCount: orders?.length,
-      hasError: !!ordersError,
-      errorCode: ordersError?.code,
-      errorMessage: ordersError?.message,
-      errorDetails: ordersError
-    })
-
     if (ordersError) {
       return NextResponse.json({ 
         error: 'Failed to fetch orders'

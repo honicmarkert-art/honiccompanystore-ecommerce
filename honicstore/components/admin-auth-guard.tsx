@@ -61,7 +61,6 @@ export function AdminAuthGuard({ children, fallback }: AdminAuthGuardProps) {
           })
         }
       } catch (error) {
-        console.error('Auth check error:', error)
         setAuthStatus({
           authenticated: false,
           isAdmin: false,

@@ -9,11 +9,10 @@ export async function GET(
 ) {
   try {
     const { id: productId } = await params
-    
+
     if (!productId || isNaN(Number(productId))) {
       return createErrorResponse('Invalid product ID', 400)
     }
-
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -27,10 +26,8 @@ export async function GET(
       .single()
 
     if (error) {
-      console.error('Error fetching product sold count:', error)
       return createErrorResponse('Failed to fetch sold count', 500)
     }
-
     const soldCount = product?.sold_count || 0
     const buyersCount = product?.buyers_count || 0
 
@@ -41,8 +38,6 @@ export async function GET(
       cacheControl: 'public, s-maxage=300, stale-while-revalidate=600'
     })
   } catch (error: any) {
-    console.error('Error in GET /api/products/[id]/sold-count:', error)
     return createErrorResponse('Internal server error', 500)
   }
 }
-

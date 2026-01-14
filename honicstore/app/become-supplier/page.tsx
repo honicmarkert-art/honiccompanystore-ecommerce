@@ -117,8 +117,7 @@ export default function BecomeSupplierPage() {
           setPlans(data.plans)
         }
       } catch (error) {
-        console.error('Error fetching plans:', error)
-      } finally {
+        } finally {
         setLoading(false)
       }
     }
@@ -1034,7 +1033,6 @@ export default function BecomeSupplierPage() {
                   return
                 }
               } catch (error) {
-                console.error('Error checking email before submission:', error)
                 // Continue with submission if check fails (server will validate)
               }
 
@@ -1217,7 +1215,6 @@ export default function BecomeSupplierPage() {
                         setEmailExists(false)
                       }
                     } catch (error) {
-                      console.error('Error checking email:', error)
                       // Don't block user if check fails
                     } finally {
                       setCheckingEmail(false)

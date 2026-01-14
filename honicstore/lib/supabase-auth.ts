@@ -13,8 +13,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
     if (process.env.NODE_ENV === 'development') {
       throw new Error('Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL and/or NEXT_PUBLIC_SUPABASE_ANON_KEY')
     } else {
-      console.error('⚠️ SECURITY WARNING: Missing Supabase environment variables. Authentication will not work.')
-    }
+      }
   }
 }
 
@@ -255,7 +254,6 @@ export const supabaseAuth = {
       }
 
     } catch (error) {
-      console.error('Sign in error:', error)
       return {
         success: false,
         error: ERROR_MESSAGES.NETWORK_ERROR,
@@ -297,9 +295,10 @@ export const supabaseAuth = {
       // SECURITY: Validate environment variables
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 
                       process.env.NEXT_PUBLIC_APP_URL || 
-                      (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://honiccompanystore.com')
+                      (process.env.NODE_ENV === 'development' 
+                        ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` 
+                        : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://honiccompanystore.com'))
       if (!siteUrl) {
-        console.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
         return {
           success: false,
           error: 'Server configuration error. Please contact support.',
@@ -308,8 +307,6 @@ export const supabaseAuth = {
       }
       
       // Log the URL being used for debugging
-      console.log('🔗 Using site URL for email verification:', siteUrl)
-
       // Note: We don't check for existing users here as it requires admin privileges
       // Supabase will handle duplicate email validation automatically
 
@@ -338,8 +335,6 @@ export const supabaseAuth = {
       })
 
       if (error) {
-        console.error('Supabase signup error:', error)
-        
         // Handle email rate limit specifically
         if (error.status === 429 && error.code === 'over_email_send_rate_limit') {
           return {
@@ -435,24 +430,10 @@ export const supabaseAuth = {
         const now = new Date()
         const secondsSinceCreation = userCreatedAt ? (now.getTime() - userCreatedAt.getTime()) / 1000 : null
         
-        console.log('🔍 User creation verification:', {
-          email: sanitizedEmail,
-          userId: data.user.id,
-          createdAt: userCreatedAt?.toISOString(),
-          now: now.toISOString(),
-          secondsSinceCreation: secondsSinceCreation?.toFixed(2)
-        })
-        
         // SECURITY: If user was created more than 3 seconds ago, this is DEFINITELY an existing user
         // Supabase should have returned an error, but if it didn't, we MUST block this registration
         if (secondsSinceCreation !== null && secondsSinceCreation > 3) {
-          console.error('🚨 SECURITY ALERT: Registration blocked - existing user detected!', {
-            email: sanitizedEmail,
-            userId: data.user.id,
-            secondsSinceCreation: secondsSinceCreation.toFixed(2),
-            createdAt: userCreatedAt?.toISOString(),
-            now: now.toISOString()
-          })
+          // Security check: User appears to be existing, blocking registration
           return {
             success: false,
             error: ERROR_MESSAGES.EMAIL_ALREADY_EXISTS,
@@ -462,13 +443,7 @@ export const supabaseAuth = {
         
         // Additional security: If no session AND no email confirmation AND user seems old, block it
         if (!data.session && !data.user.email_confirmed_at && secondsSinceCreation !== null && secondsSinceCreation > 2) {
-          console.error('🚨 SECURITY: Suspicious registration attempt - blocking:', {
-            email: sanitizedEmail,
-            userId: data.user.id,
-            secondsSinceCreation: secondsSinceCreation.toFixed(2),
-            hasSession: !!data.session,
-            emailConfirmed: !!data.user.email_confirmed_at
-          })
+          // Security check: User appears to be existing without proper confirmation
           return {
             success: false,
             error: ERROR_MESSAGES.EMAIL_ALREADY_EXISTS,
@@ -477,15 +452,6 @@ export const supabaseAuth = {
         }
         
         // User is confirmed to be newly created (within 3 seconds)
-        console.log('✅ User verified as newly created:', {
-          userId: data.user.id,
-          email: sanitizedEmail,
-          secondsSinceCreation: secondsSinceCreation?.toFixed(2)
-        })
-        console.log('📧 Email confirmed at:', data.user.email_confirmed_at)
-        console.log('📧 Supabase will send verification email automatically')
-        console.log('📧 Customize email template in: Supabase Dashboard → Authentication → Email Templates → Confirm signup')
-        
         // SECURITY: Only use session if Supabase directly provided it
         // DO NOT attempt automatic sign-in - this was the security vulnerability
         // If Supabase didn't return a session, the user needs to verify their email first
@@ -510,7 +476,6 @@ export const supabaseAuth = {
       }
 
     } catch (error) {
-      console.error('Sign up error:', error)
       return {
         success: false,
         error: ERROR_MESSAGES.NETWORK_ERROR,
@@ -534,7 +499,6 @@ export const supabaseAuth = {
 
       return { success: true }
     } catch (error) {
-      console.error('Sign out error:', error)
       return {
         success: false,
         error: ERROR_MESSAGES.NETWORK_ERROR,
@@ -581,7 +545,6 @@ export const supabaseAuth = {
         }
       }
     } catch (error) {
-      console.error('Get current user error:', error)
       return {
         success: false,
         error: ERROR_MESSAGES.NETWORK_ERROR,
@@ -608,7 +571,6 @@ export const supabaseAuth = {
         data: { session }
       }
     } catch (error) {
-      console.error('Get current session error:', error)
       return {
         success: false,
         error: ERROR_MESSAGES.NETWORK_ERROR,
@@ -634,23 +596,15 @@ export const supabaseAuth = {
       if (typeof window !== 'undefined') {
         redirectUrl = `${window.location.origin}/auth/reset-password`
       } else {
-        redirectUrl = `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/reset-password`
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://honiccompanystore.com')
+        redirectUrl = `${baseUrl}/auth/reset-password`
       }
-
-      console.log('🔍 Password reset redirect URL:', redirectUrl)
-      console.log('📧 Sending password reset email to:', email)
 
       const { data, error } = await supabaseClient.auth.resetPasswordForEmail(email, {
         redirectTo: redirectUrl
       })
 
       if (error) {
-        console.error('❌ Reset password error:', error)
-        console.error('❌ Error details:', {
-          message: error.message,
-          status: error.status,
-          name: error.name
-        })
         return {
           success: false,
           error: error.message || 'Failed to send reset email. Please check your email address and try again.',
@@ -658,14 +612,11 @@ export const supabaseAuth = {
         }
       }
 
-      console.log('✅ Password reset email sent successfully')
-      console.log('📬 Response data:', data)
       return {
         success: true,
         message: 'Password reset email sent successfully! Please check your inbox and spam folder.'
       }
     } catch (error: any) {
-      console.error('❌ Reset password exception:', error)
       return {
         success: false,
         error: error?.message || ERROR_MESSAGES.NETWORK_ERROR,
@@ -694,7 +645,6 @@ export const supabaseAuth = {
         message: 'Password updated successfully!'
       }
     } catch (error) {
-      console.error('Update password error:', error)
       return {
         success: false,
         error: ERROR_MESSAGES.NETWORK_ERROR,
@@ -707,8 +657,6 @@ export const supabaseAuth = {
   // Customize email template in: Supabase Dashboard → Authentication → Email Templates → Confirm signup
   resendVerificationEmail: async (email: string) => {
     try {
-      console.log('📧 Resending verification email via Supabase for:', email.toLowerCase())
-      
       // SECURITY: Validate email format and sanitize
       const sanitizedEmail = email.toLowerCase().trim()
       if (!sanitizedEmail || !sanitizedEmail.includes('@') || sanitizedEmail.length > 255) {
@@ -722,21 +670,16 @@ export const supabaseAuth = {
       // SECURITY: Use environment variable for redirect URL
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 
                       process.env.NEXT_PUBLIC_APP_URL || 
-                      (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://honiccompanystore.com')
+                      (process.env.NODE_ENV === 'development' 
+                        ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` 
+                        : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://honiccompanystore.com'))
       if (!siteUrl) {
-        console.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
         return {
           success: false,
           error: 'Server configuration error. Please contact support.',
           type: 'SERVER_ERROR' as AuthErrorType
         }
       }
-
-      console.log('🔗 Redirect URL will be:', `${siteUrl}/auth/callback`)
-      console.log('🔗 Using site URL for email verification:', siteUrl)
-      console.log('📝 Email configuration check:')
-      console.log('   - Site URL:', siteUrl)
-      console.log('   - Email type: signup verification')
 
       const { data: resendData, error: resendError } = await supabase.auth.resend({
         type: 'signup',
@@ -747,9 +690,6 @@ export const supabaseAuth = {
       })
 
       if (resendError) {
-        console.error('❌ Failed to resend verification email:', resendError)
-        console.error('❌ Error details:', JSON.stringify(resendError, null, 2))
-        
         // Provide more helpful error messages
         let errorMessage = resendError.message || 'Failed to resend verification email.'
         
@@ -778,21 +718,11 @@ export const supabaseAuth = {
         }
       }
 
-      console.log('✅ Verification email request accepted by Supabase')
-      console.log('📝 Resend response:', JSON.stringify(resendData, null, 2))
-      console.log('⚠️ NOTE: If email is not received, check:')
-      console.log('   1. Spam/Junk folder')
-      console.log('   2. Supabase Dashboard → Authentication → Email Templates → SMTP Settings')
-      console.log('   3. Resend Dashboard for email delivery status')
-      console.log('   4. Supabase logs for email sending errors')
-
       return {
         success: true,
         message: 'Verification email request has been sent to Supabase. Please check your inbox (including spam/junk folder). If you don\'t receive it within a few minutes, please check: 1) Supabase Dashboard → Authentication → SMTP Settings, 2) Resend Dashboard for delivery status, 3) See docs/TROUBLESHOOTING_VERIFICATION_EMAIL.md for detailed troubleshooting steps.'
       }
     } catch (error: any) {
-      console.error('❌ Resend verification email error:', error)
-      console.error('❌ Error stack:', error.stack)
       return {
         success: false,
         error: error.message || ERROR_MESSAGES.NETWORK_ERROR,

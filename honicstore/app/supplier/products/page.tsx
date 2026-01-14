@@ -110,8 +110,7 @@ function SupplierProductsContent() {
         }
       }
     } catch (error) {
-      console.error('Error fetching current plan:', error)
-    }
+      }
   }
 
   // Security: Debounce function to prevent excessive API calls
@@ -206,7 +205,6 @@ function SupplierProductsContent() {
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          console.error('Server returned HTML instead of JSON')
           return null
         }
         return null
@@ -222,7 +220,6 @@ function SupplierProductsContent() {
       }
       return null
     } catch (error) {
-      console.error('Error fetching product details:', error)
       return null
     }
   }
@@ -488,7 +485,6 @@ function SupplierProductsContent() {
                                 // Redirect to payment page
                                 window.location.href = `/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`
                               } catch (error: any) {
-                                console.error('Error initiating upgrade:', error)
                                 toast({
                                   title: 'Error',
                                   description: error.message || 'Failed to initiate upgrade. Please try again.',
@@ -613,7 +609,6 @@ function SupplierProductsContent() {
                                     // Redirect to payment page
                                     window.location.href = `/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`
                                   } catch (error: any) {
-                                    console.error('Error initiating upgrade:', error)
                                     toast({
                                       title: 'Error',
                                       description: error.message || 'Failed to initiate upgrade. Please try again.',

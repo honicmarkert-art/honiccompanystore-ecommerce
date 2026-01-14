@@ -2,30 +2,80 @@ import { NextRequest, NextResponse } from 'next/server'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 import { decrementStockForOrderItem } from '@/lib/stock-decrement'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { logError, createErrorResponse } from '@/lib/error-handler'
+import { buildUrl } from '@/lib/url-utils'
+import { z } from 'zod'
+
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
+// Validation schema
+const paymentUpdateSchema = z.object({
+  paymentStatus: z.enum(['paid', 'failed', 'pending']),
+  paymentId: z.string().optional(),
+  paymentMethod: z.string().optional(),
+})
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { orderId: string } }
+  { params }: { params: Promise<{ orderId: string }> }
 ) {
-  try {
-    const { orderId } = params
-    // Validate admin access first
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_orders_payment_patch', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/orders/[orderId]/payment',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
 
-    const { paymentStatus, paymentId, paymentMethod } = await request.json()
+      const { orderId } = await params
+      // Validate admin access first
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_orders_payment_patch',
+          endpoint: '/api/admin/orders/[orderId]/payment'
+        })
+        return authError
+      }
+
+      const body = await request.json()
+
+      // Validate input with Zod
+      let validatedData
+      try {
+        validatedData = paymentUpdateSchema.parse(body)
+      } catch (validationError) {
+        if (validationError instanceof z.ZodError) {
+          return NextResponse.json(
+            { 
+              error: 'Validation failed',
+              details: validationError.errors.map(e => `${e.path.join('.')}: ${e.message}`)
+            },
+            { status: 400 }
+          )
+        }
+        throw validationError
+      }
+
+      const { paymentStatus, paymentId, paymentMethod } = validatedData
     
-    const supabase = createAdminSupabaseClient()
-    
-    // Validate payment status
-    if (!['paid', 'failed', 'pending'].includes(paymentStatus)) {
-      return NextResponse.json(
-        { error: 'Invalid payment status' },
-        { status: 400 }
-      )
-    }
+      const supabase = createAdminSupabaseClient()
     
     // Update order payment status using orderId as reference_id
     const { data: order, error: orderError } = await supabase
@@ -40,19 +90,22 @@ export async function PATCH(
       .select()
       .single()
 
-    if (orderError) {
-      return NextResponse.json(
-        { error: 'Failed to update payment status' },
-        { status: 500 }
-      )
-    }
+      if (orderError) {
+        logError(orderError, {
+          userId: user.id,
+          action: 'admin_orders_payment_patch',
+          endpoint: '/api/admin/orders/[orderId]/payment',
+          metadata: { orderId }
+        })
+        return createErrorResponse(orderError, 500)
+      }
 
-    if (!order) {
-      return NextResponse.json(
-        { error: 'Order not found' },
-        { status: 404 }
-      )
-    }
+      if (!order) {
+        return NextResponse.json(
+          { error: 'Order not found' },
+          { status: 404 }
+        )
+      }
 
     // Send notification and reduce stock if payment is successful (only if not already reduced)
     if (paymentStatus === 'paid' && order.payment_status !== 'paid' && order.payment_status !== 'success') {
@@ -91,35 +144,73 @@ export async function PATCH(
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      order: {
+      // Log admin action
+      logSecurityEvent('ORDER_PAYMENT_UPDATED', user.id, {
+        orderId: order.id,
         referenceId: order.reference_id,
-        pickupId: order.pickup_id,
-        paymentStatus: order.payment_status,
-        status: order.status,
-      },
-    })
+        paymentStatus,
+        endpoint: '/api/admin/orders/[orderId]/payment'
+      })
 
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
+      // Clear cache
+      const { setCachedData } = await import('@/lib/database-optimization')
+      setCachedData('admin_orders_all', null, 0)
+
+      return NextResponse.json({
+        success: true,
+        order: {
+          referenceId: order.reference_id,
+          pickupId: order.pickup_id,
+          paymentStatus: order.payment_status,
+          status: order.status,
+        },
+      })
+
+    } catch (error) {
+      logError(error, {
+        action: 'admin_orders_payment_patch',
+        endpoint: '/api/admin/orders/[orderId]/payment'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { orderId: string } }
+  { params }: { params: Promise<{ orderId: string }> }
 ) {
-  try {
-    const { orderId } = params
-    // Validate admin access first
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_orders_payment_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/orders/[orderId]/payment',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      const { orderId } = await params
+      // Validate admin access first
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_orders_payment_get',
+          endpoint: '/api/admin/orders/[orderId]/payment'
+        })
+        return authError
+      }
 
     const supabase = createAdminSupabaseClient()
     
@@ -229,8 +320,8 @@ async function sendPaymentConfirmation(order: any) {
       shippingAddress: order.shipping_address || {},
       billingAddress: order.billing_address,
       paymentMethod: order.payment_method || 'ClickPesa',
-      trackingUrl: order.tracking_url || `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/account/orders/${order.order_number || order.id}`,
-      invoiceUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/api/user/orders/${order.order_number || order.id}/invoice`
+      trackingUrl: order.tracking_url || buildUrl(`/account/orders/${order.order_number || order.id}`),
+      invoiceUrl: buildUrl(`/api/user/orders/${order.order_number || order.id}/invoice`)
     })
 
     if (!emailResult.success) {

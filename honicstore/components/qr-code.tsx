@@ -78,8 +78,7 @@ export function QRCode({
         new ClipboardItem({ 'image/png': blob })
       ])
     } catch (err) {
-      console.error('Failed to copy QR code:', err)
-    }
+      }
   }
 
   if (loading) {

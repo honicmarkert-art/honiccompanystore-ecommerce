@@ -88,7 +88,6 @@ export default function PayoutAccountsPage() {
         }
       }
     } catch (error) {
-      console.error('Error checking company info:', error)
       setCompanyInfoComplete(false)
     }
   }

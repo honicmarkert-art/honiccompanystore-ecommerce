@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Support email address (configured via environment variable)
-    const fromEmail = user.email || profile?.email || 'noreply@honiccompanystore.com'
+    const fromEmail = user.email || profile?.email || process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@honiccompanystore.com'
     const supplierName = profile?.company_name || profile?.full_name || 'Supplier'
     const supportEmail = emailService.getCompanyEmails().support
 
@@ -89,12 +89,10 @@ Please respond directly to: ${fromEmail}
         })
       
       if (ticketError) {
-        console.warn('Failed to store support ticket in database (table may not exist):', ticketError.message)
         // Continue even if database storage fails
       }
     } catch (dbError) {
       // If table doesn't exist or other database error, continue without storing
-      console.warn('Database storage skipped (table may not exist):', dbError)
     }
 
     // Create HTML email content
@@ -132,20 +130,12 @@ Please respond directly to: ${fromEmail}
       subject: emailSubject,
       text: emailBody,
       html: emailHtml,
-      from: `Support <${process.env.SMTP_SENDER_EMAIL_SUPPORT || process.env.SMTP_SENDER_EMAIL_NOREPLY || process.env.SMTP_SENDER_EMAIL_INFO || 'support@honiccompanystore.com'}>`,
+      from: `Support <${process.env.SMTP_SENDER_EMAIL_SUPPORT || process.env.SUPPORT_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || process.env.SMTP_SENDER_EMAIL_INFO || 'support@honiccompanystore.com'}>`,
     })
 
     // Log to console if email service not configured (development)
     if (!emailResult.success) {
-      console.log('=== SUPPORT REQUEST EMAIL ===')
-      console.log('To:', supportEmail)
-      console.log('From:', fromEmail)
-      console.log('Subject:', emailSubject)
-      console.log('Body:', emailBody)
-      console.log('Error:', emailResult.error)
-      console.log('============================')
-      console.warn('No email service configured. Configure SMTP settings in .env.local')
-    }
+      }
 
     return NextResponse.json({
       success: true,
@@ -153,7 +143,6 @@ Please respond directly to: ${fromEmail}
     })
 
   } catch (error: any) {
-    console.error('Support request error:', error)
     return NextResponse.json(
       { success: false, error: 'Failed to send support request. Please try again.' },
       { status: 500 }

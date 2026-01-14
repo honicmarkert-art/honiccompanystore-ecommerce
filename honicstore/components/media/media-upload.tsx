@@ -180,8 +180,7 @@ export function MediaUpload({
         description: errorMessage,
         variant: "destructive"
       })
-      console.error('Upload error:', error)
-    } finally {
+      } finally {
       setIsUploading(false)
     }
   }

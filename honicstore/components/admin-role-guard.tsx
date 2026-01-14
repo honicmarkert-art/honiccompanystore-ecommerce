@@ -22,16 +22,8 @@ export function AdminRoleGuard({ children }: AdminRoleGuardProps) {
       setIsChecking(false) // Allow component to render
       
       // DEBUG: Log user data
-      console.log('🔍 AdminRoleGuard - User data:', {
-        hasUser: !!user,
-        userRole: user?.role,
-        userProfile: user?.profile,
-        isAdmin: user?.profile?.is_admin
-      })
-      
       if (!user) {
         // User not logged in, redirect to login
-        console.log('❌ No user found, redirecting to login')
         router.push('/auth/login?redirect=/siem-dashboard')
         return
       }
@@ -39,17 +31,11 @@ export function AdminRoleGuard({ children }: AdminRoleGuardProps) {
       // Check admin status after auth is done
       if (user.role !== 'admin' && user.profile?.is_admin !== true) {
         // User logged in but not admin - will show access denied in render
-        console.log('❌ User is not admin:', {
-          userRole: user.role,
-          profileIsAdmin: user.profile?.is_admin,
-          fullUser: user
-        })
         return
       }
 
       // User is admin, allow access
-      console.log('✅ User is admin, allowing access')
-    }
+      }
   }, [user, loading, router])
 
   if (loading || isChecking) {

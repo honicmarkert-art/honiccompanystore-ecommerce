@@ -98,7 +98,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (updateError) {
-      console.error('Error updating featured status:', updateError)
       return NextResponse.json(
         { success: false, error: 'Failed to update featured status' },
         { status: 500 }
@@ -111,7 +110,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Toggle featured error:', error)
     return NextResponse.json(
       { success: false, error: 'An unexpected error occurred' },
       { status: 500 }

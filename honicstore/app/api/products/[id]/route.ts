@@ -12,17 +12,7 @@ const logSecurityEvent = (action: string, userId?: string, details?: any) => {
 }
 
 const requireAdmin = (session: any) => {
-  console.log('🔍 [DEBUG] requireAdmin: Checking session:', {
-    hasSession: !!session,
-    role: session?.role,
-    profileIsAdmin: session?.profile?.is_admin,
-    roleCheck: session?.role === 'admin',
-    profileCheck: session?.profile?.is_admin === true
-  })
-  
   const isAdmin = session?.role === 'admin' || session?.profile?.is_admin === true
-  console.log('🔍 [DEBUG] requireAdmin: Result:', isAdmin)
-  
   return isAdmin
 }
 
@@ -137,7 +127,6 @@ export async function GET(
           try {
             primaryValues = JSON.parse(primaryValues)
           } catch (e) {
-            console.error('Error parsing primary_values:', e)
             primaryValues = []
           }
         }
@@ -227,22 +216,26 @@ export async function GET(
     const url = new URL(request.url)
     const isFreshRequest = url.searchParams.has('t') || url.searchParams.has('fresh')
     
-    // Use shorter cache for fresh requests to ensure immediate updates
-    const cacheControl = isFreshRequest 
-      ? 'no-cache, no-store, must-revalidate' 
-      : 'public, s-maxage=1800, stale-while-revalidate=3600'
-
+    // CDN caching: 30 min CDN, 15 min browser, 1 hour stale-while-revalidate
+    // This enables fast CDN delivery for product details
     return createSecureResponse(transformedProduct, {
-      cacheControl,
+      cdnCache: !isFreshRequest, // Enable CDN cache unless fresh request
+      browserCache: !isFreshRequest, // Enable browser cache unless fresh request
       headers: {
         'X-Cache': 'MISS',
-        'X-Product-ID': productId,
-        'Cache-Control': cacheControl
+        'X-Product-ID': productId
       }
     })
 
-  } catch (error) {
-    console.error('Error fetching product:', error)
+  } catch (error: any) {
+    // Log error for monitoring and debugging
+    logger.error(`[Product Detail API] Error fetching product ${productId}:`, {
+      error: error.message,
+      stack: error.stack,
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+    })
+    
+    // Return generic error message to prevent information disclosure
     return createErrorResponse('Internal server error', 500)
   }
 }
@@ -252,13 +245,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  console.log('🚨 [CRITICAL DEBUG] PUT method called for products/[id]!')
-  console.log('🚨 [CRITICAL DEBUG] Request URL:', request.url)
-  console.log('🚨 [CRITICAL DEBUG] Request method:', request.method)
-  
   try {
     const { id: productId } = await params
-    console.log('🚨 [CRITICAL DEBUG] Product ID:', productId)
     
     // Validate product ID
     if (!productId || isNaN(Number(productId))) {
@@ -266,42 +254,15 @@ export async function PUT(
     }
 
     // Validate admin session
-    console.log('🔍 [DEBUG] Starting session validation...')
-    console.log('🔍 [DEBUG] Request headers:', {
-      authorization: request.headers.get('authorization'),
-      cookie: request.headers.get('cookie')?.substring(0, 100) + '...',
-      userAgent: request.headers.get('user-agent')?.substring(0, 50)
-    })
-    
     const session = await validateServerSession(request)
-    console.log('🔍 [DEBUG] Session validation result:', {
-      hasSession: !!session,
-      userId: session?.id,
-      userEmail: session?.email,
-      role: session?.role,
-      profileIsAdmin: session?.profile?.is_admin,
-      profileId: session?.profile?.id
-    })
-    
     const isAdmin = requireAdmin(session)
-    console.log('🔍 [DEBUG] Admin check result:', {
-      isAdmin,
-      roleCheck: session?.role === 'admin',
-      profileCheck: session?.profile?.is_admin === true
-    })
     
     if (!isAdmin) {
-      console.log('❌ [DEBUG] Admin access denied!')
       logSecurityEvent('Unauthorized product update attempt', session?.id)
       return createErrorResponse('Unauthorized', 401)
     }
-    
-    console.log('✅ [DEBUG] Admin access granted!')
 
     const updates = await request.json()
-    
-    console.log('🚀 PUT Product [ID] method called!')
-    console.log('🔍 RAW PUT Request Body:', JSON.stringify(updates, null, 2))
     
     logger.log('🔍 PUT Product [ID] Data Received:', {
       id: productId,
@@ -354,17 +315,11 @@ export async function PUT(
     if (sanitizedUpdates.variantConfig !== undefined) supabaseUpdates.variant_config = sanitizedUpdates.variantConfig
     // Ignore variantImages on update to prevent unintended additions; handled at upload time
 
-    console.log('🔍 [DEBUG] Supabase Updates Object:', JSON.stringify(supabaseUpdates, null, 2))
-    console.log('🔍 [DEBUG] Stock quantity being sent:', supabaseUpdates.stock_quantity)
-    console.log('🔍 [DEBUG] In stock being sent:', supabaseUpdates.in_stock)
-    
     logger.log('📝 Updating product [ID] with stock:', {
       stock_quantity: supabaseUpdates.stock_quantity,
       in_stock: supabaseUpdates.in_stock
     })
 
-    console.log('🔍 [DEBUG] About to update database with:', JSON.stringify(supabaseUpdates, null, 2))
-    
     const adminClient = createAdminSupabaseClient()
     const { data: product, error } = await adminClient
       .from('products')
@@ -376,16 +331,7 @@ export async function PUT(
       `)
       .single()
 
-    console.log('🔍 [DEBUG] Database update response:', {
-      hasProduct: !!product,
-      hasError: !!error,
-      productId: product?.id,
-      productImage: product?.image,
-      productName: product?.name
-    })
-
     if (error) {
-      console.error('❌ Error updating product in database:', error)
       logger.error('Database update failed:', {
         productId,
         error: error.message,
@@ -400,18 +346,6 @@ export async function PUT(
     if (!product) {
       return createErrorResponse('Product not found', 404)
     }
-
-    console.log('✅ [DEBUG] Product updated successfully in database!')
-    console.log('🔍 [DEBUG] Updated product image:', product.image)
-    console.log('🔍 [DEBUG] Updated product stock_quantity:', product.stock_quantity)
-    console.log('🔍 [DEBUG] Updated product in_stock:', product.in_stock)
-    console.log('🔍 [DEBUG] Full updated product:', JSON.stringify({
-      id: product.id,
-      name: product.name,
-      image: product.image,
-      stock_quantity: product.stock_quantity,
-      in_stock: product.in_stock
-    }, null, 2))
 
     // Handle variants update if provided
     
@@ -440,7 +374,7 @@ export async function PUT(
           .eq('product_id', productId)
 
         if (deleteError) {
-          console.error('❌ [DEBUG] Error deleting variants:', deleteError)
+          // Error deleting variants - continue anyway
         }
 
         if (!deleteError && Array.isArray(updates.variants) && updates.variants.length > 0) {
@@ -480,7 +414,7 @@ export async function PUT(
             .select()
             
           if (insertError) {
-            console.error('❌ [DEBUG] Error inserting variants:', insertError)
+            // Error inserting variants - continue anyway
           }
         }
         
@@ -497,17 +431,10 @@ export async function PUT(
             .single()
             
           if (updateError) {
-            console.error('❌ [DEBUG] Error updating main products table:', updateError)
-            console.error('❌ [DEBUG] Update error details:', {
-              message: updateError.message,
-              code: updateError.code,
-              details: updateError.details,
-              hint: updateError.hint
-            })
+            // Error updating main products table - continue anyway
           }
         }
       } catch (e) {
-        console.error('Error updating product variants:', e)
         // Do not fail the whole request if variants update fails
       }
     }
@@ -517,8 +444,6 @@ export async function PUT(
     // Note: In a real app, you'd want to clear the cache here
 
     // Get the final updated product data to ensure we have the latest stock values
-    console.log('🔍 [DEBUG] Fetching final product data for response...')
-    
     // Add a small delay to ensure database has processed all updates
     await new Promise(resolve => setTimeout(resolve, 100))
     
@@ -529,16 +454,6 @@ export async function PUT(
       .select('*')
       .eq('id', productId)
       .single()
-    
-    if (finalError) {
-      console.error('❌ [DEBUG] Error fetching final product data:', finalError)
-    } else {
-      console.log('✅ [DEBUG] Final product data:', {
-        id: finalProduct.id,
-        stock_quantity: finalProduct.stock_quantity,
-        in_stock: finalProduct.in_stock
-      })
-    }
     
     // Use the final product data for the response
     const responseProduct = finalProduct || product
@@ -638,29 +553,18 @@ export async function PUT(
       })()
     }
 
-    console.log('🔍 Final response being sent:', JSON.stringify({
-      importChina: transformedProduct.importChina,
-      freeDelivery: transformedProduct.freeDelivery,
-      sameDayDelivery: transformedProduct.sameDayDelivery,
-      id: transformedProduct.id,
-      name: transformedProduct.name,
-      image: transformedProduct.image,
-      stockQuantity: transformedProduct.stockQuantity,
-      inStock: transformedProduct.inStock,
-      variantsCount: transformedProduct.variants?.length || 0,
-      variants: transformedProduct.variants
-    }, null, 2))
-
-    console.log('🔍 [DEBUG] About to send response. Image value:', transformedProduct.image)
-    
     const response = createSecureResponse(transformedProduct)
-    
-    console.log('🔍 [DEBUG] Response created. Status:', response.status)
-    
     return response
 
-  } catch (error) {
-    console.error('Error updating product:', error)
+  } catch (error: any) {
+    // Log error for monitoring and debugging
+    logger.error(`[Product Detail API] Error updating product ${productId}:`, {
+      error: error.message,
+      stack: error.stack,
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+    })
+    
+    // Return generic error message to prevent information disclosure
     return createErrorResponse('Internal server error', 500)
   }
 }
@@ -687,8 +591,6 @@ export async function DELETE(
 
     const adminClient = createAdminSupabaseClient()
     
-    console.log('🗑️ [DEBUG] Starting product deletion for ID:', productId)
-    
     // First, get the product to delete its images
     const { data: productToDelete, error: fetchError } = await adminClient
       .from('products')
@@ -697,79 +599,58 @@ export async function DELETE(
       .single()
     
     if (productToDelete) {
-      console.log('🔍 [DEBUG] Product found, preparing to delete images...')
-      
       // Delete main image from storage
       if (productToDelete.image) {
-        console.log('🗑️ [DEBUG] Deleting main image:', productToDelete.image)
         const imageFileName = productToDelete.image.split('/').pop()
         if (imageFileName) {
-          const { error: imageDeleteError } = await adminClient.storage
+          await adminClient.storage
             .from('product-images')
             .remove([imageFileName])
-          
-          if (imageDeleteError) {
-            console.error('⚠️ [DEBUG] Failed to delete main image:', imageDeleteError)
-          } else {
-            console.log('✅ [DEBUG] Main image deleted successfully')
-          }
         }
       }
       
       // Delete gallery images from storage
       if (productToDelete.gallery && Array.isArray(productToDelete.gallery) && productToDelete.gallery.length > 0) {
-        console.log('🗑️ [DEBUG] Deleting gallery images:', productToDelete.gallery.length, 'images')
         const galleryFileNames = productToDelete.gallery.map((url: string) => url.split('/').pop()).filter((name): name is string => Boolean(name))
         
         if (galleryFileNames.length > 0) {
-          const { error: galleryDeleteError } = await adminClient.storage
+          await adminClient.storage
             .from('product-images')
             .remove(galleryFileNames)
-          
-          if (galleryDeleteError) {
-            console.error('⚠️ [DEBUG] Failed to delete gallery images:', galleryDeleteError)
-          } else {
-            console.log('✅ [DEBUG] Gallery images deleted successfully:', galleryFileNames.length, 'images')
-          }
         }
       }
     }
     
     // Delete variants
-    console.log('🗑️ [DEBUG] Deleting product variants...')
-    const { error: variantError } = await adminClient
+    await adminClient
       .from('product_variants')
       .delete()
       .eq('product_id', productId)
 
-    if (variantError) {
-      console.error('⚠️ [DEBUG] Error deleting variants:', variantError)
-    } else {
-      console.log('✅ [DEBUG] Variants deleted successfully')
-    }
-
     // Delete the product
-    console.log('🗑️ [DEBUG] Deleting product from database...')
     const { error } = await adminClient
       .from('products')
       .delete()
       .eq('id', productId)
 
     if (error) {
-      console.error('❌ [DEBUG] Error deleting product:', error)
       return createErrorResponse('Failed to delete product', 500)
     }
-    
-    console.log('✅ [DEBUG] Product deleted successfully from database')
 
     // Clear cache for this product
     const cacheKey = `product:${productId}`
-    console.log('🗑️ [DEBUG] Cache cleared for product:', productId)
 
     return createSecureResponse({ success: true })
 
-  } catch (error) {
-    console.error('Error deleting product:', error)
+  } catch (error: any) {
+    // Log error for monitoring and debugging
+    logger.error(`[Product Detail API] Error updating product ${productId}:`, {
+      error: error.message,
+      stack: error.stack,
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+    })
+    
+    // Return generic error message to prevent information disclosure
     return createErrorResponse('Internal server error', 500)
   }
 } 

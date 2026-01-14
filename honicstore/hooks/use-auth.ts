@@ -80,7 +80,6 @@ export function useAuth() {
         })
       }
     } catch (error) {
-      console.error('Auth check error:', error)
       localStorage.removeItem('auth-token')
       setAuthState({
         user: null,
@@ -138,7 +137,6 @@ export function useAuth() {
         return { success: false, error: result.error }
       }
     } catch (error) {
-      console.error('Login error:', error)
       toast({
         title: 'Error',
         description: 'An error occurred during login',
@@ -183,7 +181,6 @@ export function useAuth() {
         return { success: false, error: result.error }
       }
     } catch (error) {
-      console.error('Registration error:', error)
       toast({
         title: 'Error',
         description: 'An error occurred during registration',
@@ -202,8 +199,7 @@ export function useAuth() {
         method: 'POST'
       })
     } catch (error) {
-      console.error('Logout API error:', error)
-    }
+      }
 
     // Clear local state
     localStorage.removeItem('auth-token')
@@ -259,7 +255,6 @@ export function useAuth() {
         return { success: false, error: result.error }
       }
     } catch (error) {
-      console.error('Email verification error:', error)
       toast({
         title: 'Error',
         description: 'An error occurred during email verification',

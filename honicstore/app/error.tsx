@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { logError, getUserFriendlyMessage } from '@/lib/error-handler'
 
 export default function Error({
   error,
@@ -16,8 +17,15 @@ export default function Error({
   const router = useRouter()
 
   useEffect(() => {
-    // Log error for debugging
-    console.error('Error boundary caught:', error)
+    // Production-ready error logging
+    logError(error, {
+      action: 'error_boundary',
+      metadata: {
+        digest: error.digest,
+        stack: error.stack,
+        name: error.name,
+      },
+    })
   }, [error])
 
   const handleRefresh = () => {

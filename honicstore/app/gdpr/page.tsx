@@ -31,7 +31,7 @@ import Link from 'next/link'
 
 export default function GDPRCompliancePage() {
   const { companyName, companyColor, settings: adminSettings } = useCompanyContext()
-  const { theme } = useTheme()
+  const { backgroundColor } = useTheme()
   const [activeSection, setActiveSection] = useState('overview')
 
   const sections = [
@@ -48,11 +48,12 @@ export default function GDPRCompliancePage() {
     { id: 'contact', title: 'Contact Us', icon: Mail }
   ]
 
+  const isDark = backgroundColor === 'dark'
   const themeClasses = {
-    mainText: theme === 'dark' ? 'text-white' : 'text-gray-900',
-    textNeutralSecondary: theme === 'dark' ? 'text-gray-400' : 'text-gray-600',
-    backgroundColor: theme === 'dark' ? 'bg-gray-900' : 'bg-white',
-    borderColor: theme === 'dark' ? 'border-gray-700' : 'border-gray-200'
+    mainText: isDark ? 'text-white' : 'text-gray-900',
+    textNeutralSecondary: isDark ? 'text-gray-400' : 'text-gray-600',
+    backgroundColor: isDark ? 'bg-gray-900' : 'bg-white',
+    borderColor: isDark ? 'border-gray-700' : 'border-gray-200'
   }
 
   return (
@@ -320,7 +321,7 @@ export default function GDPRCompliancePage() {
                             <div>
                               <p className={cn("text-sm font-medium", themeClasses.mainText)}>Email</p>
                               <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                                {adminSettings?.contactEmail || 'privacy@honic.co'}
+                                {adminSettings?.contactEmail || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || process.env.NEXT_PUBLIC_LEGAL_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co'}
                               </p>
                             </div>
                           </div>
@@ -351,7 +352,7 @@ export default function GDPRCompliancePage() {
                         <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Data Protection Officer</h4>
                         <div className="space-y-2">
                           <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                            <strong>Email:</strong> dpo@honic.co
+                            <strong>Email:</strong> {process.env.NEXT_PUBLIC_DPO_EMAIL || process.env.DPO_EMAIL || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co'}
                           </p>
                           <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
                             <strong>Phone:</strong> +1 (555) 123-4567
@@ -757,7 +758,7 @@ export default function GDPRCompliancePage() {
                         If you become aware of a potential data breach, please contact us immediately:
                       </p>
                       <ul className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                        <li>• Email: security@honic.co</li>
+                        <li>• Email: {process.env.NEXT_PUBLIC_SECURITY_EMAIL || process.env.SECURITY_EMAIL || process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'security@honic.co'}</li>
                         <li>• Phone: +1 (555) 123-4567</li>
                         <li>• Emergency: Available 24/7</li>
                       </ul>
@@ -791,7 +792,7 @@ export default function GDPRCompliancePage() {
                             <Mail className="w-4 h-4 text-orange-500" />
                             <div>
                               <p className={cn("text-sm font-medium", themeClasses.mainText)}>Email</p>
-                              <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>dpo@honic.co</p>
+                              <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>{process.env.NEXT_PUBLIC_DPO_EMAIL || process.env.DPO_EMAIL || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co'}</p>
                             </div>
                           </div>
                           
@@ -886,7 +887,7 @@ export default function GDPRCompliancePage() {
                           <div>
                             <p className={cn("text-sm font-medium", themeClasses.mainText)}>General Inquiries</p>
                             <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {adminSettings?.contactEmail || 'privacy@honic.co'}
+                              {adminSettings?.contactEmail || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || process.env.NEXT_PUBLIC_LEGAL_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co'}
                             </p>
                           </div>
                         </div>
@@ -928,7 +929,7 @@ export default function GDPRCompliancePage() {
                     <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
                       <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Data Protection Officer</h4>
                       <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                        For specific GDPR-related inquiries, you can contact our Data Protection Officer directly at dpo@honic.co
+                        For specific GDPR-related inquiries, you can contact our Data Protection Officer directly at {process.env.NEXT_PUBLIC_DPO_EMAIL || process.env.DPO_EMAIL || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co'}
                       </p>
                     </div>
                   </CardContent>

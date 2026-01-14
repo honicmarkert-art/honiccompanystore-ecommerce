@@ -35,8 +35,7 @@ export function useBrands(): UseBrandsReturn {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch brands'
       setError(errorMessage)
-      console.error('Brands fetch error:', err)
-    } finally {
+      } finally {
       setIsLoading(false)
     }
   }, [])

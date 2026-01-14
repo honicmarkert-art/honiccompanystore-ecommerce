@@ -34,7 +34,6 @@ export async function GET(request: NextRequest) {
     const { data: user, error: authError } = await userSupabase.auth.getUser()
     
     if (authError || !user?.user) {
-      console.error('Authentication failed:', authError)
       return NextResponse.json(
         { error: 'Authentication failed' },
         { status: 401 }
@@ -49,7 +48,6 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false })
 
     if (addressesError) {
-      console.error('Failed to fetch addresses:', addressesError)
       return NextResponse.json(
         { error: 'Failed to fetch addresses' },
         { status: 500 }
@@ -62,7 +60,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Addresses fetch error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -99,7 +96,6 @@ export async function POST(request: NextRequest) {
     const { data: user, error: authError } = await userSupabase.auth.getUser()
     
     if (authError || !user?.user) {
-      console.error('Authentication failed:', authError)
       return NextResponse.json(
         { error: 'Authentication failed' },
         { status: 401 }
@@ -137,7 +133,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (addressError) {
-      console.error('Failed to create address:', addressError)
       return NextResponse.json(
         { error: 'Failed to create address' },
         { status: 500 }
@@ -160,7 +155,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Address creation error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -197,7 +191,6 @@ export async function PUT(request: NextRequest) {
     const { data: user, error: authError } = await userSupabase.auth.getUser()
     
     if (authError || !user?.user) {
-      console.error('Authentication failed:', authError)
       return NextResponse.json(
         { error: 'Authentication failed' },
         { status: 401 }
@@ -227,7 +220,6 @@ export async function PUT(request: NextRequest) {
       .single()
 
     if (addressError) {
-      console.error('Failed to update address:', addressError)
       return NextResponse.json(
         { error: 'Failed to update address' },
         { status: 500 }
@@ -250,7 +242,6 @@ export async function PUT(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Address update error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -287,7 +278,6 @@ export async function DELETE(request: NextRequest) {
     const { data: user, error: authError } = await userSupabase.auth.getUser()
     
     if (authError || !user?.user) {
-      console.error('Authentication failed:', authError)
       return NextResponse.json(
         { error: 'Authentication failed' },
         { status: 401 }
@@ -313,7 +303,6 @@ export async function DELETE(request: NextRequest) {
       .eq('user_id', user.user.id)
 
     if (deleteError) {
-      console.error('Failed to delete address:', deleteError)
       return NextResponse.json(
         { error: 'Failed to delete address' },
         { status: 500 }
@@ -326,7 +315,6 @@ export async function DELETE(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Address deletion error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

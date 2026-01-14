@@ -79,13 +79,11 @@ export async function POST(request: NextRequest) {
       if (dbError) {
         // If email already exists, that's okay - just log it
         if (dbError.code === '23505') { // Unique constraint violation
-          console.log('Email already subscribed:', email)
-        } else {
-          console.warn('Database storage warning:', dbError.message)
-        }
+          } else {
+          }
       }
     } catch (dbError) {
-      console.warn('Database storage skipped (table may not exist):', dbError)
+      // Database error - continue without storing
     }
 
     // Send notification email to promotion email (from .env.local)
@@ -125,19 +123,12 @@ This is an automated notification from the Newsletter Subscription System.
       senderEmail = process.env.SMTP_SENDER_EMAIL_INFO || 
                     process.env.SMTP_SENDER_EMAIL_NOREPLY || 
                     process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-                    'noreply@mail.honiccompanystore.com'
+                    process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
     } else {
       senderEmail = smtpUserAuth
     }
 
     if (!senderEmail || !senderEmail.includes('@')) {
-      console.warn('Sender email is not configured. Email notifications will not be sent.')
-      console.log('=== NEWSLETTER SUBSCRIPTION ===')
-      console.log('Email:', email)
-      console.log('Notification to:', promotionEmail)
-      console.warn('Warning: SMTP_SENDER_EMAIL_INFO or SMTP_SENDER_EMAIL_NOREPLY not configured in .env.local')
-      console.log('===============================')
-      
       // Still return success for subscription, just without email notification
       return NextResponse.json({
         success: true,
@@ -162,7 +153,8 @@ This is an automated notification from the Newsletter Subscription System.
     // Send welcome email to subscriber
     try {
       const { sendNewsletterWelcomeEmail } = await import('@/lib/user-email-service')
-      const unsubscribeUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/account/newsletter/unsubscribe?email=${encodeURIComponent(email)}`
+      const { buildUrl } = await import('@/lib/url-utils')
+      const unsubscribeUrl = buildUrl(`/account/newsletter/unsubscribe?email=${encodeURIComponent(email)}`)
       await sendNewsletterWelcomeEmail(email, unsubscribeUrl)
     } catch (welcomeEmailError) {
       logger.warn('Failed to send newsletter welcome email:', welcomeEmailError)
@@ -171,12 +163,7 @@ This is an automated notification from the Newsletter Subscription System.
 
     // Log to console if email service not configured (development)
     if (!emailResult.success) {
-      console.log('=== NEWSLETTER SUBSCRIPTION ===')
-      console.log('Email:', email)
-      console.log('Notification to:', promotionEmail)
-      console.log('Error:', emailResult.error)
-      console.log('===============================')
-    }
+      }
 
     return NextResponse.json({
       success: true,
@@ -184,7 +171,6 @@ This is an automated notification from the Newsletter Subscription System.
     })
 
   } catch (error: any) {
-    console.error('Newsletter subscription error:', error)
     return NextResponse.json(
       { success: false, error: 'Failed to subscribe. Please try again.' },
       { status: 500 }

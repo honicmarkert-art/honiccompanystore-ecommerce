@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { logger } from '@/lib/logger'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { sanitizeOrderNumber, validateOrderOwnership } from '@/lib/auth-utils'
+import { buildUrl } from '@/lib/url-utils'
 
 // PATCH /api/user/orders/[orderNumber]/mark-delivered - Mark order as delivered/picked up
 export async function PATCH(
@@ -213,7 +214,7 @@ export async function PATCH(
               quantity: item.quantity,
               image: item.products?.image
             })) || [],
-            reviewUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/account/orders/${orderNumber}/review`
+            reviewUrl: buildUrl(`/account/orders/${orderNumber}/review`)
           })
         }
       } catch (emailError) {

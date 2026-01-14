@@ -72,7 +72,6 @@ export function Footer() {
         })
       }
     } catch (error) {
-      console.error('Newsletter subscription error:', error)
       toast({
         title: 'Error',
         description: 'Failed to subscribe. Please try again.',

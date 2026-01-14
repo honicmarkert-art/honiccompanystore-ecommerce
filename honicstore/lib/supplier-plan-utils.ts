@@ -122,8 +122,6 @@ export async function getSupplierPlan(userId: string, supabase: any): Promise<Su
       
       if (!hasValidPayment) {
         // Premium plan without valid payment - return free plan instead
-        console.warn(`⚠️ Premium plan access denied for user ${userId}: No valid payment. Payment status: ${paymentStatus}, Expires: ${paymentExpiresAt}`)
-        
         const { data: freePlan } = await supabase
           .from('supplier_plans')
           .select('*')
@@ -137,7 +135,6 @@ export async function getSupplierPlan(userId: string, supabase: any): Promise<Su
 
     return plan
   } catch (error) {
-    console.error('Error fetching supplier plan:', error)
     return null
   }
 }

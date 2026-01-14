@@ -158,8 +158,7 @@ function CompanyInfoPageContent() {
           }
         }
       } catch (error) {
-        console.error('Error loading profile:', error)
-      } finally {
+        } finally {
         setIsLoading(false)
       }
     }
@@ -297,7 +296,6 @@ function CompanyInfoPageContent() {
         })
       }
     } catch (error) {
-      console.error('Error sending reset request:', error)
       toast({
         title: 'Error',
         description: 'Failed to send reset request. Please try again.',

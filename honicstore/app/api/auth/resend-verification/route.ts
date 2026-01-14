@@ -126,13 +126,11 @@ export async function POST(request: NextRequest) {
           }
         } catch (authCheckError) {
           // If we can't check auth status, continue with resend attempt
-          console.warn('⚠️ Could not check verification status, proceeding with resend:', authCheckError)
-        }
+          }
       }
     } catch (checkError) {
       // If check fails, continue with resend attempt (Supabase will handle it)
-      console.warn('⚠️ Error checking verification status, proceeding with resend:', checkError)
-    }
+      }
 
     // Additional rate limiting for resend verification (per email)
     const clientIP = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
@@ -178,7 +176,6 @@ export async function POST(request: NextRequest) {
       )
     }
   } catch (error) {
-    console.error('Resend verification error:', error)
     return NextResponse.json(
       { 
         success: false,

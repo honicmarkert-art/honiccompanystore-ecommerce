@@ -4,34 +4,14 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { useToast } from '@/hooks/use-toast'
 
-// Safe console logging helper - defined as const with IIFE to ensure availability
-const safeLog = (function() {
-  const logFn = function(...args: any[]) {
-    if (typeof console !== 'undefined' && typeof console.log === 'function') {
-      try {
-        console.log(...args)
-      } catch (e) {
-        // Silently fail if logging fails
-      }
-    }
-  }
-  // Ensure function is always callable
-  return logFn
-})()
+// Safe logging helpers - no-op functions for production cleanliness
+const safeLog = function(...args: any[]) {
+  // Logging disabled for production cleanliness
+}
 
-const safeError = (function() {
-  const errorFn = function(...args: any[]) {
-    if (typeof console !== 'undefined' && typeof console.error === 'function') {
-      try {
-        console.error(...args)
-      } catch (e) {
-        // Silently fail if logging fails
-      }
-    }
-  }
-  // Ensure function is always callable
-  return errorFn
-})()
+const safeError = function(...args: any[]) {
+  // Error logging disabled for production cleanliness
+}
 
 // Types
 export interface SelectedVariant {
@@ -43,7 +23,6 @@ export interface SelectedVariant {
   sku?: string
   image?: string
 }
-
 export interface CartItem {
   id: number
   productId: number
@@ -65,7 +44,6 @@ export interface CartItem {
     sku?: string
   }
 }
-
 export interface CartResponse {
   items: CartItem[]
   totals: {
@@ -75,7 +53,6 @@ export interface CartResponse {
     final_total: number
   }
 }
-
 const CART_STORAGE_KEY = 'guest_cart'
 
 // Migration function to convert old cart data to new object array format
@@ -96,7 +73,6 @@ const migrateCartData = (cartData: any[]): CartItem[] => {
     }))
   }))
 }
-
 // Build a canonical, stable variant id from attributes to guarantee merging
 const buildCanonicalVariantId = (
   variantId: string | undefined,
@@ -119,13 +95,11 @@ const buildCanonicalVariantId = (
   // No attributes: use provided variantId or default
   return variantId || 'default'
 }
-
 // Shallow, order-insensitive attribute equality
 const areAttributesEqual = (
   a?: { [key: string]: string | string[] },
   b?: { [key: string]: string | string[] }
 ): boolean => {
-  
   if (!a && !b) return true
   if (!a || !b) return false
   const keysA = Object.keys(a).sort()
@@ -152,7 +126,6 @@ const areAttributesEqual = (
   }
   return true
 }
-
 // Helper function to format variant attributes for display
 export const formatVariantAttributes = (attributes: { [key: string]: string | string[] }): string => {
   return Object.entries(attributes)
@@ -164,7 +137,6 @@ export const formatVariantAttributes = (attributes: { [key: string]: string | st
     })
     .join(' | ')
 }
-
 // Helper function to format variant attributes in hierarchical format (Type > Value)
 export const formatVariantHierarchy = (attributes: { [key: string]: string | string[] }): string => {
   return Object.entries(attributes)
@@ -176,11 +148,10 @@ export const formatVariantHierarchy = (attributes: { [key: string]: string | str
     })
     .join(' | ')
 }
-
 export function useCart() {
   const { user, isAuthenticated } = useAuth()
   const { toast } = useToast()
-  
+
   const [cart, setCart] = useState<CartItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [cartSubtotal, setCartSubtotal] = useState(0)
@@ -188,10 +159,11 @@ export function useCart() {
   const [cartUniqueProducts, setCartUniqueProducts] = useState(0)
   const [hasAttemptedMerge, setHasAttemptedMerge] = useState(false)
   const cartAbortRef = useRef<AbortController | null>(null)
+  // Request deduplication map to prevent duplicate API calls
+  const addItemRequestMap = useRef<Map<string, Promise<any>>>(new Map())
 
   // Migrate old cart items to new structure
   const migrateCartItem = useCallback((item: any): CartItem => {
-    
     // If item already has new structure, preserve variant_name and migrate attributes if needed
     if (item.variants && Array.isArray(item.variants)) {
       const migrated = {
@@ -210,12 +182,10 @@ export function useCart() {
           }, {} as any)
         }))
       }
-      
       return migrated
     }
-    
     // Migrate old structure to new structure
-    
+
     const migratedItem: CartItem = {
       id: item.id,
       productId: item.productId,
@@ -244,7 +214,6 @@ export function useCart() {
       updatedAt: item.updatedAt || new Date().toISOString(),
       product: item.product
     }
-    
     return migratedItem
   }, [])
 
@@ -256,7 +225,6 @@ export function useCart() {
     if (cartAbortRef.current) {
       try { cartAbortRef.current.abort() } catch {}
     }
-
     setIsLoading(true)
     try {
       cartAbortRef.current = new AbortController()
@@ -273,7 +241,7 @@ export function useCart() {
         }
         throw error
       })
-      
+
       if (response.status === 429) {
         // brief backoff and single retry
         await new Promise(r => setTimeout(r, 400 + Math.floor(Math.random() * 300)))
@@ -291,10 +259,9 @@ export function useCart() {
           return
         }
       }
-
       // Read response text once (can only be read once)
       const responseText = await response.text()
-      
+
       if (response.ok) {
         const data: CartResponse = JSON.parse(responseText)
         const migratedCart = (data.items || []).map(migrateCartItem)
@@ -310,7 +277,6 @@ export function useCart() {
           // Not JSON, use as text
           errorData = { message: responseText || 'Unknown error' }
         }
-        
         safeError('🛒 [USE-CART] Failed to load cart:', {
           status: response.status,
           statusText: response.statusText,
@@ -318,7 +284,7 @@ export function useCart() {
           errorMessage: responseText || 'No error message',
           errorData: errorData
         })
-        
+
         // If 401, user might not be authenticated
         if (response.status === 401) {
           safeError('🛒 [USE-CART] Authentication failed - user may need to log in')
@@ -341,20 +307,20 @@ export function useCart() {
   // SECURITY: Always re-fetch supplier info from API for guest users to prevent localStorage tampering
   const loadProductDataForCartItems = useCallback(async (cartItems: CartItem[], forceRefreshSupplierInfo: boolean = false) => {
     const itemsNeedingProductData = cartItems.filter(item => !item.product)
-    const itemsNeedingVariantName = cartItems.filter(item => 
+    const itemsNeedingVariantName = cartItems.filter(item =>
       item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId)))
     )
-    
+
     // For guest users, always refresh supplier info from API (don't trust localStorage)
     const needsSupplierInfoRefresh = forceRefreshSupplierInfo || !isAuthenticated
-    
+
     if (itemsNeedingProductData.length === 0 && itemsNeedingVariantName.length === 0 && !needsSupplierInfoRefresh) return cartItems
-    
+
     const updatedItems = await Promise.all(
       cartItems.map(async (item) => {
         const needsProductData = !item.product
         const needsVariantName = item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId)))
-        
+
         // Fetch product data if needed (for product info or variant_name)
         // SECURITY: Always fetch supplier info from API for guest users (never trust localStorage)
         if (needsProductData || needsVariantName || needsSupplierInfoRefresh) {
@@ -365,9 +331,9 @@ export function useCart() {
               needsProductData || needsVariantName ? fetch(`/api/products/${item.productId}`) : Promise.resolve(null),
               needsSupplierInfoRefresh ? fetch(`/api/products/${item.productId}/supplier-info`).catch(() => null) : Promise.resolve(null)
             ])
-            
+
             const productData = productResponse && productResponse.ok ? await productResponse.json() : null
-            
+
             // SECURITY: Always fetch supplier info from API for guest users (prevent tampering)
             let supplierInfo: any = null
             if (needsSupplierInfoRefresh && supplierResponse && supplierResponse.ok) {
@@ -382,11 +348,9 @@ export function useCart() {
                 supplierInfo = null
               }
             }
-            
             // Update variants with variant_name and price from database
             const updatedVariants = productData ? item.variants.map((v: any) => {
               let updatedVariant = { ...v }
-              
               if (v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId))) {
                 const variant = productData.variants?.find((pv: any) => pv.id === Number(v.variantId))
                 if (variant) {
@@ -398,10 +362,9 @@ export function useCart() {
                 // For products without variants, use product price
                 updatedVariant.price = parseFloat(productData.price) || updatedVariant.price
               }
-              
               return updatedVariant
             }) : item.variants
-            
+
             return {
               ...item,
               variants: updatedVariants,
@@ -436,11 +399,10 @@ export function useCart() {
             } as any
           }
         }
-        
         return item // Return original item if no updates needed
       })
     )
-    
+
     return updatedItems
   }, [isAuthenticated])
 
@@ -454,11 +416,11 @@ export function useCart() {
       if (stored) {
         const guestCart = JSON.parse(stored)
         const migratedCart = (guestCart.items || []).map(migrateCartItem)
-        
+
         // SECURITY: Always refresh supplier info from API (forceRefreshSupplierInfo = true)
         // This prevents guest users from tampering with supplier info in localStorage
         const cartWithProductData = await loadProductDataForCartItems(migratedCart, true)
-        
+
         setCart(cartWithProductData)
         setCartSubtotal(guestCart.subtotal || 0)
         setCartTotalItems(guestCart.totalItems || 0)
@@ -490,7 +452,6 @@ export function useCart() {
           updatedAt: item.updatedAt,
           product: item.product
         }
-        
         // Only include safe supplier display info (no UUIDs)
         if ((item as any).supplierCompanyName) {
           sanitized.supplierCompanyName = (item as any).supplierCompanyName
@@ -507,15 +468,14 @@ export function useCart() {
         if ((item as any).supplierCompanyLogo) {
           sanitized.supplierCompanyLogo = (item as any).supplierCompanyLogo
         }
-        
         // SECURITY: Explicitly remove any UUIDs or sensitive fields
         delete (sanitized as any).supplierId
         delete (sanitized as any).supplier_id
         delete (sanitized as any).user_id
-        
+
         return sanitized
       })
-      
+
       localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({
         items: sanitizedItems,
         subtotal,
@@ -535,7 +495,6 @@ export function useCart() {
       if (stored) {
         const guestCart = JSON.parse(stored)
         if (guestCart.items && guestCart.items.length > 0) {
-          
           const response = await fetch('/api/cart/merge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -597,41 +556,42 @@ export function useCart() {
 
   // Add item to cart with variant attributes
   const addItem = useCallback(async (
-    productId: number, 
-    quantity: number = 1, 
+    productId: number,
+    quantity: number = 1,
     variantId?: string,
     variantAttributes?: { [key: string]: string | string[] },
     variantPrice?: number,
     variantSku?: string,
-    variantImage?: string
+    variantImage?: string,
+    productData?: any // Optional: Pre-loaded product data to avoid API fetch
   ) => {
     // Normalize variant id so simple products always use a single key
     const normalizedVariantId: string = buildCanonicalVariantId(variantId, variantAttributes)
 
     // Use provided price immediately for faster response
     let finalVariantPrice: number = variantPrice || 0
-    
+
     // Only fetch price if not provided (for guest users or fallback)
     if (variantPrice === undefined || variantPrice === null) {
       // Use a default price and fetch in background
       finalVariantPrice = 0
-      
+
       // Fetch price in background without blocking
       fetch(`/api/products/${productId}`)
         .then(response => response.ok ? response.json() : null)
         .then(product => {
           if (product && product.price) {
             // Update cart with correct price if it changed
-            setCart(prevCart => prevCart.map(item => 
-              item.productId === productId 
+            setCart(prevCart => prevCart.map(item =>
+              item.productId === productId
                 ? {
                     ...item,
-                    variants: item.variants.map(v => 
-                      v.variantId === normalizedVariantId 
+                    variants: item.variants.map(v =>
+                      v.variantId === normalizedVariantId
                         ? { ...v, price: product.price }
                         : v
                     ),
-                    totalPrice: item.variants.reduce((sum, v) => 
+                    totalPrice: item.variants.reduce((sum, v) =>
                       sum + ((v.variantId === normalizedVariantId ? product.price : v.price) * v.quantity), 0
                     )
                   }
@@ -643,25 +603,25 @@ export function useCart() {
     }
     // Check if product already exists in cart
     const existingItem = cart.find(item => item.productId === productId)
-    
+
     if (existingItem) {
       // Check if this exact variant already exists (match ONLY by variantId - simplified variant system)
-      const existingVariant = existingItem.variants.find(v => 
+      const existingVariant = existingItem.variants.find(v =>
         v.variantId === normalizedVariantId
       )
-      
+
       if (existingVariant) {
         // Update existing variant quantity
         const updatedCart = cart.map(item => {
           if (item.productId === productId) {
-            const updatedVariants = item.variants.map(v => 
-              (v.variantId === normalizedVariantId) 
+            const updatedVariants = item.variants.map(v =>
+              (v.variantId === normalizedVariantId)
                 ? { ...v, quantity: v.quantity + quantity }
                 : v
             )
             const totalQuantity = updatedVariants.reduce((sum, v) => sum + v.quantity, 0)
             const totalPrice = updatedVariants.reduce((sum, v) => sum + (v.price * v.quantity), 0)
-            
+
             return {
               ...item,
               variants: updatedVariants,
@@ -690,44 +650,66 @@ export function useCart() {
         })
         setCartTotalItems(prev => prev + quantity)
         setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
-        
+
       } else {
-        // Fetch variant_name and price from database if variantId is numeric
+        // Use provided product data or fetch variant_name and price from database
         let variantName: string | null = null
         let variantPriceFromDB: number | null = null
-        
-        if (normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
-          try {
-            const variantResponse = await fetch(`/api/products/${productId}`)
-            if (variantResponse.ok) {
-              const productData = await variantResponse.json()
-              const variant = productData.variants?.find((v: any) => v.id === Number(normalizedVariantId))
-              if (variant) {
-                variantName = variant.variant_name || null
-                variantPriceFromDB = parseFloat(variant.price) || null
-              }
+        let productDataToUse = productData
+
+        // Only fetch if product data not provided
+        if (!productDataToUse && normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
+          const requestKey = `product-${productId}`
+          
+          // Check for duplicate request
+          if (addItemRequestMap.current.has(requestKey)) {
+            try {
+              productDataToUse = await addItemRequestMap.current.get(requestKey)
+            } catch (error) {
+              safeError('🛒 [CLIENT] Error waiting for duplicate request:', error)
             }
+          } else {
+            // Create new fetch request
+            const fetchPromise = fetch(`/api/products/${productId}`, {
+              cache: 'default', // Use CDN cache
+              headers: {
+                'Cache-Control': 'max-age=60' // Cache for 60 seconds
+              }
+            }).then(response => response.ok ? response.json() : null)
+            
+            addItemRequestMap.current.set(requestKey, fetchPromise)
+            
+            try {
+              productDataToUse = await fetchPromise
           } catch (error) {
             safeError('🛒 [CLIENT] Error fetching variant data:', error)
-          }
-        }
-        
-        // If no variant-specific price, fetch product price
-        if (variantPriceFromDB === null) {
-          try {
-            const productResponse = await fetch(`/api/products/${productId}`)
-            if (productResponse.ok) {
-              const productData = await productResponse.json()
-              variantPriceFromDB = parseFloat(productData.price) || 0
+            } finally {
+              // Clean up after 2 seconds
+              setTimeout(() => addItemRequestMap.current.delete(requestKey), 2000)
             }
-          } catch (error) {
-            safeError('🛒 [CLIENT] Error fetching product price:', error)
           }
         }
         
+        // Extract variant data from product data
+        if (productDataToUse) {
+          if (normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
+            const variant = productDataToUse.variants?.find((v: any) => v.id === Number(normalizedVariantId))
+            if (variant) {
+              variantName = variant.variant_name || null
+              variantPriceFromDB = parseFloat(variant.price) || null
+            }
+          }
+          // If no variant-specific price, use product price
+          if (variantPriceFromDB === null) {
+            variantPriceFromDB = parseFloat(productDataToUse.price) || 0
+            }
+        } else if (variantPriceFromDB === null && variantPrice !== undefined && variantPrice !== null) {
+          // Fallback to provided price if no product data available
+          variantPriceFromDB = variantPrice
+        }
         // Use database price if available, otherwise fall back to provided price
         const finalPriceToUseForVariant = variantPriceFromDB !== null ? variantPriceFromDB : finalVariantPrice
-        
+
         // Add new variant to existing product
         const newVariant: SelectedVariant = {
           variantId: normalizedVariantId,
@@ -738,13 +720,12 @@ export function useCart() {
           sku: variantSku,
           image: variantImage
         }
-
         const updatedCart = cart.map(item => {
           if (item.productId === productId) {
             const updatedVariants = [...item.variants, newVariant]
             const totalQuantity = updatedVariants.reduce((sum, v) => sum + v.quantity, 0)
             const totalPrice = updatedVariants.reduce((sum, v) => sum + (v.price * v.quantity), 0)
-            
+
             return {
               ...item,
               variants: updatedVariants,
@@ -773,39 +754,67 @@ export function useCart() {
       })
       setCartTotalItems(prev => prev + quantity)
         setCartSubtotal(prev => prev + (finalVariantPrice * quantity))
-        
+
       }
     } else {
-      // Fetch product data (for both guest and authenticated users to get variant_name and price from DB)
-      let productData = null
+      // Use provided product data or fetch it (for both guest and authenticated users to get variant_name and price from DB)
+      let productDataToUse = productData
       let variantName: string | null = null
       let variantPriceFromDB: number | null = null
-      
-      try {
-        const response = await fetch(`/api/products/${productId}`)
-        if (response.ok) {
-          productData = await response.json()
+
+      // Only fetch if product data not provided
+      if (!productDataToUse) {
+        const requestKey = `product-${productId}`
+        
+        // Check for duplicate request
+        if (addItemRequestMap.current.has(requestKey)) {
+          try {
+            productDataToUse = await addItemRequestMap.current.get(requestKey)
+          } catch (error) {
+            safeError('🛒 [CLIENT] Error waiting for duplicate request:', error)
+          }
+        } else {
+          // Create new fetch request with CDN caching
+          const fetchPromise = fetch(`/api/products/${productId}`, {
+            cache: 'default', // Use CDN cache
+            headers: {
+              'Cache-Control': 'max-age=60' // Cache for 60 seconds
+            }
+          }).then(response => response.ok ? response.json() : null)
           
+          addItemRequestMap.current.set(requestKey, fetchPromise)
+          
+          try {
+            productDataToUse = await fetchPromise
+          } catch (error) {
+            safeError('🛒 [CLIENT] Error fetching product data:', error)
+          } finally {
+            // Clean up after 2 seconds
+            setTimeout(() => addItemRequestMap.current.delete(requestKey), 2000)
+          }
+        }
+      }
+
+      // Extract variant_name and price from product data
+      if (productDataToUse) {
           // Extract variant_name and price if variantId is numeric
           if (normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
-            const variant = productData.variants?.find((v: any) => v.id === Number(normalizedVariantId))
+          const variant = productDataToUse.variants?.find((v: any) => v.id === Number(normalizedVariantId))
             if (variant) {
               variantName = variant.variant_name || null
               variantPriceFromDB = parseFloat(variant.price) || null
             }
           }
-          
           // If no variant-specific price, use product price
           if (variantPriceFromDB === null) {
-            variantPriceFromDB = parseFloat(productData.price) || 0
+          variantPriceFromDB = parseFloat(productDataToUse.price) || 0
           }
-        }
-      } catch (error) {
-        safeError('🛒 [CLIENT] Error fetching product data:', error)
+      } else if (variantPrice !== undefined && variantPrice !== null) {
+        // Fallback to provided price if no product data available
+        variantPriceFromDB = variantPrice
       }
-
       // Use database price if available, otherwise fall back to provided price
-      const finalPriceToUse = variantPriceFromDB !== null ? variantPriceFromDB : finalVariantPrice
+      const finalPriceToUse = variantPriceFromDB !== null && variantPriceFromDB > 0 ? variantPriceFromDB : (variantPrice || finalVariantPrice || 0)
 
       // Add new product with variant
       const newVariant: SelectedVariant = {
@@ -817,8 +826,6 @@ export function useCart() {
         sku: variantSku,
         image: variantImage
       }
-
-      
       // Fetch supplier info for guest users
       let supplierInfo: any = null
       if (!isAuthenticated) {
@@ -831,7 +838,6 @@ export function useCart() {
           // Ignore supplier info fetch errors
         }
       }
-      
       const newItem: CartItem = {
           id: Date.now(), // Temporary ID
           productId,
@@ -841,15 +847,15 @@ export function useCart() {
         currency: 'TZS',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        product: productData ? {
-          id: productData.id,
-          name: productData.name,
-          image: productData.image,
-          price: productData.price,
-          originalPrice: productData.original_price,
-          inStock: productData.in_stock,
-          stockQuantity: productData.stock_quantity,
-          sku: productData.sku
+        product: productDataToUse ? {
+          id: productDataToUse.id,
+          name: productDataToUse.name,
+          image: productDataToUse.image,
+          price: productDataToUse.price,
+          originalPrice: productDataToUse.original_price || productDataToUse.originalPrice,
+          inStock: productDataToUse.in_stock !== undefined ? productDataToUse.in_stock : productDataToUse.inStock,
+          stockQuantity: productDataToUse.stock_quantity || productDataToUse.stockQuantity,
+          sku: productDataToUse.sku
         } : undefined,
         // Add supplier info for guest users
         ...(supplierInfo ? {
@@ -872,12 +878,25 @@ export function useCart() {
       setCartTotalItems(prev => prev + quantity)
       setCartSubtotal(prev => prev + (finalPriceToUse * quantity))
     }
-
     // Call API for authenticated users in background (non-blocking)
     if (isAuthenticated) {
       // Don't await - let it happen in background
       (async () => {
         try {
+          // Request deduplication for API calls
+          const apiRequestKey = `cart-add-${productId}-${normalizedVariantId}-${quantity}`
+          
+          // Check if same request is already in flight
+          if (addItemRequestMap.current.has(apiRequestKey)) {
+            // Wait for existing request instead of creating duplicate
+            try {
+              await addItemRequestMap.current.get(apiRequestKey)
+              return // Exit early, existing request will handle everything
+            } catch (error) {
+              // Continue with new request if existing one failed
+            }
+          }
+          
           // For simple products (no attributes), send undefined so API normalizes to NULL
           // NOTE: We don't send price - API will fetch authoritative price from database
           const isSimpleSelection = !variantAttributes || Object.keys(variantAttributes).length === 0
@@ -888,25 +907,35 @@ export function useCart() {
             // price: NOT SENT - API fetches from database for security
             variantAttributes: variantAttributes
           }
-
-          const response = await fetch('/api/cart', {
+          
+          // Create API request promise
+          const apiPromise = fetch('/api/cart', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
             credentials: 'include',
+            cache: 'no-store', // Don't cache POST requests
             body: JSON.stringify(requestBody)
-          })
-          
+          }).then(async (response) => {
           const responseData = await response.json().catch((err) => {
             safeError('🛒 [CLIENT] Failed to parse API response:', err)
             return {}
           })
+            return { response, responseData }
+          })
+          
+          // Store promise for deduplication
+          addItemRequestMap.current.set(apiRequestKey, apiPromise)
+          
+          const { response, responseData } = await apiPromise
+          
+          // Clean up deduplication map after request completes
+          setTimeout(() => addItemRequestMap.current.delete(apiRequestKey), 1000)
 
           if (response.ok) {
             if (typeof safeLog === 'function') {
             }
-
             // Update cart item with supplier info from API response (if available)
             if (responseData.supplierCompanyName) {
               setCart(prev => prev.map(item => {
@@ -919,10 +948,9 @@ export function useCart() {
                 return item
               }))
             }
-
             // Reload cart from server to get latest data including supplier info
             await loadServerCart()
-          
+
           // Check if this was a partial stock response
           if (responseData.partialStock) {
             const { partialStock } = responseData
@@ -944,10 +972,10 @@ export function useCart() {
             status: response.status,
             statusText: response.statusText
           })
-          
+
           const errorData = await response.json().catch(() => ({}))
           safeError('🛒 [CLIENT] Error response data:', errorData)
-          
+
           if (errorData.error === 'Product out of stock') {
             toast({
               title: "Out of Stock",
@@ -963,7 +991,6 @@ export function useCart() {
               duration: 6000, // Error message: 6 seconds (within 5000-8000ms range)
             })
           }
-
           // Rollback optimistic update
           await loadServerCart()
         }
@@ -1011,12 +1038,12 @@ export function useCart() {
         }
         return v
       })
-      
+
       const totalQuantity = updatedVariants.reduce((sum, v) => sum + v.quantity, 0)
       const totalPrice = updatedVariants.reduce((sum, v) => sum + (v.price * v.quantity), 0)
-      
-      updatedCart = cart.map(cartItem => 
-        cartItem.id === item.id 
+
+      updatedCart = cart.map(cartItem =>
+        cartItem.id === item.id
           ? { ...cartItem, variants: updatedVariants, totalQuantity, totalPrice }
           : cartItem
       )
@@ -1024,25 +1051,24 @@ export function useCart() {
       // Update entire product quantity (distribute across variants proportionally)
       const totalCurrentQuantity = item.totalQuantity
       const scaleFactor = quantity / totalCurrentQuantity
-      
+
       const updatedVariants = item.variants.map(v => {
         const newQuantity = Math.round(v.quantity * scaleFactor)
         return { ...v, quantity: newQuantity }
       })
-      
+
       const totalQuantity = updatedVariants.reduce((sum, v) => sum + v.quantity, 0)
       const totalPrice = updatedVariants.reduce((sum, v) => sum + (v.price * v.quantity), 0)
-      
+
       quantityDiff = totalQuantity - item.totalQuantity
       priceDiff = totalPrice - item.totalPrice
-      
-      updatedCart = cart.map(cartItem => 
+
+      updatedCart = cart.map(cartItem =>
       cartItem.id === item.id
           ? { ...cartItem, variants: updatedVariants, totalQuantity, totalPrice }
         : cartItem
     )
     }
-
     setCart(updatedCart)
     setCartTotalItems(prev => prev + quantityDiff)
     setCartSubtotal(prev => prev + priceDiff)
@@ -1088,7 +1114,6 @@ export function useCart() {
 
   // Remove item from cart
   const removeItem = useCallback(async (productId: number, variantId?: string) => {
-    
     const item = cart.find(item => item.productId === productId)
 
     if (!item) return
@@ -1108,7 +1133,7 @@ export function useCart() {
         }
         return true
       })
-      
+
       if (updatedVariants.length === 0) {
         // Remove entire product if no variants left
         updatedCart = cart.filter(cartItem => cartItem.id !== item.id)
@@ -1116,9 +1141,9 @@ export function useCart() {
         // Update product with remaining variants
         const totalQuantity = updatedVariants.reduce((sum, v) => sum + v.quantity, 0)
         const totalPrice = updatedVariants.reduce((sum, v) => sum + (v.price * v.quantity), 0)
-        
-        updatedCart = cart.map(cartItem => 
-          cartItem.id === item.id 
+
+        updatedCart = cart.map(cartItem =>
+          cartItem.id === item.id
             ? { ...cartItem, variants: updatedVariants, totalQuantity, totalPrice }
             : cartItem
         )
@@ -1129,8 +1154,6 @@ export function useCart() {
       removedQuantity = item.totalQuantity
       removedPrice = item.totalPrice
     }
-    
-
     setCart(updatedCart)
     setCartTotalItems(prev => prev - removedQuantity)
     setCartSubtotal(prev => prev - removedPrice)
@@ -1156,7 +1179,7 @@ export function useCart() {
           setCart(cart) // Restore original cart
           setCartTotalItems(prev => prev + removedQuantity) // Restore quantity
           setCartSubtotal(prev => prev + removedPrice) // Restore price
-          
+
           toast({
             title: "Error",
             description: "Failed to remove item. Please try again.",
@@ -1175,7 +1198,7 @@ export function useCart() {
         setCart(cart) // Restore original cart
         setCartTotalItems(prev => prev + removedQuantity) // Restore quantity
         setCartSubtotal(prev => prev + removedPrice) // Restore price
-        
+
         toast({
           title: "Error",
           description: "Failed to remove item. Please try again.",
@@ -1196,7 +1219,6 @@ export function useCart() {
 
   // Clear entire cart
   const clearCart = useCallback(async () => {
-    
     // Optimistic update
     setCart([])
     setCartTotalItems(0)
@@ -1253,7 +1275,7 @@ export function useCart() {
   const isInCart = useCallback((productId: number, variantId?: string) => {
     const item = cart.find(item => item.productId === productId)
     if (!item) return false
-    
+
     if (variantId) {
       return item.variants?.some(v => v.variantId === variantId) || false
     }
@@ -1264,7 +1286,7 @@ export function useCart() {
   const getItemQuantity = useCallback((productId: number, variantId?: string) => {
     const item = cart.find(item => item.productId === productId)
     if (!item) return 0
-    
+
     if (variantId) {
       const variant = item.variants?.find(v => v.variantId === variantId)
       return variant ? variant.quantity : 0

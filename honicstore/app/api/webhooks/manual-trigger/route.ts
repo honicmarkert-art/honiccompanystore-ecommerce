@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { logger } from '@/lib/logger'
+import { buildUrl } from '@/lib/url-utils'
 
 
 
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Forward to the actual webhook handler
-    const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/webhooks/clickpesa`
+    const webhookUrl = buildUrl('/api/webhooks/clickpesa')
     
     logger.log('🔄 Forwarding to webhook:', webhookUrl)
     
@@ -68,7 +69,6 @@ export async function POST(request: NextRequest) {
     })
     
   } catch (error) {
-    console.error('❌ Manual webhook trigger error:', error)
     return NextResponse.json(
       { error: 'Manual webhook trigger failed', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }

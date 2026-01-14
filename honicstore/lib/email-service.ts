@@ -59,18 +59,14 @@ class EmailService {
     
     if (isResendSmtp && smtpUser?.toLowerCase() === 'resend') {
       // For Resend, username stays "resend" for auth, but we'll use sender emails for "from"
-      console.log('Using Resend SMTP with username "resend"')
-    } else if (!smtpUser || !smtpUser.includes('@')) {
+      } else if (!smtpUser || !smtpUser.includes('@')) {
       // For other SMTP providers, username must be a valid email
-      console.warn('SMTP_USER must be a valid email address for non-Resend SMTP providers')
       this.transporter = null
       this.initialized = true
       return
     }
 
     if (!smtpHost || !smtpUser || !smtpPassword) {
-      console.warn('SMTP configuration incomplete. Email sending will be disabled.')
-      console.warn('Required: SMTP_HOST, SMTP_USER, SMTP_PASSWORD')
       this.transporter = null
       this.initialized = true
       return
@@ -90,13 +86,10 @@ class EmailService {
         },
       })
 
-      console.log('SMTP transporter initialized successfully')
       if (isResendSmtp) {
-        console.log('Resend SMTP: Using sender email configs for "from" addresses')
-      }
+        }
       this.initialized = true
     } catch (error) {
-      console.error('Failed to initialize SMTP transporter:', error)
       this.transporter = null
       this.initialized = true
     }
@@ -126,7 +119,7 @@ class EmailService {
       senderEmail = process.env.SMTP_SENDER_EMAIL_NOREPLY || 
                     process.env.SMTP_SENDER_EMAIL_INFO || 
                     process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-                    'noreply@mail.honiccompanystore.com'
+                    process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
     } else {
       // Use SMTP_USER as sender email (for non-Resend providers)
       senderEmail = smtpUserAuth
@@ -184,21 +177,13 @@ class EmailService {
 
       const info = await this.transporter.sendMail(mailOptions)
       
-      console.log('Email sent successfully via SMTP:', info.messageId)
-      
       return {
         success: true,
         messageId: info.messageId
       }
     } catch (error: any) {
-      console.error('SMTP email sending error:', error)
-      
       if (error.code === 'EAUTH') {
-        console.error('SMTP Authentication failed. Please check:')
-        console.error('1. SMTP_USER (email address) is correct')
-        console.error('2. SMTP_PASSWORD is correct')
-        console.error('3. SMTP_HOST matches your email provider')
-        console.error('4. If using Gmail, use an App Password instead of regular password')
+        // SMTP authentication error - check credentials
       }
 
       return {
@@ -258,7 +243,8 @@ class EmailService {
     }
 
     try {
-      const resendResponse = await fetch('https://api.resend.com/emails', {
+      const resendApiUrl = process.env.RESEND_API_URL || 'https://api.resend.com'
+      const resendResponse = await fetch(`${resendApiUrl}/emails`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -276,21 +262,18 @@ class EmailService {
 
       if (resendResponse.ok) {
         const data = await resendResponse.json()
-        console.log('Email sent successfully via Resend:', data.id)
         return {
           success: true,
           messageId: data.id
         }
       } else {
         const errorData = await resendResponse.json()
-        console.error('Resend API error:', errorData)
         return {
           success: false,
           error: errorData.message || 'Resend API error'
         }
       }
     } catch (error: any) {
-      console.error('Resend email sending error:', error)
       return {
         success: false,
         error: error.message || 'Failed to send email via Resend'
@@ -310,7 +293,6 @@ class EmailService {
     }
 
     // Fallback to Resend if SMTP fails
-    console.log('SMTP failed, trying Resend as fallback...')
     const resendResult = await this.sendEmailViaResend(options)
     
     if (resendResult.success) {
@@ -333,6 +315,11 @@ class EmailService {
       support: process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com',
       sales: process.env.SALES_EMAIL || 'sales@honiccompanystore.com',
       promotion: process.env.PROMOTION_EMAIL || 'promotion@honiccompanystore.com',
+      tech: process.env.TECH_EMAIL || process.env.SUPPORT_EMAIL || 'tech@honiccompanystore.com',
+      legal: process.env.LEGAL_EMAIL || process.env.CONTACT_EMAIL || 'legal@honic.co',
+      privacy: process.env.PRIVACY_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co',
+      dpo: process.env.DPO_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co',
+      security: process.env.SECURITY_EMAIL || process.env.SUPPORT_EMAIL || 'security@honic.co',
     }
   }
 
@@ -350,7 +337,7 @@ class EmailService {
         return process.env.SMTP_SENDER_EMAIL_NOREPLY || 
                process.env.SMTP_SENDER_EMAIL_INFO || 
                process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-               'noreply@mail.honiccompanystore.com'
+               process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
       }
       // For other providers: use SMTP_USER if it's a valid email
       return smtpUser

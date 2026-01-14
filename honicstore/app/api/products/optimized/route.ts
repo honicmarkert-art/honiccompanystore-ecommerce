@@ -88,7 +88,6 @@ export async function GET(request: NextRequest) {
     const { data: products, error } = await queryBuilder
 
     if (error) {
-      console.error('Optimized products fetch error:', error)
       return NextResponse.json(
         { error: 'Failed to fetch products', details: error.message },
         { status: 500 }
@@ -143,7 +142,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Optimized products API error:', error)
     return NextResponse.json(
       { 
         error: 'Internal server error', 

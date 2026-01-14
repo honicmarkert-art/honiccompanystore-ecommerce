@@ -103,7 +103,6 @@ export function UserProfile() {
           setCurrentPlan(data.plan)
         }
       } catch (error) {
-        console.error('Error fetching current plan:', error)
         // Keep the user object check as fallback
       } finally {
         setLoadingPlan(false)

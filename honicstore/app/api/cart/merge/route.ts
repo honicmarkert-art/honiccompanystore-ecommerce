@@ -199,7 +199,6 @@ export async function POST(request: NextRequest) {
     return finalResponse
 
   } catch (error) {
-    console.error('Cart merge error:', error)
     const errorResponse = NextResponse.json({
       error: 'Failed to merge cart',
       message: 'An unexpected error occurred while merging your cart'

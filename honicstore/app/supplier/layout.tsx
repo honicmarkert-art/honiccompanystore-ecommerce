@@ -173,7 +173,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           credentials: 'include'
         })
       } catch (apiError) {
-        console.error('Logout API error:', apiError)
         // Continue with redirect even if API fails
       }
       
@@ -185,7 +184,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         return // Exit early to prevent any other code from running
       }
     } catch (error) {
-      console.error('Logout error:', error)
       // On error, still force redirect to become-supplier immediately
       if (typeof window !== 'undefined') {
         window.location.replace('/become-supplier')
@@ -222,8 +220,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           setPaymentStatus(data.paymentStatus || null)
         }
       } catch (error) {
-        console.error('Error fetching current plan:', error)
-      } finally {
+        } finally {
         setLoadingPlan(false)
       }
     }
@@ -672,8 +669,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
             }
           }
           } catch (refreshError) {
-            console.error('Error refreshing supplier status:', refreshError)
-          }
+            }
         }
         // Form is now in sync with backend; future auto-refreshes can safely overwrite
         setCompanyInfoFormDirty(false)
@@ -1096,7 +1092,6 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                               // Step 3: Redirect directly to payment page
                               router.push(`/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`)
                             } catch (error: any) {
-                              console.error('Error initiating upgrade:', error)
                               toast({
                                 title: 'Error',
                                 description: error.message || 'Failed to initiate upgrade. Please try again.',

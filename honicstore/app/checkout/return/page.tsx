@@ -169,6 +169,10 @@ function CheckoutReturnContent() {
     try {
       // Use the correct ClickPesa API format
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+      const baseUrl = typeof window !== 'undefined' 
+        ? window.location.origin 
+        : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://www.honiccompanystore.com'))
+      
       let response = await fetch('/api/payment/clickpesa', {
         method: 'POST',
         headers: {
@@ -179,8 +183,8 @@ function CheckoutReturnContent() {
           amount: String(orderData.totalAmount),
           currency: orderData.currency || 'TZS',
           orderId: orderData.referenceId,
-          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
-          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
+          returnUrl: `${baseUrl}/checkout/return?orderReference=${orderData.referenceId}`,
+          cancelUrl: `${baseUrl}/checkout/return?orderReference=${orderData.referenceId}`,
           customerDetails: {
             fullName: orderData.billingAddress?.fullName || orderData.shippingAddress?.fullName || '',
             email: orderData.billingAddress?.email || orderData.shippingAddress?.email || '',
@@ -203,8 +207,8 @@ function CheckoutReturnContent() {
             amount: String(orderData.totalAmount),
             currency: orderData.currency || 'TZS',
             orderId: orderData.referenceId,
-            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
-            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${orderData.referenceId}`,
+            returnUrl: `${baseUrl}/checkout/return?orderReference=${orderData.referenceId}`,
+            cancelUrl: `${baseUrl}/checkout/return?orderReference=${orderData.referenceId}`,
           })
         })
       }
@@ -264,6 +268,10 @@ function CheckoutReturnContent() {
       
       // Create new ClickPesa checkout link with new reference ID
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+      const baseUrl = typeof window !== 'undefined' 
+        ? window.location.origin 
+        : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://www.honiccompanystore.com'))
+      
       let response = await fetch('/api/payment/clickpesa', {
         method: 'POST',
         headers: {
@@ -274,8 +282,8 @@ function CheckoutReturnContent() {
           amount: String(orderData?.totalAmount || 0),
           currency: orderData?.currency || 'TZS',
           orderId: newReferenceId, // Use new reference ID
-          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
-          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
+          returnUrl: `${baseUrl}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
+          cancelUrl: `${baseUrl}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
           customerDetails: {
             fullName: orderData?.billingAddress?.fullName || orderData?.shippingAddress?.fullName || 'Customer',
             email: orderData?.billingAddress?.email || orderData?.shippingAddress?.email || '',
@@ -298,8 +306,8 @@ function CheckoutReturnContent() {
             amount: String(orderData?.totalAmount || 0),
             currency: orderData?.currency || 'TZS',
             orderId: newReferenceId,
-            returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
-            cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
+            returnUrl: `${baseUrl}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
+            cancelUrl: `${baseUrl}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
           })
         })
       }

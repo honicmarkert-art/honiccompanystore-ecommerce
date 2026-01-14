@@ -22,12 +22,9 @@ export function SWRProvider({ children }: SWRProviderProps) {
       value={{
         // Global error handler
         onError: (error, key) => {
-          console.error('SWR Global Error:', error, 'for key:', key)
-          
           // Handle rate limiting globally
           if (error.message === 'RATE_LIMITED') {
-            console.warn('Rate limited globally, will retry automatically')
-          }
+            }
         },
         
         // Global success handler
@@ -35,8 +32,8 @@ export function SWRProvider({ children }: SWRProviderProps) {
           logger.log('SWR Success for key:', key)
         },
         
-        // Deduplication interval (5 seconds)
-        dedupingInterval: 5000,
+        // Deduplication interval (30 minutes - prevent duplicate requests for same data)
+        dedupingInterval: 30 * 60 * 1000,
         
         // Error retry configuration
         errorRetryCount: 3,
@@ -50,6 +47,40 @@ export function SWRProvider({ children }: SWRProviderProps) {
         
         // Interval revalidation (disabled to prevent excessive requests)
         refreshInterval: 0,
+        
+        // Keep previous data while revalidating (prevents flicker)
+        keepPreviousData: true,
+        
+        // Cache provider with persistent storage
+        provider: (() => {
+          // Use a persistent Map that survives navigation
+          if (typeof window !== 'undefined') {
+            const cache = new Map()
+            // Restore from sessionStorage on init
+            try {
+              const stored = sessionStorage.getItem('swr_cache')
+              if (stored) {
+                const parsed = JSON.parse(stored)
+                Object.entries(parsed).forEach(([key, value]) => {
+                  cache.set(key, value)
+                })
+              }
+            } catch (e) {
+              // Ignore storage errors
+            }
+            // Save to sessionStorage periodically
+            setInterval(() => {
+              try {
+                const cacheObj = Object.fromEntries(cache)
+                sessionStorage.setItem('swr_cache', JSON.stringify(cacheObj))
+              } catch (e) {
+                // Ignore storage errors
+              }
+            }, 5000)
+            return cache
+          }
+          return new Map()
+        })(),
         
         // Global fetcher with rate limiting
         fetcher: async (url: string) => {

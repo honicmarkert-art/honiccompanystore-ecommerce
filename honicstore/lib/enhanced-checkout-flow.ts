@@ -115,8 +115,9 @@ const handlePlaceOrder = async () => {
           amount: String(orderData.totalAmount),
           currency: 'TZS',
           orderId: referenceId, // ✅ Use proper reference ID
-          returnUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
-          cancelUrl: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
+          const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://honiccompanystore.com')
+          returnUrl: `${baseUrl}/checkout/return?orderReference=${referenceId}&status=SUCCESS`,
+          cancelUrl: `${baseUrl}/checkout/return?orderReference=${referenceId}&status=CANCELLED`,
           customerDetails: {
             fullName: formData.shippingAddress.fullName,
             email: formData.shippingAddress.email,
@@ -145,8 +146,7 @@ const handlePlaceOrder = async () => {
         }
       }
     } catch (clickpesaError) {
-      console.error('ClickPesa redirect failed:', clickpesaError)
-    }
+      }
     
     if (!clickpesaRedirectSuccess) {
       // Fallback: show order confirmation page
@@ -154,7 +154,6 @@ const handlePlaceOrder = async () => {
     }
     
   } catch (error) {
-    console.error('Order creation failed:', error)
     toast({
       title: "Order Failed",
       description: error instanceof Error ? error.message : "Failed to create order. Please try again.",

@@ -106,7 +106,6 @@ function AdminUsersContent() {
       setUsers(data.users || [])
       setFilteredUsers(data.users || [])
     } catch (e) {
-      console.error('Error fetching users:', e)
       setUsers([])
       setFilteredUsers([])
     } finally {
@@ -131,8 +130,7 @@ function AdminUsersContent() {
           try {
             supabaseClient.removeChannel(channel)
           } catch (error) {
-            console.warn('Error removing existing user status channel:', error)
-          }
+            }
         }
 
         channel = supabaseClient
@@ -182,13 +180,11 @@ function AdminUsersContent() {
           )
           .subscribe((status) => {
             if (status === 'SUBSCRIBED') {
-              console.log('✅ Subscribed to real-time user status changes')
-            }
+              }
           })
 
       } catch (error) {
-        console.error('Error setting up real-time user status:', error)
-      }
+        }
     }
 
     setupRealtime()
@@ -199,8 +195,7 @@ function AdminUsersContent() {
         try {
           supabaseClient.removeChannel(channel)
         } catch (error) {
-          console.warn('Error removing user status channel:', error)
-        }
+          }
       }
     }
   }, [selectedUser])

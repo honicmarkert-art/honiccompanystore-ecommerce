@@ -13,7 +13,6 @@ export async function getAuthToken(): Promise<string | null> {
     const { data: sessionData } = await supabase.auth.getSession()
     return sessionData.session?.access_token || null
   } catch (error) {
-    console.error('Error getting auth token:', error)
     return null
   }
 }
@@ -28,7 +27,6 @@ export async function getAuthenticatedUser() {
     const { data: sessionData } = await supabase.auth.getSession()
     return sessionData.session?.user || null
   } catch (error) {
-    console.error('Error getting authenticated user:', error)
     return null
   }
 }

@@ -2,7 +2,7 @@ import { MetadataRoute } from 'next'
 import { getSupabaseClient } from '@/lib/supabase-server'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.honiccompanystore.com'
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'
   
   // Static pages
   const staticPages: MetadataRoute.Sitemap = [
@@ -76,8 +76,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       }))
     }
   } catch (error) {
-    console.error('Error fetching products for sitemap:', error)
-  }
+    }
 
   return [...staticPages, ...productPages]
 }

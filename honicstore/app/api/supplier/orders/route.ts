@@ -1,25 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData, CACHE_TTL, generateCacheKey } from '@/lib/database-optimization'
+import { createErrorResponse, logError } from '@/lib/error-handler'
+import { logger } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 // GET /api/supplier/orders - Fetch orders with supplier's products only
 export async function GET(request: NextRequest) {
-  try {
-    // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
-    if (!rateLimitResult.allowed) {
-      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-        endpoint: '/api/supplier/orders',
-        reason: rateLimitResult.reason
-      }, request)
-      return NextResponse.json(
-        { success: false, error: rateLimitResult.reason },
-        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
-      )
-    }
+  return performanceMonitor.measure('supplier_orders_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/orders',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+        )
+      }
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
@@ -64,23 +69,34 @@ export async function GET(request: NextRequest) {
       .select('id')
       .or(`user_id.eq.${user.id},supplier_id.eq.${user.id}`)
 
-    if (productsError) {
-      console.error('Error fetching supplier products:', productsError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch supplier products' },
-        { status: 500 }
-      )
-    }
+      if (productsError) {
+        logError(productsError, {
+          context: 'supplier_orders_get',
+          userId: user.id
+        })
+        return createErrorResponse(productsError, 'Failed to fetch supplier products', 500)
+      }
 
-    if (!supplierProducts || supplierProducts.length === 0) {
-      // No products owned by supplier, return empty orders
-      return NextResponse.json({
-        success: true,
-        orders: []
-      })
-    }
+      if (!supplierProducts || supplierProducts.length === 0) {
+        // No products owned by supplier, return empty orders
+        return NextResponse.json({
+          success: true,
+          orders: []
+        })
+      }
 
-    const supplierProductIds = supplierProducts.map(p => p.id)
+      const supplierProductIds = supplierProducts.map(p => p.id)
+
+      // Check cache
+      const cacheKey = generateCacheKey('supplier_orders', { supplierId: user.id })
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json({
+          success: true,
+          orders: cachedData.orders || [],
+          cached: true
+        })
+      }
 
     // Fetch confirmed order items that belong to supplier's products
     const { data: supplierOrderItems, error: itemsError } = await supabase
@@ -101,21 +117,21 @@ export async function GET(request: NextRequest) {
       `)
       .in('product_id', supplierProductIds)
 
-    if (itemsError) {
-      console.error('Error fetching order items:', itemsError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch order items' },
-        { status: 500 }
-      )
-    }
+      if (itemsError) {
+        logError(itemsError, {
+          context: 'supplier_orders_get',
+          userId: user.id
+        })
+        return createErrorResponse(itemsError, 'Failed to fetch order items', 500)
+      }
 
-    if (!supplierOrderItems || supplierOrderItems.length === 0) {
-      // No order items for supplier's products
-      return NextResponse.json({
-        success: true,
-        orders: []
-      })
-    }
+      if (!supplierOrderItems || supplierOrderItems.length === 0) {
+        // No order items for supplier's products
+        return NextResponse.json({
+          success: true,
+          orders: []
+        })
+      }
 
     // Get unique confirmed_order_ids
     const orderIds = [...new Set(supplierOrderItems.map(item => item.confirmed_order_id))]
@@ -144,13 +160,13 @@ export async function GET(request: NextRequest) {
       .in('id', orderIds)
       .order('confirmed_at', { ascending: false })
 
-    if (ordersError) {
-      console.error('Error fetching confirmed orders:', ordersError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch orders' },
-        { status: 500 }
-      )
-    }
+      if (ordersError) {
+        logError(ordersError, {
+          context: 'supplier_orders_get',
+          userId: user.id
+        })
+        return createErrorResponse(ordersError, 'Failed to fetch orders', 500)
+      }
 
     // Group order items by confirmed_order_id
     const itemsByOrderId = new Map<string, typeof supplierOrderItems>()
@@ -198,17 +214,24 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({
-      success: true,
-      orders: supplierOrders
-    })
+      const responseData = {
+        orders: supplierOrders
+      }
 
-  } catch (error: any) {
-    console.error('Error in supplier orders API:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error', details: error.message },
-      { status: 500 }
-    )
-  }
+      // Cache response (5 minutes TTL)
+      setCachedData(cacheKey, responseData, 5 * 60 * 1000)
+
+      return NextResponse.json({
+        success: true,
+        ...responseData
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_orders_get'
+      })
+      return createErrorResponse(error, 'Internal server error', 500)
+    }
+  })
 }
 

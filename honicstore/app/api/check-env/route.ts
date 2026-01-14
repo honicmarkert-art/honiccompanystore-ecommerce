@@ -34,7 +34,6 @@ export async function GET() {
 
     return NextResponse.json(envInfo)
   } catch (error) {
-    console.error("Environment check error:", error)
     return NextResponse.json({
       error: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 })

@@ -24,12 +24,31 @@ function LoginPageContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!email || !password) {
+    // SECURITY: Sanitize inputs to prevent XSS
+    const sanitizeInput = (input: string): string => {
+      return input
+        .trim()
+        .replace(/[<>]/g, '') // Remove HTML tags
+        .replace(/javascript:/gi, '') // Remove javascript: protocol
+        .replace(/on\w+=/gi, '') // Remove event handlers
+        .substring(0, 255) // Limit length
+    }
+    
+    const sanitizedEmail = sanitizeInput(email).toLowerCase()
+    const sanitizedPassword = password // Don't sanitize password
+    
+    if (!sanitizedEmail || !sanitizedPassword) {
         return
     }
 
+    // SECURITY: Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(sanitizedEmail)) {
+      return
+    }
+
     // Redirect immediately after successful login (no success card)
-    const result = await signIn(email, password, remember, false, redirectTo)
+    const result = await signIn(sanitizedEmail, sanitizedPassword, remember, false, redirectTo)
     
     // Error handling is done by AuthContext - no need to log here
   }

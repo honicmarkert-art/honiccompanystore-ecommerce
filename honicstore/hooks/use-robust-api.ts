@@ -33,7 +33,10 @@ export function useRobustApi<T>(options: UseRobustApiOptions): UseRobustApiRetur
   const { endpoint, params = {}, retryDelay = 1000, maxRetries = 3, rateLimitCooldown = 60000 } = options
 
   // Build the full URL
-  const url = new URL(endpoint, typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000')
+  const baseUrl = typeof window !== 'undefined' 
+    ? window.location.origin 
+    : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://honiccompanystore.com'))
+  const url = new URL(endpoint, baseUrl)
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
       url.searchParams.append(key, String(value))

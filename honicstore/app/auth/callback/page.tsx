@@ -24,7 +24,6 @@ function AuthCallbackContent() {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash
       setInitialHash(hash)
-      console.log('📌 Initial hash captured on mount:', hash.substring(0, 100))
     }
   }, [])
 
@@ -34,22 +33,7 @@ function AuthCallbackContent() {
     const hash = window.location.hash
     const code = searchParams.get('code')
     
-    console.log('🔍 Callback page mounted:', {
-      fullUrl: fullUrl.substring(0, 300),
-      hash: hash.substring(0, 200),
-      hashLength: hash.length,
-      hasHash: hash.length > 0,
-      code: code ? 'present' : 'missing',
-      searchParams: Object.fromEntries(searchParams.entries())
-    })
-    
-    // If hash is present, log it immediately before any processing
-    if (hash && hash.length > 1) {
-      console.log('✅ Hash detected immediately:', {
-        hashPreview: hash.substring(0, 100),
-        hashFullLength: hash.length
-      })
-    }
+    // Callback logging disabled for production cleanliness
   }, []) // Empty deps - run once on mount
 
   useEffect(() => {
@@ -58,7 +42,6 @@ function AuthCallbackContent() {
         // Check if we've already processed this callback (prevent loops)
         const callbackProcessed = typeof window !== 'undefined' ? sessionStorage.getItem('callback_processed') : null
         if (callbackProcessed === 'true') {
-          console.log('⚠️ Callback already processed, skipping...')
           // Google OAuth always redirects to home page
           if (typeof window !== 'undefined') {
             sessionStorage.removeItem('oauth_redirect')
@@ -74,7 +57,6 @@ function AuthCallbackContent() {
         
         // If user is already authenticated and there's no hash/code, redirect away
         if (isAuthenticated && !hash && !searchParams.get('code')) {
-          console.log('✅ User already authenticated, redirecting away from callback...')
           // Google OAuth always redirects to home page
           if (typeof window !== 'undefined') {
             sessionStorage.removeItem('oauth_redirect')
@@ -85,14 +67,7 @@ function AuthCallbackContent() {
         }
         const fullUrl = window.location.href
         
-        // Enhanced logging - log everything first
-        console.log('🔍 Full callback URL analysis:', {
-          fullUrl: fullUrl.substring(0, 200) + (fullUrl.length > 200 ? '...' : ''),
-          hash: hash.substring(0, 200) + (hash.length > 200 ? '...' : ''),
-          hashLength: hash.length,
-          searchParams: Object.fromEntries(searchParams.entries()),
-          windowLocationHash: window.location.hash,
-        })
+        // Callback logging disabled for production cleanliness
 
         // Check for hash fragments first (OAuth tokens)
         const hashWithoutHash = hash.substring(1) // Remove the #
@@ -106,27 +81,16 @@ function AuthCallbackContent() {
             accessToken = hashParams.get('access_token')
             refreshToken = hashParams.get('refresh_token')
           } catch (e) {
-            console.error('❌ Error parsing hash:', e)
-          }
+            }
         }
         
         const error = hashParams?.get('error') || searchParams.get('error')
         const errorDescription = hashParams?.get('error_description') || searchParams.get('error_description')
 
-        // Enhanced logging
-        console.log('🔍 Processing callback:', {
-          hasHash: !!hash,
-          hashLength: hash.length,
-          hashWithoutHashLength: hashWithoutHash.length,
-          hasAccessToken: !!accessToken,
-          hasRefreshToken: !!refreshToken,
-          hasError: !!error,
-          accessTokenPreview: accessToken ? accessToken.substring(0, 20) + '...' : 'none'
-        })
+        // Callback logging disabled for production cleanliness
 
         // Handle OAuth errors
         if (error) {
-          console.error('❌ OAuth error:', error, errorDescription)
           setStatus('error')
           setMessage(errorDescription || error || 'Authentication failed. Please try again.')
           return
@@ -134,8 +98,6 @@ function AuthCallbackContent() {
 
         // If we have tokens in the hash, Supabase has already authenticated the user
         if (accessToken) {
-          console.log('✅ Found access token in hash, setting session...')
-          
           try {
             // Set the session using the tokens from the hash
             const { data: { session }, error: sessionError } = await supabaseClient.auth.setSession({
@@ -144,25 +106,18 @@ function AuthCallbackContent() {
             })
 
             if (sessionError) {
-              console.error('❌ Session error:', sessionError)
               setStatus('error')
               setMessage(sessionError.message || 'Failed to create session. Please try again.')
               return
             }
 
             if (session && session.user) {
-              console.log('✅ Session created successfully:', {
-                userId: session.user.id,
-                email: session.user.email
-              })
-              
               // Set cookies server-side so API routes can access the session
               // Use the refresh_token from the hash if session.refresh_token is missing
               const refreshTokenToUse = session.refresh_token || refreshToken || ''
               
               if (!refreshTokenToUse) {
-                console.warn('⚠️ No refresh token available - session may not persist')
-              }
+                }
               
               try {
                 const cookieResponse = await fetch('/api/auth/session', {
@@ -179,17 +134,23 @@ function AuthCallbackContent() {
 
                 if (!cookieResponse.ok) {
                   const errorText = await cookieResponse.text()
-                  console.warn('⚠️ Failed to set cookies:', errorText)
-                } else {
-                  console.log('✅ Cookies set successfully with refresh token')
-                }
+                  } else {
+                  }
               } catch (cookieError) {
-                console.error('❌ Error setting cookies:', cookieError)
                 // Continue anyway - session is still valid in localStorage
               }
 
               setStatus('success')
               setMessage('Successfully signed in!')
+              
+              // SECURITY: Mark device as verified after successful OAuth login
+              if (typeof window !== 'undefined') {
+                import('@/lib/device-fingerprint').then(({ markDeviceVerified }) => {
+                  markDeviceVerified()
+                }).catch(() => {
+                  // Ignore errors - device verification is not critical
+                })
+              }
               
               // Google OAuth always redirects to home page (no supplier redirects)
               // Remove any supplier-related flags
@@ -200,9 +161,7 @@ function AuthCallbackContent() {
               
               // Refresh auth context to update user state (don't wait for it)
               refreshUser().then(() => {
-                console.log('✅ Auth context refreshed')
-              }).catch((refreshError) => {
-                console.error('⚠️ Error refreshing auth context:', refreshError)
+                }).catch((refreshError) => {
                 // Continue anyway - session is valid
               })
               
@@ -221,13 +180,11 @@ function AuthCallbackContent() {
               // Don't auto-redirect - let user click "Go to Dashboard" button
               return
             } else {
-              console.error('❌ Session created but no user found')
               setStatus('error')
               setMessage('Session created but user data is missing. Please try again.')
               return
             }
           } catch (sessionErr: any) {
-            console.error('❌ Exception setting session:', sessionErr)
             setStatus('error')
             setMessage(sessionErr.message || 'Failed to create session. Please try again.')
             return
@@ -248,7 +205,6 @@ function AuthCallbackContent() {
           const { data, error: exchangeError } = await supabaseClient.auth.exchangeCodeForSession(code)
 
           if (exchangeError) {
-            console.error('Verification error:', exchangeError)
             setStatus('error')
             setMessage(exchangeError.message || 'Failed to verify. Please try again.')
             return
@@ -273,12 +229,9 @@ function AuthCallbackContent() {
                 })
 
                 if (!cookieResponse.ok) {
-                  console.warn('⚠️ Failed to set cookies, but session is valid')
-                } else {
-                  console.log('✅ Cookies set successfully')
-                }
+                  } else {
+                  }
               } catch (cookieError) {
-                console.error('❌ Error setting cookies:', cookieError)
                 // Continue anyway - session is still valid
               }
 
@@ -302,8 +255,6 @@ function AuthCallbackContent() {
                   
                   // Refresh auth context to update user state (don't wait for it)
                   refreshUser().then(() => {
-                    console.log('✅ Auth context refreshed')
-                    
                     // Redirect based on user type after auth context is refreshed
                     setTimeout(() => {
                       if (isSupplier) {
@@ -313,7 +264,6 @@ function AuthCallbackContent() {
                       }
                     }, 500) // Small delay to ensure context is updated
                   }).catch((refreshError) => {
-                    console.error('⚠️ Error refreshing auth context:', refreshError)
                     // Still redirect based on user type
                     if (isSupplier) {
                       router.push('/supplier/dashboard')
@@ -322,19 +272,15 @@ function AuthCallbackContent() {
                     }
                   })
                 } catch (profileError) {
-                  console.error('Error checking supplier status:', profileError)
                   // Refresh auth context anyway
                   refreshUser().catch((refreshError) => {
-                    console.error('⚠️ Error refreshing auth context:', refreshError)
-                  })
+                    })
                 }
               } else {
                 // Refresh auth context to update user state (don't wait for it)
                 refreshUser().then(() => {
-                  console.log('✅ Auth context refreshed')
-                }).catch((refreshError) => {
-                  console.error('⚠️ Error refreshing auth context:', refreshError)
-                })
+                  }).catch((refreshError) => {
+                  })
               }
               
               // Don't auto-redirect - let user click "Go to Dashboard" button or wait for redirect
@@ -356,7 +302,7 @@ function AuthCallbackContent() {
               // Run these asynchronously without waiting
               Promise.all([
                 // Refresh user context in background
-                refreshUser().catch(err => console.error('⚠️ Error refreshing auth context:', err)),
+                refreshUser().catch(err => ),
                 
                 // Send welcome email for new users (fire and forget)
                 (async () => {
@@ -381,8 +327,7 @@ function AuthCallbackContent() {
                         })
                       })
                       if (response.ok) {
-                        console.log('✅ Welcome email sent')
-                      }
+                        }
                       
                       // Create welcome notification for new suppliers
                       if (isSupplierRegistration) {
@@ -396,16 +341,14 @@ function AuthCallbackContent() {
                           })
                         })
                         if (welcomeResponse.ok) {
-                          console.log('✅ Welcome notification created')
-                        }
+                          }
                       }
                     }
                   } catch (error) {
-                    console.error('⚠️ Background task error:', error)
                     // Don't block user flow
                   }
                 })()
-              ]).catch(err => console.error('⚠️ Background tasks error:', err))
+              ]).catch(() => {})
               
               // Mark callback as processed
               if (typeof window !== 'undefined') {
@@ -427,13 +370,9 @@ function AuthCallbackContent() {
         } else if (!accessToken && !code) {
           // No tokens or code - check if user is already authenticated
           // If so, redirect to appropriate page
-          console.log('⚠️ No access token or code found, checking if already authenticated...')
-          
           try {
             const { data: { session } } = await supabaseClient.auth.getSession()
             if (session?.user) {
-              console.log('✅ User already authenticated, checking role for redirect...')
-              
               // Check if user is supplier by fetching profile
               try {
                 const { data: profile } = await supabaseClient
@@ -451,36 +390,24 @@ function AuthCallbackContent() {
                 
                 // Redirect suppliers to dashboard, others to products page
                 if (isSupplier) {
-                  console.log('✅ Supplier detected, redirecting to dashboard...')
                   router.push('/supplier/dashboard')
                 } else {
-                  console.log('✅ Regular user, redirecting to products page...')
                   router.push('/products')
                 }
                 return
               } catch (profileError) {
-                console.error('Error fetching profile:', profileError)
                 // Fallback to home if profile check fails
                 router.push('/')
                 return
               }
             }
           } catch (checkError) {
-            console.error('Error checking session:', checkError)
-          }
+            }
           
-          console.error('❌ No access token or code found')
-          console.error('❌ Debug info:', {
-            hash: window.location.hash,
-            hashLength: window.location.hash.length,
-            searchParams: Object.fromEntries(searchParams.entries()),
-            fullUrl: window.location.href.substring(0, 300)
-          })
           setStatus('error')
           setMessage('No authentication data found in URL. The OAuth callback may have failed. Please try signing in again.')
         }
       } catch (error: any) {
-        console.error('❌ Callback error:', error)
         setStatus('error')
         setMessage(error?.message || 'An unexpected error occurred. Please try again.')
       }
@@ -489,7 +416,6 @@ function AuthCallbackContent() {
     // Add timeout to prevent infinite loading (increased to 30 seconds for email verification)
     const timeoutId = setTimeout(() => {
       if (status === 'loading') {
-        console.error('⏱️ Callback timeout - taking too long')
         setStatus('error')
         setMessage('Authentication is taking too long. Please try again or contact support if the issue persists.')
       }

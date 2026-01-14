@@ -59,7 +59,6 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ rotationTime })
   } catch (error) {
-    console.error('Error fetching rotation time:', error)
     return NextResponse.json({ rotationTime: 10 }) // Default to 10 seconds
   }
 }

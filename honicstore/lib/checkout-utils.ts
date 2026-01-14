@@ -6,18 +6,25 @@
 /**
  * Get the site URL from environment variables
  * Falls back to localhost for development
+ * @deprecated Use getBaseUrl() from '@/lib/url-utils' instead for consistency
  */
 export function getSiteUrl(): string {
   if (typeof window !== 'undefined') {
     // Client-side: use current origin
     return window.location.origin
   }
-  // Server-side: use environment variables
-  return (
+  // Server-side: use environment variables with consistent fallback
+  const baseUrl =
     process.env.NEXT_PUBLIC_SITE_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
-    'http://localhost:3000'
-  )
+    process.env.NEXT_PUBLIC_WEBSITE_URL ||
+    (process.env.NODE_ENV === 'development'
+      ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}`
+      : 'https://www.honiccompanystore.com')
+  
+  // Ensure URL has protocol and no trailing slash
+  const url = baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`
+  return url.endsWith('/') ? url.slice(0, -1) : url
 }
 
 /**
@@ -67,7 +74,6 @@ export const sessionStorage = {
       window.sessionStorage.removeItem(key)
       return true
     } catch (error) {
-      console.error(`Error removing sessionStorage key "${key}":`, error)
       return false
     }
   },

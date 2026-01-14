@@ -136,30 +136,99 @@ export function OptimizedPageWrapper({
 
 /**
  * Scroll restoration component
+ * Persists scroll positions across navigations using sessionStorage
  */
 export function ScrollRestoration() {
   const pathname = usePathname()
-  const scrollPositions = useRef<Map<string, number>>(new Map())
+  const isRestoringRef = useRef(false)
+  const scrollTimeoutRef = useRef<NodeJS.Timeout>()
 
   useEffect(() => {
-    // Save scroll position before navigation
-    const handleBeforeUnload = () => {
-      scrollPositions.current.set(pathname, window.scrollY)
+    if (typeof window === 'undefined') return
+
+    // Save current scroll position before navigation
+    const saveScrollPosition = () => {
+      try {
+        const scrollKey = `scroll_${pathname}`
+        sessionStorage.setItem(scrollKey, window.scrollY.toString())
+      } catch (e) {
+        // Ignore storage errors
+      }
     }
 
     // Restore scroll position after navigation
-    const savedPosition = scrollPositions.current.get(pathname)
-    if (savedPosition !== undefined) {
-      window.scrollTo(0, savedPosition)
-    } else {
+    const restoreScrollPosition = () => {
+      try {
+        const scrollKey = `scroll_${pathname}`
+        const savedPosition = sessionStorage.getItem(scrollKey)
+        
+        if (savedPosition !== null) {
+          const position = parseInt(savedPosition, 10)
+          if (!isNaN(position) && position > 0) {
+            isRestoringRef.current = true
+            
+            // Use requestAnimationFrame for smooth restoration
+            requestAnimationFrame(() => {
+              window.scrollTo({
+                top: position,
+                behavior: 'auto' // Instant scroll for restoration
+              })
+              
+              // Clear the restoring flag after a short delay
+              if (scrollTimeoutRef.current) {
+                clearTimeout(scrollTimeoutRef.current)
+              }
+              scrollTimeoutRef.current = setTimeout(() => {
+                isRestoringRef.current = false
+              }, 100)
+            })
+            return
+          }
+        }
+      } catch (e) {
+        // Ignore storage errors
+      }
+      
       // Scroll to top for new pages
-      window.scrollTo(0, 0)
+      if (!isRestoringRef.current) {
+        window.scrollTo(0, 0)
+      }
     }
 
-    window.addEventListener('beforeunload', handleBeforeUnload)
+    // Save scroll position on scroll (throttled)
+    let scrollTimeout: NodeJS.Timeout
+    const handleScroll = () => {
+      if (isRestoringRef.current) return // Don't save while restoring
+      
+      clearTimeout(scrollTimeout)
+      scrollTimeout = setTimeout(() => {
+        saveScrollPosition()
+      }, 150) // Throttle scroll saves
+    }
+
+    // Restore on mount
+    restoreScrollPosition()
+
+    // Save on scroll
+    window.addEventListener('scroll', handleScroll, { passive: true })
     
+    // Save before navigation
+    window.addEventListener('beforeunload', saveScrollPosition)
+    
+    // Save on visibility change (when tab becomes hidden)
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        saveScrollPosition()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
+      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('beforeunload', saveScrollPosition)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (scrollTimeout) clearTimeout(scrollTimeout)
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current)
     }
   }, [pathname])
 

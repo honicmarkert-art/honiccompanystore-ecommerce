@@ -133,7 +133,6 @@ export default function SuppliersPage() {
         setIsPreviewOpen(true)
       }
     } catch (error) {
-      console.error('Error opening document preview:', error)
       toast({
         title: 'Unable to open document',
         description: 'Your browser blocked the new tab. Please check popup settings.',
@@ -177,8 +176,7 @@ export default function SuppliersPage() {
           try {
             supabaseClient.removeChannel(channel)
           } catch (error) {
-            console.warn('Error removing existing supplier status channel:', error)
-          }
+            }
         }
 
         channel = supabaseClient
@@ -203,12 +201,6 @@ export default function SuppliersPage() {
               
               // Only update if is_active changed
               if (updatedProfile.is_active !== oldProfile.is_active) {
-                console.log('🔄 Supplier status changed via real-time:', {
-                  id: updatedProfile.id,
-                  oldStatus: oldProfile.is_active,
-                  newStatus: updatedProfile.is_active
-                })
-                
                 // Update the supplier in the list
                 setSuppliers(prev => 
                   prev.map(supplier => 
@@ -238,9 +230,7 @@ export default function SuppliersPage() {
           )
           .subscribe((status) => {
             if (status === 'SUBSCRIBED') {
-              console.log('✅ Subscribed to real-time supplier status changes')
-            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-              console.warn(`⚠️ Supplier status real-time status: ${status}`)
+              } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
               // Try to reconnect after a delay
               if (isMounted) {
                 setTimeout(() => {
@@ -253,8 +243,7 @@ export default function SuppliersPage() {
           })
 
       } catch (error) {
-        console.error('Error setting up real-time supplier status:', error)
-      }
+        }
     }
 
     setupRealtime()
@@ -265,8 +254,7 @@ export default function SuppliersPage() {
         try {
           supabaseClient.removeChannel(channel)
         } catch (error) {
-          console.warn('Error removing supplier status channel:', error)
-        }
+          }
       }
     }
   }, [])
@@ -1388,7 +1376,6 @@ export default function SuppliersPage() {
                                   'Supplier account info has been cleared. They will need to resubmit their details.',
                               })
                             } catch (error: any) {
-                              console.error('Reset account info error:', error)
                               toast({
                                 title: 'Error',
                                 description: error.message || 'Failed to reset account info.',

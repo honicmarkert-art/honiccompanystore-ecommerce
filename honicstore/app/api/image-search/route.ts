@@ -79,7 +79,6 @@ export async function POST(request: NextRequest) {
       .limit(5000) // Fetch up to 5000 products for search
     
     if (fetchError) {
-      console.error('Error fetching products:', fetchError)
       return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 })
     }
 
@@ -214,12 +213,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error in image search:', error)
-    console.error('Error details:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined,
-      name: error instanceof Error ? error.name : undefined
-    })
     return NextResponse.json({ 
       error: 'Internal server error',
       details: error instanceof Error ? error.message : 'Unknown error'

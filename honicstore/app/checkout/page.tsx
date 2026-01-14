@@ -1,7 +1,7 @@
 "use client"
 
 import { BuyerRouteGuard } from '@/components/buyer-route-guard'
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
@@ -276,6 +276,60 @@ function CheckoutPageContent() {
     sameAsBilling: false,
     sameAsShipping: false,
   })
+
+  // Track if form has been prefilled to prevent overwriting user edits
+  const hasPrefilledRef = useRef(false)
+
+  // Prefill form data for authenticated users (only once, and only if fields are empty)
+  useEffect(() => {
+    // Only prefill if:
+    // 1. User is authenticated
+    // 2. Form hasn't been prefilled yet
+    // 3. Form fields are empty (not overwriting user edits)
+    if (user && user.email && !hasPrefilledRef.current) {
+      setFormData(prev => {
+        // Check if form is empty (user hasn't edited anything)
+        const isFormEmpty = 
+          !prev.shippingAddress.email && 
+          !prev.shippingAddress.fullName && 
+          !prev.shippingAddress.phone
+
+        // Only prefill if form is empty
+        if (!isFormEmpty) {
+          return prev // Don't overwrite if user has already entered data
+        }
+
+        // Mark as prefilled
+        hasPrefilledRef.current = true
+
+        return {
+          ...prev,
+          shippingAddress: {
+            ...prev.shippingAddress,
+            email: user.email || prev.shippingAddress.email,
+            fullName: user.name || user.profile?.full_name || prev.shippingAddress.fullName,
+            phone: user.profile?.phone || prev.shippingAddress.phone,
+            // Prefill address if available in profile (only if empty)
+            address1: prev.shippingAddress.address1 || user.profile?.address || "",
+            city: prev.shippingAddress.city || user.profile?.city || "",
+            state: prev.shippingAddress.state || user.profile?.state || "",
+            postalCode: prev.shippingAddress.postalCode || user.profile?.postal_code || "",
+          },
+          billingAddress: {
+            ...prev.billingAddress,
+            email: user.email || prev.billingAddress.email,
+            fullName: user.name || user.profile?.full_name || prev.billingAddress.fullName,
+            phone: user.profile?.phone || prev.billingAddress.phone,
+          },
+        }
+      })
+    }
+
+    // Reset prefilled flag if user logs out (for guest checkout)
+    if (!user && hasPrefilledRef.current) {
+      hasPrefilledRef.current = false
+    }
+  }, [user])
 
   const handleSameAsShipping = (checked: boolean) => {
     setFormData(prev => ({

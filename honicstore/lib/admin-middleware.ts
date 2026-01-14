@@ -39,15 +39,7 @@ export async function requireAdminAccess(request: NextRequest): Promise<AdminAcc
     const userAgent = request.headers.get('user-agent')
     const origin = request.headers.get('origin')
     
-    // Log admin access for security monitoring
-    console.log('🔐 Admin access granted:', {
-      userId: session.user?.id,
-      email: session.user?.email,
-      role: session.role,
-      userAgent: userAgent?.substring(0, 50),
-      origin,
-      timestamp: new Date().toISOString()
-    })
+    // Admin access logging disabled for production cleanliness
 
     return {
       allowed: true,
@@ -55,7 +47,6 @@ export async function requireAdminAccess(request: NextRequest): Promise<AdminAcc
     }
 
   } catch (error) {
-    console.error('❌ Admin access validation failed:', error)
     return {
       allowed: false,
       error: 'Access validation failed',
@@ -73,11 +64,7 @@ export function blockNonAdmin(accessResult: AdminAccessResult): NextResponse | n
   }
 
   // Log security event
-  console.log('🚫 Admin access blocked:', {
-    error: accessResult.error,
-    statusCode: accessResult.statusCode,
-    user: accessResult.user?.user?.id,
-    timestamp: new Date().toISOString()
+  .toISOString()
   })
 
   // Return appropriate error response

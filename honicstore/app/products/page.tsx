@@ -18,10 +18,14 @@ import Image from "next/image"
 import { LazyImage } from "@/components/lazy-image"
 import { ImagePreloader } from "@/components/image-preloader"
 import { OptimizedLink } from "@/components/optimized-link"
+import { ProductCard } from "@/components/product-card"
+import { VirtualizedProductGrid } from "@/components/virtualized-product-grid"
 import { useOptimizedNavigation } from "@/components/optimized-link"
 import { useRobustApi } from "@/hooks/use-robust-api"
-import { useInfiniteProducts } from "@/hooks/use-infinite-products"
+import { useSimpleProducts } from "@/hooks/use-simple-products"
 import { useCategoryFiltering } from "@/hooks/use-category-filtering"
+import { useGridColumns } from "@/hooks/use-grid-columns"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { InfiniteScrollTrigger } from "@/components/infinite-scroll-trigger"
 // import { SearchSuggestions } from "@/components/search-suggestions" // Removed - no longer using suggestion dropdown
 import { 
@@ -216,7 +220,6 @@ function ProductsPageContent() {
   const urlSearchParams = useSearchParams()
   
 
-
   // On hard refresh only, clear filter query params to normalize URL
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -237,8 +240,6 @@ function ProductsPageContent() {
     // Normalize URL to /products (or keep other non-filter params)
     router.replace(next ? `/products?${next}` : '/products')
   }, [])
-  
-
 
   useEffect(() => {
     const initial = (urlSearchParams?.get('search') || '').trim()
@@ -287,7 +288,9 @@ function ProductsPageContent() {
     }
     params.delete('returnTo')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-    router.push(nextUrl, { scroll: false })
+    // Use replace instead of push to avoid adding to history stack
+    // This prevents full page refresh and maintains client-side routing
+    router.replace(nextUrl, { scroll: false })
   }, [router, urlSearchParams, searchTerm])
 
   // Removed useRobustProducts hook - was causing duplicate API calls!
@@ -549,6 +552,88 @@ function ProductsPageContent() {
   const [isCategoryNavOpen, setIsCategoryNavOpen] = useState(false)
   const [selectedMainCategory, setSelectedMainCategory] = useState<string | null>(null)
   const [selectedSubCategories, setSelectedSubCategories] = useState<string[]>([])
+  
+  // State preservation key for this page
+  const PAGE_STATE_KEY = 'products_page_state'
+  
+  // Save page state before navigation (moved here after state declarations)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const savePageState = () => {
+      try {
+        const state = {
+          searchTerm,
+          selectedMainCategory,
+          selectedSubCategories,
+          activeBrand,
+          timestamp: Date.now()
+        }
+        sessionStorage.setItem(PAGE_STATE_KEY, JSON.stringify(state))
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+
+    // Save state periodically and before navigation
+    const saveInterval = setInterval(savePageState, 2000) // Save every 2 seconds
+    
+    // Save on visibility change (when navigating away)
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        savePageState()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // Save on beforeunload
+    window.addEventListener('beforeunload', savePageState)
+
+    return () => {
+      clearInterval(saveInterval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('beforeunload', savePageState)
+    }
+  }, [searchTerm, selectedMainCategory, selectedSubCategories, activeBrand, PAGE_STATE_KEY])
+
+  // Restore page state on mount (only if URL doesn't have params)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    // Only restore if URL doesn't have search/category params (user is returning from detail page)
+    const hasUrlParams = urlSearchParams?.get('search') || 
+                         urlSearchParams?.get('mainCategory') || 
+                         urlSearchParams?.get('subCategories') ||
+                         urlSearchParams?.get('subCategory')
+    
+    if (!hasUrlParams) {
+      try {
+        const savedState = sessionStorage.getItem(PAGE_STATE_KEY)
+        if (savedState) {
+          const state = JSON.parse(savedState)
+          // Only restore if state is recent (within 30 minutes)
+          if (state.timestamp && Date.now() - state.timestamp < 30 * 60 * 1000) {
+            if (state.searchTerm) {
+              setSearchTerm(state.searchTerm)
+            }
+            if (state.selectedMainCategory) {
+              setSelectedMainCategory(state.selectedMainCategory)
+            }
+            if (state.selectedSubCategories && Array.isArray(state.selectedSubCategories)) {
+              setSelectedSubCategories(state.selectedSubCategories)
+            }
+            if (state.activeBrand !== undefined) {
+              setActiveBrand(state.activeBrand)
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount
+  
   const [isCategoryMegaMenuOpen, setIsCategoryMegaMenuOpen] = useState(false)
   const [hoveredMegaCategory, setHoveredMegaCategory] = useState<string | null>(null)
   const categoryMegaMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -750,11 +835,9 @@ function ProductsPageContent() {
 
   // Pagination state - URL-based page number
   const [currentPage, setCurrentPage] = useState(1)
-  const PRODUCTS_PER_PAGE = 120
-  const BATCH_SIZE = 24 // Display 24 products at a time
-  // Request more products to account for client-side filtering (out-of-stock products)
-  // If ~20% are out of stock, request 30 to ensure we get ~24 visible products
-  const API_BATCH_SIZE = 30 // Request 30, filter to show ~24 visible
+  // Simple Products System - Amazon/AliExpress Style
+  // 200 products per page with CDN caching
+  const PRODUCTS_PER_PAGE = 200 // Large page size like Amazon/AliExpress
 
   // Convert category slugs to IDs for API filtering
   const { mainCategoryId, subCategoryIds, allCategoryIds } = useCategoryFiltering({
@@ -794,73 +877,30 @@ function ProductsPageContent() {
 
 
 
-  // Calculate initial offset based on current page
-  const initialOffset = (currentPage - 1) * PRODUCTS_PER_PAGE
-
-  // Infinite scroll products hook for enhanced performance
-  // Wait for ads to load first before loading products
+  // Simple Products Hook - 200 products per page with CDN caching
   const {
-    products: infiniteProducts,
-    loading: infiniteLoading,
-    loadingMore: infiniteLoadingMore,
-    filtering: infiniteFiltering, // New: filtering state (doesn't clear products)
-    hasMore: infiniteHasMore,
-    error: infiniteError,
-    totalCount: infiniteTotalCount,
-    loadMore: infiniteLoadMore,
-    reset: infiniteReset,
-    refresh: infiniteRefresh
-  } = useInfiniteProducts({
-    limit: API_BATCH_SIZE, // Request more to account for filtering
-    initialOffset, // Start from page offset
-    // Server-side filtering with PostgreSQL full-text search
-    // Use URL search param instead of searchTerm state to prevent live search
+    products: primaryProducts,
+    loading: primaryLoading,
+    loadingMore: primaryLoadingMore,
+    hasMore: primaryHasMore,
+    error: primaryError,
+    totalCount: primaryTotalCount,
+    loadMore: primaryLoadMore,
+    reset: primaryReset,
+    refresh: primaryRefresh
+  } = useSimpleProducts({
+    limit: PRODUCTS_PER_PAGE,
     brand: activeBrand || undefined,
     search: actualSearchQuery || undefined,
-    categories: isCategoryFilterActive ? allCategoryIds : undefined,
+    // Only use category IDs if categories are loaded AND filter is active
+    // Otherwise, load products immediately without waiting for categories
+    categories: (isCategoryFilterActive && allCategoryIds.length > 0) ? allCategoryIds : undefined,
     sortBy: sortOrder === 'featured' ? 'featured' : sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
     sortOrder: sortOrder === 'featured' ? 'desc' : sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
     maxPrice: priceRange[1] < 100000 ? priceRange[1] : undefined,
-    useOptimized: true,
-    useMaterializedView: false,
-    enabled: !adsLoading && !categoriesLoading && !noCategoryMatches // Wait for ads to load first, then load products
+    enabled: true
   })
-
-  // Force refetch when category parameters change
-  useEffect(() => {
-    if (allCategoryIds.length > 0 && !categoriesLoading) {
-      // Reset and refetch when categories are loaded and we have category IDs
-      infiniteReset()
-    }
-  }, [allCategoryIds, categoriesLoading, infiniteReset])
-
-  // Debounced filter reset to prevent rapid-fire API calls and rate limiting
-  // Reset products when filters change, but debounced to batch rapid changes
-  useEffect(() => {
-    // Don't reset if category filter is active but category IDs aren't ready yet
-    if (isCategoryFilterActive && allCategoryIds.length === 0 && !categoriesLoading) {
-      // Category filter is active but no matching IDs - this is expected, don't reset
-      return
-    }
-    
-    // Debounce filter changes: wait 300ms before resetting to batch rapid changes
-    // This prevents multiple API calls when user quickly changes multiple filters
-    const debounceTimer = setTimeout(() => {
-      // CRITICAL: When search query changes OR is cleared, do a hard reset (clear products) to prevent showing wrong products
-      // For other filters (category, brand, price), use soft reset to keep products visible during filtering
-      // Check if search query exists AND is not empty (not just undefined/null check)
-      const hasSearchQuery = actualSearchQuery && actualSearchQuery.trim().length > 0
-      // CRITICAL: Always do hard reset when search is involved (either active or just cleared)
-      // This ensures old search products don't persist when search is cleared
-      const shouldHardReset = hasSearchQuery || (actualSearchQuery === '' && products.length > 0)
-      infiniteReset(!shouldHardReset) // Hard reset (clear products) for search, soft reset for other filters
-    }, 300)
-    
-    return () => {
-      clearTimeout(debounceTimer)
-    }
-  }, [selectedMainCategory, selectedSubCategories, activeBrand, actualSearchQuery, priceRange, infiniteReset, isCategoryFilterActive, allCategoryIds.length, categoriesLoading])
   
   // Get page from URL on mount
   useEffect(() => {
@@ -872,17 +912,16 @@ function ProductsPageContent() {
 
   // Infinite scroll products hook for enhanced performance
 
-  // Local clearFilters function (no more duplicate API calls!)
+  // Simple clearFilters function
   const clearFilters = useCallback(() => {
     // Reset all filter states
     setPriceRange([0, 100000])
     setActiveBrand(null)
     setSearchTerm("")
     setSortOrder('price-low')
-    // CRITICAL: Do hard reset (clear products) when clearing filters to remove old search results
-    // Reset infinite scroll - the hook will automatically refetch due to dependency changes
-    infiniteReset(true) // Hard reset to clear all products
-  }, [infiniteReset])
+    // Reset products - the hook will automatically refetch due to dependency changes
+    primaryReset()
+  }, [primaryReset])
 
   // Preload products for better performance
   // useEffect(() => {
@@ -1061,210 +1100,290 @@ function ProductsPageContent() {
     }
   }
 
-  // Helper function to calculate minimum price from variants (simplified)
-  const getMinimumPrice = (productPrice: number, variants?: any[]): number => {
-    if (!variants || variants.length === 0) {
-      return productPrice
-    }
+  // getMinimumPrice moved to ProductCard component for better performance
 
-    let minPrice = productPrice
-
-    // Check variant prices (simplified variant system)
-    variants.forEach((variant: any) => {
-      if (variant.price) {
-        const variantPrice = parseFloat(variant.price)
-            if (variantPrice < minPrice) {
-              minPrice = variantPrice
-            }
+  // Batch display: Show products in batches as user scrolls
+  // Responsive: 100 products on mobile, 30 on desktop
+  const isMobile = useIsMobile()
+  const PRODUCTS_BATCH_SIZE = useMemo(() => isMobile ? 100 : 30, [isMobile])
+  
+  // Preserve displayedCount across navigation using sessionStorage
+  const getInitialDisplayedCount = useCallback(() => {
+    if (typeof window === 'undefined') return PRODUCTS_BATCH_SIZE
+    try {
+      const saved = sessionStorage.getItem('products_displayed_count')
+      if (saved) {
+        const count = parseInt(saved, 10)
+        // Only restore if it's a valid number and filters haven't changed
+        const savedFilters = sessionStorage.getItem('products_filters')
+        const currentFilters = JSON.stringify({
+          search: actualSearchQuery,
+          mainCategory: selectedMainCategory,
+          subCategories: selectedSubCategories,
+          brand: activeBrand,
+          priceRange
+        })
+        if (savedFilters === currentFilters && count >= PRODUCTS_BATCH_SIZE) {
+          return count
+        }
       }
-    })
-
-    return minPrice
-  }
-
-  // Use infinite scroll products as primary source, fallback to optimized products
-  // Convert infinite products to match the expected interface
-  const adaptedInfiniteProducts = infiniteProducts.map(product => ({
-    ...product,
-    description: product.description || '',
-    image: product.image || '',
-    category: product.category || '',
-    brand: product.brand || '',
-    originalPrice: product.original_price || product.price,
-    original_price: product.original_price, // Keep original_price field for badge calculation
-    inStock: product.in_stock,
-    freeDelivery: product.free_delivery,
-    sameDayDelivery: product.same_day_delivery,
-    is_new: product.is_new, // For "New" badge calculation
-    is_featured: (product as any).is_featured || false, // For "Featured" badge
-    updated_at: product.updated_at, // For "New" badge calculation
-    variants: product.product_variants || [],
-    gallery: product.image ? [product.image] : [],
-    specifications: {},
-  }))
-
-  // Use server-side filtering with PostgreSQL full-text search
-  const products = adaptedInfiniteProducts as any
-
-  // Old shuffling system removed - now using smart shuffling system above
-
-  // Smart Product Shuffling System
-  const [shuffledProducts, setShuffledProducts] = useState<any[]>([])
-  const [isShufflingPaused, setIsShufflingPaused] = useState(false)
-  // Use ref to avoid re-renders on every user activity
-  const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const shuffleIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const isUserActiveRef = useRef(false)
-  
-  // Shuffling configuration
-  const SHUFFLE_INTERVAL = 30000 // 30 seconds
-  const IDLE_TIMEOUT = 5000 // 5 seconds of inactivity before resuming
-  
-  // Shuffle products function
-  const shuffleProducts = useCallback((products: any[]) => {
-    if (products.length === 0) return products
-    
-    const shuffled = [...products]
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    } catch (e) {
+      // Ignore storage errors
     }
-    return shuffled
-  }, [])
+    return PRODUCTS_BATCH_SIZE
+  }, [actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, PRODUCTS_BATCH_SIZE])
   
-  // Keep shuffled list in sync when new products arrive (append-only to preserve current order)
+  const [displayedCount, setDisplayedCount] = useState(getInitialDisplayedCount)
+  
+  // Update displayedCount when batch size changes (mobile/desktop switch)
   useEffect(() => {
-    if (products.length === 0) return
-    // Filter out out-of-stock products
-    const inStockProducts = products.filter((p: any) => {
-      const isInStock = p.inStock !== false && p.in_stock !== false
-      return isInStock
-    })
-    
-    if (shuffledProducts.length === 0) {
-      setShuffledProducts(inStockProducts)
-      return
+    // If current displayed count is less than new batch size, update to batch size
+    if (displayedCount < PRODUCTS_BATCH_SIZE) {
+      setDisplayedCount(PRODUCTS_BATCH_SIZE)
     }
-    if (inStockProducts.length > shuffledProducts.length) {
-      const existingIds = new Set(shuffledProducts.map((p: any) => p.id))
-      const newOnes = inStockProducts.filter((p: any) => !existingIds.has(p.id))
-      if (newOnes.length > 0) {
-        setShuffledProducts((prev: any[]) => [...prev, ...newOnes])
-      }
-    }
-  }, [products, shuffledProducts])
-
-  // When filters/search/categories change, reset the shuffle buffer so we only show the new filtered list
-  // CRITICAL: Also reset when actualSearchQuery changes (from URL) to clear old products
+  }, [PRODUCTS_BATCH_SIZE])
+  
+  // Save displayedCount to sessionStorage whenever it changes
   useEffect(() => {
-    setShuffledProducts([])
-  }, [activeBrand, searchTerm, actualSearchQuery, selectedMainCategory, selectedSubCategories, priceRange])
-
-  // Server-side filtering is now handled by the API!
-  // Build the list to display (uses shuffled order when active)
-  const displayedProducts = useMemo(() => {
-    // Only show skeleton on initial load (loading), not when filtering (filtering keeps products visible)
-    if (infiniteLoading && infiniteProducts.length === 0) {
-      return []
+    if (typeof window === 'undefined') return
+    try {
+      sessionStorage.setItem('products_displayed_count', displayedCount.toString())
+      sessionStorage.setItem('products_filters', JSON.stringify({
+        search: actualSearchQuery,
+        mainCategory: selectedMainCategory,
+        subCategories: selectedSubCategories,
+        brand: activeBrand,
+        priceRange
+      }))
+    } catch (e) {
+      // Ignore storage errors
     }
-    // When filtering, keep showing existing products until new ones arrive
-    
-    // Always use the current products array from the API
-    // Never fall back to shuffledProducts when filters are active - always show what API returns
-    // Use actualSearchQuery (from URL) instead of searchTerm (input state) to prevent live search
-    const hasActiveFilters = actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000
-    
-    // CRITICAL: When search is active, ONLY use infiniteProducts (from API), never shuffledProducts or cached products
-    // This ensures we only show products that match the current search query
-    if (hasActiveFilters) {
-      // CRITICAL FIX: When search is active, ONLY use infiniteProducts, never fall back to products
-      // This prevents showing wrong products from previous searches or cached data
-      // If infiniteProducts is empty, return empty array (don't show wrong products)
-      const productsToDisplay = actualSearchQuery 
-        ? infiniteProducts  // For search: ONLY use infiniteProducts, even if empty
-        : (infiniteProducts.length > 0 ? infiniteProducts : products)  // For other filters: can fallback
-      
-      const seen = new Set<number>()
-      const uniqueProducts = productsToDisplay.filter((product: any) => {
-        if (seen.has(product.id)) return false
-        seen.add(product.id)
-        // Filter out out-of-stock products
-        // CRITICAL: Be lenient - only filter out if BOTH fields are explicitly false
-        // If either is true or undefined/null, allow the product through
-        const inStock1 = product.inStock
-        const inStock2 = product.in_stock
-        // Only filter out if BOTH are explicitly false
-        const isInStock = !(inStock1 === false && inStock2 === false)
-        return isInStock
-      })
-      return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
+  }, [displayedCount, actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange])
+  
+  // Reset displayed count when filters change (new search/filter)
+  useEffect(() => {
+    // Only reset if filters actually changed (not on initial mount)
+    const hasFilters = actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000
+    if (hasFilters) {
+      setDisplayedCount(PRODUCTS_BATCH_SIZE)
     }
+  }, [actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, PRODUCTS_BATCH_SIZE])
+  
+  // Simple display: Use products directly from hook, but limit to displayedCount
+  const allFilteredProducts = useMemo(() => {
+    if (primaryProducts.length === 0) return []
     
-    // No active filters - can use shuffledProducts as fallback for better UX
-    const baseList = products.length > 0 ? products : shuffledProducts
-
+    // Prevent duplicates (out-of-stock products are now shown with badge)
     const seen = new Set<number>()
-    const uniqueProducts = baseList.filter((product: any) => {
+    return primaryProducts.filter((product: any) => {
+      if (!product || typeof product.id !== 'number' || product.id <= 0) return false
       if (seen.has(product.id)) return false
       seen.add(product.id)
-      // Filter out out-of-stock products
-      const isInStock = product.inStock !== false && product.in_stock !== false
-      return isInStock
+      return true
     })
-    return uniqueProducts.slice(0, PRODUCTS_PER_PAGE)
-  }, [infiniteProducts, products, shuffledProducts, PRODUCTS_PER_PAGE, actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, infiniteLoading])
+  }, [primaryProducts])
+  
+  // Display only the current batch
+  const displayedProducts = useMemo(() => {
+    return allFilteredProducts.slice(0, displayedCount)
+  }, [allFilteredProducts, displayedCount])
+  
+  // Restore scroll position when navigating back
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    // Only restore if we have a saved scroll position and displayedCount was restored
+    const savedScroll = sessionStorage.getItem('products_scroll_position')
+    const savedDisplayedCount = sessionStorage.getItem('products_displayed_count')
+    
+    if (savedScroll && savedDisplayedCount && parseInt(savedDisplayedCount, 10) === displayedCount) {
+      // Wait for products to render before restoring scroll
+      const timer = setTimeout(() => {
+        const scrollY = parseInt(savedScroll, 10)
+        if (!isNaN(scrollY) && scrollY > 0) {
+          window.scrollTo({
+            top: scrollY,
+            behavior: 'auto' // Instant scroll for restoration
+          })
+        }
+      }, 100) // Small delay to ensure DOM is ready
+      
+      return () => clearTimeout(timer)
+    }
+  }, [displayedCount, allFilteredProducts.length])
+  
+  // Save scroll position before navigation
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    const handleScroll = () => {
+      try {
+        sessionStorage.setItem('products_scroll_position', window.scrollY.toString())
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+    
+    // Throttle scroll saves
+    let scrollTimeout: ReturnType<typeof setTimeout>
+    const throttledScroll = () => {
+      clearTimeout(scrollTimeout)
+      scrollTimeout = setTimeout(handleScroll, 150)
+    }
+    
+    window.addEventListener('scroll', throttledScroll, { passive: true })
+    
+    return () => {
+      window.removeEventListener('scroll', throttledScroll)
+      clearTimeout(scrollTimeout)
+    }
+  }, [])
+  
+  // Load more products in batch when user scrolls
+  const loadMoreBatch = useCallback(() => {
+    if (displayedCount < allFilteredProducts.length) {
+      // Show next batch (30 more products)
+      setDisplayedCount(prev => Math.min(prev + PRODUCTS_BATCH_SIZE, allFilteredProducts.length))
+    }
+  }, [displayedCount, allFilteredProducts.length])
+  
+  // When new products are fetched, automatically show them in batches
+  useEffect(() => {
+    // If we have more products than displayed, but haven't shown them yet
+    // This happens when API fetches more products
+    if (allFilteredProducts.length > displayedCount && displayedCount < PRODUCTS_BATCH_SIZE * 2) {
+      // Auto-show first 2 batches (60 products) when new data arrives
+      setDisplayedCount(Math.min(PRODUCTS_BATCH_SIZE * 2, allFilteredProducts.length))
+    }
+  }, [allFilteredProducts.length, displayedCount])
+  
+  // Shuffled products for display (only when no filters active)
+  // IMPORTANT: Only shuffle once on initial load, don't reshuffle on scroll
+  const [shuffledProducts, setShuffledProducts] = useState<any[]>([])
+  const [hasShuffled, setHasShuffled] = useState(false)
+  const previousDisplayedCountRef = useRef(0)
+  
+  useEffect(() => {
+    // Only shuffle when no filters are active
+    const hasFilters = actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000
+    
+    if (hasFilters) {
+      // Clear shuffled products when filters are active
+      setShuffledProducts([])
+      setHasShuffled(false)
+      previousDisplayedCountRef.current = 0
+      return
+    }
+    
+    // Only shuffle if:
+    // 1. No filters active
+    // 2. We have products to display
+    // 3. Either: first time (hasShuffled = false) OR displayedCount decreased (user cleared/reset)
+    if (!hasFilters && displayedProducts.length > 0) {
+      const currentDisplayedCount = displayedProducts.length
+      const previousDisplayedCount = previousDisplayedCountRef.current
+      
+      // If displayedCount decreased, reset shuffle (user cleared/reset filters)
+      if (currentDisplayedCount < previousDisplayedCount) {
+        setHasShuffled(false)
+        previousDisplayedCountRef.current = 0
+      }
+      
+      // Only shuffle if we haven't shuffled yet OR if this is a reset (count decreased)
+      if (!hasShuffled || currentDisplayedCount < previousDisplayedCount) {
+        // Shuffle all displayed products
+        const shuffled = [...displayedProducts]
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        }
+        setShuffledProducts(shuffled)
+        setHasShuffled(true)
+        previousDisplayedCountRef.current = currentDisplayedCount
+      } else if (currentDisplayedCount > previousDisplayedCount) {
+        // User scrolled - append new products WITHOUT reshuffling existing ones
+        const newProducts = displayedProducts.slice(previousDisplayedCountRef.current)
+        // Shuffle only the new products
+        const shuffledNew = [...newProducts]
+        for (let i = shuffledNew.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffledNew[i], shuffledNew[j]] = [shuffledNew[j], shuffledNew[i]]
+        }
+        // Append shuffled new products to existing shuffled products
+        setShuffledProducts(prev => [...prev, ...shuffledNew])
+        previousDisplayedCountRef.current = currentDisplayedCount
+      }
+    } else {
+      setShuffledProducts([])
+      setHasShuffled(false)
+      previousDisplayedCountRef.current = 0
+    }
+  }, [displayedProducts, actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange])
 
-  // Track initial load state - more aggressive loading
-  const [isInitialLoad, setIsInitialLoad] = useState(true)
-  const [hasDataLoaded, setHasDataLoaded] = useState(false)
-  const [showSkeleton, setShowSkeleton] = useState(true)
+  // Check if we have products ready (for skeleton display logic)
+  const hasCachedProductsInitial = primaryProducts.length > 0
+
+  // Production-Grade: Fast initial load - reduce skeleton time
+  // Show skeleton only if no prefetched/cached products available
+  const [isInitialLoad, setIsInitialLoad] = useState(!hasCachedProductsInitial)
+  const [hasDataLoaded, setHasDataLoaded] = useState(hasCachedProductsInitial)
+  // Only show skeleton if no prefetched/cached products (instant display)
+  const [showSkeleton, setShowSkeleton] = useState(!hasCachedProductsInitial)
   
   // Delay showing "No products found" to wait for all search methods to complete
   const [showNoProducts, setShowNoProducts] = useState(false)
   const noProductsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   
   useEffect(() => {
-    // Set initial load to false after a longer delay
-    const timer = setTimeout(() => setIsInitialLoad(false), 3000) // 3 seconds
-    return () => clearTimeout(timer)
-  }, [])
-  
-  // Track when we have actual data
-  useEffect(() => {
-    if (displayedProducts.length > 0) {
+    // Production-Grade: Fast initial load - reduce skeleton time to minimum
+    // If we have prefetched products, hide skeleton immediately
+    if (hasCachedProductsInitial || primaryProducts.length > 0) {
+      setIsInitialLoad(false)
       setHasDataLoaded(true)
-      // Hide skeleton after data loads and a short delay
-      setTimeout(() => setShowSkeleton(false), 1000)
-      // Cancel "No products found" delay if products are found
+      setShowSkeleton(false)
+      return
+    }
+    
+    // Otherwise, set timeout to hide skeleton quickly (reduced to 300ms)
+    const timer = setTimeout(() => {
+      setIsInitialLoad(false)
+      if (displayedProducts.length > 0) {
+        setHasDataLoaded(true)
+        setShowSkeleton(false)
+      }
+    }, 300) // Reduced to 300ms for faster UX
+    return () => clearTimeout(timer)
+  }, [hasCachedProductsInitial, primaryProducts.length, displayedProducts.length])
+  
+  // Production-Grade: Track when we have data - hide skeleton IMMEDIATELY
+  // Simple: Update data loaded state
+  useEffect(() => {
+    if (primaryProducts.length > 0 || displayedProducts.length > 0) {
+      setHasDataLoaded(true)
+      setShowSkeleton(false)
+      setIsInitialLoad(false)
       if (noProductsTimeoutRef.current) {
         clearTimeout(noProductsTimeoutRef.current)
         noProductsTimeoutRef.current = null
       }
       setShowNoProducts(false)
     }
-  }, [displayedProducts.length])
+  }, [primaryProducts.length, displayedProducts.length])
   
-  // Delay showing "No products found" message - wait for all search methods to complete
+  // Delay showing "No products found" message
   useEffect(() => {
-    // Clear any existing timeout
     if (noProductsTimeoutRef.current) {
       clearTimeout(noProductsTimeoutRef.current)
       noProductsTimeoutRef.current = null
     }
     
-    // Only show "No products found" if:
-    // 1. Not loading or filtering (all methods completed)
-    // 2. No products displayed
-    // 3. After a delay (1500ms) to prevent flickering
-    const shouldShowNoProducts = !infiniteLoading && !infiniteFiltering && displayedProducts.length === 0
+    const shouldShowNoProducts = !primaryLoading && displayedProducts.length === 0
     
     if (shouldShowNoProducts) {
-      // Wait 1500ms before showing "No products found" to allow all search methods to complete
       noProductsTimeoutRef.current = setTimeout(() => {
         setShowNoProducts(true)
       }, 1500)
     } else {
-      // If products found or still loading, don't show the message
       setShowNoProducts(false)
     }
     
@@ -1274,120 +1393,37 @@ function ProductsPageContent() {
         noProductsTimeoutRef.current = null
       }
     }
-  }, [infiniteLoading, infiniteFiltering, displayedProducts.length, actualSearchQuery])
+  }, [primaryLoading, displayedProducts.length])
   
-  // Auto-load more products if we have fewer than BATCH_SIZE visible products after filtering
-  // This ensures we always show ~24 products even if some are filtered out (out-of-stock)
-  useEffect(() => {
-    // Only auto-load if:
-    // 1. We're not currently loading
-    // 2. We have more products available
-    // 3. We have fewer visible products than BATCH_SIZE
-    // 4. We're not in initial load state
-    if (
-      !infiniteLoading && 
-      !infiniteLoadingMore &&
-      infiniteHasMore &&
-      displayedProducts.length > 0 &&
-      displayedProducts.length < BATCH_SIZE &&
-      hasDataLoaded &&
-      !isInitialLoad
-    ) {
-      // Calculate how many more we need
-      const needed = BATCH_SIZE - displayedProducts.length
-      // Only load if we need at least 6 more (to avoid too many small requests)
-      if (needed >= 6) {
-        infiniteLoadMore()
-      }
-    }
-  }, [displayedProducts.length, infiniteLoading, infiniteLoadingMore, infiniteHasMore, infiniteLoadMore, BATCH_SIZE, hasDataLoaded, isInitialLoad])
+  // Simple loading and error states - products load independently, don't wait for categories
+  const isLoading = primaryLoading && displayedProducts.length === 0
+  const error = primaryError
   
-  // More aggressive loading condition
-  const isLoading = infiniteLoading || categoriesLoading || isInitialLoad || !hasDataLoaded
-  const error = infiniteError
-  
-
-  // Handle user activity detection
-  const handleUserActivity = useCallback(() => {
-    isUserActiveRef.current = true
-    setIsShufflingPaused(true)
-    
-    // Clear existing timeout
-    if (userActivityTimeoutRef.current) {
-      clearTimeout(userActivityTimeoutRef.current)
-    }
-    
-    // Set new timeout to resume shuffling
-    const timeout = setTimeout(() => {
-      isUserActiveRef.current = false
-      setIsShufflingPaused(false)
-    }, IDLE_TIMEOUT)
-    
-    userActivityTimeoutRef.current = timeout
-  }, [IDLE_TIMEOUT])
-  
-  // Set up shuffling interval
-  useEffect(() => {
-    if (shuffledProducts.length > 0 && !isShufflingPaused) {
-      shuffleIntervalRef.current = setInterval(() => {
-        if (!isUserActiveRef.current) {
-          setShuffledProducts((prev: any[]) => shuffleProducts(prev))
-        }
-      }, SHUFFLE_INTERVAL)
-    }
-    
-    return () => {
-      if (shuffleIntervalRef.current) {
-        clearInterval(shuffleIntervalRef.current)
-      }
-    }
-  }, [shuffledProducts.length, isShufflingPaused, SHUFFLE_INTERVAL])
-  
-  // Cleanup timeouts on unmount
-  useEffect(() => {
-    return () => {
-      if (userActivityTimeoutRef.current) {
-        clearTimeout(userActivityTimeoutRef.current)
-      }
-      if (shuffleIntervalRef.current) {
-        clearInterval(shuffleIntervalRef.current)
-      }
-    }
-  }, [])
-  
-  // Event listeners for user activity
-  useEffect(() => {
-    const events = ['scroll', 'mousemove', 'keydown', 'touchstart', 'click']
-    
-    events.forEach(event => {
-      document.addEventListener(event, handleUserActivity, { passive: true })
-    })
-    
-    return () => {
-      events.forEach(event => {
-        document.removeEventListener(event, handleUserActivity)
-      })
-    }
-  }, [handleUserActivity])
-  
-  
-  const handleFilterActivity = useCallback(() => {
-    handleUserActivity()
-  }, [handleUserActivity])
-  
+  // Product hover handler (no longer needed for shuffling, but kept for potential future use)
   const handleProductHover = useCallback(() => {
-    handleUserActivity()
-  }, [handleUserActivity])
-  
-  // Removed UI badge for shuffle/pause status
+    // No action needed - shuffling system removed
+  }, [])
   
   // Note: Price filtering, category filtering, and sorting are now done server-side
   // The API endpoint handles these parameters automatically
 
-  // Check if we have more products beyond the current page limit
-  const hasMoreProducts = infiniteHasMore && displayedProducts.length < PRODUCTS_PER_PAGE
-  const hasNextPage = infiniteTotalCount > PRODUCTS_PER_PAGE || (displayedProducts.length >= PRODUCTS_PER_PAGE && infiniteHasMore)
+  // Check if we have more products to display from current batch
+  const hasMoreInBatch = displayedCount < allFilteredProducts.length
+  // Check if we need to fetch more from API
+  const hasMoreProducts = primaryHasMore || (primaryTotalCount > 0 && allFilteredProducts.length < primaryTotalCount)
+  const hasNextPage = primaryTotalCount > allFilteredProducts.length || primaryHasMore
   const currentPageProductCount = displayedProducts.length
+  
+  // Combined load more: show more from batch OR fetch from API
+  const handleLoadMore = useCallback(() => {
+    if (hasMoreInBatch) {
+      // Show more products from current batch
+      loadMoreBatch()
+    } else if (hasMoreProducts) {
+      // Fetch more products from API
+      primaryLoadMore()
+    }
+  }, [hasMoreInBatch, hasMoreProducts, loadMoreBatch, primaryLoadMore])
   
   // Build next page URL with current filters
   const buildNextPageUrl = useCallback(() => {
@@ -1608,7 +1644,8 @@ function ProductsPageContent() {
     setPendingCartItem(null)
   }
 
-  const handleAddToCart = async (productId: number, productName: string, productPrice: number, productVariants?: any[]) => {
+  // Memoized add to cart handler to prevent unnecessary re-renders
+  const handleAddToCart = useCallback(async (productId: number, productName: string, productPrice: number, productVariants?: any[]) => {
     // Fetch full product data from database to get accurate variant info and prices
     let fullProductData = null
     let selectedVariant: any = null
@@ -1654,7 +1691,7 @@ function ProductsPageContent() {
         }
       } else {
         // Fallback if API fails
-        const productForStockCheck = products.find((p: any) => p.id === productId)
+        const productForStockCheck = primaryProducts.find((p: any) => p.id === productId)
         if (productForStockCheck) {
           const stockCheck = checkProductStock(productForStockCheck)
           if (!stockCheck.isAvailable) {
@@ -1669,7 +1706,7 @@ function ProductsPageContent() {
       }
     } catch (error) {
       // Fallback to basic check
-      const productForStockCheck = products.find((p: any) => p.id === productId)
+      const productForStockCheck = primaryProducts.find((p: any) => p.id === productId)
       if (productForStockCheck) {
         const stockCheck = checkProductStock(productForStockCheck)
         if (!stockCheck.isAvailable) {
@@ -1687,7 +1724,7 @@ function ProductsPageContent() {
         const quantity = variantPrice < 500 ? 5 : 1
         
         // Check if this is a China import item
-    const product = products.find((p: any) => p.id === productId) || fullProductData
+    const product = primaryProducts.find((p: any) => p.id === productId) || fullProductData
         if (product && (product.importChina || product.import_china)) {
           // Show modal for China import items
           setPendingCartItem({
@@ -1711,13 +1748,13 @@ function ProductsPageContent() {
       selectedVariant?.sku,
       selectedVariant?.image
     )
-  }
+  }, [addItem, toast, setPendingCartItem, setShowChinaImportModal, primaryProducts])
 
   return (
     <div className={cn("flex flex-col min-h-screen w-full overflow-x-hidden", themeClasses.mainBg, themeClasses.mainText)} suppressHydrationWarning>
       {/* Preload first few product images for better performance */}
       <ImagePreloader 
-        images={products.slice(0, 6).map((p: any) => p.image).filter((img: any): img is string => Boolean(img))} 
+        images={displayedProducts.slice(0, 6).map((p: any) => p.image).filter((img: any): img is string => Boolean(img))} 
         priority={true} 
       />
       {/* Welcome Message Bar - Mobile Only */}
@@ -1904,7 +1941,9 @@ function ProductsPageContent() {
                     params.delete('search')
                     params.delete('returnTo')
                     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                        router.push(nextUrl, { scroll: false })
+                        // Use replace instead of push to avoid adding to history stack
+    // This prevents full page refresh and maintains client-side routing
+    router.replace(nextUrl, { scroll: false })
                       }
                       clearSearchTimeoutRef.current = null
                     }, 500)
@@ -1931,8 +1970,8 @@ function ProductsPageContent() {
               {searchTerm.trim().length > 0 && searchTerm.trim().length < 3 && (
                 <div className={cn(
                   "absolute top-full left-0 right-0 mt-1 z-50 rounded-lg shadow-lg border p-3",
-                  themeClasses.bgPrimary,
-                  themeClasses.borderNeutral,
+                  themeClasses.cardBg,
+                  themeClasses.borderNeutralSecondary,
                   themeClasses.textNeutralSecondary
                 )}>
                   <p className="text-xs sm:text-sm">
@@ -1975,7 +2014,9 @@ function ProductsPageContent() {
                     params.delete('search')
                     params.delete('returnTo')
                     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                        router.push(nextUrl, { scroll: false })
+                        // Use replace instead of push to avoid adding to history stack
+    // This prevents full page refresh and maintains client-side routing
+    router.replace(nextUrl, { scroll: false })
                       }
                       clearSearchTimeoutRef.current = null
                     }, 500)
@@ -2032,20 +2073,38 @@ function ProductsPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2055,20 +2114,38 @@ function ProductsPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2078,20 +2155,38 @@ function ProductsPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2101,20 +2196,38 @@ function ProductsPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2733,19 +2846,29 @@ function ProductsPageContent() {
                 className={darkHeaderFooterClasses.dropdownItemHoverBg}
                 onClick={(e) => {
                   e.preventDefault()
+                  // Security: Use safer DOM manipulation instead of document.write
                   const newWindow = window.open('', '_blank')
                   if (newWindow) {
-                    newWindow.document.write(`
-                      <html>
-                        <head><title>Coming Soon</title></head>
-                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                          </div>
-                        </body>
-                      </html>
-                    `)
+                    newWindow.document.open()
+                    const doc = newWindow.document
+                    // Create initial HTML structure without using document.write
+                    doc.documentElement.innerHTML = '<head><title>Coming Soon</title></head><body></body>'
+                    
+                    const body = doc.body
+                    if (body) {
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
+                    }
                     newWindow.document.close()
                   }
                 }}
@@ -2756,19 +2879,29 @@ function ProductsPageContent() {
                 className={darkHeaderFooterClasses.dropdownItemHoverBg}
                 onClick={(e) => {
                   e.preventDefault()
+                  // Security: Use safer DOM manipulation instead of document.write
                   const newWindow = window.open('', '_blank')
                   if (newWindow) {
-                    newWindow.document.write(`
-                      <html>
-                        <head><title>Coming Soon</title></head>
-                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                          </div>
-                        </body>
-                      </html>
-                    `)
+                    newWindow.document.open()
+                    const doc = newWindow.document
+                    // Create initial HTML structure without using document.write
+                    doc.documentElement.innerHTML = '<head><title>Coming Soon</title></head><body></body>'
+                    
+                    const body = doc.body
+                    if (body) {
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
+                    }
                     newWindow.document.close()
                   }
                 }}
@@ -2779,19 +2912,29 @@ function ProductsPageContent() {
                 className={darkHeaderFooterClasses.dropdownItemHoverBg}
                 onClick={(e) => {
                   e.preventDefault()
+                  // Security: Use safer DOM manipulation instead of document.write
                   const newWindow = window.open('', '_blank')
                   if (newWindow) {
-                    newWindow.document.write(`
-                      <html>
-                        <head><title>Coming Soon</title></head>
-                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                          </div>
-                        </body>
-                      </html>
-                    `)
+                    newWindow.document.open()
+                    const doc = newWindow.document
+                    // Create initial HTML structure without using document.write
+                    doc.documentElement.innerHTML = '<head><title>Coming Soon</title></head><body></body>'
+                    
+                    const body = doc.body
+                    if (body) {
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
+                    }
                     newWindow.document.close()
                   }
                 }}
@@ -2802,19 +2945,29 @@ function ProductsPageContent() {
                 className={darkHeaderFooterClasses.dropdownItemHoverBg}
                 onClick={(e) => {
                   e.preventDefault()
+                  // Security: Use safer DOM manipulation instead of document.write
                   const newWindow = window.open('', '_blank')
                   if (newWindow) {
-                    newWindow.document.write(`
-                      <html>
-                        <head><title>Coming Soon</title></head>
-                        <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                          <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                            <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                            <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                          </div>
-                        </body>
-                      </html>
-                    `)
+                    newWindow.document.open()
+                    const doc = newWindow.document
+                    // Create initial HTML structure without using document.write
+                    doc.documentElement.innerHTML = '<head><title>Coming Soon</title></head><body></body>'
+                    
+                    const body = doc.body
+                    if (body) {
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
+                    }
                     newWindow.document.close()
                   }
                 }}
@@ -3451,12 +3604,10 @@ function ProductsPageContent() {
             {/* Product Count */}
             <span className={cn("text-xs sm:text-sm whitespace-nowrap flex items-center gap-1", themeClasses.textNeutralSecondary)}>
               <Package className={cn("w-3 h-3 sm:w-4 sm:h-4", themeClasses.textNeutralSecondary)} />
-              {infiniteLoading && infiniteTotalCount === 0 && displayedProducts.length === 0 ? (
+              {primaryLoading && displayedProducts.length === 0 ? (
                 "Loading products..."
               ) : (
-                // CRITICAL FIX: Use infiniteTotalCount when available (from API), otherwise use displayedProducts.length
-                // This ensures accurate count display, especially for search results
-                `${displayedProducts.length}${infiniteTotalCount > 0 ? ` of ${infiniteTotalCount}` : ''} product${displayedProducts.length !== 1 ? 's' : ''}`
+                `${displayedProducts.length}${primaryTotalCount > 0 ? ` of ${primaryTotalCount}` : ''} product${displayedProducts.length !== 1 ? 's' : ''}`
               )}
             </span>
           </div>
@@ -3670,18 +3821,18 @@ function ProductsPageContent() {
         {/* Loading State - Removed for faster UX */}
 
         {/* Error State (Rate limiting and other errors) */}
-        {infiniteError && !infiniteLoading && (
+        {error && !primaryLoading && (
               <div className="col-span-full flex flex-col items-center justify-center py-12 px-4 text-center">
             <Package className="w-16 h-16 text-red-400 mb-4" />
                 <h3 className={cn("text-lg font-semibold mb-2", themeClasses.mainText)}>
               Error Loading Products
                 </h3>
                 <p className={cn("text-sm mb-6 max-w-md", themeClasses.textNeutralSecondary)}>
-              {infiniteError}
+              {error || 'Failed to load products'}
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <Button
-                onClick={infiniteRefresh}
+                onClick={primaryRefresh}
                     className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
                   >
                 Try Again
@@ -3703,362 +3854,84 @@ function ProductsPageContent() {
 
 
                 {/* Products Grid */}
-        {(showSkeleton || (isLoading && infiniteProducts.length === 0) || (actualSearchQuery && infiniteProducts.length === 0 && (infiniteLoading || infiniteFiltering))) ? (
-          // Skeleton Loading State - show on initial load, when filtering, or when search is active and loading
+        {/* Only show skeleton if: loading AND no products AND no cached data loaded - prevent multiple skeletons */}
+        {(showSkeleton && primaryLoading && primaryProducts.length === 0 && !hasDataLoaded) ? (
+          // Skeleton Loading State - only show when actually loading and no data available
           <div className="px-1 sm:px-2 lg:px-3">
             <ProductGridSkeleton count={24} />
           </div>
-        ) : (noCategoryMatches || (displayedProducts.length === 0 && !infiniteLoading && !infiniteFiltering && showNoProducts)) ? (
+        ) : (noCategoryMatches || (displayedProducts.length === 0 && !primaryLoading && showNoProducts)) ? (
           <div className="px-4 py-10 text-center">
             <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
-              {actualSearchQuery && actualSearchQuery.trim().length >= 3 
-                ? `No products found for "${actualSearchQuery}"` 
-                : actualSearchQuery && actualSearchQuery.trim().length > 0 && actualSearchQuery.trim().length < 3
-                ? `Please type at least 3 characters to search`
-                : "No products found"}
+              Available soon
             </h3>
-            {(actualSearchQuery || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
-              <div className={cn("text-sm mb-6 max-w-md mx-auto", themeClasses.textNeutralSecondary)}>
-                <p className="mb-2">Selected filters:</p>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  {actualSearchQuery && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-blue-800 dark:text-blue-200 text-xs font-medium">
-                      Search: "{actualSearchQuery}"
-                    </span>
-                  )}
-                  {selectedMainCategory && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 text-xs font-medium">
-                      Category: {selectedMainName}
-                    </span>
-                  )}
-                  {selectedSubCategories.length > 0 && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs font-medium">
-                      Sub: {selectedSubNames.join(', ')}
-                    </span>
-                  )}
-                  {activeBrand && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 text-xs font-medium">
-                      Brand: {activeBrand}
-                    </span>
-                  )}
-                  {(priceRange[0] > 0 || priceRange[1] < 100000) && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-xs font-medium">
-                      Price: {priceRange[0]} - {priceRange[1]} TZS
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-            {(actualSearchQuery || selectedMainCategory || selectedSubCategories.length || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000) && (
-              <Button
-                onClick={clearFilters}
-                className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-              >
-                Clear All Filters
-              </Button>
-            )}
           </div>
         ) : !error ? (
           <InfiniteScrollTrigger
-            onLoadMore={infiniteLoadMore}
-            hasMore={hasMoreProducts}
-            loading={infiniteLoadingMore}
-            error={infiniteError}
+            onLoadMore={handleLoadMore}
+            hasMore={hasMoreInBatch || hasMoreProducts}
+            loading={primaryLoadingMore}
+            error={error}
           >
-            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-8 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
-            {displayedProducts.length > 0 && (
-              <>
-                
-                {/* All Product Cards */}
-                {/* CRITICAL FIX: When search/filters are active, ONLY use displayedProducts, never shuffledProducts */}
-                {/* This prevents showing wrong products from previous searches */}
-                {((actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000)
-                  ? displayedProducts
-                  : (shuffledProducts.length > 0 ? shuffledProducts : displayedProducts)
-                ).map((product: any, index: number) => {
-            
-            // Use simplified variant system - get minimum price from variants
-            let effectivePrice = getMinimumPrice(product.price, product.variants)
-            // Use server-provided prices only - no client-side discount synthesis
-            const originalPrice = product.originalPrice || product.original_price || effectivePrice
-            // Only show discount if original price is actually higher than current price (server-validated)
-            const discountPercentage = originalPrice > effectivePrice 
-              ? ((originalPrice - effectivePrice) / originalPrice) * 100 
-              : 0
-            
-            const productInCart = isInCart(product.id, product.variants?.[0]?.id) // Check if product or its default variant is in cart
-            const hasFreeShipping = product.free_delivery === true ||
-              product.freeDelivery === true ||
-              (product as any)?.free_shipping === true ||
-              (product as any)?.freeShipping === true
-            
-            return (
-              <Card
-                key={`${product.id}-${index}`}
-                data-product-id={product.id}
-                onMouseEnter={handleProductHover}
-                onFocus={handleProductHover}
-                className={cn(
-                  "flex flex-col overflow-hidden rounded-lg border-0 shadow-none",
-                  "transform transition-all duration-300 ease-in-out",
-                  "hover:scale-105 hover:shadow-xl hover:shadow-gray-300/60 dark:hover:shadow-gray-700/60",
-                  "hover:z-10 relative hover:ring-2 hover:ring-blue-500/20",
-                  themeClasses.cardBg,
-                  themeClasses.mainText,
-                )}
-                style={{ contentVisibility: 'auto', containIntrinsicSize: '320px 420px' }}
-                    suppressHydrationWarning
-              >
-                    <OptimizedLink 
-                      href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}` || window.location.href)}`} 
-                      className="block relative aspect-square overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600" 
-                      prefetch={false}
-                      priority="low"
-                      suppressHydrationWarning
-                    >
-                  {product.image && (
-                    <LazyImage
-                      src={product.image}
-                      alt={product.name}
-                      fill
-                      className="object-cover transition-transform duration-300 hover:scale-110"
-                      priority={false}
-                      quality={60}
-                      sizes="(max-width: 640px) 40vw, (max-width: 1024px) 25vw, 20vw"
-                    />
-                  )}
-                  {/* Corner decoration */}
-                  <div className="absolute top-0 right-0 w-0 h-0 border-l-[20px] border-l-transparent border-t-[20px] border-t-orange-500 z-20"></div>
+            {/* Use virtual scrolling for large lists (50+ products), regular grid for smaller lists */}
+            {(() => {
+              const productsToDisplay = (actualSearchQuery || selectedMainCategory || selectedSubCategories.length > 0 || activeBrand || priceRange[0] > 0 || priceRange[1] < 100000)
+                ? displayedProducts
+                : (shuffledProducts.length > 0 ? shuffledProducts : displayedProducts)
+              
+              const useVirtualScrolling = productsToDisplay.length >= 50
 
-                  {/* Badges - Separate left and right badge systems */}
-                  {(() => {
-                    const leftBadge = getLeftBadge(product)
-                    const rightBadge = getRightBadge(product)
-                    const hasChinaBadge = product.importChina || product.import_china
-                    const hasRightBadge = rightBadge.type !== 'none'
-                    
-                    // Calculate top position for China badge (below New/Discount badge if it exists)
-                    const chinaBadgeTop = hasRightBadge ? 'top-6 sm:top-7' : 'top-0'
-                    
-                    return (
+              if (useVirtualScrolling) {
+                // Virtual scrolling for large lists
+                return (
+                  <VirtualizedProductGrid
+                    products={productsToDisplay}
+                    themeClasses={themeClasses}
+                    formatPrice={formatPrice}
+                    isInCart={isInCart}
+                    handleAddToCart={handleAddToCart}
+                    pathname={pathname}
+                    urlSearchParams={urlSearchParams}
+                    onHover={handleProductHover}
+                    className="px-1 sm:px-2 lg:px-3"
+                    gap={4}
+                    onItemsRendered={(startIndex, stopIndex) => {
+                      // Trigger load more when user scrolls near the end
+                      if (stopIndex >= productsToDisplay.length - 10 && (hasMoreInBatch || hasMoreProducts)) {
+                        handleLoadMore()
+                      }
+                    }}
+                  />
+                )
+              } else {
+                // Regular grid for smaller lists
+                return (
+                  <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-8 gap-1 px-1 sm:px-2 lg:px-3" suppressHydrationWarning>
+                    {productsToDisplay.length > 0 && (
                       <>
-                        {/* Left side badge (Popular vs Free Shipping) */}
-                        {leftBadge.type !== 'none' && (
-                          <div className="absolute top-0 left-0 sm:top-0 sm:left-1.5 z-10" suppressHydrationWarning>
-                            <span className={leftBadge.className} suppressHydrationWarning>
-                              {leftBadge.text}
-                      </span>
-        </div>
-                        )}
-                        
-                        {/* Right side badge (New vs Discount) */}
-                        {rightBadge.type !== 'none' && (
-                          <div className="absolute top-0 right-0 sm:top-0 sm:right-1.5 z-10" suppressHydrationWarning>
-                  <span 
-                              className={rightBadge.className} 
-                              style={rightBadge.customStyle}
-                              suppressHydrationWarning
-                  >
-                              {rightBadge.text}
-                  </span>
-                </div>
-                        )}
-                        
-                        {/* China badge - Right side, below New/Discount badge */}
-                        {hasChinaBadge && (
-                          <div className={`absolute ${chinaBadgeTop} right-0 sm:right-1.5 z-10`} suppressHydrationWarning>
-                            <span 
-                              className="bg-red-600 text-white text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-none shadow-sm sm:shadow-md"
-                              suppressHydrationWarning
-                            >
-                              China
-                  </span>
-                </div>
-                        )}
-                      </>
-                    )
-                  })()}
-                    </OptimizedLink>
-                    <CardContent className="p-1 md:p-0.5 lg:p-1 flex-1 flex flex-col justify-between" suppressHydrationWarning>
-                      <OptimizedLink 
-                        href={`/products/${product.id}-${encodeURIComponent(product.slug || product.name || 'product')}?returnTo=${encodeURIComponent(`${pathname}${(urlSearchParams?.toString() ? `?${urlSearchParams.toString()}` : '')}` || window.location.href)}`}
-                        className="block"
-                        prefetch={false}
-                        priority="low"
-                      >
-                        <TooltipProvider delayDuration={200}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <h3 className="text-xs font-semibold sm:text-xs md:text-[11px] lg:text-base hover:text-blue-600 dark:hover:text-blue-400 hover:scale-105 transition-all duration-300 line-clamp-2 overflow-hidden cursor-pointer" suppressHydrationWarning>{product.name}</h3>
-                            </TooltipTrigger>
-                            <TooltipContent 
-                              className="text-xs max-w-xs sm:max-w-sm break-words !z-[99999]" 
-                              side="top" 
-                              align="start"
-                              sideOffset={8}
-                              avoidCollisions={true}
-                              collisionPadding={8}
-                            >
-                              <p className="whitespace-normal">{product.name}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </OptimizedLink>
-                  {/* Stock/Sold status - on new line above ratings on mobile */}
-                  {/* Always show sold count, display "000 sold" if 0 or null */}
-                  <div className="sm:hidden text-[10px] mt-0" suppressHydrationWarning>
-                    {(() => {
-                      const isOutOfStock = !product.inStock && !product.in_stock
-                      const soldCount = product.sold_count || 0
-                      
-                      if (isOutOfStock) {
-                        return (
-                          <span className="text-red-600 dark:text-red-400 font-semibold" suppressHydrationWarning>
-                            Out of Stock
-                          </span>
-                        )
-                      } else {
-                        return (
-                          <span className={themeClasses.textNeutralSecondary} suppressHydrationWarning>
-                            {soldCount > 0 
-                              ? (soldCount >= 1000 
-                                  ? `${(soldCount / 1000).toFixed(1)}k+` 
-                                  : `${soldCount}+`)
-                              : '000'} sold
-                          </span>
-                        )
-                      }
-                    })()}
-                  </div>
-                  <div
-                    className={cn(
-                      "flex flex-wrap items-center gap-0.5 text-[10px] mt-0 sm:text-xs min-h-[1.5rem]",
-                      themeClasses.textNeutralSecondary,
-                    )}
-                        suppressHydrationWarning
-                  >
-                    {/* Stock/Sold status - inline on desktop */}
-                    {/* Always show sold count, display "000 sold" if 0 or null */}
-                    {(() => {
-                      const isOutOfStock = !product.inStock && !product.in_stock
-                      const soldCount = product.sold_count || 0
-                      
-                      if (isOutOfStock) {
-                        return (
-                          <span className="hidden sm:inline text-xs whitespace-nowrap text-red-600 dark:text-red-400 font-semibold" suppressHydrationWarning>
-                            Out of Stock
-                          </span>
-                        )
-                      } else {
-                        return (
-                          <>
-                            <span className="hidden sm:inline text-xs whitespace-nowrap" suppressHydrationWarning>
-                              {soldCount > 0 
-                                ? (soldCount >= 1000 
-                                    ? `${(soldCount / 1000).toFixed(1)}k+` 
-                                    : `${soldCount}+`)
-                                : '000'} sold
-                            </span>
-                            <span className="hidden sm:inline mx-0.5 text-[8px]" suppressHydrationWarning>•</span>
-                          </>
-                        )
-                      }
-                    })()}
-                    {/* Rating: Show empty stars if rating is 0, filled stars if rating > 0 */}
-                    {/* Always show stars, but empty/unfilled if rating is 0 */}
-                    <div className="flex items-center gap-0 flex-shrink-0">
-                      {Array.from({ length: 5 }).map((_, i) => {
-                        const rating = product.rating || 0
-                        const hasRating = rating > 0
-                        return (
-                          <Star
-                            key={i}
-                            className={`w-3 h-3 flex-shrink-0 ${
-                              hasRating && i < Math.floor(rating)
-                                ? "fill-yellow-400 text-yellow-400"
-                                : themeClasses.textNeutralSecondary
-                            }`}
-                            suppressHydrationWarning
+                        {/* All Product Cards - Memoized for Performance */}
+                        {productsToDisplay.map((product: any, index: number) => (
+                          <ProductCard
+                            key={`${product.id}-${index}`}
+                            product={product}
+                            index={index}
+                            themeClasses={themeClasses}
+                            formatPrice={formatPrice}
+                            isInCart={isInCart}
+                            handleAddToCart={handleAddToCart}
+                            pathname={pathname}
+                            urlSearchParams={urlSearchParams}
+                            onHover={handleProductHover}
+                            priority={index < 6} // Priority for first 6 images (above the fold)
                           />
-                        )
-                      })}
-                      {/* Show reviews count if > 0, otherwise show (0) */}
-                      <span className="whitespace-nowrap ml-0.5" suppressHydrationWarning>
-                        ({product.reviews || 0})
-                      </span>
-                      {/* Show views count: (0) if zero */}
-                      {product.views !== undefined && product.views !== null && (
-                        <>
-                          <span className="hidden sm:inline mx-0.5 text-[8px]" suppressHydrationWarning>•</span>
-                          <span className="whitespace-nowrap" suppressHydrationWarning>
-                            ({product.views || 0})
-                          </span>
-                        </>
-                        )}
-                      </div>
-                  </div>
-                  {hasFreeShipping && (
-                    <div
-                      className="text-[10px] sm:text-xs font-semibold text-red-600 uppercase tracking-wide mt-1 flex items-center gap-1"
-                      suppressHydrationWarning
-                    >
-                      <span aria-hidden="true">•</span>
-                      <span>Free Shipping</span>
-                    </div>
-                  )}
-                      <div className="flex flex-wrap items-baseline gap-x-1.5 mt-0" suppressHydrationWarning>
-                        {/* Main Price */}
-                        <div className="text-sm font-bold sm:text-sm md:text-xs lg:text-lg" suppressHydrationWarning>
-                          {formatPrice(effectivePrice)}
-                        </div>
-                        
-                        {/* Original Price and Discount - Always show for all products */}
-                        {originalPrice > effectivePrice && (
-                      <>
-                            <div className={cn("text-[10px] line-through sm:text-xs", themeClasses.textNeutralSecondary)} suppressHydrationWarning>
-                              {formatPrice(originalPrice)}
-                </div>
-                            <div className="text-[10px] font-medium text-green-600" suppressHydrationWarning>
-                          {discountPercentage.toFixed(0)}% OFF
-                </div>
+                        ))}
                       </>
                     )}
-              </div>
-
-
-                </CardContent>
-                    <CardFooter className="px-1 pb-1 pt-0 flex flex-col gap-1" suppressHydrationWarning>
-                  {/* Verified Badge - Hidden for now */}
-                  {/* {product.supplier_verified && (
-                    <div className="flex items-center justify-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 rounded-t-sm border-b border-blue-200 dark:border-blue-800">
-                      <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                        <Check className="w-3.5 h-3.5 text-green-500 dark:text-green-400" />
-                        <span className="text-xs font-semibold">Verified Seller</span>
-                      </div>
-                    </div>
-                  )} */}
-                  <Button
-                    className={cn(
-                      "w-full text-xs py-1 h-auto sm:text-sm lg:text-base rounded-b-sm rounded-t-none transform transition-all duration-200 hover:scale-105 hover:shadow-md",
-                      (product.importChina || product.import_china) 
-                        ? "bg-red-800 text-white hover:bg-red-900" 
-                        : "bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                    )}
-                    onClick={() => handleAddToCart(product.id, product.name, product.price, product.variants)}
-                        suppressHydrationWarning
-                  >
-                    <>
-                          <ShoppingCart className="w-4 h-4 mr-2" suppressHydrationWarning /> Add to Cart
-                    </>
-                  </Button>
-                </CardFooter>
-              </Card>
-            )
-                })}
-              </>
-            )}
-              </div>
+                  </div>
+                )
+              }
+            })()}
           </InfiniteScrollTrigger>
         ) : null}
 
@@ -4067,8 +3940,8 @@ function ProductsPageContent() {
           <div className="flex flex-col items-center justify-center py-2 px-4 gap-2" suppressHydrationWarning>
             <div className="text-center">
               <p className={cn("text-sm mb-2", themeClasses.textNeutralSecondary)}>
-                {infiniteTotalCount > PRODUCTS_PER_PAGE 
-                  ? `${infiniteTotalCount - currentPageProductCount} more products available` 
+                {primaryTotalCount > PRODUCTS_PER_PAGE 
+                  ? `${primaryTotalCount - displayedProducts.length} more products available` 
                   : 'More products available'}
               </p>
             </div>
@@ -4084,7 +3957,7 @@ function ProductsPageContent() {
         )}
         
         {/* End of all products */}
-        {!hasMoreProducts && !hasNextPage && products.length > 0 && (
+        {!hasMoreProducts && !hasNextPage && displayedProducts.length > 0 && (
           <div className="flex justify-center py-8" suppressHydrationWarning>
             <p className={cn("text-lg", themeClasses.textNeutralSecondary)}>You've reached the end of the list!</p>
             </div>
@@ -4093,7 +3966,7 @@ function ProductsPageContent() {
       </main>
 
 
-      {!infiniteLoading && !infiniteLoadingMore && !(categoriesLoading && infiniteProducts.length === 0) && <Footer />}
+      {!primaryLoading && !primaryLoadingMore && <Footer />}
 
       {/* Category Navigation Modal */}
       <Sheet open={isCategoryNavOpen} onOpenChange={setIsCategoryNavOpen}>

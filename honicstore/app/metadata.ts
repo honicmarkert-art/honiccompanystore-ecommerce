@@ -21,13 +21,13 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://www.honiccompanystore.com',
+    url: process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com',
     siteName: 'Honic Company Store',
     title: 'Honic Company Store - Online Shopping in Tanzania',
     description: 'Shop the best deals on electronics, fashion, home goods, and more. Free shipping across Tanzania.',
     images: [
       {
-        url: 'https://www.honiccompanystore.com/logo.png',
+        url: `${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'}/logo.png`,
         width: 1200,
         height: 630,
         alt: 'Honic Company Store',
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Honic Company Store - Online Shopping in Tanzania',
     description: 'Shop the best deals on electronics, fashion, home goods, and more.',
-    images: ['https://www.honiccompanystore.com/logo.png'],
+    images: [`${process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'}/logo.png`],
   },
   verification: {
     google: 'your-google-verification-code',

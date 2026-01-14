@@ -43,7 +43,6 @@ export async function POST(request: NextRequest) {
     const { error } = await supabase.auth.signOut()
     
     if (error) {
-      console.error('Supabase signOut error:', error)
       // Continue with cookie cleanup even if Supabase signOut fails
     }
 
@@ -119,8 +118,6 @@ export async function POST(request: NextRequest) {
     return response
 
   } catch (error) {
-    console.error('Logout error:', error)
-    
     // Even if there's an error, clear the cookies and session
     const isProd = process.env.NODE_ENV === 'production'
     const response = NextResponse.json({
@@ -149,8 +146,7 @@ export async function POST(request: NextRequest) {
       )
       await supabase.auth.signOut()
     } catch (signOutError) {
-      console.error('Error during signOut in catch block:', signOutError)
-    }
+      }
 
     // Clear cookies regardless of error
     const cookieOptions = {

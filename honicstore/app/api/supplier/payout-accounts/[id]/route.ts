@@ -4,6 +4,9 @@ import { getSupabaseClient } from '@/lib/supabase-server'
 import { encryptPayoutAccount, decryptPayoutAccount } from '@/lib/payout-encryption'
 import { cookies } from 'next/headers'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { clearCache } from '@/lib/database-optimization'
+import { createErrorResponse, logError } from '@/lib/error-handler'
 import { logger } from '@/lib/logger'
 
 export const runtime = 'nodejs'
@@ -14,19 +17,20 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
-    if (!rateLimitResult.allowed) {
-      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-        endpoint: '/api/supplier/payout-accounts/[id]',
-        reason: rateLimitResult.reason
-      }, request)
-      return NextResponse.json(
-        { success: false, error: rateLimitResult.reason },
-        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
-      )
-    }
+  return performanceMonitor.measure('supplier_payout_accounts_put', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/payout-accounts/[id]',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
+        )
+      }
 
     const headers = { 'Content-Type': 'application/json' }
     const cookieStore = await cookies()
@@ -117,28 +121,37 @@ export async function PUT(
       .select()
       .single()
 
-    if (updateError) {
-      logger.error('Error updating payout account:', updateError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to update payout account' },
-        { status: 500, headers }
-      )
+      if (updateError) {
+        logError(updateError, {
+          context: 'supplier_payout_accounts_put',
+          userId: user.id,
+          accountId: id
+        })
+        return createErrorResponse(updateError, 'Failed to update payout account', 500)
+      }
+
+      // Clear cache
+      clearCache()
+
+      // Decrypt sensitive fields before returning to client
+      const decryptedAccount = decryptPayoutAccount(updatedAccount)
+
+      logSecurityEvent('SUPPLIER_PAYOUT_ACCOUNT_UPDATED', user.id, {
+        accountId: id,
+        endpoint: '/api/supplier/payout-accounts/[id]'
+      })
+
+      return NextResponse.json({
+        success: true,
+        account: decryptedAccount
+      })
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_payout_accounts_put'
+      })
+      return createErrorResponse(error, 'Internal server error', 500)
     }
-
-    // Decrypt sensitive fields before returning to client
-    const decryptedAccount = decryptPayoutAccount(updatedAccount)
-
-    return NextResponse.json({
-      success: true,
-      account: decryptedAccount
-    })
-  } catch (error: any) {
-    logger.error('Error in PUT /api/supplier/payout-accounts/[id]:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
+  })
 }
 
 // DELETE /api/supplier/payout-accounts/[id] - Delete a payout account
@@ -146,19 +159,20 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
-    if (!rateLimitResult.allowed) {
-      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-        endpoint: '/api/supplier/payout-accounts/[id]',
-        reason: rateLimitResult.reason
-      }, request)
-      return NextResponse.json(
-        { success: false, error: rateLimitResult.reason },
-        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
-      )
-    }
+  return performanceMonitor.measure('supplier_payout_accounts_delete', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/payout-accounts/[id]',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60', 'Content-Type': 'application/json' } }
+        )
+      }
 
     const headers = { 'Content-Type': 'application/json' }
     const cookieStore = await cookies()
@@ -207,24 +221,33 @@ export async function DELETE(
       .delete()
       .eq('id', id)
 
-    if (deleteError) {
-      logger.error('Error deleting payout account:', deleteError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to delete payout account' },
-        { status: 500, headers }
-      )
-    }
+      if (deleteError) {
+        logError(deleteError, {
+          context: 'supplier_payout_accounts_delete',
+          userId: user.id,
+          accountId: id
+        })
+        return createErrorResponse(deleteError, 'Failed to delete payout account', 500)
+      }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Account deleted successfully'
-    })
-  } catch (error: any) {
-    logger.error('Error in DELETE /api/supplier/payout-accounts/[id]:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
+      // Clear cache
+      clearCache()
+
+      logSecurityEvent('SUPPLIER_PAYOUT_ACCOUNT_DELETED', user.id, {
+        accountId: id,
+        endpoint: '/api/supplier/payout-accounts/[id]'
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: 'Account deleted successfully'
+      })
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_payout_accounts_delete'
+      })
+      return createErrorResponse(error, 'Internal server error', 500)
+    }
+  })
 }
 

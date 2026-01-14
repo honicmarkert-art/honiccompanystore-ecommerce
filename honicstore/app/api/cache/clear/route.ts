@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { enhancedCache } from '@/lib/performance-monitor'
+import { clearCache, getCacheStats } from '@/lib/database-optimization'
 
 // POST - Clear the API cache
 export async function POST(request: NextRequest) {
   try {
-    // Clear the enhanced cache
-    enhancedCache.clear()
+    // Clear the cache (all entries)
+    clearCache()
     
     return NextResponse.json({ 
       success: true, 
@@ -13,7 +13,6 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString()
     })
   } catch (error) {
-    console.error('Error clearing cache:', error)
     return NextResponse.json({ 
       success: false, 
       error: 'Failed to clear cache' 
@@ -24,7 +23,7 @@ export async function POST(request: NextRequest) {
 // GET - Get cache stats
 export async function GET() {
   try {
-    const stats = enhancedCache.getStats()
+    const stats = getCacheStats()
     
     return NextResponse.json({
       success: true,
@@ -32,7 +31,6 @@ export async function GET() {
       timestamp: new Date().toISOString()
     })
   } catch (error) {
-    console.error('Error getting cache stats:', error)
     return NextResponse.json({ 
       success: false, 
       error: 'Failed to get cache stats' 

@@ -59,7 +59,6 @@ export async function GET(request: NextRequest) {
         .in('id', uncachedIds)
 
       if (error) {
-        console.error('Error fetching stock data:', error)
         return NextResponse.json({ error: 'Failed to fetch stock data' }, { status: 500 })
       }
 
@@ -108,7 +107,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Stock API error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -146,7 +144,6 @@ export async function POST(request: NextRequest) {
       .eq('id', productId)
 
     if (error) {
-      console.error('Error updating stock:', error)
       return NextResponse.json({ error: 'Failed to update stock' }, { status: 500 })
     }
 
@@ -156,7 +153,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true })
 
   } catch (error) {
-    console.error('Stock update error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

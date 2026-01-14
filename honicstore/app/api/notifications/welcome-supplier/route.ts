@@ -52,7 +52,6 @@ export async function POST(request: NextRequest) {
     )
 
     if (!result.success) {
-      console.error('Failed to create welcome notification:', result.error)
       return NextResponse.json(
         { error: 'Failed to create notification' },
         { status: 500 }
@@ -65,7 +64,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error: any) {
-    console.error('Error creating welcome notification:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

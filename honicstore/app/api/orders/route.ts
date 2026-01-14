@@ -5,6 +5,7 @@ import { logger } from '@/lib/logger'
 import { secureOrderCreation, ReferenceIdSecurity } from '@/lib/reference-id-security'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { securityUtils } from '@/lib/secure-config'
+import { validateAuth } from '@/lib/auth-server'
 
 
 
@@ -49,6 +50,38 @@ export async function POST(request: NextRequest) {
     
     // Parse order data
     const orderData = await request.json()
+
+    // Security: If userId is provided (not null), validate authentication
+    // Guest checkout: userId can be null, which is allowed without authentication
+    if (orderData.userId !== null && orderData.userId !== undefined) {
+      const { user: authUser, error: authError } = await validateAuth(request)
+      
+      if (authError || !authUser) {
+        logSecurityEvent('UNAUTHENTICATED_USER_ID_PROVIDED', {
+          endpoint: '/api/orders',
+          providedUserId: orderData.userId,
+          error: authError
+        }, request)
+        return NextResponse.json(
+          { error: 'Authentication required when userId is provided' },
+          { status: 401 }
+        )
+      }
+
+      // Security: Ensure userId matches authenticated user
+      if (authUser.id !== orderData.userId) {
+        logSecurityEvent('USER_ID_MISMATCH', {
+          endpoint: '/api/orders',
+          providedUserId: orderData.userId,
+          authenticatedUserId: authUser.id
+        }, request)
+        return NextResponse.json(
+          { error: 'User ID mismatch' },
+          { status: 403 }
+        )
+      }
+    }
+    // Guest checkout: If userId is null, proceed without authentication (allowed)
     
     // SECURITY: Validate and fetch prices from database (prevent price tampering)
     if (!orderData.items || !Array.isArray(orderData.items) || orderData.items.length === 0) {

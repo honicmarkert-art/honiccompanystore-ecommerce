@@ -158,7 +158,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Promotion validation error:', error)
     return NextResponse.json(
       { success: false, error: 'An unexpected error occurred' },
       { status: 500 }

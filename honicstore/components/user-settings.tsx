@@ -49,8 +49,7 @@ export function UserSettings() {
         })
       }
     } catch (error) {
-      console.error('Failed to load user settings:', error)
-    }
+      }
   }
 
   const saveSettings = async () => {
@@ -77,7 +76,6 @@ export function UserSettings() {
         throw new Error('Failed to save settings')
       }
     } catch (error) {
-      console.error('Failed to save settings:', error)
       toast({
         title: "Error",
         description: "Failed to save settings. Please try again.",

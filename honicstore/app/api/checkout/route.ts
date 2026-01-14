@@ -220,7 +220,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (orderError) {
-      console.error('Order creation error:', orderError)
       return NextResponse.json({ 
         error: 'Failed to create order',
         details: process.env.NODE_ENV === 'development' ? orderError.message : undefined
@@ -246,8 +245,6 @@ export async function POST(request: NextRequest) {
       .insert(orderItems)
 
     if (orderItemsError) {
-      console.error('Order items creation error:', orderItemsError)
-      
       // Attempt to clean up the created order
       await supabase
         .from('orders')

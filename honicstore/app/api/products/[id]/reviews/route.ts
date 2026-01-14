@@ -9,11 +9,10 @@ export async function GET(
 ) {
   try {
     const { id: productId } = await params
-    
+
     if (!productId || isNaN(Number(productId))) {
       return createErrorResponse('Invalid product ID', 400)
     }
-
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -36,27 +35,23 @@ export async function GET(
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Error fetching reviews:', error)
       return createErrorResponse('Failed to fetch reviews', 500)
     }
-
     // Fetch user profiles separately to avoid foreign key relationship issues
     const userIds = [...new Set((reviews || []).map((r: any) => r.user_id).filter(Boolean))]
     let userProfiles: Record<string, any> = {}
-    
     if (userIds.length > 0) {
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, full_name, company_name, avatar_url')
         .in('id', userIds)
-      
+
       if (!profilesError && profiles) {
         profiles.forEach((profile: any) => {
           userProfiles[profile.id] = profile
         })
       }
     }
-
     // Transform reviews to include user name
     const transformedReviews = (reviews || []).map((review: any) => {
       const profile = userProfiles[review.user_id] || null
@@ -82,11 +77,9 @@ export async function GET(
       cacheControl: 'public, s-maxage=300, stale-while-revalidate=600'
     })
   } catch (error: any) {
-    console.error('Error in GET /api/products/[id]/reviews:', error)
     return createErrorResponse('Internal server error', 500)
   }
 }
-
 // POST - Create a new review
 export async function POST(
   request: NextRequest,
@@ -94,11 +87,10 @@ export async function POST(
 ) {
   try {
     const { id: productId } = await params
-    
+
     if (!productId || isNaN(Number(productId))) {
       return createErrorResponse('Invalid product ID', 400)
     }
-
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -108,14 +100,12 @@ export async function POST(
     if (!authHeader) {
       return createErrorResponse('Unauthorized', 401)
     }
-
     const token = authHeader.replace('Bearer ', '')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
 
     if (authError || !user) {
       return createErrorResponse('Unauthorized', 401)
     }
-
     const body = await request.json()
     const { rating, comment, images } = body
 
@@ -123,7 +113,6 @@ export async function POST(
     if (!rating || rating < 1 || rating > 5) {
       return createErrorResponse('Rating must be between 1 and 5', 400)
     }
-
     // Check if user already reviewed this product
     const { data: existingReview } = await supabase
       .from('product_reviews')
@@ -147,10 +136,8 @@ export async function POST(
         .single()
 
       if (updateError) {
-        console.error('Error updating review:', updateError)
         return createErrorResponse('Failed to update review', 500)
       }
-
       return createSecureResponse({
         review: updatedReview,
         message: 'Review updated successfully'
@@ -170,10 +157,8 @@ export async function POST(
         .single()
 
       if (insertError) {
-        console.error('Error creating review:', insertError)
         return createErrorResponse('Failed to create review', 500)
       }
-
       return createSecureResponse({
         review: newReview,
         message: 'Review created successfully'
@@ -182,10 +167,6 @@ export async function POST(
       })
     }
   } catch (error: any) {
-    console.error('Error in POST /api/products/[id]/reviews:', error)
     return createErrorResponse('Internal server error', 500)
   }
 }
-
-
-

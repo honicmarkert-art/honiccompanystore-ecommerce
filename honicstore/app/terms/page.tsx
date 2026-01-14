@@ -667,7 +667,7 @@ export default function TermsOfServicePage() {
                           <div>
                             <p className={cn("text-sm font-medium", themeClasses.mainText)}>Email</p>
                             <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {adminSettings?.contactEmail || 'legal@honic.co'}
+                              {adminSettings?.contactEmail || process.env.NEXT_PUBLIC_LEGAL_EMAIL || process.env.LEGAL_EMAIL || process.env.NEXT_PUBLIC_CONTACT_EMAIL || process.env.CONTACT_EMAIL || 'legal@honic.co'}
                             </p>
                           </div>
                         </div>

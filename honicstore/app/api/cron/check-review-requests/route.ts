@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 import { sendReviewRequestEmail } from '@/lib/user-email-service'
+import { buildUrl } from '@/lib/url-utils'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -117,14 +118,8 @@ export async function GET(request: NextRequest) {
             orderNumber: order.order_number,
             productName: product.name,
             productImage: product.image || '',
-            productUrl: (() => {
-              const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '')
-              return baseUrl ? `${baseUrl}/products/${product.slug || product.id}` : ''
-            })(),
-            reviewUrl: (() => {
-              const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '')
-              return baseUrl ? `${baseUrl}/account/orders/${order.order_number}/review?product=${product.id}` : ''
-            })()
+            productUrl: buildUrl(`/products/${product.slug || product.id}`),
+            reviewUrl: buildUrl(`/account/orders/${order.order_number}/review?product=${product.id}`)
           })
 
           if (emailResult.success && reviewRequest) {

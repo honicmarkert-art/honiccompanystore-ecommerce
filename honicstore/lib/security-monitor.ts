@@ -9,7 +9,6 @@ interface SecurityEvent {
   userAgent?: string
   userId?: string
 }
-
 class SecurityMonitor {
   private static instance: SecurityMonitor
   private events: SecurityEvent[] = []
@@ -21,45 +20,36 @@ class SecurityMonitor {
     }
     return SecurityMonitor.instance
   }
-
   logEvent(event: Omit<SecurityEvent, 'timestamp'>): void {
     const securityEvent: SecurityEvent = {
       ...event,
       timestamp: new Date().toISOString()
     }
-
     this.events.unshift(securityEvent)
-    
+
     // Keep only the latest events
     if (this.events.length > this.maxEvents) {
       this.events = this.events.slice(0, this.maxEvents)
     }
-
     // Log to console in development
     if (process.env.NODE_ENV === 'development') {
       logger.log(`[SECURITY MONITOR] ${event.type} - ${event.severity}`, securityEvent)
     }
-
     // In production, send to monitoring service
     this.sendToMonitoringService(securityEvent)
   }
-
   getRecentEvents(limit: number = 50): SecurityEvent[] {
     return this.events.slice(0, limit)
   }
-
   getEventsByType(type: SecurityEvent['type'], limit: number = 50): SecurityEvent[] {
     return this.events.filter(event => event.type === type).slice(0, limit)
   }
-
   getEventsBySeverity(severity: SecurityEvent['severity'], limit: number = 50): SecurityEvent[] {
     return this.events.filter(event => event.severity === severity).slice(0, limit)
   }
-
   getEventsByIP(ip: string, limit: number = 50): SecurityEvent[] {
     return this.events.filter(event => event.ip === ip).slice(0, limit)
   }
-
   // Check for suspicious patterns
   detectSuspiciousActivity(ip: string): boolean {
     const recentEvents = this.getEventsByIP(ip, 100)
@@ -67,20 +57,20 @@ class SecurityMonitor {
     const oneHour = 60 * 60 * 1000
 
     // Check for multiple failed auth attempts
-    const authFailures = recentEvents.filter(event => 
-      event.type === 'AUTH_FAILURE' && 
+    const authFailures = recentEvents.filter(event =>
+      event.type === 'AUTH_FAILURE' &&
       (now - new Date(event.timestamp).getTime()) < oneHour
     )
 
     // Check for rate limit violations
-    const rateLimitViolations = recentEvents.filter(event => 
-      event.type === 'RATE_LIMIT' && 
+    const rateLimitViolations = recentEvents.filter(event =>
+      event.type === 'RATE_LIMIT' &&
       (now - new Date(event.timestamp).getTime()) < oneHour
     )
 
     // Check for multiple admin access attempts
-    const adminAccess = recentEvents.filter(event => 
-      event.type === 'ADMIN_ACCESS' && 
+    const adminAccess = recentEvents.filter(event =>
+      event.type === 'ADMIN_ACCESS' &&
       (now - new Date(event.timestamp).getTime()) < oneHour
     )
 
@@ -102,25 +92,22 @@ class SecurityMonitor {
       })
       return true
     }
-
     return false
   }
-
   private sendToMonitoringService(event: SecurityEvent): void {
     // In production, implement actual monitoring service integration
     // Examples: Sentry, DataDog, CloudWatch, etc.
-    
+
     if (process.env.NODE_ENV === 'production') {
       // Example: Send to external monitoring service
       // fetch('https://your-monitoring-service.com/api/security-events', {
       //   method: 'POST',
       //   headers: { 'Content-Type': 'application/json' },
       //   body: JSON.stringify(event)
-      // }).catch(console.error)
+      // }).catch(() => {}) // Error handling disabled for production cleanliness
     }
   }
 }
-
 export const securityMonitor = SecurityMonitor.getInstance()
 
 // Helper functions for common security events
@@ -134,7 +121,6 @@ export function logAuthFailure(details: any, ip: string, userAgent?: string, use
     userId
   })
 }
-
 export function logRateLimit(details: any, ip: string, userAgent?: string): void {
   securityMonitor.logEvent({
     type: 'RATE_LIMIT',
@@ -144,7 +130,6 @@ export function logRateLimit(details: any, ip: string, userAgent?: string): void
     userAgent
   })
 }
-
 export function logPaymentAttempt(details: any, ip: string, userAgent?: string, userId?: string): void {
   securityMonitor.logEvent({
     type: 'PAYMENT_ATTEMPT',
@@ -155,7 +140,6 @@ export function logPaymentAttempt(details: any, ip: string, userAgent?: string, 
     userId
   })
 }
-
 export function logAdminAccess(details: any, ip: string, userAgent?: string, userId?: string): void {
   securityMonitor.logEvent({
     type: 'ADMIN_ACCESS',
@@ -166,11 +150,3 @@ export function logAdminAccess(details: any, ip: string, userAgent?: string, use
     userId
   })
 }
-
-
-
-
-
-
-
-

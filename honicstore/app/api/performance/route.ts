@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
       }
     })
   } catch (error) {
-    console.error('Error getting performance metrics:', error)
     return NextResponse.json(
       { error: 'Failed to get performance metrics' },
       { status: 500 }
@@ -57,7 +56,6 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     )
   } catch (error) {
-    console.error('Error clearing performance metrics:', error)
     return NextResponse.json(
       { error: 'Failed to clear performance metrics' },
       { status: 500 }

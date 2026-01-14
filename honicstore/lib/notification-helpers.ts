@@ -48,13 +48,11 @@ export async function getAllAdminUserIds(): Promise<string[]> {
       .eq('is_admin', true)
 
     if (error) {
-      console.error('Error fetching admin users:', error)
       return []
     }
 
     return (admins || []).map((admin: any) => admin.id)
   } catch (error) {
-    console.error('Error in getAllAdminUserIds:', error)
     return []
   }
 }
@@ -84,13 +82,11 @@ export async function createNotification(
       })
 
     if (error) {
-      console.error('Error creating notification:', error)
       return { success: false, error: error.message }
     }
 
     return { success: true }
   } catch (error: any) {
-    console.error('Error in createNotification:', error)
     return { success: false, error: error.message }
   }
 }
@@ -108,7 +104,6 @@ export async function notifyAllAdmins(
     const adminIds = await getAllAdminUserIds()
     
     if (adminIds.length === 0) {
-      console.warn('No admin users found to notify')
       return { success: false, notified: 0, errors: 0 }
     }
 
@@ -129,14 +124,12 @@ export async function notifyAllAdmins(
       .insert(notifications)
 
     if (error) {
-      console.error('Error creating admin notifications:', error)
       return { success: false, notified: 0, errors: adminIds.length }
     }
 
-    console.log(`✅ Notified ${adminIds.length} admin(s): ${title}`)
+    : ${title}`)
     return { success: true, notified: adminIds.length, errors: 0 }
   } catch (error: any) {
-    console.error('Error in notifyAllAdmins:', error)
     return { success: false, notified: 0, errors: 1 }
   }
 }

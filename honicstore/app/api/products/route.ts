@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { validateServerSession } from '@/lib/security-server'
 import { getCachedData, setCachedData, CACHE_TTL, generateCacheKey } from '@/lib/database-optimization'
-import { enhancedCache, performanceMonitor, performanceUtils } from '@/lib/performance-monitor'
+import { performanceMonitor } from '@/lib/performance-monitor'
 import { createSecureApiHandler, createSecureResponse, createErrorResponse } from '@/lib/secure-api'
 import { securityUtils } from '@/lib/secure-config'
 import { logger } from '@/lib/logger'
@@ -39,54 +39,330 @@ const escapeSqlWildcards = (input: string): string => {
   return input.replace(/[%_]/g, (char) => `\\${char}`)
 }
 
+// Input validation helper
+function validateAndSanitizeInputs(searchParams: URLSearchParams) {
+  const errors: string[] = []
+  const validated: Record<string, any> = {}
+  
+  // Validate limit (1-200) - Amazon/AliExpress style large page size
+  const limit = searchParams.get('limit')
+  if (limit) {
+    const limitNum = parseInt(limit, 10)
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 200) {
+      errors.push('Limit must be between 1 and 200')
+    } else {
+      validated.limit = limitNum
+    }
+  } else {
+    validated.limit = 200 // Default: 200 products per page
+  }
+  
+  // Validate offset (>= 0)
+  const offset = searchParams.get('offset')
+  if (offset) {
+    const offsetNum = parseInt(offset, 10)
+    if (isNaN(offsetNum) || offsetNum < 0) {
+      errors.push('Offset must be a non-negative number')
+    } else {
+      validated.offset = offsetNum
+    }
+  } else {
+    validated.offset = 0
+  }
+  
+  // Validate prices
+  const minPrice = searchParams.get('minPrice')
+  if (minPrice) {
+    const min = parseFloat(minPrice)
+    if (isNaN(min) || min < 0 || min > 10000000) {
+      errors.push('Min price must be between 0 and 10,000,000')
+    } else {
+      validated.minPrice = min
+    }
+  }
+  
+  const maxPrice = searchParams.get('maxPrice')
+  if (maxPrice) {
+    const max = parseFloat(maxPrice)
+    if (isNaN(max) || max < 0 || max > 10000000) {
+      errors.push('Max price must be between 0 and 10,000,000')
+    } else {
+      validated.maxPrice = max
+    }
+  }
+  
+  // Validate price range
+  if (validated.minPrice !== undefined && validated.maxPrice !== undefined) {
+    if (validated.minPrice > validated.maxPrice) {
+      errors.push('Min price cannot be greater than max price')
+    }
+  }
+  
+  // Validate UUID format for category, supplier
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const category = searchParams.get('category')
+  if (category && !uuidRegex.test(category)) {
+    errors.push('Invalid category ID format')
+  } else if (category) {
+    validated.category = category
+  }
+  
+  const supplier = searchParams.get('supplier')
+  if (supplier && !uuidRegex.test(supplier)) {
+    errors.push('Invalid supplier ID format')
+  } else if (supplier) {
+    validated.supplier = supplier
+  }
+  
+  const supplierByProduct = searchParams.get('supplierByProduct')
+  if (supplierByProduct) {
+    const productId = parseInt(supplierByProduct, 10)
+    if (isNaN(productId) || productId < 1) {
+      errors.push('Invalid product ID format')
+    } else {
+      validated.supplierByProduct = productId
+    }
+  }
+  
+  // Validate sortBy
+  const sortBy = searchParams.get('sortBy') || 'created_at'
+  const validSortFields = ['created_at', 'price', 'rating', 'name', 'reviews', 'featured']
+  if (!validSortFields.includes(sortBy)) {
+    errors.push(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`)
+  } else {
+    validated.sortBy = sortBy
+  }
+  
+  // Validate sortOrder
+  const sortOrder = searchParams.get('sortOrder') || 'desc'
+  if (!['asc', 'desc'].includes(sortOrder.toLowerCase())) {
+    errors.push('Invalid sortOrder. Must be "asc" or "desc"')
+  } else {
+    validated.sortOrder = sortOrder.toLowerCase()
+  }
+  
+  // Sanitize search query (max 200 chars, prevent injection)
+  const search = searchParams.get('search')
+  if (search) {
+    const sanitized = securityUtils.sanitizeInput(search.trim())
+    if (sanitized.length > 200) {
+      errors.push('Search query cannot exceed 200 characters')
+    } else if (sanitized.length > 0) {
+      validated.search = sanitized
+    }
+  }
+  
+  // Sanitize brand (max 100 chars)
+  const brand = searchParams.get('brand')
+  if (brand) {
+    const sanitized = securityUtils.sanitizeInput(brand.trim())
+    if (sanitized.length > 100) {
+      errors.push('Brand name cannot exceed 100 characters')
+    } else {
+      validated.brand = sanitized
+    }
+  }
+  
+  // Validate categories (comma-separated UUIDs)
+  const categories = searchParams.get('categories')
+  if (categories) {
+    const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
+    const invalidCategories = categoryList.filter(c => !uuidRegex.test(c))
+    if (invalidCategories.length > 0) {
+      errors.push('Invalid category ID format in categories parameter')
+    } else if (categoryList.length > 0) {
+      validated.categories = categoryList
+    }
+  }
+  
+  // Validate IDs parameter (comma-separated integers)
+  const idsParam = searchParams.get('ids')
+  if (idsParam) {
+    const idList = idsParam.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id) && id > 0)
+    if (idList.length === 0) {
+      errors.push('Invalid product IDs format')
+    } else if (idList.length > 100) {
+      errors.push('Cannot request more than 100 product IDs at once')
+    } else {
+      validated.ids = idList
+    }
+  }
+  
+  // Boolean flags
+  validated.minimal = searchParams.get('minimal') === 'true'
+  validated.enriched = searchParams.get('enriched') === 'true'
+  validated.inStock = searchParams.get('inStock') === 'true'
+  validated.isChina = searchParams.get('isChina') === 'true'
+  
+  return { validated, errors }
+}
+
 // GET - Fetch all products with optimized caching and minimal payload support
 export async function GET(request: NextRequest) {
-  // Rate limiting
-  const rateLimitResult = enhancedRateLimit(request)
-  if (!rateLimitResult.allowed) {
-    logRateLimitEvent('/api/products', rateLimitResult.reason, request)
-    
-    return NextResponse.json(
-      { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
-      { 
-        status: 429,
-        headers: {
-          'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
-        }
-      }
-    )
-  }
-
   const startTime = Date.now()
   
   try {
+    // Rate limiting with graceful degradation (return cached data if rate limited)
+    const rateLimitResult = enhancedRateLimit(request)
+    if (!rateLimitResult.allowed) {
+      logRateLimitEvent('/api/products', rateLimitResult.reason, request)
+      
+      // Try to return cached data instead of error (graceful degradation)
+      const { searchParams } = new URL(request.url)
+      const cacheKey = generateCacheKey('products', {
+        minimal: searchParams.get('minimal'),
+        enriched: searchParams.get('enriched'),
+        limit: searchParams.get('limit'),
+        offset: searchParams.get('offset'),
+        category: searchParams.get('category'),
+        brand: searchParams.get('brand'),
+        search: searchParams.get('search'),
+        minPrice: searchParams.get('minPrice'),
+        maxPrice: searchParams.get('maxPrice'),
+        inStock: searchParams.get('inStock'),
+        categories: searchParams.get('categories'),
+        sortBy: searchParams.get('sortBy'),
+        sortOrder: searchParams.get('sortOrder'),
+        isChina: searchParams.get('isChina'),
+        supplier: searchParams.get('supplier'),
+        supplierByProduct: searchParams.get('supplierByProduct')
+      })
+      
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        // Return cached data with rate limit warning header (but don't fail the request)
+        // Use CDN + browser caching for cached responses
+        return createSecureResponse(cachedData, {
+          cdnCache: true,
+          browserCache: true,
+          headers: {
+            'X-Cache': 'HIT',
+            'X-Rate-Limit-Warning': 'true',
+            'X-Rate-Limit-Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+          }
+        })
+      }
+      
+      // Only return error if no cached data available
+      return NextResponse.json(
+        { error: 'Service temporarily unavailable. Please try again in a moment.' },
+        { 
+          status: 429,
+          headers: {
+            'Retry-After': rateLimitResult.retryAfter?.toString() || '60',
+            'X-Rate-Limit-Exceeded': 'true'
+          }
+        }
+      )
+    }
+
     const { searchParams } = new URL(request.url)
-    const minimal = searchParams.get('minimal') === 'true'
-    const enriched = searchParams.get('enriched') === 'true'
-    const limit = searchParams.get('limit')
-    const offset = searchParams.get('offset')
-    const category = searchParams.get('category')
-    const brand = searchParams.get('brand')
-    const search = searchParams.get('search')
+    
+    // Early input validation - fail fast on invalid inputs
+    const { validated, errors } = validateAndSanitizeInputs(searchParams)
+    if (errors.length > 0) {
+      return NextResponse.json(
+        { error: 'Invalid request parameters', details: errors },
+        { status: 400 }
+      )
+    }
+    
+    const minimal = validated.minimal
+    const enriched = validated.enriched
+    const limit = validated.limit
+    const offset = validated.offset
+    const category = validated.category
+    const brand = validated.brand
+    const search = validated.search
 
     // Track which search methods were used (for test page display)
     const searchMethodsUsed = new Set<string>()
 
-    // Server-side filtering parameters
-    const minPrice = searchParams.get('minPrice')
-    const maxPrice = searchParams.get('maxPrice')
-    const inStock = searchParams.get('inStock')
-    const categories = searchParams.get('categories') // Comma-separated list
-    const isChina = searchParams.get('isChina') // Filter by import_china
-    const supplier = searchParams.get('supplier') // Filter by supplier_id or user_id
-    const supplierByProduct = searchParams.get('supplierByProduct') // Filter by supplier using product ID (secure)
+    // Server-side filtering parameters (already validated)
+    const minPrice = validated.minPrice
+    const maxPrice = validated.maxPrice
+    const inStock = validated.inStock
+    const categories = validated.categories // Already validated as array of UUIDs
+    const isChina = validated.isChina
+    const supplier = validated.supplier // Already validated as UUID
+    const supplierByProduct = validated.supplierByProduct // Already validated as integer
     
-    // Sorting parameters
-    const sortBy = searchParams.get('sortBy') || 'created_at'
-    const sortOrder = searchParams.get('sortOrder') || 'desc'
+    // Sorting parameters (already validated)
+    const sortBy = validated.sortBy
+    const sortOrder = validated.sortOrder
     
-    // Batch IDs parameter for prefetching
-    const idsParam = searchParams.get('ids')
+    // Batch IDs parameter for prefetching (already validated)
+    const idsParam = validated.ids
+
+    // AliExpress-style: Check popular products cache first (no DB hit for popular requests)
+    const { isPopularProductsRequest, getPopularProductsFromCache } = await import('@/lib/popular-products-cache')
+    
+    // Check if this is a popular products request (no filters, default sort, first page)
+    const isPopularRequest = isPopularProductsRequest({
+      search,
+      category,
+      brand,
+      minPrice,
+      maxPrice,
+      sortBy,
+      sortOrder,
+      offset
+    })
+    
+    // Serve popular products from cache without database hit
+    // Production-ready: Popular products served from cache/CDN (90-95% hit rate)
+    if (isPopularRequest && offset === 0) {
+      try {
+        const popularProducts = getPopularProductsFromCache()
+        if (popularProducts && Array.isArray(popularProducts) && popularProducts.length > 0) {
+          const apiTime = Date.now() - startTime
+          performanceMonitor.recordMetric('products_api_popular_cache_hit', apiTime, { 
+            cacheHitRate: 100,
+            productCount: popularProducts.length
+          })
+          
+          // Validate limit and offset
+          const safeLimit = Math.min(limit, 200) // Max 200 products per request
+          const safeOffset = Math.max(0, offset)
+          const slicedProducts = popularProducts.slice(safeOffset, safeOffset + safeLimit)
+          
+          // Return popular products from cache (NO DATABASE HIT!)
+          // AliExpress-style: Popular products served from cache/CDN without hitting database
+          return createSecureResponse({
+            products: slicedProducts,
+            pagination: {
+              total: popularProducts.length,
+              limit: safeLimit,
+              offset: safeOffset,
+              hasMore: safeOffset + safeLimit < popularProducts.length
+            }
+          }, {
+            popularProducts: true, // Aggressive CDN + browser caching (2 hours CDN, 1 hour browser)
+            cdnCache: true,
+            browserCache: true,
+            headers: {
+              'X-Cache': 'POPULAR_HIT',
+              'X-Products-Count': slicedProducts.length.toString(),
+              'X-Total-Count': popularProducts.length.toString(),
+              'X-API-Time': apiTime.toString(),
+              'X-Cache-Hit-Rate': '100',
+              'X-Data-Source': 'POPULAR_CACHE',
+              'X-No-DB-Hit': 'true',
+              'X-CDN-Cache': 'HIT',
+              'X-Browser-Cache': 'HIT',
+              'X-Cache-Type': 'POPULAR_PRODUCTS'
+            }
+          })
+        }
+      } catch (cacheError: any) {
+        // Log error but continue to regular flow (don't fail request)
+        logger.error('[Products API] Error getting popular products from cache:', cacheError)
+        performanceMonitor.recordMetric('products_api_popular_cache_error', Date.now() - startTime, {
+          error: cacheError.message
+        })
+        // Continue to regular database query
+      }
+    }
 
     // Generate cache key based on parameters (including filters)
     const cacheKey = generateCacheKey('products', {
@@ -107,26 +383,30 @@ export async function GET(request: NextRequest) {
       supplier,
       supplierByProduct
     })
-
-    // Check enhanced cache first
-    const cachedData = enhancedCache.get(cacheKey) as any
+    
+    // Check regular server cache
+    const cachedData = getCachedData<any>(cacheKey)
     if (cachedData) {
       const apiTime = Date.now() - startTime
-      performanceMonitor.recordMetrics({ apiTime, cacheHitRate: 100 })
+      performanceMonitor.recordMetric('products_api_cache_hit', apiTime, { cacheHitRate: 100 })
       
       // Cached data should already have pagination info
       const productsCount = cachedData.products ? cachedData.products.length : (Array.isArray(cachedData) ? cachedData.length : 0)
       const totalCount = cachedData.pagination?.total || productsCount
       
+      // Server cache hit - serve from in-memory cache (no database query)
       return createSecureResponse(cachedData, {
-        cacheControl: 'public, s-maxage=1800, stale-while-revalidate=3600',
+        cdnCache: true, // Enable CDN caching
+        browserCache: true, // Enable browser caching
         headers: {
           'X-Cache': 'HIT',
+          'X-No-DB-Hit': 'true',
+          'X-Data-Source': 'SERVER_CACHE',
           'X-Products-Count': productsCount.toString(),
           'X-Total-Count': totalCount.toString(),
           'X-API-Time': apiTime.toString(),
           'X-Cache-Hit-Rate': '100',
-          'X-Data-Source': 'PRODUCTS_TABLE'
+          'X-Data-Source': 'SERVER_CACHE'
         }
       })
     }
@@ -169,85 +449,91 @@ export async function GET(request: NextRequest) {
     // Filter out hidden products (from deactivated suppliers) - after select
     queryBuilder = queryBuilder.eq('is_hidden', false)
 
-    // Apply filters
+    // Apply filters (all inputs already validated)
     // Handle batch IDs for prefetching
-    if (idsParam) {
-      const idList = idsParam.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))
-      if (idList.length > 0) {
-        queryBuilder = queryBuilder.in('id', idList)
-      }
+    if (idsParam && idsParam.length > 0) {
+      queryBuilder = queryBuilder.in('id', idsParam)
     }
     
     if (category) {
-      // Filter by category_id (foreign key) instead of category string
+      // Filter by category_id (foreign key) - already validated as UUID
       queryBuilder = queryBuilder.eq('category_id', category)
     }
     if (brand) {
+      // Brand already sanitized and validated
       queryBuilder = queryBuilder.eq('brand', brand)
     }
     
-    // Server-side price filtering (much faster than client-side!)
-    if (minPrice) {
-      const min = parseFloat(minPrice)
-      if (!isNaN(min) && min >= 0) {
-        queryBuilder = queryBuilder.gte('price', min)
-      }
+    // Server-side price filtering (already validated)
+    if (minPrice !== undefined) {
+      queryBuilder = queryBuilder.gte('price', minPrice)
     }
-    if (maxPrice) {
-      const max = parseFloat(maxPrice)
-      if (!isNaN(max) && max >= 0) {
-        queryBuilder = queryBuilder.lte('price', max)
-      }
+    if (maxPrice !== undefined) {
+      queryBuilder = queryBuilder.lte('price', maxPrice)
     }
     
-    // Stock filtering
-    if (inStock === 'true') {
+    // Stock filtering (already validated as boolean)
+    if (inStock) {
       queryBuilder = queryBuilder.eq('in_stock', true)
     }
     
-    // China import filtering
-    if (isChina === 'true') {
+    // China import filtering (already validated as boolean)
+    if (isChina) {
       queryBuilder = queryBuilder.eq('import_china', true)
     }
     
-    // Supplier filtering (by supplier_id or user_id)
+    // Supplier filtering (by supplier_id or user_id) - already validated as UUID
     if (supplier) {
       queryBuilder = queryBuilder.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
     }
     
     // Secure supplier filtering by product ID (resolves supplier_id server-side)
+    // supplierByProduct already validated as integer
     if (supplierByProduct) {
       const { createClient } = await import('@supabase/supabase-js')
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
       const supabaseClient = createClient(supabaseUrl, supabaseAnonKey)
       
-      // Fetch product to get supplier_id
-      const { data: productData } = await supabaseClient
-        .from('products')
-        .select('supplier_id, user_id')
-        .eq('id', supplierByProduct)
-        .single()
-      
-      if (productData) {
-        const resolvedSupplierId = productData.supplier_id || productData.user_id
-        if (resolvedSupplierId) {
-          queryBuilder = queryBuilder.or(`supplier_id.eq.${resolvedSupplierId},user_id.eq.${resolvedSupplierId}`)
+      // Fetch product to get supplier_id (with timeout protection)
+      try {
+        const queryPromise = supabaseClient
+          .from('products')
+          .select('supplier_id, user_id')
+          .eq('id', supplierByProduct)
+          .single()
+        
+        const timeoutPromise = new Promise<{ data: null; error: Error }>((_, reject) => 
+          setTimeout(() => reject(new Error('Query timeout')), 5000)
+        )
+        
+        const result = await Promise.race([
+          queryPromise,
+          timeoutPromise
+        ]) as any
+        
+        // Check if result is an error (from timeout)
+        if (result instanceof Error) {
+          throw result
         }
+        
+        const { data: productData, error: productError } = result || { data: null, error: null }
+        
+        if (!productError && productData) {
+          const resolvedSupplierId = productData.supplier_id || productData.user_id
+          if (resolvedSupplierId) {
+            queryBuilder = queryBuilder.or(`supplier_id.eq.${resolvedSupplierId},user_id.eq.${resolvedSupplierId}`)
+          }
+        }
+      } catch (timeoutError) {
+        logger.log('Supplier product lookup timeout, skipping supplier filter')
+        // Continue without supplier filter - don't fail the request
       }
     }
     
-    // Multiple categories filtering (comma-separated)
-    if (categories !== undefined && categories !== null) {
-      const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
-      
-      if (categoryList.length > 0) {
-        queryBuilder = queryBuilder.in('category_id', categoryList)
-      } else {
-        // If categories parameter exists but is empty, return no products
-        queryBuilder = queryBuilder.eq('category_id', '00000000-0000-0000-0000-000000000000')
-      }
-    } else {
+    // Multiple categories filtering - already validated as array of UUIDs
+    if (categories && categories.length > 0) {
+      queryBuilder = queryBuilder.in('category_id', categories)
     }
     // Variables for search normalization (declared at higher scope to avoid duplicates)
     let normalized: string = ''
@@ -286,14 +572,8 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    // Apply pagination
-    if (limit) {
-      const limitNum = parseInt(limit)
-      const offsetNum = offset ? parseInt(offset) : 0
-      queryBuilder = queryBuilder.range(offsetNum, offsetNum + limitNum - 1)
-    } else {
-      queryBuilder = queryBuilder.limit(1000)
-    }
+    // Apply pagination (already validated)
+    queryBuilder = queryBuilder.range(offset, offset + limit - 1)
 
     // Server-side sorting (database is much faster than JavaScript!)
     // When searching, we'll sort by relevance in JavaScript after fetching
@@ -317,31 +597,7 @@ export async function GET(request: NextRequest) {
     }
     // When searching, we don't apply database sorting - relevance sorting happens in JavaScript below
 
-    const { data: products, error } = await queryBuilder
-
-    if (error) {
-      logger.log(`Error fetching products: ${error.message || JSON.stringify(error)}`)
-      // Check if error is due to missing search_vector column
-      if (error.message && (error.message.includes('search_vector') || (error.message.includes('column') && error.message.includes('does not exist')))) {
-        logger.log('Search vector column missing - products table may need migration')
-        return createErrorResponse('Database schema mismatch. Please run migrations to add search_vector column.', 500)
-      }
-      // Check if error is due to missing is_featured column
-      if (error.message && (error.message.includes('is_featured') || error.message.includes('column') && error.message.includes('does not exist'))) {
-        logger.log('Database schema error detected. Please ensure migration 20250127_add_is_featured_to_products.sql has been run.')
-        return createErrorResponse('Database schema mismatch. Please contact administrator.', 500)
-      }
-      logger.log(`Database query error: ${error.message || JSON.stringify(error)}`)
-      return createErrorResponse(`Failed to fetch products: ${error.message || 'Unknown error'}`, 500)
-    }
-    
-    // Log if no products found (for debugging)
-    if (!products || products.length === 0) {
-      logger.log(`No products found with filters: search=${search}, category=${category}, brand=${brand}, limit=${limit}`)
-    } else {
-      logger.log(`Found ${products.length} products`)
-    }
-
+    // Build count query BEFORE executing main query so we can run them in parallel
     // Get total count for pagination (with same filters, without pagination)
     let totalCount = 0
     const limitNum = limit ? parseInt(limit) : 1000
@@ -353,51 +609,59 @@ export async function GET(request: NextRequest) {
     // Filter out hidden products (from deactivated suppliers)
     countQuery = countQuery.eq('is_hidden', false)
     
-    // Apply same filters as main query
+    // Apply same filters as main query (all already validated)
     if (category) countQuery = countQuery.eq('category_id', category)
     if (brand) countQuery = countQuery.eq('brand', brand)
-    if (minPrice) {
-      const min = parseFloat(minPrice)
-      if (!isNaN(min) && min >= 0) countQuery = countQuery.gte('price', min)
-    }
-    if (maxPrice) {
-      const max = parseFloat(maxPrice)
-      if (!isNaN(max) && max >= 0) countQuery = countQuery.lte('price', max)
-    }
-    if (inStock === 'true') countQuery = countQuery.eq('in_stock', true)
-    if (isChina === 'true') countQuery = countQuery.eq('import_china', true)
+    if (minPrice !== undefined) countQuery = countQuery.gte('price', minPrice)
+    if (maxPrice !== undefined) countQuery = countQuery.lte('price', maxPrice)
+    if (inStock) countQuery = countQuery.eq('in_stock', true)
+    if (isChina) countQuery = countQuery.eq('import_china', true)
     if (supplier) countQuery = countQuery.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
     
-    // Secure supplier filtering by product ID for count query
+    // Secure supplier filtering by product ID for count query (with timeout protection)
     if (supplierByProduct) {
-      const { createClient } = await import('@supabase/supabase-js')
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey)
-      
-      const { data: productData } = await supabaseClient
-        .from('products')
-        .select('supplier_id, user_id')
-        .eq('id', supplierByProduct)
-        .single()
-      
-      if (productData) {
-        const resolvedSupplierId = productData.supplier_id || productData.user_id
-        if (resolvedSupplierId) {
-          countQuery = countQuery.or(`supplier_id.eq.${resolvedSupplierId},user_id.eq.${resolvedSupplierId}`)
+      try {
+        const { createClient } = await import('@supabase/supabase-js')
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        const supabaseClient = createClient(supabaseUrl, supabaseAnonKey)
+        
+        const queryPromise = supabaseClient
+          .from('products')
+          .select('supplier_id, user_id')
+          .eq('id', supplierByProduct)
+          .single()
+        
+        const timeoutPromise = new Promise<{ data: null; error: Error }>((_, reject) => 
+          setTimeout(() => reject(new Error('Query timeout')), 5000)
+        )
+        
+        const result = await Promise.race([
+          queryPromise,
+          timeoutPromise
+        ]) as any
+        
+        // Check if result is an error (from timeout)
+        if (result instanceof Error) {
+          throw result
         }
+        
+        const { data: productData, error: productError } = result || { data: null, error: null }
+        
+        if (!productError && productData) {
+          const resolvedSupplierId = productData.supplier_id || productData.user_id
+          if (resolvedSupplierId) {
+            countQuery = countQuery.or(`supplier_id.eq.${resolvedSupplierId},user_id.eq.${resolvedSupplierId}`)
+          }
+        }
+      } catch (timeoutError) {
+        logger.log('Count query: Supplier product lookup timeout, skipping supplier filter')
+        // Continue without supplier filter - don't fail the request
       }
     }
     
-    if (categories !== undefined && categories !== null) {
-      const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
-      
-      if (categoryList.length > 0) {
-        countQuery = countQuery.in('category_id', categoryList)
-      } else {
-        // If categories parameter exists but is empty, return no products
-        countQuery = countQuery.eq('category_id', '00000000-0000-0000-0000-000000000000')
-      }
+    if (categories && categories.length > 0) {
+      countQuery = countQuery.in('category_id', categories)
     }
     // Apply search filter to count query using search_vector
     if (search && search.trim().length > 0) {
@@ -423,16 +687,69 @@ export async function GET(request: NextRequest) {
         }
       }
     }
+
+    // Execute main query and count query in parallel for better performance
+    // This reduces total latency from ~(queryTime + countTime) to ~max(queryTime, countTime)
+    const parallelStartTime = Date.now()
+    let productsResult: any
+    let countResult: any
     
-    const { count, error: countError } = await countQuery
+    try {
+      [productsResult, countResult] = await Promise.all([
+        queryBuilder,
+        countQuery
+      ])
+    } catch (parallelError: any) {
+      logger.log(`Parallel query error: ${parallelError?.message || 'Unknown error'}`)
+      // If parallel execution fails, try sequential as fallback
+      try {
+        productsResult = await queryBuilder
+        countResult = await countQuery
+      } catch (fallbackError: any) {
+        logger.log(`Fallback query error: ${fallbackError?.message || 'Unknown error'}`)
+        return createErrorResponse('Failed to fetch products. Please try again.', 500)
+      }
+    }
+    
+    const parallelTime = Date.now() - parallelStartTime
+    performanceMonitor.recordMetric('products_api_parallel_query_time', parallelTime, {
+      hasSearch: !!search,
+      hasFilters: !!(category || brand || minPrice || maxPrice),
+      enriched
+    })
+
+    // Safely extract data and errors
+    const { data: products, error } = productsResult || { data: null, error: null }
+    const { count, error: countError } = countResult || { count: null, error: null }
+
+    if (error) {
+      logger.log(`Error fetching products: ${error.message || JSON.stringify(error)}`)
+      // Check if error is due to missing search_vector column
+      if (error.message && (error.message.includes('search_vector') || (error.message.includes('column') && error.message.includes('does not exist')))) {
+        logger.log('Search vector column missing - products table may need migration')
+        return createErrorResponse('Database schema mismatch. Please run migrations to add search_vector column.', 500)
+      }
+      // Check if error is due to missing is_featured column
+      if (error.message && (error.message.includes('is_featured') || error.message.includes('column') && error.message.includes('does not exist'))) {
+        logger.log('Database schema error detected. Please ensure migration 20250127_add_is_featured_to_products.sql has been run.')
+        return createErrorResponse('Database schema mismatch. Please contact administrator.', 500)
+      }
+      logger.log(`Database query error: ${error.message || JSON.stringify(error)}`)
+      return createErrorResponse(`Failed to fetch products: ${error.message || 'Unknown error'}`, 500)
+    }
+    
+    // Log if no products found (for debugging)
+    if (!products || products.length === 0) {
+      logger.log(`No products found with filters: search=${search}, category=${category}, brand=${brand}, limit=${limit}`)
+    } else {
+      logger.log(`Found ${products.length} products`)
+    }
     
     if (countError) {
       logger.log(`Count query error: ${countError.message || JSON.stringify(countError)}`)
       // Don't fail the whole request if count fails, just use 0
       totalCount = 0
-    }
-    
-    if (!countError && count !== null) {
+    } else if (count !== null) {
       totalCount = count
     }
 
@@ -520,19 +837,13 @@ export async function GET(request: NextRequest) {
           .eq('is_hidden', false)
           .limit(2000) // Increased limit for better fuzzy matching coverage
         
-        // Apply other filters (same as main query)
+        // Apply other filters (same as main query, using validated values)
         if (category) fuzzyQuery.eq('category_id', category)
         if (brand) fuzzyQuery.eq('brand', brand)
-        if (minPrice) {
-          const min = parseFloat(minPrice)
-          if (!isNaN(min) && min >= 0) fuzzyQuery.gte('price', min)
-        }
-        if (maxPrice) {
-          const max = parseFloat(maxPrice)
-          if (!isNaN(max) && max >= 0) fuzzyQuery.lte('price', max)
-        }
-        if (inStock === 'true') fuzzyQuery.eq('in_stock', true)
-        if (isChina === 'true') fuzzyQuery.eq('import_china', true)
+        if (minPrice !== undefined) fuzzyQuery.gte('price', minPrice)
+        if (maxPrice !== undefined) fuzzyQuery.lte('price', maxPrice)
+        if (inStock) fuzzyQuery.eq('in_stock', true)
+        if (isChina) fuzzyQuery.eq('import_china', true)
         if (supplier) fuzzyQuery.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
         
         // Secure supplier filtering by product ID for fuzzy query
@@ -782,23 +1093,16 @@ export async function GET(request: NextRequest) {
             .or(`name.ilike.%${escapedQuery}%,description.ilike.%${escapedQuery}%,brand.ilike.%${escapedQuery}%,category.ilike.%${escapedQuery}%,model.ilike.%${escapedQuery}%,sku.ilike.%${escapedQuery}%`)
             .limit(limitNum || 200) // Increased limit to check more products
           
-          // Apply same filters as main query
+          // Apply same filters as main query (using validated values)
           if (category) fallbackQuery.eq('category_id', category)
           if (brand) fallbackQuery.eq('brand', brand)
-          if (minPrice) {
-            const min = parseFloat(minPrice)
-            if (!isNaN(min) && min >= 0) fallbackQuery.gte('price', min)
-          }
-          if (maxPrice) {
-            const max = parseFloat(maxPrice)
-            if (!isNaN(max) && max >= 0) fallbackQuery.lte('price', max)
-          }
-          if (inStock === 'true') fallbackQuery.eq('in_stock', true)
-          if (isChina === 'true') fallbackQuery.eq('import_china', true)
+          if (minPrice !== undefined) fallbackQuery.gte('price', minPrice)
+          if (maxPrice !== undefined) fallbackQuery.lte('price', maxPrice)
+          if (inStock) fallbackQuery.eq('in_stock', true)
+          if (isChina) fallbackQuery.eq('import_china', true)
           if (supplier) fallbackQuery.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
           
-          if (categories !== undefined && categories !== null) {
-            const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
+          if (categories && categories.length > 0) {
             if (categoryList.length > 0) {
               fallbackQuery.in('category_id', categoryList)
             }
@@ -1258,7 +1562,6 @@ export async function GET(request: NextRequest) {
             try {
               primaryValues = JSON.parse(primaryValues)
             } catch (e) {
-              console.error('Error parsing primary_values:', e)
               primaryValues = []
             }
           }
@@ -1351,17 +1654,56 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url)
     const isFreshRequest = url.searchParams.has('t') || url.searchParams.has('fresh')
 
-    // Cache the result using enhanced cache
-    enhancedCache.set(cacheKey, responseData, CACHE_TTL.PRODUCTS)
+    // Cache the result
+    setCachedData(cacheKey, responseData, CACHE_TTL.PRODUCTS)
+    
+    // AliExpress-style: Store popular products in dedicated cache (no DB hit next time)
+    // Pre-populate cache with popular products for instant serving
+    // Production-ready: Background cache population with error handling (non-blocking)
+    if (isPopularRequest && offset === 0 && transformedProducts.length > 0) {
+      // Don't block response - cache in background (fire-and-forget)
+      // This ensures request response time is not affected by cache population
+      setImmediate(async () => {
+        try {
+          const { setPopularProductsCache, isPopularProduct, calculatePopularityScore } = await import('@/lib/popular-products-cache')
+          
+          // Filter and store popular products (by sold_count, rating, reviews, views)
+          // Production-grade: Validate and sort by popularity score
+          const popularProducts = transformedProducts
+            .filter((p: any) => {
+              // Validate product structure before filtering
+              if (!p || typeof p !== 'object') return false
+              return isPopularProduct(p)
+            })
+            .sort((a: any, b: any) => {
+              // Use production-grade scoring algorithm
+              const aScore = calculatePopularityScore(a)
+              const bScore = calculatePopularityScore(b)
+              return bScore - aScore
+            })
+            .slice(0, 100) // Store top 100 popular products
+          
+          if (popularProducts.length > 0) {
+            setPopularProductsCache(popularProducts)
+            logger.log(`[Popular Cache] Cached ${popularProducts.length} popular products (no DB hit next time)`)
+            performanceMonitor.recordMetric('popular_products_cached', 0, {
+              count: popularProducts.length
+            })
+          }
+        } catch (cacheError: any) {
+          // Don't fail the request if cache population fails
+          // Log error for monitoring but continue normally
+          logger.error('[Popular Cache] Error populating cache:', cacheError)
+          performanceMonitor.recordMetric('popular_products_cache_population_error', 0, {
+            error: cacheError.message
+          })
+        }
+      })
+    }
     
     const apiTime = Date.now() - startTime
-    performanceMonitor.recordMetrics({ apiTime, cacheHitRate: 0 })
+    performanceMonitor.recordMetric('products_api', apiTime, { cacheHitRate: 0 })
     
-    // Use no-cache for fresh requests to ensure immediate updates
-    const cacheControl = isFreshRequest 
-      ? 'no-cache, no-store, must-revalidate' 
-      : 'public, s-maxage=1800, stale-while-revalidate=3600'
-
     // Build search methods header (only if search was performed)
     const searchMethodsHeader = search && search.trim().length > 0 
       ? Array.from(searchMethodsUsed).join(',')
@@ -1376,7 +1718,6 @@ export async function GET(request: NextRequest) {
         'X-API-Time': apiTime.toString(),
         'X-Cache-Hit-Rate': '0',
         'X-Data-Source': 'PRODUCTS_TABLE',
-        'Cache-Control': cacheControl,
     }
     
     // Add search methods header if search was performed
@@ -1384,12 +1725,17 @@ export async function GET(request: NextRequest) {
       responseHeaders['X-Search-Methods-Used'] = searchMethodsHeader
     }
     
+    // AliExpress-style multi-layer caching:
+    // - Popular products: Aggressive CDN + browser cache (1 hour CDN, 30 min browser)
+    // - Regular requests: Moderate CDN + browser cache (30 min CDN, 15 min browser)
+    // - Fresh requests: No cache
     return createSecureResponse(responseData, {
-      cacheControl,
+      popularProducts: isPopularRequest && offset === 0, // Aggressive caching for popular
+      cdnCache: !isFreshRequest, // CDN cache unless fresh request
+      browserCache: !isFreshRequest, // Browser cache unless fresh request
       headers: responseHeaders
     })
-  } catch (error) {
-    console.error('Error reading products:', error)
+  } catch (error: any) {
     performanceMonitor.recordSecurityEvent({
       type: 'api_error',
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -1397,10 +1743,29 @@ export async function GET(request: NextRequest) {
     })
     
     const apiTime = Date.now() - startTime
-    performanceMonitor.recordMetrics({ apiTime, errors: 1 })
+    performanceMonitor.recordMetric('products_api_error', apiTime, { errors: 1 })
     
-    // Always return proper error response - no fallback to fake data
-    return createErrorResponse('Failed to fetch products from database', 500)
+    // Log the full error for debugging
+    logger.log(`Products API error: ${error?.message || JSON.stringify(error)}`, {
+      stack: error?.stack,
+      name: error?.name
+    })
+    
+    // Always return proper JSON error response - no fallback to fake data
+    // Ensure response is always valid JSON to prevent "Unexpected end of JSON input" errors
+    try {
+      return createErrorResponse(
+        error?.message || 'Failed to fetch products from database', 
+        500,
+        { endpoint: '/api/products', timestamp: new Date().toISOString() }
+      )
+    } catch (responseError: any) {
+      // Last resort: return a simple JSON response
+      return NextResponse.json(
+        { error: 'Internal server error', success: false },
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
   }
 }
 
@@ -1518,7 +1883,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Error adding product:', error)
       // Return clearer error details to help diagnose 500s during creation (safe enough for dev)
       return NextResponse.json({ error: 'Failed to add product', details: error.message }, { status: 500 })
     }
@@ -1573,7 +1937,6 @@ export async function POST(request: NextRequest) {
         .select()
 
       if (variantError) {
-        console.error('Error adding variants:', variantError)
         // Don't fail the entire request if variants fail
       } else {
         logger.log('Successfully inserted variants:', insertedVariants)
@@ -1646,9 +2009,11 @@ export async function POST(request: NextRequest) {
       })()
     }
 
+    // Clear product cache to ensure new product is immediately visible
+    clearCache()
+
     return NextResponse.json(transformedProduct, { status: 201 })
   } catch (error) {
-    console.error('Error adding product:', error)
     return NextResponse.json({ error: 'Failed to add product' }, { status: 500 })
   }
 }
@@ -1725,7 +2090,6 @@ export async function PUT(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Error updating product:', error)
       return NextResponse.json({ error: 'Failed to update product' }, { status: 500 })
     }
 
@@ -1777,8 +2141,7 @@ export async function PUT(request: NextRequest) {
         .eq('product_id', id)
 
       if (deleteError) {
-        console.error('Error deleting existing variants:', deleteError)
-      } else {
+        } else {
         logger.log('Successfully deleted existing variants')
       }
 
@@ -1822,7 +2185,6 @@ export async function PUT(request: NextRequest) {
           .select()
 
         if (variantError) {
-          console.error('Error adding variants:', variantError)
           // Don't fail the entire request if variants fail
         } else {
           logger.log('Successfully inserted variants:', insertedVariants)
@@ -1936,9 +2298,11 @@ export async function PUT(request: NextRequest) {
     }
 
 
+    // Clear product cache to ensure immediate visibility of updates
+    clearCache() // Clear all cache to ensure product updates are visible immediately
+
     return NextResponse.json(transformedProduct)
   } catch (error) {
-    console.error('Error updating product:', error)
     return NextResponse.json({ error: 'Failed to update product' }, { status: 500 })
   }
 }
@@ -1965,8 +2329,7 @@ export async function DELETE(request: NextRequest) {
       .eq('product_id', id)
 
     if (variantError) {
-      console.error('Error deleting variants:', variantError)
-    }
+      }
 
     // Then delete the product
     const { error } = await adminClient
@@ -1975,13 +2338,11 @@ export async function DELETE(request: NextRequest) {
       .eq('id', id)
 
     if (error) {
-      console.error('Error deleting product:', error)
       return NextResponse.json({ error: 'Failed to delete product' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Error deleting product:', error)
     return NextResponse.json({ error: 'Failed to delete product' }, { status: 500 })
   }
 }

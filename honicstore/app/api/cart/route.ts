@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAuth, copyCookies } from '@/lib/auth-server'
 import { logger } from '@/lib/logger'
+import { validateProductId } from '@/lib/input-validation'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { sanitizeString } from '@/lib/input-validation'
 
 // GET /api/cart - Return full cart with product details
 export async function GET(request: NextRequest) {
@@ -497,45 +500,138 @@ export async function GET(request: NextRequest) {
 
 // POST /api/cart - Add product (or increment if exists)
 export async function POST(request: NextRequest) {
+  // Security: Rate limiting
+  const rateLimitCheck = enhancedRateLimit(request)
+  if (!rateLimitCheck.allowed) {
+    logSecurityEvent('Rate limit exceeded on cart POST', { 
+      ip: request.headers.get('x-forwarded-for') || 'unknown',
+      path: request.nextUrl.pathname 
+    }, request)
+    return NextResponse.json({ 
+      error: rateLimitCheck.reason || 'Rate limit exceeded',
+      retryAfter: rateLimitCheck.retryAfter 
+    }, { 
+      status: 429,
+      headers: {
+        'Retry-After': rateLimitCheck.retryAfter?.toString() || '60'
+      }
+    })
+  }
+
+  // Security: Request size validation (prevent DoS)
+  const contentLength = request.headers.get('content-length')
+  if (contentLength && parseInt(contentLength) > 10000) { // 10KB max
+    logSecurityEvent('Request too large on cart POST', { 
+      size: contentLength 
+    }, request)
+    return NextResponse.json({ error: 'Request too large' }, { status: 413 })
+  }
+
   const { user, error: authError, response, supabase } = await validateAuth(request)
   
   if (authError || !user) {
+    logSecurityEvent('Unauthorized cart POST attempt', { 
+      error: authError 
+    }, request)
     return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
   }
 
-  const body = await request.json()
-  logger.log('Cart POST request body:', body)
-  
-  const { productId, variantId: rawVariantId, quantity, price: variantPrice } = body
-  
-  // Validate productId exists and is valid
-  if (!productId || isNaN(Number(productId))) {
-    logger.log('Validation failed: Invalid productId', { productId })
-    return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 })
+  let body: any
+  try {
+    body = await request.json()
+  } catch (error) {
+    logSecurityEvent('Invalid JSON in cart POST', { 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    }, request)
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
   
-  // Normalize variantId
+  logger.log('Cart POST request body:', body)
+  
+  // Security: Input validation and sanitization
+  const { productId: rawProductId, variantId: rawVariantId, quantity: rawQuantity, variantAttributes } = body
+  
+  // Validate and sanitize productId
+  const validatedProductId = validateProductId(rawProductId)
+  if (!validatedProductId) {
+    logSecurityEvent('Invalid product ID in cart POST', { 
+      productId: rawProductId 
+    }, request)
+    return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 })
+  }
+  const productId = validatedProductId
+  
+  // Validate and sanitize quantity
+  const quantity = typeof rawQuantity === 'number' 
+    ? Math.floor(Math.max(1, Math.min(1000, rawQuantity))) // Clamp between 1 and 1000
+    : (typeof rawQuantity === 'string' 
+      ? Math.floor(Math.max(1, Math.min(1000, parseInt(rawQuantity) || 1)))
+      : 1)
+  
+  if (!quantity || quantity <= 0 || quantity > 1000) {
+    logSecurityEvent('Invalid quantity in cart POST', { 
+      quantity: rawQuantity 
+    }, request)
+    return NextResponse.json({ error: 'Invalid quantity. Must be between 1 and 1000.' }, { status: 400 })
+  }
+  
+  // Security: Validate and sanitize variantAttributes if provided
+  let sanitizedVariantAttributes: { [key: string]: string | string[] } | undefined = undefined
+  if (variantAttributes && typeof variantAttributes === 'object') {
+    sanitizedVariantAttributes = {}
+    for (const [key, value] of Object.entries(variantAttributes)) {
+      // Sanitize key
+      const sanitizedKey = sanitizeString(String(key), 50)
+      if (!sanitizedKey) continue
+      
+      // Sanitize value
+      if (Array.isArray(value)) {
+        sanitizedVariantAttributes[sanitizedKey] = value
+          .map(v => sanitizeString(String(v), 100))
+          .filter(Boolean)
+          .slice(0, 10) // Limit to 10 values max
+      } else {
+        const sanitizedValue = sanitizeString(String(value), 100)
+        if (sanitizedValue) {
+          sanitizedVariantAttributes[sanitizedKey] = sanitizedValue
+        }
+      }
+    }
+    // Limit to 10 attributes max
+    const entries = Object.entries(sanitizedVariantAttributes).slice(0, 10)
+    sanitizedVariantAttributes = Object.fromEntries(entries)
+  }
+  
+  // Normalize variantId with sanitization
   // IMPORTANT: For simple products (no attributes/variant), persist a stable key 'default'
   // so the unique (user_id, product_id, variant_id) constraint merges quantities instead of creating rows with NULLs
-  const variantId = (rawVariantId === undefined || rawVariantId === null || String(rawVariantId).trim() === '')
-    ? 'default'
-    : String(rawVariantId)
+  let variantId: string
+  if (rawVariantId === undefined || rawVariantId === null || String(rawVariantId).trim() === '') {
+    variantId = 'default'
+  } else {
+    // Security: Sanitize variantId to prevent injection
+    const sanitized = sanitizeString(String(rawVariantId), 100)
+    variantId = sanitized || 'default'
+    
+    // Security: Validate variantId format
+    if (variantId !== 'default' && !variantId.startsWith('combination-')) {
+      const variantIdNum = Number(variantId)
+      if (isNaN(variantIdNum) || variantIdNum <= 0 || variantIdNum > Number.MAX_SAFE_INTEGER) {
+        logSecurityEvent('Invalid variant ID format in cart POST', { 
+          variantId: rawVariantId 
+        }, request)
+        return NextResponse.json({ error: 'Invalid variant ID format' }, { status: 400 })
+      }
+    }
+  }
   
   logger.log('🛒 Cart add request:', { 
     productId, 
     rawVariantId, 
     normalizedVariantId: variantId, 
     quantity,
-    variantPrice,
     variantIdType: typeof variantId
   })
-  
-  logger.log('🛒 DEBUG: variantPrice received:', variantPrice, 'type:', typeof variantPrice)
-  
-  if (!productId || !quantity || quantity <= 0) {
-    logger.log('Validation failed:', { productId, variantId, quantity })
-    return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
-  }
 
   // Fetch authoritative pricing + stock from database - VALIDATE product exists
   // Also fetch supplier_id/user_id to get supplier info
@@ -610,17 +706,31 @@ export async function POST(request: NextRequest) {
     })
   }
   
-  // Validate variant ID exists in database if it's numeric
-  if (variantId && variantId !== 'default' && !isNaN(Number(variantId))) {
+  // Security: Validate variant ID exists in database if it's numeric
+  if (variantId && variantId !== 'default' && !variantId.startsWith('combination-') && !isNaN(Number(variantId))) {
+    const variantIdNum = Number(variantId)
+    
+    // Additional security: Validate variantId is within safe range
+    if (variantIdNum <= 0 || variantIdNum > Number.MAX_SAFE_INTEGER) {
+      logSecurityEvent('Variant ID out of range in cart POST', { 
+        variantId: variantIdNum 
+      }, request)
+      return NextResponse.json({ error: 'Invalid variant ID' }, { status: 400 })
+    }
+    
     const { data: variantExists, error: variantErr } = await supabase
       .from('product_variants')
       .select('id, product_id')
-      .eq('id', Number(variantId))
-      .eq('product_id', Number(productId))
+      .eq('id', variantIdNum)
+      .eq('product_id', productId) // Security: Ensure variant belongs to product
       .maybeSingle()
     
     if (variantErr || !variantExists) {
-      logger.error('Variant validation failed:', { variantId, productId, error: variantErr })
+      logSecurityEvent('Variant validation failed in cart POST', { 
+        variantId, 
+        productId, 
+        error: variantErr?.message 
+      }, request)
       return NextResponse.json({ error: 'Variant not found or does not belong to this product' }, { status: 404 })
     }
   }
@@ -826,7 +936,7 @@ export async function POST(request: NextRequest) {
         customerCare: {
           message: `For the remaining ${quantity - adjustedQuantity} items, please contact our customer care to confirm availability and restock timing.`,
           contactInfo: {
-            email: 'support@honicco.com',
+            email: process.env.SUPPORT_EMAIL || 'support@honicco.com',
             phone: '+255-123-456-789',
             hours: 'Monday-Friday 8AM-6PM EAT'
           }
@@ -848,13 +958,6 @@ export async function POST(request: NextRequest) {
   let newVariantName: string | null = null
   let variantPriceFromDB: number | null = null
   
-  console.log('🛒 [CART ADD] Step 1: Fetching variant data from database', {
-    variantId,
-    variantIdType: typeof variantId,
-    isNumeric: variantId && !isNaN(Number(variantId)),
-    isDefault: variantId === 'default'
-  })
-  
   if (variantId && variantId !== 'default' && !isNaN(Number(variantId))) {
     const { data: newVariant, error: variantError } = await supabase
       .from('product_variants')
@@ -862,20 +965,10 @@ export async function POST(request: NextRequest) {
       .eq('id', Number(variantId))
       .single()
     
-    console.log('🛒 [CART ADD] Step 1 Result:', {
-      variantId: Number(variantId),
-      found: !!newVariant,
-      variant_name: newVariant?.variant_name || null,
-      variant_price: newVariant?.price || null,
-      error: variantError?.message
-    })
-    
     if (newVariant) {
       newVariantName = newVariant.variant_name
       variantPriceFromDB = parseFloat(newVariant.price) || null
     }
-  } else {
-    console.log('🛒 [CART ADD] Step 1: Skipped (variant is default or not numeric)')
   }
   
   // ALWAYS use database price - NEVER trust client-provided price
@@ -891,37 +984,14 @@ export async function POST(request: NextRequest) {
   })
 
   // Check ALL existing cart items for this product (not just one)
-  console.log('🛒 [CART ADD] Step 2: Fetching all existing cart items for product', {
-    productId,
-    userId: user.id
-  })
-  
   const { data: existingItems, error: checkError } = await supabase
     .from('cart_items')
     .select('id, quantity, variant_id')
     .eq('user_id', user.id)
     .eq('product_id', productId)
 
-  console.log('🛒 [CART ADD] Step 2 Result: Existing cart items found', {
-    productId,
-    newVariantId: variantId,
-    newVariantName,
-    existingItemsCount: existingItems?.length || 0,
-    existingItems: existingItems?.map((item: any) => ({
-      id: item.id,
-      variant_id: item.variant_id,
-      variant_idType: typeof item.variant_id,
-      quantity: item.quantity
-    })) || [],
-    checkError: checkError?.message
-  })
-
   // Find matching item by comparing both variant_id AND variant_name
   let matchingItem: any = null
-  
-  console.log('🛒 [CART ADD] Step 3: Comparing existing items with new variant', {
-    existingItemsCount: existingItems?.length || 0
-  })
   
   if (existingItems && existingItems.length > 0) {
     // Fetch variant names for all existing items
@@ -930,79 +1000,33 @@ export async function POST(request: NextRequest) {
       .filter((id: any) => id && id !== 'default' && !isNaN(Number(id)))
       .map((id: any) => Number(id))
     
-    console.log('🛒 [CART ADD] Step 3a: Extracting variant IDs from existing items', {
-      allVariantIds: existingItems.map((item: any) => item.variant_id),
-      numericVariantIds: existingVariantIds
-    })
-    
     let existingVariantMap: { [key: number]: string | null } = {}
     if (existingVariantIds.length > 0) {
-      console.log('🛒 [CART ADD] Step 3b: Fetching variant names from database', {
-        variantIdsToFetch: existingVariantIds
-      })
-      
       const { data: existingVariants, error: variantsError } = await supabase
         .from('product_variants')
         .select('id, variant_name')
         .in('id', existingVariantIds)
-      
-      console.log('🛒 [CART ADD] Step 3b Result: Variant names fetched', {
-        found: existingVariants?.length || 0,
-        variants: existingVariants?.map((v: any) => ({
-          id: v.id,
-          variant_name: v.variant_name
-        })) || [],
-        error: variantsError?.message
-      })
       
       if (existingVariants) {
         existingVariants.forEach((v: any) => {
           existingVariantMap[v.id] = v.variant_name
         })
       }
-    } else {
-      console.log('🛒 [CART ADD] Step 3b: Skipped (no numeric variant IDs found)')
     }
     
     // Compare each existing item with the new one
-    console.log('🛒 [CART ADD] Step 3c: Comparing each existing item', {
-      newVariantId: String(variantId || 'default'),
-      newVariantName
-    })
-    
     for (let i = 0; i < existingItems.length; i++) {
       const existingItem = existingItems[i]
       const existingVariantId = String(existingItem.variant_id || 'default')
       const newVariantId = String(variantId || 'default')
       
-      console.log(`🛒 [CART ADD] Step 3c.${i + 1}: Comparing item ${existingItem.id}`, {
-        existingItemId: existingItem.id,
-        existingVariantId,
-        existingVariantIdType: typeof existingItem.variant_id,
-        newVariantId,
-        newVariantIdType: typeof variantId,
-        variantIdMatch: existingVariantId === newVariantId
-      })
-      
       // First check variant_id
       if (existingVariantId === newVariantId) {
-        console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ✅ Variant ID matches! Checking variant name...`)
-        
         // If variant_id matches, also check variant_name
         let existingVariantName: string | null = null
         if (existingItem.variant_id && !isNaN(Number(existingItem.variant_id))) {
           existingVariantName = existingVariantMap[Number(existingItem.variant_id)] || null
         }
-        
-        console.log(`🛒 [CART ADD] Step 3c.${i + 1}: Variant name comparison`, {
-          existingVariantName,
-          newVariantName,
-          existingVariantNameType: typeof existingVariantName,
-          newVariantNameType: typeof newVariantName,
-          bothNull: !existingVariantName && !newVariantName,
-          bothMatch: existingVariantName === newVariantName,
-          namesMatch: (existingVariantName === newVariantName) || (!existingVariantName && !newVariantName)
-        })
         
         // Compare variant names (both must match or both must be null/empty)
         const namesMatch = (existingVariantName === newVariantName) || 
@@ -1010,49 +1034,20 @@ export async function POST(request: NextRequest) {
         
         if (namesMatch) {
           matchingItem = existingItem
-          console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ✅✅✅ FOUND MATCHING ITEM!`, {
-            itemId: existingItem.id,
-            currentQuantity: existingItem.quantity,
-            variantId: existingVariantId,
-            variantName: existingVariantName || newVariantName,
-            willIncrement: true
-          })
           break
-        } else {
-          console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ⚠️ Variant ID matches but name differs`, {
-            existingVariantId,
-            existingVariantName,
-            newVariantName,
-            reason: existingVariantName !== newVariantName ? 'Names are different' : 'One is null and other is not'
-          })
+          }
         }
-      } else {
-        console.log(`🛒 [CART ADD] Step 3c.${i + 1}: ❌ Variant ID does NOT match - skipping this item`)
-      }
     }
-    
-    if (!matchingItem) {
-      console.log('🛒 [CART ADD] Step 3 Result: ❌ No matching item found - will add as new item')
     }
-  } else {
-    console.log('🛒 [CART ADD] Step 3: No existing items found - will add as new item')
-  }
 
   // Only increment if we found a matching item (same variant_id AND variant_name)
-  console.log('🛒 [CART ADD] Step 4: Deciding action (increment vs insert)', {
+  logger.log('🛒 [CART POST] Matching item check:', {
     hasMatchingItem: !!matchingItem,
     matchingItemId: matchingItem?.id || null,
     matchingItemQuantity: matchingItem?.quantity || null
   })
   
   if (matchingItem) {
-      console.log('🛒 [CART ADD] Step 4: ✅ ACTION = INCREMENT existing item', {
-        itemId: matchingItem.id,
-        currentQuantity: matchingItem.quantity,
-        addingQuantity: quantity,
-        newQuantity: matchingItem.quantity + quantity
-      })
-      
       // Item exists with same variant_id AND variant_name - increment quantity
       const newQuantity = matchingItem.quantity + quantity
       
@@ -1112,14 +1107,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to update cart item' }, { status: 500 })
       }
       
-      console.log('🛒 [CART ADD] Step 4: ✅✅✅ SUCCESS - Incremented existing cart item quantity', { 
-        itemId: matchingItem.id, 
-        oldQuantity: matchingItem.quantity, 
-        newQuantity,
-        variantId: String(variantId || 'default'),
-        variantName: newVariantName
-      })
-      
       logger.log('✅ Incremented existing cart item quantity:', { 
         itemId: matchingItem.id, 
         oldQuantity: matchingItem.quantity, 
@@ -1152,15 +1139,6 @@ export async function POST(request: NextRequest) {
   }
   
   // Item doesn't exist or different variant - insert new item
-  console.log('🛒 [CART ADD] Step 4: ✅ ACTION = INSERT new item (no match found or different variant)', {
-    productId,
-    variantId,
-    variantName: newVariantName,
-    quantity,
-    price: finalPrice,
-    reason: matchingItem ? 'Variant name/ID mismatch' : 'No existing items for this product'
-  })
-  
   const { error: insertError } = await supabase
     .from('cart_items')
     .insert({
@@ -1169,29 +1147,13 @@ export async function POST(request: NextRequest) {
         variant_id: variantId,
         quantity,
       price: finalPrice,
-        currency: 'USD'
+        currency: 'TZS' // Security: Always use TZS, never trust client-provided currency
     })
   
   if (insertError) {
-    console.error('🛒 [CART ADD] Step 4: ❌❌❌ FAILED to insert cart item:', {
-      error: insertError.message,
-      code: insertError.code,
-      details: insertError.details,
-      hint: insertError.hint,
-      productId,
-      variantId
-    })
     logger.error('Failed to insert cart item:', insertError)
       return NextResponse.json({ error: 'Failed to add item to cart' }, { status: 500 })
   }
-  
-  console.log('🛒 [CART ADD] Step 4: ✅✅✅ SUCCESS - Added new cart item', { 
-    productId, 
-    variantId, 
-    variantName: newVariantName,
-    quantity,
-    price: finalPrice
-  })
   
   logger.log('✅ Added new cart item:', { productId, variantId, quantity })
 
@@ -1252,12 +1214,12 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to remove item' }, { status: 500 })
     }
   } else {
-    // Update quantity
+    // Security: Update quantity with user ownership validation
     const { error: updErr } = await supabase
       .from('cart_items')
       .update({ quantity })
       .eq('id', itemId)
-      .eq('user_id', user.id)
+      .eq('user_id', user.id) // Security: Ensure user owns the cart item
 
     if (updErr) {
       return NextResponse.json({ error: 'Failed to update item' }, { status: 500 })
@@ -1275,9 +1237,29 @@ export async function PATCH(request: NextRequest) {
 
 // DELETE /api/cart - Clear entire cart
 export async function DELETE(request: NextRequest) {
+  // Security: Rate limiting
+  const rateLimitCheck = enhancedRateLimit(request)
+  if (!rateLimitCheck.allowed) {
+    logSecurityEvent('Rate limit exceeded on cart DELETE', { 
+      ip: request.headers.get('x-forwarded-for') || 'unknown' 
+    }, request)
+    return NextResponse.json({ 
+      error: rateLimitCheck.reason || 'Rate limit exceeded',
+      retryAfter: rateLimitCheck.retryAfter 
+    }, { 
+      status: 429,
+      headers: {
+        'Retry-After': rateLimitCheck.retryAfter?.toString() || '60'
+      }
+    })
+  }
+
   const { user, error: authError, response, supabase } = await validateAuth(request)
   
   if (authError || !user) {
+    logSecurityEvent('Unauthorized cart DELETE attempt', { 
+      error: authError 
+    }, request)
     return NextResponse.json({ error: authError || 'Unauthorized' }, { status: 401 })
   }
 

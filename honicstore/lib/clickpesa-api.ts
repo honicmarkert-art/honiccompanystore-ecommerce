@@ -40,9 +40,7 @@ export interface TokenResponse {
 
 // ClickPesa Configuration
 const CLICKPESA_CONFIG: ClickPesaConfig = {
-  baseUrl: process.env.NODE_ENV === "production" 
-    ? "https://api.clickpesa.com" 
-    : "https://api.clickpesa.com", // Use same URL for both (adjust if sandbox available)
+  baseUrl: process.env.CLICKPESA_API_URL || process.env.NEXT_PUBLIC_CLICKPESA_API_URL || "https://api.clickpesa.com",
   accessToken: process.env.CLICKPESA_CLIENT_ID || "", // Use Client ID as access token
   isLive: process.env.NODE_ENV === "production"
 }
@@ -144,12 +142,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
 
     if (!response.ok) {
       const responseText = await response.text()
-      console.error("ClickPesa: Token generation failed:", {
-        status: response.status,
-        statusText: response.statusText,
-        body: responseText
-      })
-
       let errorData
       try {
         errorData = JSON.parse(responseText)
@@ -170,7 +162,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     try {
       data = JSON.parse(responseText)
     } catch (parseError) {
-      console.error("ClickPesa: Failed to parse token response:", parseError)
       throw new Error("Invalid JSON response from ClickPesa token generation API")
     }
     
@@ -181,8 +172,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     logger.log("ClickPesa: Access token generated successfully")
     return data.token
   } catch (error) {
-    console.error("ClickPesa Token Generation Error:", error)
-    
     if (error instanceof Error) {
       throw new Error(`Failed to generate access token: ${error.message}`)
     }
@@ -245,7 +234,6 @@ export const generateChecksum = (payload: CheckoutLinkRequest): string => {
       throw new Error("Checksum generation should only happen server-side")
     }
   } catch (error) {
-    console.error("Checksum generation error:", error)
     throw new Error(`Failed to generate checksum: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 }
@@ -310,8 +298,6 @@ export const createCheckoutLink = async (
       clientId: data.clientId
     }
   } catch (error) {
-    console.error("ClickPesa Checkout Link Error:", error)
-    
     if (error instanceof Error) {
       throw new Error(`Failed to create checkout link: ${error.message}`)
     }
@@ -324,7 +310,6 @@ export const createCheckoutLink = async (
 export const validateWebhook = (payload: any, signature: string, secretKey: string): boolean => {
   try {
     if (!secretKey) {
-      console.warn('ClickPesa webhook secret key not configured')
       return false
     }
 
@@ -346,7 +331,6 @@ export const validateWebhook = (payload: any, signature: string, secretKey: stri
       Buffer.from(providedSignature, 'hex')
     )
   } catch (error) {
-    console.error('Webhook signature validation error:', error)
     return false
   }
 }
@@ -385,12 +369,10 @@ export const parseWebhookPayload = (payload: any) => {
     // Validate status values
     const validStatuses = ['pending', 'processing', 'completed', 'success', 'failed', 'error', 'cancelled', 'declined']
     if (!validStatuses.includes(webhookData.status.toLowerCase())) {
-      console.warn(`Unknown webhook status: ${webhookData.status}`)
-    }
+      }
 
     return webhookData
   } catch (error) {
-    console.error('Webhook payload parsing error:', error)
     throw new Error(`Invalid webhook payload: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 }
@@ -445,7 +427,6 @@ export const testChecksumGeneration = () => {
       }
     }
   } catch (error) {
-    console.error("Checksum test error:", error)
     return { error: error instanceof Error ? error.message : 'Unknown error' }
   }
 }

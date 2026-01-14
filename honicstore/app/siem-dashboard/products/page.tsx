@@ -220,29 +220,18 @@ function AdminProductsContent() {
                 onSave={async (productData) => {
                   try {
                     if (editingProduct) {
-                      console.log('🔍 [DEBUG] About to update product:', editingProduct.id)
                       await updateProduct(editingProduct.id, productData)
-                      console.log('✅ [DEBUG] updateProduct completed')
                       toast({ title: 'Product updated successfully' })
                       
                       // Small delay to ensure database has processed the update
                       await new Promise(resolve => setTimeout(resolve, 100))
                       
                       // Refresh the product data after update
-                      console.log('🔍 [DEBUG] Fetching refreshed product...')
                       const refreshedProduct = await fetchFullProductDetails(editingProduct.id)
                       if (refreshedProduct) {
-                        console.log('✅ [DEBUG] Fetched refreshed product:', {
-                          id: refreshedProduct.id,
-                          name: refreshedProduct.name,
-                          image: refreshedProduct.image,
-                          freeDelivery: refreshedProduct.freeDelivery,
-                          sameDayDelivery: refreshedProduct.sameDayDelivery
-                        })
                         setEditingProduct(refreshedProduct)
                       } else {
-                        console.log('⚠️ [DEBUG] No refreshed product data received')
-                      }
+                        }
                     } else {
                       const newProduct = await addProduct(productData)
                       toast({ title: 'Product created successfully' })

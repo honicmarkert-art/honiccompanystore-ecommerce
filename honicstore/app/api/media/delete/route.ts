@@ -8,8 +8,13 @@ import { createClient } from '@supabase/supabase-js'
 export const dynamic = 'force-dynamic'
 
 export const runtime = 'nodejs'
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+// SECURITY: Never fallback to anon key for service operations
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required. Service role key must be used for admin operations.')
+}
 
 const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null
 
@@ -125,7 +130,6 @@ export async function DELETE(request: NextRequest) {
       .remove(objectNames)
 
     if (removeError) {
-      console.error('Storage delete error:', removeError)
       return NextResponse.json({ error: 'Failed to delete from storage' }, { status: 500 })
     }
     // cleaned debug logs
@@ -145,7 +149,6 @@ export async function DELETE(request: NextRequest) {
           .eq('id', productId)
 
         if (updateError) {
-          console.error('DB update error:', updateError)
           return NextResponse.json({ success: true, storageDeleted: removed, dbUpdated: false })
         }
         // cleaned debug logs
@@ -157,7 +160,6 @@ export async function DELETE(request: NextRequest) {
           .update({ gallery: [] })
           .eq('id', productId)
         if (galleryUpdateError) {
-          console.error('DB update error (gallery):', galleryUpdateError)
           return NextResponse.json({ success: true, storageDeleted: removed, dbUpdated: false })
         }
         // cleaned debug logs
@@ -170,7 +172,6 @@ export async function DELETE(request: NextRequest) {
           .eq('id', productId)
           .single()
         if (fetchErr) {
-          console.error('DB fetch error (variant_images):', fetchErr)
           return NextResponse.json({ success: true, storageDeleted: removed, dbUpdated: false })
         }
         const rawImages = Array.isArray(prod2?.variant_images) ? prod2.variant_images : []
@@ -200,7 +201,6 @@ export async function DELETE(request: NextRequest) {
           .update({ variant_images: newArr })
           .eq('id', productId)
         if (updErr) {
-          console.error('DB update error (variant_images):', updErr)
           return NextResponse.json({ success: true, storageDeleted: removed, dbUpdated: false })
         }
         return NextResponse.json({ success: true, storageDeleted: removed, dbUpdated: true })
@@ -210,7 +210,6 @@ export async function DELETE(request: NextRequest) {
     // cleaned debug logs
     return NextResponse.json({ success: true, storageDeleted: removed })
   } catch (error) {
-    console.error('Media delete API error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

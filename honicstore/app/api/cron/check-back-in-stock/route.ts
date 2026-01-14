@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 import { sendBackInStockEmail } from '@/lib/user-email-service'
+import { buildUrl } from '@/lib/url-utils'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
             name: product.name,
             image: product.image || '',
             price: product.price,
-            productUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/products/${product.slug || product.id}`,
+            productUrl: buildUrl(`/products/${product.slug || product.id}`),
             stockQuantity: product.stock_quantity
           })
 

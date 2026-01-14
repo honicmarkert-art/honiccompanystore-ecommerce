@@ -41,7 +41,6 @@ export async function POST(request: NextRequest) {
       .select()
 
     if (error) {
-      console.error('Error marking notifications as read:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to mark notifications as read' },
         { status: 500 }
@@ -55,7 +54,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error: any) {
-    console.error('Error in POST /api/notifications/mark-all-read:', error)
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }

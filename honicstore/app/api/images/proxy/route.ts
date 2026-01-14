@@ -81,7 +81,6 @@ export async function GET(request: NextRequest) {
       { status: 504 }
     )
   } catch (error: any) {
-    console.error('Image proxy error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

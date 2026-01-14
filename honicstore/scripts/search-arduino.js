@@ -4,7 +4,8 @@
  */
 
 const searchQuery = 'arduino';
-const apiUrl = `http://localhost:3000/api/products?search=${encodeURIComponent(searchQuery)}&limit=1000`;
+const LOCALHOST_PORT = process.env.LOCALHOST_PORT || '3000'
+const apiUrl = `http://localhost:${LOCALHOST_PORT}/api/products?search=${encodeURIComponent(searchQuery)}&limit=1000`;
 
 console.log(`\n🔍 Searching for: "${searchQuery}"`);
 console.log(`📍 URL: ${apiUrl}\n`);
@@ -64,7 +65,7 @@ fetch(apiUrl)
     console.error('\n❌ Error:', error.message);
     console.error('\n💡 Make sure:');
     console.error('   1. Development server is running (npm run dev)');
-    console.error('   2. Server is accessible at http://localhost:3000');
+    console.error(`   2. Server is accessible at http://localhost:${LOCALHOST_PORT}`);
     console.error('   3. API endpoint is working\n');
     process.exit(1);
   });

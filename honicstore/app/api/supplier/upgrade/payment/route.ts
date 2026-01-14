@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { logger } from '@/lib/logger'
+import { buildUrl } from '@/lib/url-utils'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { createErrorResponse, logError } from '@/lib/error-handler'
 import { 
   createCheckoutLink, 
   formatAmountForClickPesa,
@@ -14,8 +18,22 @@ export const runtime = 'nodejs'
 
 // POST /api/supplier/upgrade/payment - Create ClickPesa checkout link for upgrade
 export async function POST(request: NextRequest) {
-  try {
-    const supabase = createServerClient(
+  return performanceMonitor.measure('supplier_upgrade_payment_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/upgrade/payment',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+        )
+      }
+
+      const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
       {
@@ -97,22 +115,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
-                   process.env.NEXT_PUBLIC_APP_URL ||
-                   (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined)
-    
-    if (!baseUrl) {
-      console.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
-      return NextResponse.json(
-        { error: 'Server configuration error: Base URL not configured. Please set NEXT_PUBLIC_SITE_URL or NEXT_PUBLIC_APP_URL environment variable.' },
-        { status: 500 }
-      )
-    }
-    
-    const webhookUrl = `${baseUrl}/api/webhooks/supplier-upgrade`
-    // Return directly to supplier dashboard after payment (user is already authenticated)
-    const returnUrl = `${baseUrl}/supplier/dashboard?payment=success&referenceId=${referenceId}`
-    const cancelUrl = `${baseUrl}/supplier/dashboard?payment=cancelled&referenceId=${referenceId}`
+    const webhookUrl = buildUrl('/api/webhooks/supplier-upgrade')
+    const returnUrl = buildUrl('/supplier/dashboard', { payment: 'success', referenceId })
+    const cancelUrl = buildUrl('/supplier/dashboard', { payment: 'cancelled', referenceId })
 
     // Get supplier profile for customer details
     const { data: supplierProfile } = await supabase
@@ -153,17 +158,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({
-      success: true,
-      checkoutUrl: checkoutResult.checkoutLink,
-      referenceId: referenceId
-    })
-  } catch (error: any) {
-    logger.error('Error creating payment link for supplier upgrade:', error)
-    return NextResponse.json(
-      { success: false, error: 'Failed to create payment link', details: error.message },
-      { status: 500 }
-    )
-  }
+      logSecurityEvent('SUPPLIER_UPGRADE_PAYMENT_INITIATED', user.id, {
+        referenceId,
+        amount: payment.amount,
+        currency: payment.currency,
+        endpoint: '/api/supplier/upgrade/payment'
+      })
+
+      return NextResponse.json({
+        success: true,
+        checkoutUrl: checkoutResult.checkoutLink,
+        referenceId: referenceId
+      })
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_upgrade_payment_post',
+        userId: user?.id,
+        referenceId: body?.referenceId
+      })
+      return createErrorResponse(error, 'Failed to create payment link', 500)
+    }
+  })
 }
 

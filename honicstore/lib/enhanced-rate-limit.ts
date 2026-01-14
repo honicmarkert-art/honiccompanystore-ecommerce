@@ -26,11 +26,14 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   '/api/payment': { windowMs: 5 * 60 * 1000, maxRequests: 10, blockDurationMs: 60 * 60 * 1000 },
   '/api/checkout': { windowMs: 5 * 60 * 1000, maxRequests: 5, blockDurationMs: 30 * 60 * 1000 },
   
+  // Cart endpoints - moderate limits to prevent abuse
+  '/api/cart': { windowMs: 60 * 1000, maxRequests: 30, blockDurationMs: 5 * 60 * 1000 },
+  
   // Newsletter subscription - moderate limits to prevent spam
   '/api/newsletter/subscribe': { windowMs: 60 * 60 * 1000, maxRequests: 5, blockDurationMs: 60 * 60 * 1000 },
   
-  // Public API endpoints - moderate limits
-  '/api/products': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  // Public API endpoints - higher limits for products (used for infinite scroll)
+  '/api/products': { windowMs: 60 * 1000, maxRequests: 120, blockDurationMs: 2 * 60 * 1000 },
   '/api/categories': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
   '/api/advertisements': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
   

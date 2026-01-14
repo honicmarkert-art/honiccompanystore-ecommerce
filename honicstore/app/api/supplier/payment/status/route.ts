@@ -81,7 +81,6 @@ export async function GET(request: NextRequest) {
       }
     })
   } catch (error: any) {
-    console.error('Error checking payment status:', error)
     return NextResponse.json(
       { success: false, error: 'Failed to check payment status', details: error.message },
       { status: 500 }

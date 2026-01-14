@@ -76,13 +76,7 @@ Please respond directly to: ${email}
 
     // Log to console if email service not configured (development)
     if (!emailResult.success) {
-      console.log('=== CONTACT FORM EMAIL ===')
-      console.log('To:', emailService.getContactEmailByType(inquiryType))
-      console.log('From:', email)
-      console.log('Subject:', emailSubject)
-      console.log('Body:', emailBody)
-      console.log('Error:', emailResult.error)
-      console.log('=========================')
+      // Email service not configured - continue anyway
     }
 
     return NextResponse.json({
@@ -91,7 +85,6 @@ Please respond directly to: ${email}
     })
 
   } catch (error: any) {
-    console.error('Contact form error:', error)
     return NextResponse.json(
       { success: false, error: 'Failed to send message. Please try again.' },
       { status: 500 }

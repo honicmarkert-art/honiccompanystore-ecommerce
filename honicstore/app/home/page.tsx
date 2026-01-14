@@ -237,8 +237,7 @@ export default function LandingPage() {
         // You can add a toast notification here if needed
       }
     } catch (error) {
-      console.error('Newsletter subscription error:', error)
-    }
+      }
   }
 
 

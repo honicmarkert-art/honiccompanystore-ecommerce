@@ -64,13 +64,12 @@ export default function AdvertisementsPage() {
     try {
       setIsLoading(true)
       const response = await fetch('/api/admin/advertisements', { credentials: 'include' })
-      if (!response.ok) {
-        const text = await response.text().catch(() => '')
-        console.error('[AdminAds] /api/admin/advertisements failed:', response.status, response.statusText, text?.slice(0,200))
-      }
       if (response.ok) {
         const data = await response.json()
         setAdvertisements(data.advertisements || [])
+      } else {
+        const text = await response.text().catch(() => '')
+        // Error handling - response not ok
       }
     } catch (error) {
       toast({
@@ -86,13 +85,12 @@ export default function AdvertisementsPage() {
   const fetchRotationTime = async () => {
     try {
       const response = await fetch('/api/admin/settings/ad-rotation', { credentials: 'include' })
-      if (!response.ok) {
-        const text = await response.text().catch(() => '')
-        console.error('[AdminAds] /api/admin/settings/ad-rotation failed:', response.status, response.statusText, text?.slice(0,200))
-      }
       if (response.ok) {
         const data = await response.json()
         setRotationTime(data.rotationTime || 10)
+      } else {
+        const text = await response.text().catch(() => '')
+        // Error handling - response not ok
       }
     } catch (error) {
     }

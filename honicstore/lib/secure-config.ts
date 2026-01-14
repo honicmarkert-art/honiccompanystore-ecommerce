@@ -17,6 +17,9 @@ const envSchema = z.object({
   // Application Configuration
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   NEXT_PUBLIC_APP_URL: z.string().url('Invalid app URL').optional(),
+  NEXT_PUBLIC_SITE_URL: z.string().url('Invalid site URL').optional(),
+  NEXT_PUBLIC_WEBSITE_URL: z.string().url('Invalid website URL').optional(),
+  LOCALHOST_PORT: z.string().transform(Number).default('3000'),
   
   // Security Configuration
   NEXTAUTH_SECRET: z.string().min(32, 'NextAuth secret must be at least 32 characters').optional(),
@@ -25,6 +28,25 @@ const envSchema = z.object({
   // API Configuration
   CLICKPESA_API_KEY: z.string().min(1, 'ClickPesa API key is required').optional(),
   CLICKPESA_SECRET: z.string().min(1, 'ClickPesa secret is required').optional(),
+  CLICKPESA_API_URL: z.string().url('Invalid ClickPesa API URL').default('https://api.clickpesa.com'),
+  NEXT_PUBLIC_CLICKPESA_API_URL: z.string().url('Invalid ClickPesa API URL').optional(),
+  RESEND_API_URL: z.string().url('Invalid Resend API URL').default('https://api.resend.com'),
+  
+  // Email Configuration
+  CONTACT_EMAIL: z.string().email('Invalid contact email').optional(),
+  SUPPORT_EMAIL: z.string().email('Invalid support email').optional(),
+  SALES_EMAIL: z.string().email('Invalid sales email').optional(),
+  PROMOTION_EMAIL: z.string().email('Invalid promotion email').optional(),
+  TECH_EMAIL: z.string().email('Invalid tech email').optional(),
+  LEGAL_EMAIL: z.string().email('Invalid legal email').optional(),
+  PRIVACY_EMAIL: z.string().email('Invalid privacy email').optional(),
+  DPO_EMAIL: z.string().email('Invalid DPO email').optional(),
+  SECURITY_EMAIL: z.string().email('Invalid security email').optional(),
+  NOREPLY_EMAIL: z.string().email('Invalid noreply email').optional(),
+  SMTP_SENDER_EMAIL_NOREPLY: z.string().email('Invalid SMTP sender noreply email').optional(),
+  SMTP_SENDER_EMAIL_SUPPORT: z.string().email('Invalid SMTP sender support email').optional(),
+  SMTP_SENDER_EMAIL_INFO: z.string().email('Invalid SMTP sender info email').optional(),
+  ADMIN_EMAILS: z.string().optional(), // Comma-separated list of admin emails
   
   // Rate Limiting
   RATE_LIMIT_MAX: z.string().transform(Number).default('100'),
@@ -63,8 +85,8 @@ export const securityConfig = {
   // CORS configuration
   cors: {
     origin: env.NODE_ENV === 'production' 
-      ? [env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com']
-      : ['http://localhost:3000', 'http://localhost:3001'],
+      ? [env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_SITE_URL || env.NEXT_PUBLIC_WEBSITE_URL || 'https://yourdomain.com']
+      : [`http://localhost:${env.LOCALHOST_PORT}`, `http://localhost:${parseInt(env.LOCALHOST_PORT) + 1}`],
     credentials: true,
   },
   
@@ -97,7 +119,7 @@ export const securityConfig = {
         "'self'",
         process.env.NEXT_PUBLIC_SUPABASE_URL || "",
         "https://*.supabase.co",
-        "https://api.clickpesa.com"
+        env.CLICKPESA_API_URL
       ],
       mediaSrc: [
         "'self'",
@@ -122,12 +144,15 @@ export const cacheConfig = {
   default: 300000, // 5 minutes
 }
 
-// API configuration
+  // API configuration
 export const apiConfig = {
   clickpesa: {
     apiKey: env.CLICKPESA_API_KEY,
     secret: env.CLICKPESA_SECRET,
-    baseUrl: 'https://api.clickpesa.com',
+    baseUrl: env.CLICKPESA_API_URL,
+  },
+  resend: {
+    apiUrl: env.RESEND_API_URL,
   },
   supabase: {
     url: env.NEXT_PUBLIC_SUPABASE_URL,

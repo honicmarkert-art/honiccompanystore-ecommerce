@@ -104,7 +104,6 @@ function InvoicesContent() {
       const contentType = response.headers.get('content-type')
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
-        console.error('Non-JSON response:', text.substring(0, 200))
         throw new Error('Server returned an invalid response. Please try again.')
       }
 
@@ -119,7 +118,6 @@ function InvoicesContent() {
       setInvoices(fetchedInvoices)
       setSummary(data.summary || null)
     } catch (err: any) {
-      console.error('Error fetching billing data:', err)
       const errorMessage = err.message || 'Failed to load billing history'
       setError(errorMessage)
       toast({
@@ -156,7 +154,6 @@ function InvoicesContent() {
         description: `Invoice ${invoice.invoice_number} has been downloaded.`,
       })
     } catch (err: any) {
-      console.error('Error downloading invoice:', err)
       toast({
         title: 'Download Error',
         description: 'Failed to download invoice. Please try again.',
@@ -629,7 +626,6 @@ For support, please contact customer service.
                       // Redirect to payment page
                       router.push(`/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`)
                     } catch (error: any) {
-                      console.error('Error initiating upgrade:', error)
                       toast({
                         title: 'Error',
                         description: error.message || 'Failed to initiate upgrade. Please try again.',

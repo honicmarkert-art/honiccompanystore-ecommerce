@@ -96,8 +96,7 @@ export default function SupplierAnalyticsPage() {
         setPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
-      console.error('Error fetching current plan:', error)
-    }
+      }
   }
 
   const fetchAnalytics = async () => {
@@ -234,8 +233,7 @@ export default function SupplierAnalyticsPage() {
         })
       }
     } catch (error) {
-      console.error('Error fetching analytics:', error)
-    } finally {
+      } finally {
       setLoading(false)
     }
   }
@@ -711,7 +709,6 @@ export default function SupplierAnalyticsPage() {
                     // Redirect to payment page
                     router.push(`/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`)
                   } catch (error: any) {
-                    console.error('Error initiating upgrade:', error)
                     toast({
                       title: 'Error',
                       description: error.message || 'Failed to initiate upgrade. Please try again.',

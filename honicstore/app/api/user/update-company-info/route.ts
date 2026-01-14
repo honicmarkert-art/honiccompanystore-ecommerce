@@ -240,7 +240,6 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Error updating company info:', error)
       return NextResponse.json(
         { 
           success: false,
@@ -263,7 +262,6 @@ export async function POST(request: NextRequest) {
         }
       )
     } catch (notifError) {
-      console.error('Error creating waiting for review notification:', notifError)
       // Don't fail the request if notification fails
     }
 
@@ -281,7 +279,6 @@ export async function POST(request: NextRequest) {
         }
       )
     } catch (adminNotifError) {
-      console.error('Error notifying admins:', adminNotifError)
       // Don't fail the request if admin notification fails
     }
 
@@ -309,7 +306,9 @@ export async function POST(request: NextRequest) {
     try {
       const appUrl = process.env.NEXT_PUBLIC_SITE_URL || 
                      process.env.NEXT_PUBLIC_APP_URL ||
-                     (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://honiccompanystore.com')
+                     (process.env.NODE_ENV === 'development' 
+                       ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` 
+                       : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://honiccompanystore.com'))
       
       // Only send welcome email on first-time company info submission
       if (isFirstTimeSubmission && appUrl && user.email && data?.is_supplier) {
@@ -337,14 +336,11 @@ export async function POST(request: NextRequest) {
         })
         
         if (welcomeResult.success) {
-          console.log('✅ Supplier welcome email sent after company info submission')
-        } else {
-          console.error('⚠️ Failed to send supplier welcome email:', welcomeResult.error)
+          } else {
           // Don't fail the request if email fails
         }
       }
     } catch (emailError) {
-      console.error('⚠️ Error sending supplier welcome email:', emailError)
       // Don't fail the request if email fails
     }
 
@@ -356,7 +352,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Update company info error:', error)
     return NextResponse.json(
       { 
         success: false,

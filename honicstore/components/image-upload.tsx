@@ -93,7 +93,6 @@ export function ImageUpload({
         throw new Error(result.error || 'Upload failed')
       }
     } catch (error) {
-      console.error('Upload error:', error)
       toast({
         title: "Upload failed",
         description: "Failed to upload image. Please try again.",

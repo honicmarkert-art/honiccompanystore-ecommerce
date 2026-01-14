@@ -35,7 +35,6 @@ export async function GET(request: NextRequest) {
       .lt('created_at', oneDayAgoISO)
 
     if (fetchError) {
-      console.error('❌ Cron: Error fetching expired orders:', fetchError)
       return NextResponse.json(
         { error: 'Failed to fetch expired orders', details: fetchError.message },
         { status: 500 }
@@ -63,7 +62,6 @@ export async function GET(request: NextRequest) {
       .in('order_id', orderIds)
 
     if (itemsError) {
-      console.error('❌ Cron: Error deleting order items:', itemsError)
       return NextResponse.json(
         { error: 'Failed to delete order items', details: itemsError.message },
         { status: 500 }
@@ -77,7 +75,6 @@ export async function GET(request: NextRequest) {
       .in('id', orderIds)
 
     if (ordersError) {
-      console.error('❌ Cron: Error deleting orders:', ordersError)
       return NextResponse.json(
         { error: 'Failed to delete orders', details: ordersError.message },
         { status: 500 }
@@ -98,7 +95,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('❌ Cron: Order cleanup error:', error)
     return NextResponse.json(
       { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }

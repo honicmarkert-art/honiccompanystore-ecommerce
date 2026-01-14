@@ -30,7 +30,6 @@ export function useCompany() {
           loadFromLocalStorage()
         }
       } catch (error) {
-        console.error('Error fetching company settings:', error)
         // Fallback to localStorage if API fails
         loadFromLocalStorage()
       } finally {
@@ -85,7 +84,6 @@ export function useCompany() {
           return true
         }
       } catch (error) {
-        console.error('Error updating company name:', error)
         // Fallback to localStorage if database fails
       setCompanyName(trimmedName)
       if (typeof window !== 'undefined') {
@@ -127,7 +125,6 @@ export function useCompany() {
           return true
         }
       } catch (error) {
-        console.error('Error updating company color:', error)
         // Fallback to localStorage if database fails
         setCompanyColor(trimmedColor)
         if (typeof window !== 'undefined') {
@@ -165,7 +162,6 @@ export function useCompany() {
         }
       }
     } catch (error) {
-      console.error('Error resetting company name:', error)
       // Fallback to localStorage if database fails
     setCompanyName(DEFAULT_COMPANY_NAME)
     if (typeof window !== 'undefined') {
@@ -199,7 +195,6 @@ export function useCompany() {
         }
       }
     } catch (error) {
-      console.error('Error resetting company color:', error)
       // Fallback to localStorage if database fails
       setCompanyColor(DEFAULT_COMPANY_COLOR)
       if (typeof window !== 'undefined') {
@@ -239,7 +234,6 @@ export function useCompany() {
           return true
         }
       } catch (error) {
-        console.error('Error updating company logo:', error)
         // Fallback to localStorage if database fails
         setCompanyLogo(trimmedLogo)
         if (typeof window !== 'undefined') {
@@ -276,7 +270,6 @@ export function useCompany() {
         }
       }
     } catch (error) {
-      console.error('Error resetting company logo:', error)
       // Fallback to localStorage if database fails
       setCompanyLogo(DEFAULT_COMPANY_LOGO)
       if (typeof window !== 'undefined') {

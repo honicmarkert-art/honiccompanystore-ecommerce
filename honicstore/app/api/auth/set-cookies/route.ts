@@ -48,7 +48,6 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    console.error('Set cookies error:', error)
     return NextResponse.json(
       { success: false, error: 'Failed to set auth cookies' },
       { status: 500 }

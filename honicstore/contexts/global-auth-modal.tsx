@@ -70,7 +70,6 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
     
     // Don't open modal if user is already authenticated (unless it's a supplier flow)
     if (isAuthenticated && user && !isSupplierFlow) {
-      console.log('User is already authenticated, skipping auth modal')
       return
     }
     
@@ -96,7 +95,6 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
     
     // Don't auto-close for supplier flows - allow user to switch accounts
     if (isAuthenticated && user && isOpen && !isSupplierFlow) {
-      console.log('User authenticated, closing auth modal')
       setIsOpen(false)
       setRedirectUrl(undefined)
       if (typeof window !== 'undefined') {

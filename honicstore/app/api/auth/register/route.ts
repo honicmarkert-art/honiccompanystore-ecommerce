@@ -61,7 +61,6 @@ export async function POST(request: NextRequest) {
     
     try {
       const adminSupabase = createAdminSupabaseClient()
-      console.log('🔍 [Register API] Checking if email exists (Method 1 - Profiles table):', email)
       
       // Method 1: Check profiles table (primary method - most reliable)
       const { data: profile, error: profileError } = await adminSupabase
@@ -71,14 +70,6 @@ export async function POST(request: NextRequest) {
         .limit(1)
         .maybeSingle()
       
-      console.log('🔍 [Register API] Profiles table check result:', {
-        hasError: !!profileError,
-        errorMessage: profileError?.message,
-        hasProfile: !!profile,
-        profileId: profile?.id,
-        createdAt: profile?.created_at
-      })
-      
       // If profile exists, email is already registered
       if (!profileError && profile) {
         emailExists = true
@@ -87,7 +78,6 @@ export async function POST(request: NextRequest) {
           profileId: profile.id,
           createdAt: profile.created_at 
         })
-        console.error('🚨 [Register API] BLOCKING REGISTRATION - Email already exists in profiles:', email)
         return NextResponse.json(
           {
             success: false,
@@ -101,7 +91,6 @@ export async function POST(request: NextRequest) {
       // Method 2: Try to check auth users using listUsers (fallback)
       if (profileError && profileError.code !== 'PGRST116') {
         // PGRST116 is "not found" which is expected, other errors might indicate issues
-        console.log('🔍 [Register API] Checking Auth users (Method 2 - fallback):', email)
         try {
           // List users and filter by email
           const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
@@ -115,7 +104,6 @@ export async function POST(request: NextRequest) {
                 userId: existingAuthUser.id,
                 createdAt: existingAuthUser.created_at 
               })
-              console.error('🚨 [Register API] BLOCKING REGISTRATION - Email already exists in Auth:', email)
               return NextResponse.json(
                 {
                   success: false,
@@ -130,26 +118,22 @@ export async function POST(request: NextRequest) {
           logger.warn('⚠️ [Register API] Auth users check failed (proceeding - local check as fallback):', {
             error: authCheckError?.message || authCheckError
           })
-          console.warn('⚠️ [Register API] Auth users check error:', authCheckError)
-        }
+          }
       } else {
         // Profile not found - email is available
         logger.log('✅ [Register API] Email available for registration:', email)
-        console.log('✅ [Register API] Email is available - proceeding with registration')
-      }
+        }
     } catch (checkError: any) {
       // If all checks fail, log but continue - local check will catch as fallback
       logger.error('⚠️ [Register API] Error during email pre-check (proceeding - local check as fallback):', {
         error: checkError?.message || checkError,
         email: email
       })
-      console.error('⚠️ [Register API] Exception during email pre-check:', checkError)
-    }
+      }
     
     // Method 3: Legacy local user store check (fallback)
     const existingLocalUser = findUserByEmail(email)
     if (existingLocalUser) {
-      console.error('🚨 [Register API] BLOCKING REGISTRATION - Email exists in local store:', email)
       return NextResponse.json(
         { 
           success: false,
@@ -162,7 +146,6 @@ export async function POST(request: NextRequest) {
     
     // If we determined email exists, don't proceed
     if (emailExists) {
-      console.error('🚨 [Register API] Email exists check failed - blocking registration')
       return NextResponse.json(
         {
           success: false,
@@ -228,7 +211,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.error('Registration error:', error)
     return NextResponse.json(
       { 
         success: false,

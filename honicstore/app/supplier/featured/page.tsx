@@ -48,8 +48,7 @@ export default function SupplierFeaturedPage() {
         setPaymentStatus(data.paymentStatus || null)
       }
     } catch (error) {
-      console.error('Error fetching current plan:', error)
-    }
+      }
   }
 
   const fetchProducts = async () => {
@@ -71,8 +70,7 @@ export default function SupplierFeaturedPage() {
         })))
       }
     } catch (error) {
-      console.error('Error fetching products:', error)
-    } finally {
+      } finally {
       setLoading(false)
     }
   }
@@ -226,7 +224,6 @@ export default function SupplierFeaturedPage() {
                       // Redirect to payment page
                       router.push(`/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`)
                     } catch (error: any) {
-                      console.error('Error initiating upgrade:', error)
                       toast({
                         title: 'Error',
                         description: error.message || 'Failed to initiate upgrade. Please try again.',

@@ -118,7 +118,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Categories API error:', error)
     const message = String((error as any)?.message || '')
     const isNetworkFailure =
       message.includes('ENOTFOUND') ||

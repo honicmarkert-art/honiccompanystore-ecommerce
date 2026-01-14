@@ -41,7 +41,6 @@ export function MaterializedViewRefreshButton({ onRefresh, className }: RefreshB
         throw new Error(data.error || 'Failed to refresh materialized view')
       }
     } catch (error) {
-      console.error('Refresh error:', error)
       toast({
         title: "❌ Refresh Failed",
         description: error instanceof Error ? error.message : 'Failed to refresh materialized view',

@@ -67,7 +67,7 @@ interface InfiniteProductsReturn {
 
 export function useInfiniteProducts(options: InfiniteProductsOptions = {}): InfiniteProductsReturn {
   const {
-    limit = 24,
+    limit = 20, // AliExpress-style: Fixed 20 products per batch
     initialOffset = 0,
     category,
     brand,
@@ -135,22 +135,53 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     setLoadingMore(false)
   }, [initialOffset])
 
-  // Fetch products function
-  const fetchProducts = useCallback(async (currentOffset: number, isLoadMore: boolean = false) => {
-    
+  // Fetch products function with smart cache busting
+  const fetchProducts = useCallback(async (currentOffset: number, isLoadMore: boolean = false, forceRefresh: boolean = false) => {
     if (!enabled || loadingRef.current) return
 
-    // Cancel any in-flight request before starting a new one
-    if (abortControllerRef.current) {
+    // For load-more, don't abort previous request (let it complete) - only abort on filter changes
+    if (!isLoadMore && abortControllerRef.current) {
       try { abortControllerRef.current.abort() } catch {}
     }
-    // Clear in-flight requests map when starting new fetch to prevent stale requests
-    inFlightRequestsRef.current.clear()
+    // Only clear in-flight map on filter changes, not on load-more
+    if (!isLoadMore) {
+      inFlightRequestsRef.current.clear()
+    }
     abortControllerRef.current = new AbortController()
     loadingRef.current = true
     
+    // Check cache first (unless force refresh or load-more)
+    // Skip cache for load-more to ensure fresh data and faster response
+    if (!forceRefresh && !isLoadMore && typeof window !== 'undefined') {
+      try {
+        const cacheKey = `products_${JSON.stringify({ category, brand, search, minPrice, maxPrice, categories, inStock, isChina, supplier, sortBy, sortOrder })}_${currentOffset}_${limit}`
+        const cached = sessionStorage.getItem(cacheKey)
+        if (cached) {
+          const cacheData = JSON.parse(cached)
+          const now = Date.now()
+          // Use cached data if less than 5 minutes old
+          if (cacheData.timestamp && (now - cacheData.timestamp) < 5 * 60 * 1000) {
+            // Set cached data immediately (synchronous) to hide skeleton
+            setProducts(cacheData.products || [])
+            setHasMore(cacheData.hasMore !== undefined ? cacheData.hasMore : true)
+            setTotalCount(cacheData.totalCount || 0)
+            setLoading(false)
+            setFiltering(false)
+            loadingRef.current = false
+            // Return early to prevent showing loading state
+            // Fresh data will be fetched in background via the effect below
+            return
+          }
+        }
+      } catch (e) {
+        // Ignore cache errors, continue with fetch
+      }
+    }
+    
+    // Optimized: Set loading state immediately to prevent delays
     if (isLoadMore) {
       setLoadingMore(true)
+      // Don't set main loading state for load-more to keep existing products visible
     } else {
       // If we have existing products, use filtering state instead of loading
       if (products.length > 0) {
@@ -216,36 +247,54 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
         params.append('enriched', 'true')
       }
       
-      // Only add cache busting for search queries to allow caching for regular browsing
-      // This significantly reduces API calls and prevents rate limiting
+      // Smart cache busting: only when explicitly needed
+      // - Always cache bust for search queries (fresh results needed)
+      // - Cache bust for filter changes (new results needed)
+      // - Use cache for regular browsing (faster, reduces API calls)
       const isSearching = !!search && String(search).trim().length > 0
-      if (isSearching) {
+      const hasFilters = isSearching || category || brand || minPrice !== undefined || maxPrice !== undefined || categories?.length || inStock !== undefined || isChina !== undefined || supplier
+      
+      // Only cache bust if:
+      // 1. Searching (need fresh results)
+      // 2. Force refresh requested
+      // 3. Filter changed (need new results)
+      if (isSearching || forceRefresh || (hasFilters && !isLoadMore)) {
         params.append('t', Date.now().toString())
       }
 
       const fullUrl = `${url}?${params.toString()}`
       
-      // Request deduplication: if same request is in-flight, reuse it to prevent duplicate API calls
-      const existingRequest = inFlightRequestsRef.current.get(fullUrl)
-      if (existingRequest) {
-        try {
-          const data = await existingRequest
-          // Request completed, remove from map
-          inFlightRequestsRef.current.delete(fullUrl)
-          return data
-        } catch (err) {
-          // Request failed, remove from map
-          inFlightRequestsRef.current.delete(fullUrl)
-          throw err
+      // Request deduplication: only for initial loads (not load-more) to avoid blocking scroll
+      if (!isLoadMore) {
+        const existingRequest = inFlightRequestsRef.current.get(fullUrl)
+        if (existingRequest) {
+          try {
+            const data = await existingRequest
+            inFlightRequestsRef.current.delete(fullUrl)
+            return data
+          } catch (err) {
+            inFlightRequestsRef.current.delete(fullUrl)
+            throw err
+          }
         }
       }
       
-      // For search queries, reduce cache to avoid stale results
-      // Fetch with a single retry on 429 rate limit using short exponential backoff with jitter
-      const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
+      // Optimized fetch: For load-more, use direct fetch with no cache for maximum speed
       const fetchOnce = async () => {
-        return await fetchWithCache(fullUrl, { ttlMs: isSearching ? 1000 : 30_000, swrMs: isSearching ? 0 : 180_000, signal: abortControllerRef.current?.signal })
+        if (isLoadMore) {
+          // Load-more: Direct fetch, no cache layer, no delays - fastest possible
+          const response = await fetch(fullUrl, { 
+            signal: abortControllerRef.current?.signal,
+            cache: 'no-store' // Ensure fresh data for load-more
+          })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          return await response.json()
+        } else {
+          // Initial load: Use cache for better performance
+          const cacheTTL = isSearching ? 1000 : 30_000
+          const cacheSWR = isSearching ? 0 : 180_000
+          return await fetchWithCache(fullUrl, { ttlMs: cacheTTL, swrMs: cacheSWR, signal: abortControllerRef.current?.signal })
+        }
       }
 
       // Create request promise and store it for deduplication
@@ -255,13 +304,16 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
           try {
             data = await fetchOnce()
           } catch (err: any) {
+            // For load-more, skip retry delay - fail fast
+            if (isLoadMore) throw err
+            
+            // For initial load, retry on rate limit with minimal delay
             const message = err?.message || ''
             const status = (err as any)?.status
             const isRateLimited = status === 429 || /429|too many requests|rate limit/i.test(message)
             if (isRateLimited) {
-              // Backoff: 400ms base + small jitter, single retry
-              const backoffMs = 400 + Math.floor(Math.random() * 300)
-              await sleep(backoffMs)
+              // Minimal backoff for initial load only
+              await new Promise(resolve => setTimeout(resolve, 200))
               data = await fetchOnce()
             } else {
               throw err
@@ -294,41 +346,70 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       // Check if we have more data - use API's hasMore flag if available
       // Account for client-side filtering (out-of-stock products) by checking if we got full batch
       const receivedFullBatch = newProducts.length >= limit
-      const hasMoreData = pagination?.hasMore ?? receivedFullBatch
       
+      // CRITICAL FIX: Use API's hasMore if available, otherwise check if:
+      // 1. We received a full batch (30 products), OR
+      // 2. The total count indicates more products exist
+      // IMPORTANT: Use limit (30) not newProducts.length for offset calculation
+      let hasMoreData = false
+      if (pagination?.hasMore !== undefined) {
+        // Trust API's hasMore flag (most accurate)
+        hasMoreData = pagination.hasMore
+      } else if (pagination?.total !== undefined) {
+        // Calculate based on total count: if current offset + limit < total, there's more
+        // Use limit (30) not newProducts.length because offset must increment by requested amount
+        const nextOffset = currentOffset + limit
+        hasMoreData = nextOffset < pagination.total
+      } else {
+        // Fallback: if we got a full batch, assume there might be more
+        hasMoreData = receivedFullBatch
+      }
       
       hasMoreRef.current = hasMoreData
       setHasMore(hasMoreData)
 
-      // Transform products to ensure importChina field is properly mapped
-      // CRITICAL: Ensure all products have required fields for frontend filtering
-      const transformedProducts = newProducts.map((product: any) => {
-        // Ensure inStock and in_stock fields are always set correctly
-        const hasInStock = product.inStock !== undefined ? product.inStock : (product.in_stock !== undefined ? product.in_stock : true)
-        const hasInStock2 = product.in_stock !== undefined ? product.in_stock : hasInStock
-        
-        return {
-          ...product,
-          // Always set both fields to prevent frontend filtering issues
-          inStock: hasInStock,
-          in_stock: hasInStock2
-        }
-      })
+      // Optimized: Minimal transformation - only set missing fields, skip full mapping for load-more
+      const transformedProducts = isLoadMore && newProducts.length > 0 && newProducts[0].inStock !== undefined
+        ? newProducts // Skip transformation for load-more - already correct format
+        : newProducts.map((product: any) => ({
+            ...product,
+            // Only set if missing - avoid unnecessary object creation
+            inStock: product.inStock ?? product.in_stock ?? true,
+            in_stock: product.in_stock ?? product.inStock ?? true
+          }))
 
-      // Update products
+      // Update products - use functional update to get current state
       if (isLoadMore) {
         setProducts(prev => [...prev, ...transformedProducts])
       } else {
         setProducts(transformedProducts)
       }
       
-      // Log for debugging (only in development)
-      if (process.env.NODE_ENV === 'development' && transformedProducts.length > 0) {
-        console.log(`[useInfiniteProducts] Set ${transformedProducts.length} products, first product:`, transformedProducts[0]?.name, transformedProducts[0]?.inStock, transformedProducts[0]?.in_stock)
+      // Cache only for initial load (not load-more) to avoid storage overhead
+      if (!isLoadMore && typeof window !== 'undefined') {
+        try {
+          const cacheKey = `products_${JSON.stringify({ category, brand, search, minPrice, maxPrice, categories, inStock, isChina, supplier, sortBy, sortOrder })}_${currentOffset}_${limit}`
+          sessionStorage.setItem(cacheKey, JSON.stringify({
+            products: transformedProducts,
+            hasMore: hasMoreData,
+            totalCount: pagination?.total || transformedProducts.length,
+            timestamp: Date.now()
+          }))
+        } catch (e) {
+          // Ignore storage errors
+        }
       }
 
-      // Update offset
-      setOffset(currentOffset + newProducts.length)
+      // Update offset - CRITICAL FIX: Always increment by the number of products requested (limit)
+      // not by the number returned, to maintain correct pagination even if API returns fewer products
+      // This ensures: offset 0 → 30 → 60 → 90, not 0 → 22 → 44 → 66
+      const nextOffset = currentOffset + limit
+      setOffset(nextOffset)
+      
+      // Mark initial load as complete after first successful fetch
+      if (!isLoadMore && !hasInitialLoadRef.current) {
+        hasInitialLoadRef.current = true
+      }
 
     } catch (err) {
       // Ignore AbortError as it's an intentional cancellation
@@ -337,7 +418,6 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       }
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch products'
       setError(errorMessage)
-      // Keep console clean in production; surface error state only
     } finally {
       setLoading(false)
       setLoadingMore(false)
@@ -345,12 +425,14 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
       loadingRef.current = false
       abortControllerRef.current = null
     }
-  }, [enabled, limit, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier, products.length])
+  }, [enabled, limit, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier])
 
-  // Load more function
+  // Load more function - optimized for speed (no delays, immediate fetch)
   const loadMore = useCallback(async () => {
     if (!hasMoreRef.current || loadingRef.current) return
-    await fetchProducts(offset, true)
+    // Fetch immediately without any delays for faster scroll experience
+    // Use current offset from state (which is correctly incremented by limit)
+    fetchProducts(offset, true)
   }, [fetchProducts, offset])
 
   // Refresh function
@@ -359,37 +441,104 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
     await fetchProducts(0, false)
   }, [reset, fetchProducts])
 
+  // Track if this is the first mount to avoid unnecessary resets on navigation
+  const isFirstMountRef = useRef(true)
+  const prevFiltersRef = useRef<string>('')
+  const hasInitialLoadRef = useRef(false) // Track if initial load has happened
+
   // Initial load - reset and fetch when filters change
   useEffect(() => {
     if (!enabled) return
+    
+    // Don't run if currently loading (prevents interference with load-more)
+    if (loadingRef.current) return
+
+    // Build filter signature to detect actual filter changes
+    const filterSig = JSON.stringify({ category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina, supplier })
+    const filtersChanged = filterSig !== prevFiltersRef.current
+    prevFiltersRef.current = filterSig
 
     // Build a stable signature for categories (order-independent)
     const sig = Array.isArray(categories) ? [...categories].sort().join(',') : 'undefined'
-    if (prevCategoriesSigRef.current !== sig) {
-      // Categories actually changed → clear cache once
-      if (Array.isArray(categories)) {
-        const { clearCache } = require('@/lib/fetch-cache')
-        clearCache('/api/products')
+    if (prevCategoriesSigRef.current !== sig && Array.isArray(categories)) {
+      // Categories actually changed → clear fetch cache (but keep sessionStorage cache for instant display)
+      // Only clear if categories actually changed (not on return navigation)
+      if (filtersChanged) {
+        // Clear cache on filter changes (async import to avoid build issues)
+        import('@/lib/fetch-cache').then(({ clearCache }) => {
+          clearCache('/api/products')
+        }).catch(() => {
+          // Ignore if module not available
+        })
       }
+      prevCategoriesSigRef.current = sig
+    } else if (prevCategoriesSigRef.current === null) {
       prevCategoriesSigRef.current = sig
     }
 
-    // Debounced cooldown to avoid immediate double-fetch after reset
-    // CRITICAL: For search queries, do hard reset (clear products) to prevent showing wrong products
-    // For other filters, use soft reset to keep products visible during filtering
-    const isSearchActive = search && search.trim().length > 0
-    reset(isSearchActive) // Hard reset (clear products) for search, soft reset for other filters
-    
-    if (cooldownTimeoutRef.current) {
-      clearTimeout(cooldownTimeoutRef.current)
-      cooldownTimeoutRef.current = null
+    // On first mount or when returning (no filter change), check cache first
+    if (isFirstMountRef.current || !filtersChanged) {
+      isFirstMountRef.current = false
+      
+      // CRITICAL: If products already exist (from load-more), don't reset them!
+      if (products.length > 0 && hasInitialLoadRef.current) {
+        return
+      }
+      
+      // Check cache BEFORE resetting - if cache exists, use it immediately
+      if (typeof window !== 'undefined') {
+        try {
+          const cacheKey = `products_${JSON.stringify({ category, brand, search, minPrice, maxPrice, categories, inStock, isChina, supplier, sortBy, sortOrder })}_${initialOffset}_${limit}`
+          const cached = sessionStorage.getItem(cacheKey)
+          if (cached) {
+            const cacheData = JSON.parse(cached)
+            const now = Date.now()
+            // Use cached data if less than 5 minutes old
+            if (cacheData.timestamp && (now - cacheData.timestamp) < 5 * 60 * 1000 && cacheData.products?.length > 0) {
+              // Set cached products immediately without reset
+              setProducts(cacheData.products || [])
+              setHasMore(cacheData.hasMore !== undefined ? cacheData.hasMore : true)
+              setTotalCount(cacheData.totalCount || 0)
+              setLoading(false)
+              setFiltering(false)
+              loadingRef.current = false
+              hasInitialLoadRef.current = true
+              
+              // Fetch fresh data in background immediately (stale-while-revalidate)
+              // No delay needed - cached products already displayed
+              fetchProducts(initialOffset, false)
+              return // Skip reset and cooldown - products already shown
+            }
+          }
+        } catch (e) {
+          // Ignore cache errors, continue with normal flow
+        }
+      }
     }
-    // Reduced cooldown from 500-800ms to 200-400ms for faster response
-    // Still prevents double-fetch but reduces perceived latency
-    const cooldownMs = 200 + Math.floor(Math.random() * 200) // 200–400ms
-    cooldownTimeoutRef.current = setTimeout(() => {
+
+    // Only reset if filters actually changed (not on first mount or return)
+    // CRITICAL: Don't fetch if we already have products (from load-more) unless filters changed
+    if (filtersChanged) {
+      const isSearchActive = search && search.trim().length > 0
+      reset(isSearchActive)
+      hasInitialLoadRef.current = false // Reset flag on filter change
+      
+      // Clear any existing timeout
+      if (cooldownTimeoutRef.current) {
+        clearTimeout(cooldownTimeoutRef.current)
+        cooldownTimeoutRef.current = null
+      }
+      
+      // Fetch immediately for filter changes (no cooldown for faster response)
       fetchProducts(initialOffset, false)
-    }, cooldownMs)
+    } else if (!hasInitialLoadRef.current && products.length === 0 && !loadingRef.current) {
+      // Only fetch on first mount if no products exist and initial load hasn't happened
+      // Don't fetch if products.length > 0 (from load-more) - this prevents reset
+      // Don't fetch if already loading (prevents interference with load-more)
+      hasInitialLoadRef.current = true
+      fetchProducts(initialOffset, false)
+    }
+    
     return () => {
       if (abortControllerRef.current) {
         try { abortControllerRef.current.abort() } catch {}
@@ -400,7 +549,7 @@ export function useInfiniteProducts(options: InfiniteProductsOptions = {}): Infi
         cooldownTimeoutRef.current = null
       }
     }
-  }, [enabled, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier, initialOffset])
+  }, [enabled, category, brand, search, sortBy, sortOrder, useOptimized, useMaterializedView, minPrice, maxPrice, categories, inStock, isChina, supplier, initialOffset, limit, fetchProducts, reset, products.length])
 
   return {
     products,

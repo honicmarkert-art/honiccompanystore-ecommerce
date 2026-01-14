@@ -81,8 +81,7 @@ export function useCategories(): UseCategoriesReturn {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch categories'
       setError(errorMessage)
-      console.error('Categories fetch error:', err)
-    } finally {
+      } finally {
       setIsLoading(false)
     }
   }, [])

@@ -59,7 +59,6 @@ export async function GET(request: NextRequest) {
       .order('display_order', { ascending: true })
 
     if (plansError) {
-      console.error('Error fetching supplier plans:', plansError)
       return NextResponse.json(
         { error: 'Failed to fetch supplier plans' },
         { status: 500 }
@@ -110,7 +109,6 @@ export async function GET(request: NextRequest) {
       }
     })
   } catch (error) {
-    console.error('Error in supplier-plans API:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

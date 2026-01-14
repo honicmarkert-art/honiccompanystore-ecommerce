@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
         // ClickPesa supports multiple payment methods: mobile money, cards, bank transfers
         const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
                        process.env.NEXT_PUBLIC_APP_URL ||
-                       (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined)
+                       (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : undefined)
         
         if (!baseUrl) {
           logger.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')

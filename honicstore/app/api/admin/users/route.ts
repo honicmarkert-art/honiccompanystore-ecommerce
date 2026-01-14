@@ -1,17 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData, CACHE_TTL } from '@/lib/database-optimization'
+import { logError, createErrorResponse } from '@/lib/error-handler'
+import { logger } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 // GET /api/admin/users - Fetch all users with their auth data
 export async function GET(request: NextRequest) {
-  try {
-    // Validate admin access
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_users_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/users',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Check cache
+      const cacheKey = 'admin_users_all'
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            'X-Cache': 'HIT',
+            'Cache-Control': 'private, max-age=60' // 1 minute cache
+          }
+        })
+      }
+
+      // Validate admin access
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_users_get',
+          endpoint: '/api/admin/users'
+        })
+        return authError
+      }
 
     const supabase = createAdminSupabaseClient()
     
@@ -21,13 +62,14 @@ export async function GET(request: NextRequest) {
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (profilesError) {
-      console.error('[API][Admin][Users] Database error:', profilesError)
-      return NextResponse.json(
-        { error: 'Failed to fetch users', details: profilesError.message },
-        { status: 500 }
-      )
-    }
+      if (profilesError) {
+        logError(profilesError, {
+          userId: user.id,
+          action: 'admin_users_get',
+          endpoint: '/api/admin/users'
+        })
+        return createErrorResponse(profilesError, 500)
+      }
 
     // Fetch auth data for all users (last_sign_in_at, email_confirmed_at)
     // Note: Supabase admin API doesn't support batch fetching, so we fetch individually
@@ -81,16 +123,27 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({
-      success: true,
-      users
-    })
+      const responseData = {
+        success: true,
+        users
+      }
 
-  } catch (error: any) {
-    console.error('[API][Admin][Users] Unexpected error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch users', details: error.message },
-      { status: 500 }
-    )
-  }
+      // Cache response (1 minute TTL for user list)
+      setCachedData(cacheKey, responseData, 60000)
+
+      return NextResponse.json(responseData, {
+        headers: {
+          'X-Cache': 'MISS',
+          'Cache-Control': 'private, max-age=60'
+        }
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        action: 'admin_users_get',
+        endpoint: '/api/admin/users'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }

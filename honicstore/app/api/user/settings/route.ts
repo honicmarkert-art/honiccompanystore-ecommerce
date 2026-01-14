@@ -53,7 +53,6 @@ export async function GET(request: NextRequest) {
       .single()
 
     if (profileError) {
-      console.error('Error fetching user settings:', profileError)
       // Return default settings if profile doesn't exist
       return NextResponse.json({
         settings: {
@@ -73,7 +72,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error in user settings GET:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -127,7 +125,6 @@ export async function POST(request: NextRequest) {
       })
 
     if (updateError) {
-      console.error('Error updating user settings:', updateError)
       return NextResponse.json(
         { error: 'Failed to update settings' },
         { status: 500 }
@@ -147,7 +144,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.error('Error in user settings POST:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

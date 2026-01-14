@@ -736,7 +736,7 @@ export default function CookiePolicyPage() {
                           <div>
                             <p className={cn("text-sm font-medium", themeClasses.mainText)}>Email</p>
                             <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {adminSettings?.contactEmail || 'privacy@honic.co'}
+                              {adminSettings?.contactEmail || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || process.env.NEXT_PUBLIC_LEGAL_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co'}
                             </p>
                           </div>
                         </div>
@@ -778,7 +778,7 @@ export default function CookiePolicyPage() {
                     <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
                       <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Data Protection Officer</h4>
                       <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                        For GDPR-related cookie inquiries, you can also contact our Data Protection Officer at dpo@honic.co
+                        For GDPR-related cookie inquiries, you can also contact our Data Protection Officer at {process.env.NEXT_PUBLIC_DPO_EMAIL || process.env.DPO_EMAIL || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co'}
                       </p>
                     </div>
                   </CardContent>

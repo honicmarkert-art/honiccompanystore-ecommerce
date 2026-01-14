@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { logError, createErrorResponse } from '@/lib/error-handler'
+import { buildUrl } from '@/lib/url-utils'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -10,73 +14,110 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ orderId: string }> }
 ) {
-  try {
-    const { orderId } = await params
-    
-    // Validate admin access
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
+  return performanceMonitor.measure('admin_orders_send_confirmation_email_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/orders/[orderId]/send-confirmation-email',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      const { orderId } = await params
+      
+      // Validate admin access
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_orders_send_confirmation_email_post',
+          endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
+        })
+        return authError
+      }
+
+      const supabase = createAdminSupabaseClient()
+      
+      // Get order by reference_id or order_number
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('*')
+        .or(`reference_id.eq.${orderId},order_number.eq.${orderId},id.eq.${orderId}`)
+        .single()
+
+      if (orderError || !order) {
+        return NextResponse.json(
+          { error: 'Order not found' },
+          { status: 404 }
+        )
+      }
+
+      // Check if order is paid
+      if (order.payment_status !== 'paid' && order.payment_status !== 'success') {
+        return NextResponse.json(
+          { error: 'Order is not paid. Email will only be sent for paid orders.' },
+          { status: 400 }
+        )
+      }
+
+      // Send payment confirmation email
+      const emailResult = await sendPaymentConfirmation(order, supabase)
+
+      if (!emailResult.success) {
+        logError(new Error(emailResult.error || 'Failed to send email'), {
+          userId: user.id,
+          action: 'admin_orders_send_confirmation_email_post',
+          endpoint: '/api/admin/orders/[orderId]/send-confirmation-email',
+          metadata: { orderId }
+        })
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'Failed to send confirmation email', 
+            details: emailResult.error 
+          },
+          { status: 500 }
+        )
+      }
+
+      // Log admin action
+      logSecurityEvent('CONFIRMATION_EMAIL_SENT', user.id, {
+        orderId: order.id,
+        orderNumber: order.order_number,
+        endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: 'Order confirmation email sent successfully',
+        orderNumber: order.order_number || order.id
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        action: 'admin_orders_send_confirmation_email_post',
+        endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
+      })
+      return createErrorResponse(error, 500)
     }
-
-    const supabase = createAdminSupabaseClient()
-    
-    // Get order by reference_id or order_number
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .select('*')
-      .or(`reference_id.eq.${orderId},order_number.eq.${orderId},id.eq.${orderId}`)
-      .single()
-
-    if (orderError || !order) {
-      return NextResponse.json(
-        { error: 'Order not found' },
-        { status: 404 }
-      )
-    }
-
-    // Check if order is paid
-    if (order.payment_status !== 'paid' && order.payment_status !== 'success') {
-      return NextResponse.json(
-        { error: 'Order is not paid. Email will only be sent for paid orders.' },
-        { status: 400 }
-      )
-    }
-
-    // Send payment confirmation email
-    const emailResult = await sendPaymentConfirmation(order)
-
-    if (!emailResult.success) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Failed to send confirmation email', 
-          details: emailResult.error 
-        },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: 'Order confirmation email sent successfully',
-      orderNumber: order.order_number || order.id
-    })
-
-  } catch (error: any) {
-    logger.error('Error sending confirmation email:', error)
-    return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
-      { status: 500 }
-    )
-  }
+  })
 }
 
 // Function to send payment confirmation
-async function sendPaymentConfirmation(order: any) {
+async function sendPaymentConfirmation(order: any, supabase: any) {
   try {
     const { sendOrderConfirmationEmail } = await import('@/lib/user-email-service')
-    const supabase = createAdminSupabaseClient()
     
     // Get customer email - Priority: logged-in user's email, then shipping/billing email
     let customerEmail: string | null = null
@@ -156,14 +197,8 @@ async function sendPaymentConfirmation(order: any) {
       shippingAddress: shippingAddress || {},
       billingAddress: billingAddress || shippingAddress || {},
       paymentMethod: order.payment_method || 'ClickPesa',
-      trackingUrl: order.tracking_url || (() => {
-        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '')
-        return baseUrl ? `${baseUrl}/account/orders/${order.order_number || order.id}` : ''
-      })(),
-      invoiceUrl: (() => {
-        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '')
-        return baseUrl ? `${baseUrl}/api/user/orders/${order.order_number || order.id}/invoice` : ''
-      })()
+      trackingUrl: order.tracking_url || buildUrl(`/account/orders/${order.order_number || order.id}`),
+      invoiceUrl: buildUrl(`/api/user/orders/${order.order_number || order.id}/invoice`)
     })
 
     if (!emailResult.success) {
@@ -178,6 +213,3 @@ async function sendPaymentConfirmation(order: any) {
     return { success: false, error: error.message }
   }
 }
-
-
-

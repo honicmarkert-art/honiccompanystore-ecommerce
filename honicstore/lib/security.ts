@@ -36,7 +36,7 @@ export const CSP_POLICY = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https: http:",
   "font-src 'self' https://fonts.gstatic.com",
-  "connect-src 'self' https://*.supabase.co https://api.clickpesa.com wss://*.supabase.co",
+  `connect-src 'self' https://*.supabase.co ${process.env.CLICKPESA_API_URL || process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'} wss://*.supabase.co`,
   "media-src 'self' data: blob: https: http:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -112,8 +112,17 @@ export function validateCSRFToken(request: NextRequest): boolean {
   }
   
   // Use constant-time comparison to prevent timing attacks
-  return token.length === cookieToken.length && 
-         token === cookieToken
+  if (token.length !== cookieToken.length) {
+    return false
+  }
+  
+  // Constant-time string comparison
+  let result = 0
+  for (let i = 0; i < token.length; i++) {
+    result |= token.charCodeAt(i) ^ cookieToken.charCodeAt(i)
+  }
+  
+  return result === 0
 }
 
 // Input sanitization

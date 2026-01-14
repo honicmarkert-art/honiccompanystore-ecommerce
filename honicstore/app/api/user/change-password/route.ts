@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     
     if (authError || !user || !user.email || !user.id) {
-      console.warn(`[SECURITY] Password change attempt with invalid session: ${getClientIP(request)}`)
+      }`)
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -126,7 +126,6 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json()
     } catch (error) {
-      console.warn(`[SECURITY] Invalid JSON in password change request from ${clientIP}`)
       return NextResponse.json(
         { error: 'Invalid request format' },
         { status: 400 }
@@ -148,7 +147,6 @@ export async function POST(request: NextRequest) {
       // Rate limiting
       const rateLimitCheck = checkUserRateLimit(userId, true)
       if (!rateLimitCheck.allowed) {
-        console.warn(`[SECURITY] Rate limit exceeded for password change OTP request: User ${userId}, IP ${clientIP}`)
         return NextResponse.json(
           { error: rateLimitCheck.reason || 'Too many requests. Please try again later.' },
           { 
@@ -213,7 +211,6 @@ export async function POST(request: NextRequest) {
       })
 
       if (signInError) {
-        console.warn(`[SECURITY] Failed password verification for password change: User ${userId}, IP ${clientIP}`)
         return NextResponse.json(
           { error: 'Current password is incorrect' },
           { status: 401 }
@@ -239,14 +236,11 @@ export async function POST(request: NextRequest) {
       const emailResult = await sendPasswordChangeOTPEmail(user.email!, otpCode, 15)
       
       if (!emailResult.success) {
-        console.error(`[ERROR] Failed to send OTP email for password change: User ${userId}`)
         return NextResponse.json(
           { error: 'Failed to send verification code. Please try again.' },
           { status: 500 }
         )
       }
-
-      console.log(`[AUDIT] Password change OTP requested: User ${userId}, IP ${clientIP}, Duration: ${Date.now() - startTime}ms`)
 
       return NextResponse.json({
         success: true,
@@ -260,7 +254,6 @@ export async function POST(request: NextRequest) {
       // Rate limiting for OTP verification
       const rateLimitCheck = checkUserRateLimit(userId, false)
       if (!rateLimitCheck.allowed) {
-        console.warn(`[SECURITY] Rate limit exceeded for password change OTP verification: User ${userId}, IP ${clientIP}`)
         return NextResponse.json(
           { error: rateLimitCheck.reason || 'Too many attempts. Please try again later.' },
           { 
@@ -320,7 +313,6 @@ export async function POST(request: NextRequest) {
       // Verify password matches the one from step 1
       const storedRequest = passwordChangeRequests.get(userId)
       if (!storedRequest) {
-        console.warn(`[SECURITY] Password change OTP verification without valid request: User ${userId}, IP ${clientIP}`)
         return NextResponse.json(
           { error: 'Password change request expired or invalid. Please start over.' },
           { status: 400 }
@@ -339,7 +331,6 @@ export async function POST(request: NextRequest) {
       // Verify password hash matches
       const passwordHash = hashPassword(sanitizedNewPassword)
       if (passwordHash !== storedRequest.passwordHash) {
-        console.warn(`[SECURITY] Password mismatch in password change verification: User ${userId}, IP ${clientIP}`)
         return NextResponse.json(
           { error: 'New password does not match the password from your request. Please start over.' },
           { status: 400 }
@@ -350,7 +341,6 @@ export async function POST(request: NextRequest) {
       const otpResult = otpManager.validateOTP(user.email!, 'password-change', sanitizedOtpCode)
       
       if (!otpResult.valid) {
-        console.warn(`[SECURITY] Invalid OTP attempt for password change: User ${userId}, IP ${clientIP}, ${otpResult.message}`)
         return NextResponse.json(
           { error: otpResult.message || 'Invalid or expired verification code' },
           { status: 400 }
@@ -366,14 +356,11 @@ export async function POST(request: NextRequest) {
       })
 
       if (updateError) {
-        console.error(`[ERROR] Failed to update password: User ${userId}, Error: ${updateError.message}`)
         return NextResponse.json(
           { error: 'Failed to update password. Please try again.' },
           { status: 500 }
         )
       }
-
-      console.log(`[AUDIT] Password changed successfully: User ${userId}, IP ${clientIP}, Duration: ${Date.now() - startTime}ms`)
 
       return NextResponse.json({
         success: true,
@@ -387,7 +374,7 @@ export async function POST(request: NextRequest) {
     )
   } catch (error: any) {
     const errorMessage = error.message || 'Unknown error'
-    console.error(`[ERROR] Password change error: User ${userId || 'unknown'}, IP ${getClientIP(request)}, Error: ${errorMessage}`)
+    }, Error: ${errorMessage}`)
     
     // Don't expose internal error details
     return NextResponse.json(

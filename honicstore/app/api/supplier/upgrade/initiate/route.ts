@@ -189,12 +189,6 @@ export async function POST(request: NextRequest) {
 
     if (updateError) {
       logger.error('Error creating upgrade transaction:', updateError)
-      console.error('Database update error details:', {
-        message: updateError.message,
-        details: updateError.details,
-        hint: updateError.hint,
-        code: updateError.code
-      })
       return NextResponse.json(
         { 
           success: false, 
@@ -239,7 +233,6 @@ export async function POST(request: NextRequest) {
         }
       )
     } catch (notifError) {
-      console.error('Error notifying admins of upgrade request:', notifError)
       // Don't fail the request if notification fails
     }
 

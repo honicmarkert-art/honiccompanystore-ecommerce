@@ -19,7 +19,6 @@ export async function GET(request: NextRequest) {
       .order('brand')
 
     if (error) {
-      console.error('Error fetching brands:', error)
       return NextResponse.json(
         { error: 'Failed to fetch brands' }, 
         { status: 500 }
@@ -38,7 +37,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Brands API error:', error)
     return NextResponse.json(
       { error: 'Internal server error' }, 
       { status: 500 }

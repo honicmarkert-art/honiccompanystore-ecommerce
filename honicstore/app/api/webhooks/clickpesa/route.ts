@@ -17,41 +17,11 @@ export async function POST(request: NextRequest) {
   
   try {
     const timestamp = new Date().toISOString()
-    
-    console.log('\n' + '='.repeat(80))
-    console.log('🔔 CLICKPESA WEBHOOK RECEIVED')
-    console.log('='.repeat(80))
-    console.log('📅 Timestamp:', timestamp)
-    console.log('🌐 URL:', request.url)
-    console.log('📡 Method:', request.method)
     const body = await request.text()
     const signature = request.headers.get('x-clickpesa-signature')
     
     // Log ALL headers to see what ClickPesa actually sends
     const allHeaders = Object.fromEntries(request.headers.entries())
-    
-    console.log('\n📦 REQUEST DETAILS:')
-    console.log('  Body Length:', body.length, 'bytes')
-    console.log('  Has Signature:', !!signature)
-    console.log('  Signature Length:', signature?.length || 0)
-    console.log('  Signature (first 50 chars):', signature ? signature.substring(0, 50) + '...' : 'NOT PROVIDED')
-    
-    console.log('\n📋 ALL HEADERS:')
-    request.headers.forEach((value, key) => {
-      // Mask sensitive values
-      const displayValue = key.toLowerCase().includes('secret') || key.toLowerCase().includes('key')
-        ? '***MASKED***'
-        : value.length > 100 
-          ? value.substring(0, 100) + '...'
-          : value
-      console.log(`  ${key}: ${displayValue}`)
-    })
-    
-    console.log('\n📄 BODY CONTENT (first 500 chars):')
-    console.log(body.substring(0, 500))
-    if (body.length > 500) {
-      console.log('  ... (truncated, total length:', body.length, ')')
-    }
     
     logger.log('🔔 ClickPesa webhook received:', {
       hasSignature: !!signature,
@@ -77,14 +47,6 @@ export async function POST(request: NextRequest) {
     // Extract custom signature (remove prefix if present like "sha256=")
     const extractedCustomSignature = customSignature.replace(/^sha256=/i, '').trim()
     
-    console.log('\n🔐 SIGNATURE VALIDATION:')
-    console.log('  ClickPesa Signature (x-clickpesa-signature):', signature ? 'PRESENT' : 'NOT PROVIDED')
-    console.log('  Custom Signature (X-Webhook-Signature):', extractedCustomSignature ? 'PRESENT' : 'NOT PROVIDED')
-    console.log('  Has CLICKPESA_CHECKSUM_KEY:', hasChecksumKey)
-    console.log('  Has CLICKPESA_WEBHOOK_SECRET:', hasWebhookSecret)
-    console.log('  Secret Key Available:', !!secretKey)
-    console.log('  Secret Key Length:', secretKey?.length || 0)
-    
     logger.log('🔐 Webhook signature validation:', {
       hasClickPesaSignature: !!signature,
       hasCustomSignature: !!extractedCustomSignature,
@@ -101,15 +63,12 @@ export async function POST(request: NextRequest) {
     
     // PRIMARY: Try ClickPesa signature validation first
     if (signature && secretKey) {
-      console.log('\n🔍 Attempting ClickPesa signature validation...')
       logger.log('🔍 Validating ClickPesa signature...')
       signatureValid = verifyWebhookSignature(body, signature, secretKey)
       if (signatureValid) {
         validationMethod = 'clickpesa'
-        console.log('✅ ClickPesa signature validation PASSED')
         logger.log('✅ ClickPesa signature validation PASSED')
       } else {
-        console.log('❌ ClickPesa signature validation FAILED')
         logger.log('❌ ClickPesa signature validation FAILED')
       }
     }
@@ -118,10 +77,6 @@ export async function POST(request: NextRequest) {
     // Security is provided by ClickPesa API verification (happens later)
     // Signatures are optional - if provided, we validate them; if not, we rely on API verification
     if (!signature && !extractedCustomSignature) {
-      console.log('\n⚠️ INFO: No signature provided')
-      console.log('  ClickPesa Signature: NOT PROVIDED')
-      console.log('  Custom Signature: NOT PROVIDED')
-      console.log('  ✅ Will verify via ClickPesa API (primary security mechanism)')
       logger.log('⚠️ No signature provided - will verify via ClickPesa API', {
         hasClickPesaSignature: false,
         hasCustomSignature: false,
@@ -132,15 +87,12 @@ export async function POST(request: NextRequest) {
     
     // FALLBACK: Try custom webhook signature validation if ClickPesa signature failed or not present
     if (!signatureValid && extractedCustomSignature && secretKey) {
-      console.log('\n🔍 Attempting custom webhook signature validation (fallback - REQUIRED)...')
       logger.log('🔍 Validating custom webhook signature (fallback - REQUIRED)...')
       signatureValid = verifyCustomWebhookSignature(body, extractedCustomSignature, secretKey)
       if (signatureValid) {
         validationMethod = 'custom'
-        console.log('✅ Custom webhook signature validation PASSED (fallback)')
         logger.log('✅ Custom webhook signature validation PASSED (fallback)')
       } else {
-        console.log('❌ Custom webhook signature validation FAILED')
         logger.log('❌ Custom webhook signature validation FAILED')
       }
     }
@@ -148,11 +100,6 @@ export async function POST(request: NextRequest) {
     // REJECT only if signature was provided but validation failed
     // If no signature was provided, we'll proceed to API verification
     if ((signature || extractedCustomSignature) && !signatureValid) {
-      console.log('\n❌ SECURITY REJECTION: Invalid signature provided')
-      console.log('  Status: 401 Unauthorized')
-      console.log('  ClickPesa Signature:', signature ? 'PRESENT but INVALID' : 'NOT PROVIDED')
-      console.log('  Custom Signature:', extractedCustomSignature ? 'PRESENT but INVALID' : 'NOT PROVIDED')
-      console.log('  Secret Key:', secretKey ? 'CONFIGURED' : 'NOT CONFIGURED')
       logger.error('❌ SECURITY: Webhook rejected - Invalid signature provided', {
         hasClickPesaSignature: !!signature,
         hasCustomSignature: !!extractedCustomSignature,
@@ -168,21 +115,15 @@ export async function POST(request: NextRequest) {
       }
       
     if (signatureValid) {
-      console.log(`✅ Signature validation PASSED using ${validationMethod} method`)
       logger.log(`✅ Webhook signature validation PASSED using ${validationMethod} method`)
     } else {
-      console.log('⚠️ No signature provided - proceeding to ClickPesa API verification')
       logger.log('⚠️ No signature provided - proceeding to ClickPesa API verification (primary security)', {
         bodyLength: body.length,
         timestamp: timestamp
       })
     }
 
-    console.log('\n📦 PARSING PAYLOAD...')
     const payload = JSON.parse(body)
-    console.log('✅ Payload parsed successfully')
-    console.log('📋 Payload keys:', Object.keys(payload))
-    console.log('📋 Full payload:', JSON.stringify(payload, null, 2))
     logger.log('📦 ClickPesa webhook payload:', payload)
 
     // Extract payment information based on ClickPesa format
@@ -190,9 +131,7 @@ export async function POST(request: NextRequest) {
     const event = payload.event || payload.eventType
     const data = payload.data
     
-    console.log('\n📊 EXTRACTED DATA:')
-    console.log('  Event:', event)
-    console.log('  Data:', JSON.stringify(data, null, 2))
+    )
     
     // Handle different event types
     let paymentStatus = 'unpaid'
@@ -230,31 +169,18 @@ export async function POST(request: NextRequest) {
     }
 
     if (!orderReference) {
-      console.log('\n❌ ERROR: No order reference found in payload')
-      console.log('  Status: 400 Bad Request')
-      console.log('  Payload keys:', Object.keys(payload))
-      console.log('  Data keys:', data ? Object.keys(data) : 'No data')
       return NextResponse.json(
         { error: 'No order reference found' },
         { status: 400 }
       )
     }
     
-    console.log('\n🔍 ORDER LOOKUP:')
-    console.log('  Order Reference:', orderReference)
-    console.log('  Transaction ID:', transactionId || 'N/A')
-    console.log('  Payment Status:', paymentStatus)
-    console.log('  Amount:', amount, currency)
-
     // Find the order in our database using orderReference
     // Handle different reference formats (with/without hyphens, different cases)
     const supabase = await import('@/lib/supabase-server').then(m => m.getSupabaseClient())
     
     // Normalize the reference ID (remove hyphens, convert to lowercase)
     const normalizedReference = orderReference.replace(/[^A-Za-z0-9]/g, '').toLowerCase()
-    
-    console.log('  Normalized Reference:', normalizedReference)
-    console.log('  Searching database...')
     
     logger.log('🔍 Looking for order with reference:', {
       originalReference: orderReference,
@@ -268,17 +194,10 @@ export async function POST(request: NextRequest) {
       .eq('reference_id', normalizedReference)
       .single()
     
-    console.log('  Query 1 (normalized):', order ? '✅ FOUND' : '❌ NOT FOUND')
     if (orderError) {
-      console.log('  Error:', orderError.message)
-      console.log('  Error Code:', orderError.code)
-    }
+      }
     if (order) {
-      console.log('  Order ID:', order.id)
-      console.log('  Order Number:', order.order_number)
-      console.log('  Current Payment Status:', order.payment_status)
-      console.log('  Current Order Status:', order.status)
-    }
+      }
     
     logger.log('🔍 First query result:', {
       foundOrder: !!order,
@@ -289,7 +208,6 @@ export async function POST(request: NextRequest) {
 
     // If not found, try original reference
     if (orderError && normalizedReference !== orderReference) {
-      console.log('\n  Trying with original reference format...')
       logger.log('🔄 Trying with original reference format...')
       const result = await supabase
         .from('orders')
@@ -297,10 +215,8 @@ export async function POST(request: NextRequest) {
         .eq('reference_id', orderReference)
         .single()
       
-      console.log('  Query 2 (original):', result.data ? '✅ FOUND' : '❌ NOT FOUND')
       if (result.error) {
-        console.log('  Error:', result.error.message)
-      }
+        }
       
       logger.log('🔍 Second query result:', {
         foundOrder: !!result.data,
@@ -415,8 +331,6 @@ export async function POST(request: NextRequest) {
 
     // If order not found, check if it's a supplier upgrade payment (stored in profiles table)
     if (orderError || !order) {
-      console.log('\n⚠️ Order not found in orders table')
-      console.log('  Checking if this is a supplier upgrade payment...')
       logger.log('⚠️ Order not found, checking profiles table for supplier upgrade payment:', {
         orderReference: orderReference,
         normalizedReference: normalizedReference
@@ -441,11 +355,6 @@ export async function POST(request: NextRequest) {
       }
       
       if (profileFound) {
-        console.log('  ✅ Found supplier upgrade payment in profiles table')
-        console.log('  Profile ID:', profileFound.id)
-        console.log('  Payment Reference ID:', profileFound.payment_reference_id)
-        console.log('  Pending Plan ID:', profileFound.pending_plan_id || 'N/A')
-        console.log('  Current Payment Status:', profileFound.payment_status || 'N/A')
         logger.log('✅ Found supplier upgrade payment:', {
           profileId: profileFound.id,
           paymentReferenceId: profileFound.payment_reference_id,
@@ -453,17 +362,10 @@ export async function POST(request: NextRequest) {
         })
         
         // This is a supplier upgrade payment - handle it here
-        console.log('\n⚠️ NOTE: This is a supplier upgrade payment')
-        console.log('  Handling supplier upgrade payment update...')
-        
         // Extract transaction ID from webhook payload (same as regular orders)
         let transactionId = data.id || data.paymentId || data.transactionId || null
         
         // Verify via API for security
-        console.log('\n🔐 VERIFYING TRANSACTION WITH CLICKPESA API:')
-        console.log('  Order Reference:', orderReference)
-        console.log('  Webhook Transaction ID:', transactionId || 'N/A')
-        
         const { verifyTransactionWithClickPesa } = await import('@/lib/clickpesa-api')
         // Use supplier credentials for supplier upgrade payments
         const verification = await verifyTransactionWithClickPesa(orderReference, true)
@@ -490,13 +392,7 @@ export async function POST(request: NextRequest) {
           transactionId = orderReference // Use orderReference as fallback to ensure field is never null
         }
         
-        console.log('  Verification Result:', verification.verified ? 'VERIFIED' : 'FAILED')
-        console.log('  ClickPesa API Status:', verification.status)
-        console.log('  Transaction ID:', verification.transactionId || 'N/A')
-        
         if (!verification.verified) {
-          console.log('\n❌ SECURITY REJECTION: Transaction verification failed')
-          console.log('  Status: 401 Unauthorized')
           logger.error('❌ SECURITY: Supplier upgrade webhook rejected - Transaction verification failed', {
             orderReference: orderReference,
             profileId: profileFound.id,
@@ -524,11 +420,6 @@ export async function POST(request: NextRequest) {
         
         if (verification.transactionId && transactionId) {
           if (verification.transactionId !== transactionId) {
-            console.log('\n❌ SECURITY REJECTION: Transaction ID mismatch!')
-            console.log('  Status: 401 Unauthorized')
-            console.log('  Webhook Transaction ID:', transactionId)
-            console.log('  API Transaction ID:', verification.transactionId)
-            console.log('  ⚠️ Possible tampering detected - REJECTING webhook')
             logger.error('❌ SECURITY: Webhook rejected - Transaction ID mismatch (possible tampering)', {
               webhookTransactionId: transactionId,
               apiTransactionId: verification.transactionId,
@@ -540,8 +431,7 @@ export async function POST(request: NextRequest) {
               { status: 401 }
             )
           } else {
-            console.log('  ✅ Transaction ID matches:', transactionId)
-          }
+            }
         } else if (verification.transactionId && !transactionId) {
           // Use API transaction ID if webhook doesn't have one
           transactionId = verification.transactionId
@@ -568,11 +458,6 @@ export async function POST(request: NextRequest) {
           }
           
           if (apiMappedStatus !== paymentStatus && paymentStatus !== 'pending') {
-            console.log('\n❌ SECURITY REJECTION: Status mismatch detected!')
-            console.log('  Status: 401 Unauthorized')
-            console.log('  Webhook Status:', paymentStatus)
-            console.log('  API Status (mapped):', apiMappedStatus)
-            console.log('  ⚠️ Possible tampering detected - REJECTING webhook')
             logger.error('❌ SECURITY: Webhook rejected - Status mismatch (possible tampering)', {
               webhookStatus: paymentStatus,
               apiStatus: apiMappedStatus,
@@ -587,10 +472,8 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        console.log('\n✅ TRANSACTION VERIFIED:')
-        console.log('  ClickPesa API Status:', verifiedStatus, '(for reference only)')
-        console.log('  Webhook Status (USED):', paymentStatus)
-        console.log('  Verified Payment Status:', verifiedPaymentStatus)
+        ')
+        :', paymentStatus)
         logger.log('✅ Transaction verified - using webhook status as primary source', {
           webhookStatus: paymentStatus,
           apiStatus: verifiedStatus,
@@ -639,26 +522,18 @@ export async function POST(request: NextRequest) {
           updateData.clickpesa_transaction_id = transactionId
         }
         
-        console.log('\n💾 UPDATING SUPPLIER UPGRADE PAYMENT:')
-        console.log('  Update Data:', JSON.stringify(updateData, null, 2))
-        
         const { error: updateError } = await adminSupabase
           .from('profiles')
           .update(updateData)
           .eq('id', profileFound.id)
         
         if (updateError) {
-          console.log('\n❌ ERROR: Failed to update supplier upgrade payment')
-          console.log('  Error:', updateError.message)
           logger.error('Error updating supplier upgrade payment:', updateError)
           return NextResponse.json(
             { error: 'Failed to update supplier upgrade payment' },
             { status: 500 }
           )
         }
-        
-        console.log('✅ Supplier upgrade payment updated successfully')
-        console.log('  Payment Status:', verifiedPaymentStatus)
         
         // Notify supplier when payment is successful
         if (verifiedPaymentStatus === 'paid' && profileFound.pending_plan_id) {
@@ -686,9 +561,7 @@ export async function POST(request: NextRequest) {
               }
             )
             
-            console.log('✅ Notification created for supplier payment success')
-          } catch (notifError) {
-            console.error('Error creating payment success notification for supplier:', notifError)
+            } catch (notifError) {
             // Don't fail the webhook if notification fails
           }
         }
@@ -704,11 +577,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Not found in either table
-      console.log('\n❌ ERROR: Transaction not found in database')
-      console.log('  Status: 404 Not Found')
-      console.log('  Searched in: orders table, profiles table')
-      console.log('  Searched References:', [normalizedReference, orderReference].filter(Boolean))
-      console.log('  Last Error:', orderError?.message || profileError?.message || 'No transaction found')
+      )
       logger.error('❌ Transaction not found in orders or profiles table:', {
         orderReference: orderReference,
         normalizedReference: normalizedReference,
@@ -720,16 +589,6 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       )
     }
-
-    console.log('\n✅ ORDER FOUND:')
-    console.log('  Order ID:', order.id)
-    console.log('  Order Number:', order.order_number)
-    console.log('  Reference ID:', order.reference_id)
-    console.log('  Current Payment Status:', order.payment_status)
-    console.log('  Current Order Status:', order.status)
-    console.log('  Is Retry Payment:', order.payment_status === 'failed' || order.payment_status === 'pending')
-    console.log('  User ID:', order.user_id || 'Guest')
-    console.log('  Total Amount:', order.total_amount, order.currency || 'TZS')
 
     logger.log('✅ Order found:', {
       orderId: order.id,
@@ -749,7 +608,6 @@ export async function POST(request: NextRequest) {
     
     if (isManualTrigger) {
       // Skip API verification for manual triggers
-      console.log('\n🔧 MANUAL TRIGGER DETECTED - Skipping API verification')
       logger.log('🔧 Manual trigger detected - skipping ClickPesa API verification', {
         orderReference: orderReference,
         webhookPaymentStatus: paymentStatus
@@ -766,8 +624,6 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // SECURITY: Always verify transaction via ClickPesa API before marking as confirmed
-      console.log('\n🔐 VERIFYING TRANSACTION WITH CLICKPESA API:')
-      console.log('  Order Reference:', orderReference)
       logger.log('🔐 Verifying transaction with ClickPesa API before confirmation:', {
         orderReference: orderReference,
         webhookPaymentStatus: paymentStatus,
@@ -777,19 +633,11 @@ export async function POST(request: NextRequest) {
       // Use regular credentials for regular orders
       verification = await verifyTransactionWithClickPesa(orderReference, false)
       
-      console.log('  Verification Result:', verification.verified ? 'VERIFIED' : 'FAILED')
-      console.log('  ClickPesa API Status:', verification.status)
-      console.log('  Transaction ID:', verification.transactionId || 'N/A')
-      console.log('  Amount:', verification.amount || 'N/A', verification.currency || 'N/A')
       if (verification.error) {
-        console.log('  Error:', verification.error)
-      }
+        }
       
       // If verification failed, reject the webhook
       if (!verification.verified) {
-        console.log('\n❌ SECURITY REJECTION: Transaction verification failed')
-        console.log('  Status: 401 Unauthorized')
-        console.log('  Reason: Could not verify transaction with ClickPesa API')
         logger.error('❌ SECURITY: Webhook rejected - Transaction verification failed', {
           orderReference: orderReference,
           orderId: order.id,
@@ -831,20 +679,12 @@ export async function POST(request: NextRequest) {
     }
     
     if (isManualTrigger) {
-      console.log('\n✅ MANUAL TRIGGER PROCESSED:')
-      console.log('  Payment Status:', verifiedPaymentStatus)
-      console.log('  Transaction ID:', transactionId)
       logger.log('✅ Manual trigger processed - payment status updated', {
         webhookStatus: paymentStatus,
         orderReference: orderReference,
         transactionId: transactionId
       })
     } else {
-      console.log('\n✅ TRANSACTION VERIFIED:')
-      console.log('  ClickPesa API Status:', verifiedStatus, '(for reference only)')
-      console.log('  Webhook Status (USED):', paymentStatus)
-      console.log('  Verified Payment Status:', verifiedPaymentStatus)
-      console.log('  Transaction ID (FINAL):', transactionId)
       logger.log('✅ Transaction verified - using webhook status as primary source', {
         webhookStatus: paymentStatus,
         apiStatus: verifiedStatus,
@@ -861,12 +701,8 @@ export async function POST(request: NextRequest) {
       orderStatus = 'pending' // Admin still needs to confirm
     }
 
-    console.log('\n💾 UPDATING ORDER:')
-    console.log('  New Payment Status (from webhook):', verifiedPaymentStatus)
-    console.log('  New Order Status:', orderStatus)
-    console.log('  Transaction ID:', transactionId)
-    console.log('  Failure Reason:', failureReason || 'N/A')
-    console.log('  Client IP:', request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'N/A')
+    const clientIP = request.headers.get('x-forwarded-for') 
+      || request.headers.get('x-real-ip') || 'N/A'
 
     // Use secure order update with reference_id protection
     // Always use webhook status as primary source
@@ -879,8 +715,6 @@ export async function POST(request: NextRequest) {
       payment_method: 'clickpesa',
       payment_timestamp: paymentTimestamp
     }
-    
-    console.log('  Update Data:', JSON.stringify(updateData, null, 2))
 
     const updateResult = await secureOrderUpdate(order.id, updateData, undefined, clientIP || undefined)
     
@@ -891,9 +725,6 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    logger.log('✅ Order updated securely with reference_id protection')
-
-
     logger.log('✅ Order updated successfully:', {
       orderId: order.id,
       paymentStatus,
@@ -1255,19 +1086,7 @@ export async function POST(request: NextRequest) {
     const isRetryPayment = order.payment_status === 'failed' || order.payment_status === 'pending'
     const processingTime = Date.now() - startTime
     
-    console.log('\n✅ WEBHOOK SUCCESS:')
-    console.log('  Order ID:', order.id)
-    console.log('  Order Number:', order.order_number)
-    console.log('  Reference ID:', order.reference_id)
-    console.log('  Payment Status:', paymentStatus)
-    console.log('  Order Status:', orderStatus)
-    console.log('  Is Retry Payment:', isRetryPayment)
-    console.log('  Previous Payment Status:', order.payment_status)
-    console.log('  Failure Reason:', failureReason || 'N/A')
-    console.log('  Processing Time:', processingTime, 'ms')
-    console.log('='.repeat(80))
-    console.log('')
-    
+    )
     return NextResponse.json({
       success: true,
       message: isRetryPayment ? 'Retry payment processed successfully' : 'Initial payment processed successfully',
@@ -1284,18 +1103,6 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     const processingTime = Date.now() - startTime
-    console.log('\n❌ WEBHOOK ERROR:')
-    console.log('  Status: 500 Internal Server Error')
-    console.log('  Error Type:', error instanceof Error ? error.constructor.name : typeof error)
-    console.log('  Error Message:', error instanceof Error ? error.message : String(error))
-    if (error instanceof Error && error.stack) {
-      console.log('  Stack Trace:')
-      console.log(error.stack.split('\n').slice(0, 10).map(line => '    ' + line).join('\n'))
-    }
-    console.log('  Processing Time:', processingTime, 'ms')
-    console.log('='.repeat(80))
-    console.log('')
-    
     logger.error('❌ ClickPesa webhook error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },

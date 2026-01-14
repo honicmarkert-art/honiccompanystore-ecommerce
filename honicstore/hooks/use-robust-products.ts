@@ -164,7 +164,6 @@ export function useRobustProducts(options: UseRobustProductsOptions = {}): UseRo
       .then(response => {
         if (response.status === 429) {
           // Handle rate limiting gracefully - don't throw error
-          console.warn('Rate limited when loading more products')
           return null // Return null instead of throwing
         }
         if (!response.ok) {
@@ -190,7 +189,6 @@ export function useRobustProducts(options: UseRobustProductsOptions = {}): UseRo
         // If newData is null (rate limited), don't update state
       })
       .catch(err => {
-        console.error('Error loading more products:', err)
         // Don't update state on error to prevent UI issues
       })
       .finally(() => {
@@ -241,8 +239,7 @@ export function useRobustProducts(options: UseRobustProductsOptions = {}): UseRo
         setHasMore(uniqueProducts.length === limit)
       })
       .catch(err => {
-        console.error('Error searching products:', err)
-      })
+        })
   }, [currentFilters, buildEndpoint, limit])
 
   // Filter by category
@@ -279,8 +276,7 @@ export function useRobustProducts(options: UseRobustProductsOptions = {}): UseRo
         setHasMore(uniqueProducts.length === limit)
       })
       .catch(err => {
-        console.error('Error filtering by category:', err)
-      })
+        })
   }, [currentFilters, buildEndpoint, limit])
 
   // Filter by brand
@@ -317,8 +313,7 @@ export function useRobustProducts(options: UseRobustProductsOptions = {}): UseRo
         setHasMore(uniqueProducts.length === limit)
       })
       .catch(err => {
-        console.error('Error filtering by brand:', err)
-      })
+        })
   }, [currentFilters, buildEndpoint, limit])
 
   // Clear all filters
@@ -355,8 +350,7 @@ export function useRobustProducts(options: UseRobustProductsOptions = {}): UseRo
         setHasMore(uniqueProducts.length === limit)
       })
       .catch(err => {
-        console.error('Error clearing filters:', err)
-      })
+        })
   }, [buildEndpoint, limit])
 
   return {

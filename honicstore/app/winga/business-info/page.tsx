@@ -92,8 +92,7 @@ function WingaBusinessInfoContent() {
           }
         }
       } catch (error) {
-        console.error('Error loading profile:', error)
-      } finally {
+        } finally {
         setIsLoading(false)
       }
     }

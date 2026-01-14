@@ -108,7 +108,6 @@ export default function ContactPage() {
         })
       }
     } catch (error) {
-      console.error('Contact form error:', error)
       toast({
         title: "Error",
         description: "Failed to send message. Please try again.",
@@ -129,7 +128,7 @@ export default function ContactPage() {
     {
       icon: <Mail className="w-5 h-5" />,
       title: "Email",
-      details: ["sales@honiccompanystore.com", "support@honiccompanystore.com"],
+      details: [process.env.NEXT_PUBLIC_SALES_EMAIL || process.env.SALES_EMAIL || "sales@honiccompanystore.com", process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || "support@honiccompanystore.com"],
       description: "Send us an email anytime"
     },
     {

@@ -116,7 +116,6 @@ export default function SupplierPlansPage() {
         })
       }
     } catch (error) {
-      console.error('Error fetching plans:', error)
       toast({
         title: "Error",
         description: "Failed to fetch supplier plans",

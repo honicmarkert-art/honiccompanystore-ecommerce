@@ -206,15 +206,15 @@ export function useProducts(): UseProductsReturn {
       const isAdminPage = pathname.startsWith('/admin')
       const apiUrl = isAdminPage ? '/api/products' : '/api/products?minimal=true'
       
-      // Add cache busting to force fresh data
-      const cacheBustUrl = `${apiUrl}${apiUrl.includes('?') ? '&' : '?'}cache_bust=${Date.now()}`
+      // Use cache-friendly URL (no cache busting) to enable proper client-side caching
+      // Browser and Next.js will handle caching based on Cache-Control headers
       
       preloadPromise = Promise.race([
-        fetch(cacheBustUrl, {
+        fetch(apiUrl, {
           headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+            'Content-Type': 'application/json',
           },
+          cache: 'default', // Use default cache strategy
           signal: AbortSignal.timeout(30000) // 30 second timeout
         }),
         new Promise((_, reject) => 

@@ -93,7 +93,6 @@ export default function PayoutAccountsPage() {
       setAccounts(data.accounts || [])
       setFilteredAccounts(data.accounts || [])
     } catch (error: any) {
-      console.error('Error fetching payout accounts:', error)
       toast({
         title: 'Error',
         description: error.message || 'Failed to fetch payout accounts',

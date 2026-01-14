@@ -118,12 +118,7 @@ export default function AdminOrdersPage() {
     try {
       const res = await fetch(`/api/admin/orders?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' })
       if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        console.error('[AdminOrders] /api/admin/orders failed:', res.status, res.statusText, text?.slice(0,200))
-      }
-      
-      if (!res.ok) {
-        const errorText = await res.text()
+        const errorText = await res.text().catch(() => '')
         throw new Error(`Failed to fetch orders: ${res.status} ${res.statusText}`)
       }
       
@@ -575,9 +570,6 @@ export default function AdminOrdersPage() {
     )
 
     try {
-      // Debug: Log the order object to see what fields exist
-      console.log('🔍 Full order object:', JSON.stringify(order, null, 2))
-      
       // Create a confirmed order record for tracking
       const confirmedOrderData = {
         originalOrderId: order.id,
@@ -593,9 +585,6 @@ export default function AdminOrdersPage() {
         confirmedBy: null, // Set to null since we don't have admin user ID
         orderItems: order.order_items || []
       }
-      
-      // Debug: Log what we're sending
-      console.log('📦 Data being sent to API:', JSON.stringify(confirmedOrderData, null, 2))
 
       const confirmResponse = await fetch('/api/admin/confirmed-orders', {
         method: 'POST',
@@ -626,11 +615,9 @@ export default function AdminOrdersPage() {
             logger.log('✅ Order status updated in database to:', newStatus)
           } else {
             const errorData = await updateResponse.json().catch(() => ({ error: 'Unknown error' }))
-            console.error('❌ Failed to update order status in database:', errorData)
             logger.log('⚠️ Continuing with local state update only')
           }
         } catch (updateError) {
-          console.error('❌ Error updating order status in database:', updateError)
           logger.log('⚠️ Continuing with local state update only')
         }
         
@@ -650,18 +637,10 @@ export default function AdminOrdersPage() {
         logger.log('✅ ' + statusMessage)
       } else {
         const errorData = await confirmResponse.json().catch(() => ({ error: 'Unknown error' }))
-        console.error('❌ Failed to create confirmed order record:', errorData)
-        console.error('Response status:', confirmResponse.status)
-        console.error('Request data sent:', {
-          originalOrderId: confirmedOrderData.originalOrderId,
-          orderNumber: confirmedOrderData.orderNumber,
-          referenceId: confirmedOrderData.referenceId
-        })
         return
       }
     } catch (error) {
-      console.error('Error in confirmOrder:', error)
-    } finally {
+      } finally {
       // Clear loading state
       setOrders(prevOrders => 
         prevOrders.map(o => 
@@ -698,9 +677,6 @@ export default function AdminOrdersPage() {
           prevOrders.filter(o => o.id !== order.id)
         )
       } else {
-        console.error('❌ Delete request failed with status:', deleteResponse.status)
-        console.error('❌ Delete request status text:', deleteResponse.statusText)
-        
         let deleteErrorData
         try {
           deleteErrorData = await deleteResponse.json()
@@ -708,12 +684,9 @@ export default function AdminOrdersPage() {
           deleteErrorData = { error: `HTTP ${deleteResponse.status}: ${deleteResponse.statusText}` }
         }
         
-        console.error('❌ Failed to clear confirmed order:', deleteErrorData)
-        console.error('❌ Order details:', { id: order.id, orderNumber: order.orderNumber, status: order.status, paymentStatus: order.paymentStatus })
-      }
+        }
     } catch (error) {
-      console.error('Error clearing confirmed order:', error)
-    } finally {
+      } finally {
       // Clear loading state for this specific order
       setOrders(prevOrders => 
         prevOrders.map(o => 

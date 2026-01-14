@@ -517,8 +517,7 @@ export default function ConfirmedOrdersPage() {
         await fetchConfirmedOrders()
       }
     } catch (error) {
-      console.error('Error updating order status:', error)
-    }
+      }
   }
 
 

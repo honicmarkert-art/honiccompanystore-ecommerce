@@ -33,8 +33,7 @@ function CheckoutPageContent() {
         return result.reservedOrder
       }
     } catch (error) {
-      console.error('Failed to reserve order IDs:', error)
-    }
+      }
     return null
   }
   
@@ -111,7 +110,6 @@ function CheckoutPageContent() {
       }
       
     } catch (error) {
-      console.error('Order creation failed:', error)
       toast({
         title: "Order Failed",
         description: error.message,

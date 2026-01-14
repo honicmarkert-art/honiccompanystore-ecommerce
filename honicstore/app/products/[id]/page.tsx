@@ -1,6 +1,7 @@
 "use client"
 
 import { BuyerRouteGuard } from '@/components/buyer-route-guard'
+import { ProductDetailErrorBoundary } from '@/components/product-detail-error-boundary'
 import { DialogTrigger } from "@/components/ui/dialog"
 import { SearchSuggestions } from "@/components/search-suggestions"
 import { SearchModal } from "@/components/search-modal"
@@ -90,7 +91,6 @@ import { useToast } from "@/hooks/use-toast" // Import useToast hook
 import { checkProductStock } from "@/utils/stock-validation"
 import { getLeftBadge, getRightBadge } from '@/utils/product-badges'
 import { useProducts } from "@/hooks/use-products"
-import { useOptimizedApi } from "@/hooks/use-optimized-api"
 import { useSharedDataCache } from "@/contexts/shared-data-cache"
 import { OptimizedLink, useOptimizedNavigation } from "@/components/optimized-link"
 import { type ProductVariant } from "@/hooks/use-products" // Import types from hook
@@ -99,8 +99,11 @@ import { useParams, useRouter, usePathname, useSearchParams } from "next/navigat
 import { usePublicCompanyContext } from "@/contexts/public-company-context"
 // import { getPreviousPageName } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth-context"
+import { fetchJSON, fetchWithMetrics, fetchWithRetry, type FetchMetrics } from "@/lib/fetch-utils"
 import { useWishlist } from "@/hooks/use-wishlist"
 import { useSavedLater } from "@/hooks/use-saved-later"
+import { validateReviewComment, validateRating, sanitizeString } from "@/lib/input-validation"
+import { validateProductResponse, sanitizeProductData, validateReviewResponse, sanitizeReviewData } from "@/lib/response-validation"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { useCurrency } from "@/contexts/currency-context"
 import { UserProfile } from "@/components/user-profile"
@@ -193,7 +196,7 @@ function ProductDetailPageContent() {
   const searchParams = useSearchParams()
   const { navigateWithPrefetch } = useOptimizedNavigation()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
-  const { products, isLoading, preloadProducts, fetchFullProductDetails } = useProducts()
+  const { products, isLoading, preloadProducts } = useProducts()
   const { addItem, isInCart, cartUniqueProducts } = useCart() // Use useCart hook
   const { companyName, companyLogo, companyColor, isLoaded: companyLoaded } = usePublicCompanyContext()
   
@@ -230,62 +233,202 @@ function ProductDetailPageContent() {
   // Validate product ID (but don't return early - violates Rules of Hooks!)
   const isValidProductId = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
   
-  // Fetch product data FIRST with highest priority - show details immediately when available
-  // This fetch happens immediately on mount, before anything else
-  const { 
-    data: optimizedProduct, 
-    isLoading: isOptimizedLoading, 
-    error: optimizedError
-  } = useOptimizedApi({
-    endpoint: `/api/products/${productId}`,
-    params: { minimal: false, t: Date.now() }, // Cache busting
-    ttl: 0, // No cache to force fresh data
-    staleWhileRevalidate: false,
-    refetchOnWindowFocus: false,
-    enabled: !!productId && isValidProductId, // Only fetch if valid product ID
-    refetchOnMount: true // Fetch immediately on mount - PRIORITY
-  })
-  
   // Shared data cache for cross-page data
   const { set } = useSharedDataCache()
   const productIdNumber = Number.parseInt(params.id as string)
   
-  // Direct product state for immediate display (bypasses hook delays)
-  const [directProduct, setDirectProduct] = useState<any>(null)
+  // Single optimized product state - fetch once, use CDN cache
+  const [productData, setProductData] = useState<any>(null)
+  const [isLoadingProduct, setIsLoadingProduct] = useState(false)
   
-  // Direct fetch immediately on mount - bypasses rate limiting for faster load
+  // Check cache first, then fetch - enables immediate display from cache
   const product = useMemo(() => {
-    if (directProduct && typeof directProduct === 'object' && 'id' in directProduct && directProduct.id) {
-      return directProduct
-    }
+    // Priority 1: Check shared cache (instant - 0ms)
     if (Array.isArray(products) && products.length > 0 && productIdNumber) {
       const foundProduct = products.find((p) => p.id === productIdNumber)
       if (foundProduct) {
         return foundProduct
       }
     }
-    if (optimizedProduct && typeof optimizedProduct === 'object' && 'id' in optimizedProduct && optimizedProduct.id) {
-      return optimizedProduct as any
+    // Priority 2: Use fetched product data
+    if (productData && typeof productData === 'object' && 'id' in productData && productData.id) {
+      return productData
     }
     return undefined
-  }, [directProduct, products, productIdNumber, optimizedProduct])
+  }, [products, productIdNumber, productData])
 
+  // Request deduplication - prevent duplicate API calls
+  const fetchRequestRef = useRef<Map<string, Promise<any>>>(new Map())
+  
+  // Single parallel fetch with CDN caching - ALL data in parallel, no delays
   useEffect(() => {
-    if (productIdNumber && isValidProductId && !directProduct && !product) {
-      fetch(`/api/products/${productIdNumber}?minimal=false&t=${Date.now()}`, {
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        priority: 'high' as RequestPriority
+    if (!productIdNumber || !isValidProductId || product) return
+
+    setIsLoadingProduct(true)
+    
+    // AbortController for request cancellation
+    const abortController = new AbortController()
+    const signal = abortController.signal
+    
+    // Request deduplication key
+    const requestKey = `product-${productIdNumber}`
+    
+    // Check if request is already in flight
+    if (fetchRequestRef.current.has(requestKey)) {
+      fetchRequestRef.current.get(requestKey)?.then(() => {
+        setIsLoadingProduct(false)
+      }).catch(() => {
+        setIsLoadingProduct(false)
       })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (data && data.id) {
-            setDirectProduct(data)
-          }
-        })
-        .catch(() => {})
+      return () => abortController.abort()
     }
-  }, [productIdNumber, isValidProductId, directProduct, product])
+    
+    // Performance tracking
+    const performanceMetrics: FetchMetrics[] = []
+    
+    // Helper function for safe fetch with retry, timeout, and metrics
+    const safeFetch = async <T = any>(url: string, options: RequestInit = {}): Promise<T | null> => {
+      try {
+        const { response, metrics } = await fetchWithMetrics(url, {
+          ...options,
+          signal,
+          timeout: 10000, // 10 second timeout
+          retries: 2, // Retry twice on failure
+          retryDelay: 500, // Start with 500ms delay
+          exponentialBackoff: true, // Use exponential backoff
+          headers: {
+            'Content-Type': 'application/json',
+            ...options.headers
+          },
+          cache: 'default' // Use CDN cache
+        })
+        
+        // Track performance metrics
+        performanceMetrics.push(metrics)
+        
+        if (!response.ok) {
+          // Log non-2xx responses for monitoring
+          if (response.status >= 500) {
+            console.error(`[Product Detail] Server error ${response.status} for ${url}`, metrics)
+          }
+          return null
+        }
+        
+        return await response.json()
+      } catch (error: any) {
+        // Ignore abort errors (expected when component unmounts)
+        if (error?.name === 'AbortError' || signal.aborted) {
+          return null
+        }
+        
+        // Log metrics if available
+        if (error.metrics) {
+          performanceMetrics.push(error.metrics)
+          console.error(`[Product Detail] Fetch error for ${url}:`, error.metrics)
+        } else {
+          console.error(`[Product Detail] Fetch error for ${url}:`, error.message)
+        }
+        return null
+      }
+    }
+    
+    // Parallel fetch: ALL requests simultaneously (CDN cached)
+    const fetchPromise = Promise.all([
+      // Main product fetch (CDN cache enabled)
+      safeFetch(`/api/products/${productIdNumber}`, {
+        priority: 'high' as RequestPriority
+      }),
+      
+      // Variant images (parallel, CDN cached)
+      safeFetch(`/api/products/${productIdNumber}/variant-images?limit=5`),
+      
+      // Reviews (parallel, CDN cached)
+      safeFetch(`/api/products/${productIdNumber}/reviews`),
+      
+      // Sold count (parallel, CDN cached)
+      safeFetch(`/api/products/${productIdNumber}/sold-count`)
+    ]).then(([productResult, variantImagesData, reviewsData, soldCountData]) => {
+      // Remove from deduplication map
+      fetchRequestRef.current.delete(requestKey)
+      
+      // Log performance metrics if available
+      if (performanceMetrics.length > 0) {
+        const totalDuration = performanceMetrics.reduce((sum, m) => sum + m.duration, 0)
+        const avgDuration = totalDuration / performanceMetrics.length
+        const cacheHitRate = performanceMetrics.filter(m => m.cached).length / performanceMetrics.length
+        
+        console.log(`[Product Detail] Performance metrics:`, {
+          totalRequests: performanceMetrics.length,
+          totalDuration: `${totalDuration.toFixed(2)}ms`,
+          avgDuration: `${avgDuration.toFixed(2)}ms`,
+          cacheHitRate: `${(cacheHitRate * 100).toFixed(1)}%`,
+          metrics: performanceMetrics
+        })
+      }
+      
+      // Security: Validate product response before using
+      if (productResult && validateProductResponse(productResult)) {
+        // Sanitize product data to prevent XSS
+        const sanitizedProduct = sanitizeProductData(productResult)
+        
+        // Merge all data immediately - no delays
+        const mergedProduct = {
+          ...sanitizedProduct,
+          variantImages: variantImagesData?.variantImages || sanitizedProduct.variantImages || [],
+          reviews: reviewsData?.reviews || sanitizedProduct.reviews || [],
+          sold_count: soldCountData?.soldCount || sanitizedProduct.sold_count || 0
+        }
+        setProductData(mergedProduct)
+        
+        // Update variant images state (validate structure)
+        if (variantImagesData?.variantImages && Array.isArray(variantImagesData.variantImages)) {
+          setVariantImages(variantImagesData.variantImages)
+        }
+        
+        // Security: Validate and sanitize reviews before setting
+        if (reviewsData && validateReviewResponse(reviewsData)) {
+          const reviews = Array.isArray(reviewsData.reviews) ? reviewsData.reviews : reviewsData
+          const sanitizedReviews = Array.isArray(reviews) 
+            ? reviews.map((review: any) => sanitizeReviewData(review)).filter(Boolean)
+            : []
+          setReviews(sanitizedReviews)
+        }
+        
+        // Update sold count state
+        if (soldCountData) {
+          setSoldCount({
+            soldCount: soldCountData.soldCount || 0,
+            buyersCount: soldCountData.buyersCount || null
+          })
+    }
+      } else {
+        // Log if product not found
+        console.warn(`[Product Detail] Product ${productIdNumber} not found or invalid response`)
+      }
+      
+      setIsLoadingProduct(false)
+    }).catch((error: any) => {
+      // Remove from deduplication map on error
+      fetchRequestRef.current.delete(requestKey)
+      
+      // Only log non-abort errors
+      if (error?.name !== 'AbortError') {
+        console.error(`[Product Detail] Failed to load product ${productIdNumber}:`, error.message)
+      }
+      setIsLoadingProduct(false)
+    })
+    
+    // Store promise for deduplication
+    fetchRequestRef.current.set(requestKey, fetchPromise)
+    
+    return () => {
+      abortController.abort()
+      // Clean up deduplication map after 5 seconds
+      setTimeout(() => {
+        fetchRequestRef.current.delete(requestKey)
+      }, 5000)
+    }
+  }, [productIdNumber, isValidProductId, product])
 
   // Helpers for video rendering
   const isDirectVideoFile = (url?: string | null) => !!url && /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(url)
@@ -324,18 +467,21 @@ function ProductDetailPageContent() {
     // Mark as tracking immediately to prevent race conditions
     viewTrackingRef.current.add(productId)
     
-    // Track view
-    fetch(`/api/products/${productId}/view`, {
+    // Track view with retry logic
+    fetchWithRetry(`/api/products/${productId}/view`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      retries: 2, // Retry twice for view tracking
+      retryDelay: 500, // Shorter delay for view tracking
+      exponentialBackoff: true
     })
       .then(res => res.json())
       .then(data => {
         if (data.success && data.views !== undefined) {
           // Update local product views count silently without triggering re-renders
-          setFullProduct((prev: any) => {
+          setProductData((prev: any) => {
             if (prev?.views === data.views) return prev // Prevent unnecessary updates
             return {
               ...prev,
@@ -347,24 +493,20 @@ function ProductDetailPageContent() {
       .catch(error => {
         // Remove from ref on error so it can retry if needed
         viewTrackingRef.current.delete(productId)
+        // Silent fail for view tracking - don't log errors
       })
   }, [productId, isValidProductId]) // Only depend on productId, removed product to prevent re-runs
 
   // Autoplay controller for video view
   const [shouldAutoplayVideo, setShouldAutoplayVideo] = useState(false)
   
-  // State for full product details
-  const [fullProduct, setFullProduct] = useState<any>(null)
-  const [isLoadingFull, setIsLoadingFull] = useState(false)
-  
-  // State for variant images
+  // Consolidated state - all data loaded in parallel
   const [variantImages, setVariantImages] = useState<Array<{
     variantId?: number
     imageUrl: string
     attribute?: {name: string, value: string}
     attributes?: Array<{name: string, value: string}>
   }>>([])
-  const [isLoadingVariantImages, setIsLoadingVariantImages] = useState(false)
   
   // State for supplier/company name
   const [supplierCompanyName, setSupplierCompanyName] = useState<string | null>(null)
@@ -390,52 +532,8 @@ function ProductDetailPageContent() {
   } | null>(null)
   const [soldCountLoading, setSoldCountLoading] = useState(false)
 
-  // Fetch reviews when product is loaded
-  useEffect(() => {
-    const fetchReviews = async () => {
-      if (!product?.id) return
-      
-      setReviewsLoading(true)
-      try {
-        const response = await fetch(`/api/products/${product.id}/reviews`)
-        if (response.ok) {
-          const data = await response.json()
-          setReviews(data.reviews || [])
-        }
-      } catch (error) {
-        // Error fetching reviews
-      } finally {
-        setReviewsLoading(false)
-      }
-    }
-    
-    fetchReviews()
-  }, [product?.id])
-
-  // Fetch sold count when product is loaded
-  useEffect(() => {
-    const fetchSoldCount = async () => {
-      if (!product?.id) return
-      
-      setSoldCountLoading(true)
-      try {
-        const response = await fetch(`/api/products/${product.id}/sold-count`)
-        if (response.ok) {
-          const data = await response.json()
-          setSoldCount({
-            soldCount: data.soldCount || 0,
-            buyersCount: data.buyersCount || null
-          })
-        }
-      } catch (error) {
-        // Error fetching sold count
-      } finally {
-        setSoldCountLoading(false)
-      }
-    }
-    
-    fetchSoldCount()
-  }, [product?.id])
+  // Reviews and sold count are now loaded in parallel with product (see main useEffect above)
+  // Removed redundant fetches - all data loads simultaneously
 
   // Fetch supplier information when product is loaded
   useEffect(() => {
@@ -443,8 +541,12 @@ function ProductDetailPageContent() {
       if (!product?.id) return
       
       try {
-        // Use API route instead of direct Supabase client
-        const response = await fetch(`/api/products/${product.id}/supplier-info`)
+        // Use API route with retry logic
+        const response = await fetchWithRetry(`/api/products/${product.id}/supplier-info`, {
+          retries: 2,
+          retryDelay: 1000,
+          exponentialBackoff: true
+        })
         
         if (!response.ok) {
           return
@@ -552,8 +654,9 @@ function ProductDetailPageContent() {
   }, [])
 
   // Prefer server-fetched full details when available
-  const currentVideo = fullProduct?.video ?? product?.video
-  const currentView360 = fullProduct?.view360 ?? product?.view360
+  // Use product data directly (already includes all details from parallel fetch)
+  const currentVideo = product?.video
+  const currentView360 = product?.view360
   
   // Calculate rotated related products (memoized for performance)
   const rotatedRelatedProducts = useMemo(() => {
@@ -594,86 +697,15 @@ function ProductDetailPageContent() {
     return relatedProducts
   }, [products, product, relatedProductsRotation, isMobile, RELATED_PRODUCTS_COUNT_MOBILE, RELATED_PRODUCTS_COUNT_DESKTOP])
 
-  // Fetch full product details when product is found
-  // This runs in parallel with optimizedProduct fetch - doesn't block product display
-  useEffect(() => {
-    if (productIdNumber && !fullProduct) {
-      setIsLoadingFull(true)
-      fetchFullProductDetails(productIdNumber).then((fullData) => {
-        if (fullData) {
-          setFullProduct(fullData)
-        }
-        setIsLoadingFull(false)
-      }).catch(() => {
-        setIsLoadingFull(false)
-      })
-    }
-  }, [productIdNumber, fetchFullProductDetails, fullProduct])
+  // Variant images are now loaded in parallel with product data (see main useEffect above)
 
-  // Fetch variant images for the product with caching and rate limiting
-  const fetchVariantImages = useCallback(async (productId: number, forceRefresh = false) => {
-    try {
-      setIsLoadingVariantImages(true)
-      
-      // Add cache busting parameter if force refresh is requested
-      const cacheBustParam = forceRefresh ? `?cb=${Date.now()}` : '?'
-      const limitParam = 'limit=5' // Limit to first 5 images for better performance
-      
-      // Abortable fetch with single retry on 429
-      const controller = new AbortController()
-      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
-      
-      const response = await fetch(`/api/products/${productId}/variant-images${cacheBustParam}${limitParam}`, {
-        headers: {
-          'Cache-Control': forceRefresh ? 'no-cache' : 'max-age=60'
-        },
-        signal: controller.signal
-      })
-      
-      if (response.status === 429) {
-        await sleep(400 + Math.floor(Math.random() * 300))
-        const retry = await fetch(`/api/products/${productId}/variant-images?${limitParam}`, {
-          headers: { 'Cache-Control': 'no-cache' },
-          signal: controller.signal
-        })
-        if (retry.ok) {
-          const data = await retry.json()
-          setVariantImages(data.variantImages || [])
-        }
-        return
-      }
-      
-      if (response.ok) {
-        const data = await response.json()
-        setVariantImages(data.variantImages || [])
-      }
-    } catch (error) {
-      // Ignore AbortError; otherwise silent
-    } finally {
-      setIsLoadingVariantImages(false)
-    }
-  }, [])
-
-  // Fetch variant images when product is loaded (single call only)
-  useEffect(() => {
-    if (productIdNumber) {
-      // Single load with cache - no force refresh to prevent 429 errors
-      fetchVariantImages(productIdNumber, false)
-    }
-  }, [productIdNumber, fetchVariantImages])
-
-  // Add a manual refresh function for when new images are added (with rate limiting)
-  const refreshVariantImages = useCallback(() => {
-    if (productIdNumber && !isLoadingVariantImages) {
-      fetchVariantImages(productIdNumber, true)
-    }
-  }, [productIdNumber, fetchVariantImages, isLoadingVariantImages])
+  // Variant images are loaded in parallel with product data (see main useEffect above)
 
 
 
-  // Use full product data if available, otherwise fall back to minimal product data
+  // Use product data - already includes all details from parallel fetch
   const displayProduct = useMemo(() => {
-    const base: any = fullProduct || product
+    const base: any = product
     if (!base) return base
 
     // Normalize variants from either JSON column or relation
@@ -770,10 +802,10 @@ function ProductDetailPageContent() {
       variants: normalizedVariants,
       variantConfig: normalizedVariantConfig,
     }
-  }, [fullProduct, product])
+  }, [product])
   
   // Combined loading state
-  const isProductLoading = isOptimizedLoading || isLoading || isLoadingFull
+  const isProductLoading = isLoadingProduct || isLoading
 
   // Preload products on mount for better performance
   useEffect(() => {
@@ -803,11 +835,15 @@ function ProductDetailPageContent() {
       const t = setTimeout(async () => {
         try {
           const url = `/api/products/${id}?minimal=false`
-          const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' }, signal: controller.signal })
-          if (res.status === 429) {
-            await sleep(400 + Math.floor(Math.random() * 300))
-            await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' }, signal: controller.signal }).catch(() => {})
-          }
+          // Use retry logic with exponential backoff for prefetching
+          await fetchWithRetry(url, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            retries: 1, // Only retry once for prefetching
+            retryDelay: 500,
+            exponentialBackoff: true
+          }).catch(() => {}) // Silent fail for prefetching
         } catch (err: any) {
           if (err?.name !== 'AbortError') {
             // ignore
@@ -1298,10 +1334,8 @@ function ProductDetailPageContent() {
       }
       
       // For non-primary attributes in multi-dependent, show all values for the current step
-      if (currentStep <= variantSelectionStep) return true
-      
-      // For future steps, we can implement more sophisticated filtering later
-      return false
+      // Note: variantSelectionStep logic removed - all values are shown for multi-dependent variants
+      return true
     }
     
     return true
@@ -1393,7 +1427,8 @@ function ProductDetailPageContent() {
   // Compute thumbnails before deriving currentImage (declare helper first)
 
   // Main image shows clicked thumbnail, or first thumbnail when available, or matching variant image when variant is selected; falls back to main product image
-  const currentImage = (() => {
+  // Memoized to prevent unnecessary recalculations and image flickering
+  const currentImage = useMemo(() => {
     // If user clicked a thumbnail, show that image
     if (mainImage) {
       return mainImage
@@ -1404,18 +1439,19 @@ function ProductDetailPageContent() {
       return matchingVariantImage
     }
     
-    // Prefer the first thumbnail if available
-    if (thumbnailImages.length > 0) {
+    // Prefer the first thumbnail if available (but only if variant images have loaded)
+    // This prevents showing main image first, then switching to thumbnail
+    if (thumbnailImages.length > 0 && variantImages.length > 0) {
       return thumbnailImages[0]
     }
     
-    // When no thumbnails exist, show main product image
+    // When no thumbnails exist or variant images haven't loaded yet, show main product image
     if (product?.image && product.image.trim() !== '') {
       return product.image
     }
     
     return null
-  })()
+  }, [mainImage, matchingVariantImage, thumbnailImages, variantImages.length, product?.image])
   
   // (helper declared once above)
   
@@ -1424,6 +1460,22 @@ function ProductDetailPageContent() {
     setIsManualImageSelection(false)
     setSelectedThumbnailIndex(null)
   }, [selectedVariant])
+
+  // Initialize mainImage on first load - prevents showing main image then switching to thumbnail
+  useEffect(() => {
+    // Only initialize once when product loads and variant images are available
+    if (!product?.image || mainImage) return
+    
+    // If variant images have loaded, use first thumbnail
+    if (variantImages.length > 0 && thumbnailImages.length > 0) {
+      setMainImage(thumbnailImages[0])
+      setSelectedThumbnailIndex(0)
+    } else {
+      // Otherwise use main product image
+      setMainImage(product.image)
+      setSelectedThumbnailIndex(null)
+    }
+  }, [product?.image, variantImages.length]) // Only run when product or variant images load
 
   // Auto-update main image when variant changes (but not when user manually selects a thumbnail)
   useEffect(() => {
@@ -1437,18 +1489,15 @@ function ProductDetailPageContent() {
         setMainImage(matchingVariantImage)
         const matchingIndex = thumbnailImages.findIndex(img => img === matchingVariantImage)
         setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : null)
-    } else if (thumbnailImages.length > 0) {
-      // Prefer first thumbnail, else main product image
+    } else if (thumbnailImages.length > 0 && variantImages.length > 0 && !matchingVariantImage) {
+      // Only update if variant images have loaded and no variant is selected
+      // Check if current mainImage is the main product image (to avoid unnecessary updates)
+      if (mainImage === product?.image) {
         setMainImage(thumbnailImages[0])
         setSelectedThumbnailIndex(0)
-    } else if (product?.image) {
-      setMainImage(product.image)
-      setSelectedThumbnailIndex(null)
-      } else {
-        setMainImage(null)
-        setSelectedThumbnailIndex(null)
+      }
     }
-  }, [matchingVariantImage, product?.image, thumbnailImages, isManualImageSelection, selectedVariant])
+  }, [matchingVariantImage, thumbnailImages, variantImages.length, isManualImageSelection, selectedVariant, mainImage, product?.image])
   
   const currentSKU = selectedVariant?.sku || product?.sku || ""
   const currentModel = selectedVariant?.model || product?.model || ""
@@ -1477,7 +1526,8 @@ function ProductDetailPageContent() {
   const currentAvailableStock = useMemo((): number => {
     // If variant is selected, use variant stock
     if (selectedVariant) {
-      const variantStock = selectedVariant.stock_quantity || selectedVariant.stockQuantity || 0
+      const variantAny = selectedVariant as any
+      const variantStock = variantAny.stock_quantity || variantAny.stockQuantity || 0
       return typeof variantStock === 'number' ? variantStock : parseInt(String(variantStock)) || 0
     }
     
@@ -1574,7 +1624,8 @@ function ProductDetailPageContent() {
             return false
       }
       
-      const stockQty = selectedVariant.stock_quantity || selectedVariant.stockQuantity || 0
+      const variantAny = selectedVariant as any
+      const stockQty = variantAny.stock_quantity || variantAny.stockQuantity || 0
       if (stockQty < quantity) {
       toast({
           title: "Insufficient Stock",
@@ -1586,6 +1637,8 @@ function ProductDetailPageContent() {
     }
     
     // Add to cart - simplified variant system
+    // Pass pre-loaded product data to avoid redundant API fetch (performance optimization)
+    // Security: Price is NOT sent to API - server fetches authoritative price from database
     const currentPrice = getCurrentPrice()
     const variantId = selectedVariant?.id?.toString()
     
@@ -1594,9 +1647,10 @@ function ProductDetailPageContent() {
           quantity, 
           variantId,
       {}, // No complex attributes
-          currentPrice,
+          currentPrice, // Used for optimistic UI update only - server validates actual price
           selectedVariant?.sku,
-          selectedVariant?.image
+          selectedVariant?.image,
+          product // Pass pre-loaded product data to avoid API fetch
         )
     
     return true
@@ -2028,12 +2082,14 @@ function ProductDetailPageContent() {
                 />
                 
                 {/* Search Suggestions */}
+                {showSuggestions && isSearchFocused && (
+                  <div className="mt-1">
                 <SearchSuggestions
                   query={searchTerm}
-                  onSuggestionClick={handleSuggestionClick}
-                  isVisible={showSuggestions && isSearchFocused}
-                  className="mt-1"
+                      onSelect={handleSuggestionClick}
                 />
+                  </div>
+                )}
                 
                 {/* Camera/Search by Image Button */}
                 <button
@@ -2087,20 +2143,38 @@ function ProductDetailPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2110,20 +2184,38 @@ function ProductDetailPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2133,20 +2225,38 @@ function ProductDetailPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2156,20 +2266,38 @@ function ProductDetailPageContent() {
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
                   onClick={(e) => {
                     e.preventDefault()
+                    // Security: Use safer DOM manipulation instead of document.write
                     const newWindow = window.open('', '_blank')
                     if (newWindow) {
-                      newWindow.document.write(`
-                        <html>
-                          <head><title>Coming Soon</title></head>
-                          <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;">
-                            <div style="text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                              <h1 style="color: #333; margin-bottom: 20px;">Coming Soon</h1>
-                              <p style="color: #666;">This feature is coming soon. Stay tuned!</p>
-                            </div>
-                          </body>
-                        </html>
-                      `)
-                      newWindow.document.close()
+                      const doc = newWindow.document
+                      // Create title element safely
+                      const title = doc.createElement('title')
+                      title.textContent = 'Coming Soon'
+                      if (!doc.head) {
+                        const head = doc.createElement('head')
+                        doc.documentElement.appendChild(head)
+                      }
+                      doc.head.appendChild(title)
+                      
+                      // Ensure body exists
+                      if (!doc.body) {
+                        const body = doc.createElement('body')
+                        doc.documentElement.appendChild(body)
+                      }
+                      
+                      const body = doc.body
+                      body.style.cssText = 'font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5;'
+                      const div = doc.createElement('div')
+                      div.style.cssText = 'text-align: center; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+                      const h1 = doc.createElement('h1')
+                      h1.textContent = 'Coming Soon'
+                      h1.style.cssText = 'color: #333; margin-bottom: 20px;'
+                      const p = doc.createElement('p')
+                      p.textContent = 'This feature is coming soon. Stay tuned!'
+                      p.style.cssText = 'color: #666;'
+                      div.appendChild(h1)
+                      div.appendChild(p)
+                      body.appendChild(div)
                     }
                   }}
                 >
@@ -2352,24 +2480,7 @@ function ProductDetailPageContent() {
         </div>
       </header>
 
-      {/* China Import Notice - Fixed during scroll (only show if not from China page) */}
-      {!fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) && (
-        <div className="fixed top-16 sm:top-16 z-30 w-full bg-red-50 dark:bg-red-900/20 px-4 py-1.5 shadow-sm">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex items-center justify-center text-center">
-              <div className="flex items-center gap-2 text-xs text-red-700 dark:text-red-300">
-                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="font-large">Import Notice:</span>
-                <span className="ml-1">This item can be imported directly from China within 3-5 days. Same price, same quality, just a short wait!</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-3 sm:px-6 lg:px-16 xl:px-24 2xl:px-32", themeClasses.mainBg, !fromChina && displayProduct && (displayProduct.importChina || displayProduct.import_china) ? "pt-24 sm:pt-28" : "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
+      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-3 sm:px-6 lg:px-16 xl:px-24 2xl:px-32", themeClasses.mainBg, "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
         {/* Show product details immediately when product data is available */}
         {/* Priority: Product Details (first) > Ads > Images */}
         {/* Skeleton only shows when data is false/null (not available) */}
@@ -3050,7 +3161,7 @@ function ProductDetailPageContent() {
             <div className={cn("flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm mt-2", themeClasses.textNeutralSecondary)}>
               {/* Dynamic Stock Status */}
               <div className="flex items-center gap-1">
-                {isLoadingFull ? (
+                {isLoadingProduct ? (
                   <span className="flex items-center gap-1 text-gray-500 font-medium">
                     <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
                     Loading stock status...
@@ -3803,15 +3914,23 @@ function ProductDetailPageContent() {
                                 return
                               }
                               
-                              const response = await fetch(`/api/products/${product.id}/reviews/${review.id}/helpful`, {
+                              // Use retry logic for helpful vote
+                              const response = await fetchWithRetry(`/api/products/${product.id}/reviews/${review.id}/helpful`, {
                                 method: 'POST',
                                 headers: {
                                   'Authorization': `Bearer ${session.access_token}`
-                                }
+                                },
+                                retries: 2,
+                                retryDelay: 500,
+                                exponentialBackoff: true
                               })
                               if (response.ok) {
-                                // Refetch reviews
-                                const reviewsResponse = await fetch(`/api/products/${product.id}/reviews`)
+                                // Refetch reviews with retry logic
+                                const reviewsResponse = await fetchWithRetry(`/api/products/${product.id}/reviews`, {
+                                  retries: 2,
+                                  retryDelay: 500,
+                                  exponentialBackoff: true
+                                })
                                 if (reviewsResponse.ok) {
                                   const data = await reviewsResponse.json()
                                   setReviews(data.reviews || [])
@@ -3945,6 +4064,8 @@ function ProductDetailPageContent() {
             {rotatedRelatedProducts.map((relatedProduct: any) => {
                 const discountPercentage = ((relatedProduct.originalPrice - relatedProduct.price) / relatedProduct.originalPrice) * 100
                 
+                // Check if product is out of stock
+                const isOutOfStock = !relatedProduct.inStock && !relatedProduct.in_stock
                 
                 // Get badges for the related product
                 const leftBadge = getLeftBadge(relatedProduct)
@@ -3961,6 +4082,7 @@ function ProductDetailPageContent() {
                       "hover:z-10 relative hover:ring-2 hover:ring-blue-500/20",
                       themeClasses.cardBg,
                       themeClasses.mainText,
+                      isOutOfStock && "opacity-75"
                     )}
                   >
                     <OptimizedLink 
@@ -3975,10 +4097,22 @@ function ProductDetailPageContent() {
                           alt={relatedProduct.name}
                           fill
                           sizes="(max-width: 640px) 33vw, (max-width: 768px) 25vw, (max-width: 1024px) 20vw, (max-width: 1280px) 16vw, (max-width: 1536px) 14vw, 12vw"
-                          className="object-cover transition-transform duration-300 hover:scale-110"
+                          className={cn(
+                            "object-cover transition-transform duration-300 hover:scale-110",
+                            isOutOfStock && "grayscale"
+                          )}
                           priority={false} // Not priority since it's below the fold
                           quality={60}
                         />
+                      )}
+                      
+                      {/* Out of Stock Overlay */}
+                      {isOutOfStock && (
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-30">
+                          <span className="bg-red-600 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 sm:py-1.5 rounded-md shadow-lg uppercase tracking-wide">
+                            Out of Stock
+                          </span>
+                        </div>
                       )}
                       
                       {/* Orange chamfered corner - Top Right */}
@@ -4055,12 +4189,21 @@ function ProductDetailPageContent() {
                       </div>
                     </CardContent>
                     <CardFooter className="px-1 pb-1 pt-0 flex flex-col gap-1">
+                      {isOutOfStock ? (
+                        <Button
+                          className="w-full text-xs py-1 h-auto sm:text-sm lg:text-base bg-gray-400 text-white cursor-not-allowed rounded-b-sm rounded-t-none"
+                          disabled
+                        >
+                          <X className="w-4 h-4 mr-2" /> Out of Stock
+                        </Button>
+                      ) : (
                       <Button
                         className="w-full text-xs py-1 h-auto sm:text-sm lg:text-base bg-yellow-500 text-neutral-950 hover:bg-yellow-600 rounded-b-sm rounded-t-none transform transition-all duration-200 hover:scale-105 hover:shadow-md"
                         onClick={() => addItem(relatedProduct.id, 1)}
                       >
                         <ShoppingCart className="w-4 h-4 mr-2" /> Add to Cart
                       </Button>
+                      )}
                     </CardFooter>
                   </Card>
                 )
@@ -4257,9 +4400,24 @@ function ProductDetailPageContent() {
               </Button>
               <Button
                 onClick={async () => {
-                  // Basic client-side validation
-                  if (reviewFormData.rating === 0) {
-                    alert('Please select a rating')
+                  // Security: Validate and sanitize input
+                  if (!validateRating(reviewFormData.rating)) {
+                    toast({
+                      title: "Invalid Rating",
+                      description: "Please select a valid rating (1-5 stars)",
+                      variant: "destructive"
+                    })
+                    return
+                  }
+
+                  // Validate and sanitize review comment
+                  const commentValidation = validateReviewComment(reviewFormData.comment)
+                  if (!commentValidation.valid) {
+                    toast({
+                      title: "Invalid Comment",
+                      description: commentValidation.error || "Please enter a valid comment",
+                      variant: "destructive"
+                    })
                     return
                   }
 
@@ -4267,7 +4425,11 @@ function ProductDetailPageContent() {
                   try {
                     // Use app auth state first
                     if (!isAuthenticated) {
-                      alert('Please log in to submit a review.')
+                      toast({
+                        title: "Authentication Required",
+                        description: "Please log in to submit a review.",
+                        variant: "destructive"
+                      })
                       openAuthModal('login')
                       return
                     }
@@ -4278,18 +4440,18 @@ function ProductDetailPageContent() {
                         'Content-Type': 'application/json',
                       },
                       body: JSON.stringify({
-                        name: user?.name || user?.email || 'Unknown user',
+                        name: sanitizeString(user?.name || user?.email || 'Unknown user', 255),
                         email: user?.email || 'no-email@unknown.com',
-                        phone: user?.profile?.phone || '',
+                        phone: sanitizeString(user?.profile?.phone || '', 50),
                         subject: `New product review for ID ${product?.id}`,
                         message: [
                           `Product ID: ${product?.id}`,
-                          `Product Name: ${product?.name}`,
+                          `Product Name: ${sanitizeString(product?.name || '', 500)}`,
                           '',
                           `Rating: ${reviewFormData.rating} / 5`,
                           '',
                           'Comment:',
-                          reviewFormData.comment || '(no comment provided)',
+                          commentValidation.sanitized || '(no comment provided)',
                           '',
                           reviewFormData.images?.length
                             ? `Attached image URLs:\n${reviewFormData.images.join('\n')}`
@@ -4342,7 +4504,7 @@ function ProductDetailPageContent() {
                 Import Notice
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-300 text-center mb-6">
-                This item is not available in our local stock at the moment. However, we can import it directly from China within 3-5 days. Same price, same quality, just a short wait!
+                This item is not available in our local stock at the moment. However, we can import it  within 7-10 days. Same price, same quality, just a short wait!
               </p>
               <div className="flex gap-3">
                 <button
@@ -4370,7 +4532,9 @@ function ProductDetailPageContent() {
 export default function ProductDetailPage() {
   return (
     <BuyerRouteGuard>
+      <ProductDetailErrorBoundary>
       <ProductDetailPageContent />
+      </ProductDetailErrorBoundary>
     </BuyerRouteGuard>
   )
 }

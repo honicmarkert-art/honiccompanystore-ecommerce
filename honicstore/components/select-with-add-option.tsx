@@ -61,10 +61,6 @@ export function SelectWithAddOption({
             <SelectItem value="__loading__" disabled>
               Loading...
             </SelectItem>
-          ) : error ? (
-            <SelectItem value="__error__" disabled>
-              Error loading options
-            </SelectItem>
           ) : options.length === 0 ? (
             <SelectItem value="__empty__" disabled>
               {emptyMessage}
@@ -121,12 +117,6 @@ export function SelectWithAddOption({
             <X className="h-4 w-4" />
           </Button>
         </div>
-      )}
-
-      {error && (
-        <p className="text-sm text-red-500 mt-1">
-          Error loading options: {error}
-        </p>
       )}
     </div>
   )

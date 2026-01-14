@@ -14,7 +14,7 @@ export async function GET(
     const supabase = getSupabaseClient()
     // Normalize: DB stores reference_id without hyphens, lowercase
     const normalizedRef = referenceId.replace(/[^A-Za-z0-9]/g, '').toLowerCase()
-    
+
     // Also try the original reference ID in case it's already in the correct format
     const originalRef = referenceId
 
@@ -24,14 +24,13 @@ export async function GET(
     if (!referenceId) {
       return NextResponse.json({ error: 'Reference ID is required' }, { status: 400 })
     }
-
     // First try a simple query without order_items to see if that's causing the issue
     let { data: order, error: orderError } = await supabase
       .from('orders')
       .select('*')
       .eq('reference_id', normalizedRef)
       .single()
-    
+
     // If not found with normalized ref, try original ref
     if (orderError && normalizedRef !== originalRef) {
       logger.log('🔍 Trying original reference format:', originalRef)
@@ -40,26 +39,16 @@ export async function GET(
         .select('*')
         .eq('reference_id', originalRef)
         .single()
-      
+
       order = result.data
       orderError = result.error
     }
-
     if (orderError) {
-      console.error('Error fetching order:', orderError)
-      console.error('🔍 Order not found - Query details:', {
-        queryRef: normalizedRef,
-        errorCode: orderError.code,
-        errorMessage: orderError.message
-      })
-      
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
-
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
-
     // Fetch order items separately since the join might cause issues
     const { data: orderItems } = await supabase
       .from('order_items')
@@ -91,11 +80,9 @@ export async function GET(
     })
 
   } catch (error) {
-    console.error('Error in GET /api/orders/[referenceId]:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-
 // PATCH /api/orders/[referenceId] - Update order status
 // SECURITY: This endpoint should ONLY be used as a last resort backup when webhook fails
 // It requires additional security measures to prevent abuse
@@ -111,11 +98,10 @@ export async function PATCH(
     if (!paymentStatus) {
       return NextResponse.json({ error: 'Payment status is required' }, { status: 400 })
     }
-
     const supabase = getSupabaseClient()
     // Normalize: DB stores reference_id without hyphens, lowercase
     const normalizedRef = referenceId.replace(/[^A-Za-z0-9]/g, '').toLowerCase()
-    
+
     // Also try the original reference ID in case it's already in the correct format
     const originalRef = referenceId
 
@@ -125,7 +111,7 @@ export async function PATCH(
       .select('*')
       .eq('reference_id', normalizedRef)
       .single()
-    
+
     // If not found with normalized ref, try original ref
     if (orderError && normalizedRef !== originalRef) {
       const result = await supabase
@@ -133,15 +119,13 @@ export async function PATCH(
         .select('*')
         .eq('reference_id', originalRef)
         .single()
-      
+
       order = result.data
       orderError = result.error
     }
-
     if (orderError || !order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
-
     // SECURITY: Verify user owns the order OR verify payment actually happened
     // Get user from session if available
     let isOrderOwner = false
@@ -160,19 +144,18 @@ export async function PATCH(
           },
         }
       )
-      
+
       const { data: { user } } = await supabaseAuth.auth.getUser()
       isOrderOwner = !!(user && order.user_id === user.id)
     } catch (authError) {
       // If auth fails, user is not authenticated - continue with other checks
       logger.log('Auth check failed for return URL update:', authError)
     }
-
     // Check if this is a retry payment update request
     // IMPORTANT: Return URL updates are ONLY for retry payments when webhook fails
     // Webhooks are the PRIMARY mechanism - return URL is backup only
     const { isRetryPayment } = body
-    
+
     // SECURITY: Additional validation for return URL updates
     if (isRetryPayment && paymentStatus === 'paid') {
       // SECURITY CHECK 1: Verify order is actually in retry state (failed/pending)
@@ -182,17 +165,16 @@ export async function PATCH(
           currentStatus: order.payment_status,
           requestedStatus: paymentStatus
         })
-        return NextResponse.json({ 
-          error: 'Order is not in retry state. Only failed or pending orders can be updated via return URL.' 
+        return NextResponse.json({
+          error: 'Order is not in retry state. Only failed or pending orders can be updated via return URL.'
         }, { status: 403 })
       }
-      
       // SECURITY CHECK 2: Verify user owns the order OR verify ClickPesa transaction exists
       // For guest orders, we need to verify the payment actually happened
       if (!isOrderOwner) {
         // Check if there's a ClickPesa transaction ID (proves payment happened)
         const hasClickPesaTransaction = order.clickpesa_transaction_id
-        
+
         if (!hasClickPesaTransaction) {
           logger.log('⚠️ SECURITY: Unauthorized return URL update attempt:', {
             orderId: order.id,
@@ -200,33 +182,32 @@ export async function PATCH(
             requestUserId: user?.id || 'anonymous',
             hasTransaction: false
           })
-          return NextResponse.json({ 
-            error: 'Unauthorized. Only order owner or verified payment can update status.' 
+          return NextResponse.json({
+            error: 'Unauthorized. Only order owner or verified payment can update status.'
           }, { status: 403 })
         }
       }
-      
       // SECURITY CHECK 3: Rate limiting - prevent abuse
       // Check if this order was recently updated (prevent duplicate updates)
-      const recentlyUpdated = order.updated_at && 
+      const recentlyUpdated = order.updated_at &&
         (new Date().getTime() - new Date(order.updated_at).getTime()) < 5000 // 5 seconds
-      
+
       if (recentlyUpdated && order.payment_status === 'paid') {
         logger.log('⚠️ SECURITY: Duplicate update attempt prevented:', {
           orderId: order.id,
           lastUpdated: order.updated_at
         })
-        return NextResponse.json({ 
-          error: 'Order was recently updated. Please wait before retrying.' 
+        return NextResponse.json({
+          error: 'Order was recently updated. Please wait before retrying.'
         }, { status: 429 })
       }
       // This is a retry payment backup update via return URL (webhook didn't work)
       logger.log('🔄 Processing retry payment update via return URL (webhook backup):', order.id)
-      
+
       // Update payment status
       const { data: updatedOrder, error: updateError } = await supabase
         .from('orders')
-        .update({ 
+        .update({
           payment_status: paymentStatus,
           updated_at: new Date().toISOString()
         })
@@ -235,15 +216,13 @@ export async function PATCH(
         .single()
 
       if (updateError) {
-        console.error('Error updating retry payment:', updateError)
         return NextResponse.json({ error: 'Failed to update retry payment' }, { status: 500 })
       }
-
       // Reduce stock for retry payment (only if not already reduced)
       if (order.payment_status !== 'paid' && order.payment_status !== 'success') {
         try {
           logger.log('📦 Reducing stock for retry payment via return URL:', order.id)
-          
+
           // Get order items to reduce stock
           const { data: orderItems, error: itemsError } = await supabase
             .from('order_items')
@@ -251,7 +230,6 @@ export async function PATCH(
             .eq('order_id', order.id)
 
           if (itemsError) {
-            console.error('❌ Error fetching order items for retry payment stock reduction:', itemsError)
           } else if (orderItems && orderItems.length > 0) {
             // Reduce stock for each item
             for (const item of orderItems) {
@@ -264,10 +242,8 @@ export async function PATCH(
                   .single()
 
                 if (fetchError) {
-                  console.error('❌ Error fetching product for retry payment stock reduction:', item.product_id, fetchError)
                   continue
                 }
-
                 const currentStock = product.stock_quantity || 0
                 const newStock = Math.max(0, currentStock - item.quantity)
                 const isInStock = newStock > 0
@@ -283,20 +259,16 @@ export async function PATCH(
                   .eq('id', item.product_id)
 
                 if (stockUpdateError) {
-                  console.error('❌ Error updating stock for retry payment product:', item.product_id, stockUpdateError)
                 } else {
                   logger.log('✅ Stock reduced for retry payment product:', item.product_id, 'by', item.quantity, `(${currentStock} -> ${newStock})`)
                 }
               } catch (stockError) {
-                console.error('❌ Error in retry payment stock reduction for product:', item.product_id, stockError)
               }
             }
           }
         } catch (stockReductionError) {
-          console.error('❌ Error in retry payment stock reduction process:', stockReductionError)
         }
       }
-
       return NextResponse.json({
         success: true,
         order: {
@@ -313,7 +285,7 @@ export async function PATCH(
       logger.log('📋 Return URL: Returning current order status (read-only)')
       logger.log('📋 Current payment status:', order.payment_status)
       logger.log('📋 URL payment status:', paymentStatus)
-      
+
       return NextResponse.json({
         success: true,
         order: {
@@ -325,11 +297,7 @@ export async function PATCH(
         message: 'Order status retrieved (read-only). Payment status updates are handled by webhooks only.'
       })
     }
-
   } catch (error) {
-    console.error('Error in PATCH /api/orders/[referenceId]:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-
-

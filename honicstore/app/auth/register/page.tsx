@@ -127,7 +127,6 @@ export default function RegisterPage() {
         return
       }
     } catch (error) {
-      console.error('Error checking email before submission:', error)
       // Continue with submission if check fails (server will validate)
     }
 
@@ -366,7 +365,6 @@ export default function RegisterPage() {
                             }
                           }
                         } catch (error) {
-                          console.error('Error checking email:', error)
                           // Don't block user if check fails
                         } finally {
                           setCheckingEmail(false)

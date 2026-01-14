@@ -71,14 +71,11 @@ export default function SiemCategories() {
       try {
         setLoading(true)
         const response = await fetch('/api/admin/categories', { credentials: 'include' })
-        if (!response.ok) {
-          const text = await response.text().catch(() => '')
-          console.error('[AdminCategories] /api/admin/categories failed:', response.status, response.statusText, text?.slice(0,200))
-        }
         if (response.ok) {
           const data = await response.json()
           setCategories(data)
         } else {
+          const text = await response.text().catch(() => '')
           toast({
             title: "Error",
             description: "Failed to fetch categories",
@@ -383,20 +380,22 @@ export default function SiemCategories() {
               Add Category
             </Button>
           </DialogTrigger>
-          <DialogContent className={cn("max-w-2xl shadow-xl bg-white dark:bg-neutral-900", themeClasses.cardBorder)}>
+          <DialogContent className={cn("max-w-2xl shadow-xl bg-white dark:bg-neutral-900 max-h-[90vh]", themeClasses.cardBorder)}>
             <DialogHeader>
               <DialogTitle>
                 {editingCategory ? "Edit Category" : "Add New Category"}
               </DialogTitle>
             </DialogHeader>
-            <CategoryForm 
-              category={editingCategory}
-              onClose={() => {
-                setIsAddDialogOpen(false)
-                setEditingCategory(null)
-              }}
-              onSave={handleCategorySaved}
-            />
+            <div className="overflow-y-auto max-h-[calc(90vh-120px)] pr-2">
+              <CategoryForm 
+                category={editingCategory}
+                onClose={() => {
+                  setIsAddDialogOpen(false)
+                  setEditingCategory(null)
+                }}
+                onSave={handleCategorySaved}
+              />
+            </div>
           </DialogContent>
         </Dialog>
         </div>

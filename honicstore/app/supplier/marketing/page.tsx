@@ -124,7 +124,6 @@ export default function SupplierMarketingPage() {
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          console.error('Server returned HTML instead of JSON')
           return
         }
         return
@@ -139,8 +138,7 @@ export default function SupplierMarketingPage() {
         })))
       }
     } catch (error) {
-      console.error('Error fetching products:', error)
-    } finally {
+      } finally {
       setLoadingProducts(false)
     }
   }
@@ -156,7 +154,6 @@ export default function SupplierMarketingPage() {
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          console.error('Server returned HTML instead of JSON')
           return
         }
         return
@@ -167,8 +164,7 @@ export default function SupplierMarketingPage() {
         setCurrentPlan(data.plan)
       }
     } catch (error) {
-      console.error('Error fetching current plan:', error)
-    }
+      }
   }
 
   const fetchPromotions = async () => {
@@ -203,7 +199,6 @@ export default function SupplierMarketingPage() {
       }
     } catch (error: any) {
       const errorMessage = error?.message || 'Failed to fetch promotions'
-      console.error('Error fetching promotions:', error)
       toast({
         title: 'Error',
         description: errorMessage,
@@ -376,7 +371,6 @@ export default function SupplierMarketingPage() {
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          console.error('Server returned HTML instead of JSON')
           return
         }
         return
@@ -388,8 +382,7 @@ export default function SupplierMarketingPage() {
         setAdvertisements(data.advertisements || [])
       }
     } catch (error) {
-      console.error('Error fetching advertisements:', error)
-    } finally {
+      } finally {
       setLoadingAds(false)
     }
   }
@@ -688,7 +681,6 @@ export default function SupplierMarketingPage() {
                       // Redirect to payment page
                       router.push(`/supplier/payment?planId=${premiumPlan.id}&referenceId=${referenceId}`)
                     } catch (error: any) {
-                      console.error('Error initiating upgrade:', error)
                       toast({
                         title: 'Error',
                         description: error.message || 'Failed to initiate upgrade. Please try again.',

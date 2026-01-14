@@ -91,7 +91,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Set safety timeout
       safetyTimeout = setTimeout(() => {
         if (checkingAuthRef.current) {
-          console.warn('Auth check taking too long, forcing loading to false')
           setLoading(false)
           checkingAuthRef.current = false
         }
@@ -109,9 +108,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }, 5000) // 5 second timeout for better session restoration
       
       try {
+        // SECURITY: Include device verification status in request header
+        // This allows server to prevent auto-refresh on new devices
+        let deviceVerified = false
+        if (typeof window !== 'undefined') {
+          try {
+            const deviceFp = await import('@/lib/device-fingerprint')
+            deviceVerified = deviceFp.isDeviceVerified()
+          } catch {
+            deviceVerified = false
+          }
+        }
+        
         const response = await fetch('/api/auth/session', {
           credentials: 'include', // Include cookies in the request
-          signal: controller.signal
+          signal: controller.signal,
+          headers: {
+            'X-Device-Verified': deviceVerified ? 'true' : 'false'
+          }
         })
         
         clearTimeout(timeoutId)
@@ -127,7 +141,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           let userRole = userData.role
           if (!isProfileLoaded && userData.email) {
             // Fallback: Check if email matches known admin emails
-            const adminEmails = ['admin1@honic.com', 'admin@honic.com', 'sieme@honic.com']
+            const adminEmailsStr = process.env.ADMIN_EMAILS || 'admin1@honic.com,admin@honic.com,sieme@honic.com'
+            const adminEmails = adminEmailsStr.split(',').map(email => email.trim().toLowerCase())
             if (adminEmails.includes(userData.email.toLowerCase())) {
               userRole = 'admin'
             }
@@ -245,9 +260,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hasCheckedAuthRef = useRef(false)
   useEffect(() => {
     // Check auth on component mount only once - no periodic checks to avoid UI flickering
+    // SECURITY: Only auto-check if device is verified (user has explicitly logged in on this device)
     if (!hasCheckedAuthRef.current) {
       hasCheckedAuthRef.current = true
-      checkAuth()
+      
+      // Import device fingerprinting utilities
+      if (typeof window !== 'undefined') {
+        import('@/lib/device-fingerprint').then(({ isDeviceVerified }) => {
+          // SECURITY: Clear Supabase session from localStorage if device is not verified
+          // This prevents Supabase from auto-restoring sessions on new devices
+          if (!isDeviceVerified()) {
+            // Clear Supabase's localStorage session to prevent auto-restoration
+            localStorage.removeItem('supabase.auth.token')
+            // Also clear any other Supabase-related storage
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith('sb-') || key.includes('supabase')) {
+                localStorage.removeItem(key)
+              }
+            })
+            
+            // Device not verified - don't auto-login
+            // User must explicitly log in
+            setLoading(false)
+            setUser(null)
+            setIsAuthenticated(false)
+            setIsAdmin(false)
+          } else {
+            // Device is verified - safe to check auth
+            checkAuth()
+          }
+        }).catch(() => {
+          // If device fingerprinting fails, clear Supabase session and don't auto-check (security first)
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('supabase.auth.token')
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith('sb-') || key.includes('supabase')) {
+                localStorage.removeItem(key)
+              }
+            })
+          }
+          setLoading(false)
+          setUser(null)
+          setIsAuthenticated(false)
+          setIsAdmin(false)
+        })
+      } else {
+        // Server-side: don't check auth
+        setLoading(false)
+      }
     }
   }, []) // Empty dependency array - only run once on mount
 
@@ -476,9 +536,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 access_token: session.access_token,
                 refresh_token: session.refresh_token,
               })
-              console.log('✅ Client-side session set for auto-login')
-            } catch (sessionError) {
-              console.error('⚠️ Error setting client-side session:', sessionError)
+              } catch (sessionError) {
               // Continue anyway - server-side cookies are set
             }
           }
@@ -500,9 +558,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Refresh user data from server to get full profile (this will also verify session)
           try {
             await refreshUser()
-            console.log('✅ User data refreshed after auto-login')
-          } catch (refreshError) {
-            console.error('⚠️ Error refreshing user data:', refreshError)
+            } catch (refreshError) {
             // Continue anyway - user is already set
           }
           
@@ -556,33 +612,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
-      const getURL = () => {
-        // Use window.location.origin for client-side to get the exact current URL
-        if (typeof window !== 'undefined') {
-          return window.location.origin
-        }
-        // Fallback for SSR
-        let url =
-          process?.env?.NEXT_PUBLIC_SITE_URL ?? // Set this to your site URL in production env.
-          process?.env?.NEXT_PUBLIC_VERCEL_URL ?? // Automatically set by Vercel.
-          'http://localhost:3000'
-        // Make sure to include `https://` when not localhost.
-        url = url.startsWith('http') ? url : `https://${url}`
-        // Remove trailing slash
-        url = url.endsWith('/') ? url.slice(0, -1) : url
-        return url
-      }
-
+      // Use centralized URL utility for production-ready URL resolution
+      const { buildUrl } = await import('@/lib/url-utils')
+      
       // Import supabase client dynamically to avoid SSR issues
       const { supabaseClient } = await import('@/lib/supabase-client')
       
-      const redirectTo = `${getURL()}/auth/callback`
+      const redirectTo = buildUrl('/auth/callback')
       
-      // Log the redirect URI for debugging (remove in production)
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔍 App redirect URL (configured in Supabase):', redirectTo)
-        console.log('📋 Make sure this URL is in Supabase Dashboard > Authentication > URL Configuration > Redirect URLs')
-      }
+      // Redirect URI logging disabled for production cleanliness
       
       const { data, error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'google',
@@ -608,7 +646,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // The callback will handle the session exchange and redirect
       return { success: true }
     } catch (error: any) {
-      console.error('Google sign-in error:', error)
       toast({
         title: "Google Sign-In Error",
         description: "Network error. Please check your connection and try again.",
@@ -625,9 +662,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const { supabaseClient } = await import('@/lib/supabase-client')
           await supabaseClient.auth.signOut()
-          console.log('✅ Client-side Supabase session cleared')
-        } catch (clientError) {
-          console.error('⚠️ Error clearing client-side Supabase session:', clientError)
+          } catch (clientError) {
           // Continue with server-side logout
         }
       }
@@ -650,9 +685,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
       // Clear all local storage and session storage
       if (typeof window !== 'undefined') {
+        // SECURITY: Clear device verification on logout
+        import('@/lib/device-fingerprint').then(({ clearDeviceVerification }) => {
+          clearDeviceVerification()
+        }).catch(() => {
+          // Continue with other cleanup even if device verification clear fails
+        })
+        
         // Clear Supabase's localStorage key
         localStorage.removeItem('supabase.auth.token')
         
+        // SECURITY: Clear all localStorage and sessionStorage to prevent session restoration
         localStorage.clear()
         sessionStorage.clear()
         
@@ -740,7 +783,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: false, error: result.error }
       }
     } catch (error: any) {
-      console.error('Reset password error:', error)
       toast({
         title: "Reset Error",
         description: error?.message || "An error occurred while sending reset email",

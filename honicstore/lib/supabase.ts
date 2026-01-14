@@ -12,7 +12,6 @@ const supabaseAnonKey =
   process.env.SUPABASE_ANON_KEY ||
   (() => {
     if (process.env.NODE_ENV === 'development') {
-      console.warn('⚠️ NEXT_PUBLIC_SUPABASE_ANON_KEY is not set. Please add it to your .env.local file.')
       return ''
     }
     throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY is required in production')

@@ -66,7 +66,6 @@ export async function POST(request: NextRequest) {
         message: 'User not found'
       })
     } catch (checkError: any) {
-      console.error('Error checking verification status:', checkError)
       return NextResponse.json(
         {
           success: false,
@@ -77,7 +76,6 @@ export async function POST(request: NextRequest) {
       )
     }
   } catch (error) {
-    console.error('Check verification status error:', error)
     return NextResponse.json(
       {
         success: false,

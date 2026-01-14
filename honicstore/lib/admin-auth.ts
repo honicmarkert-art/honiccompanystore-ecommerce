@@ -17,7 +17,6 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
   try {
     // Check environment variables
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      console.error('❌ Missing Supabase environment variables')
       return {
         user: null,
         error: NextResponse.json(
@@ -51,41 +50,17 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
 
     // Debug cookies
     const allCookies = cookieStore.getAll()
-    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Available cookies:', allCookies.map(c => ({ name: c.name, hasValue: !!c.value, valueLength: c.value?.length || 0 })))
     
     // Check for specific Supabase session cookies
     const sessionCookies = allCookies.filter(c => c.name.includes('sb-') || c.name.includes('supabase'))
-    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Supabase cookies:', sessionCookies.map(c => ({ name: c.name, hasValue: !!c.value })))
     
     // Get current session
-    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Getting session...')
     const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession()
     let session = initialSession
     
-    if (DEBUG) console.log('🔍 [DEBUG] validateAdminAccess: Session result:', {
-      hasSession: !!session,
-      hasError: !!sessionError,
-      errorMessage: sessionError?.message,
-      userId: session?.user?.id,
-      userEmail: session?.user?.email
-    })
-    
     if (sessionError || !session) {
-      if (DEBUG) console.log('❌ [DEBUG] validateAdminAccess: No session found')
-      if (DEBUG) console.log('❌ [DEBUG] validateAdminAccess: Session error details:', {
-        error: sessionError?.message,
-        code: sessionError?.code,
-        status: sessionError?.status
-      })
-      
       // Try alternative session retrieval
-      if (DEBUG) console.log('🔄 [DEBUG] validateAdminAccess: Trying alternative session retrieval...')
       const { data: { user }, error: userError } = await supabase.auth.getUser()
-      if (DEBUG) console.log('🔄 [DEBUG] validateAdminAccess: Alternative user check:', {
-        hasUser: !!user,
-        userError: userError?.message
-      })
-      
       if (userError || !user) {
         return {
           user: null,
@@ -106,8 +81,7 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
         token_type: 'bearer'
       }
       
-      if (DEBUG) console.log('✅ [DEBUG] validateAdminAccess: Using minimal session for user:', user.email)
-      // Continue with the minimal session
+      if (DEBUG) // Continue with the minimal session
       session = minimalSession as any
     }
 
@@ -130,25 +104,10 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
       .single()
     let profile = initialProfile
 
-    if (DEBUG) console.log('🔍 Profile lookup result:', {
-      userId: session.user.id,
-      profileError,
-      profile,
-      hasProfile: !!profile
-    })
-
     if (profileError || !profile) {
-      console.error('❌ Profile not found:', {
-        userId: session.user.id,
-        error: profileError,
-        message: 'User profile could not be retrieved'
-      })
-      
       // Check if the error is due to network issues vs profile not existing
       if (profileError && profileError.code === 'PGRST116') {
         // Profile truly doesn't exist, try to create it
-        console.log('🔄 Profile does not exist, attempting to create profile for user:', session.user.id)
-        
         try {
           const { data: newProfile, error: createError } = await supabase
             .from('profiles')
@@ -166,7 +125,6 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
           if (createError) {
             // Check if it's a duplicate key error (profile already exists)
             if (createError.code === '23505') {
-              console.log('⚠️ Profile already exists, attempting to fetch it again')
               // Try to fetch the profile again
               const { data: existingProfile, error: fetchError } = await supabase
                 .from('profiles')
@@ -175,7 +133,6 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
                 .single()
               
               if (fetchError || !existingProfile) {
-                console.error('❌ Still cannot fetch existing profile:', fetchError)
                 return {
                   user: null,
                   error: NextResponse.json(
@@ -186,9 +143,7 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
               }
               
               profile = existingProfile
-              console.log('✅ Successfully fetched existing profile:', profile)
-            } else {
-              console.error('❌ Failed to create profile - Supabase error:', createError)
+              } else {
               return {
                 user: null,
                 error: NextResponse.json(
@@ -198,10 +153,8 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
               }
             }
           } else if (newProfile) {
-            console.log('✅ Profile created successfully:', newProfile)
             profile = newProfile
           } else {
-            console.error('❌ Failed to create profile - No data returned')
             return {
               user: null,
               error: NextResponse.json(
@@ -211,7 +164,6 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
             }
           }
         } catch (createError) {
-          console.error('❌ Failed to create profile - Network error:', createError)
           return {
             user: null,
             error: NextResponse.json(
@@ -222,7 +174,6 @@ export async function validateAdminAccess(): Promise<{ user: AdminUser | null; e
         }
       } else {
         // Network or other error, don't try to create profile
-        console.error('❌ Network or other error accessing profile, not attempting creation')
         return {
           user: null,
           error: NextResponse.json(

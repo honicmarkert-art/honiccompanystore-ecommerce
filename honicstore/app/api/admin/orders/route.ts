@@ -3,6 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 import { generateOrderIds, formatPickupId } from '@/lib/order-ids'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData, CACHE_TTL } from '@/lib/database-optimization'
+import { logError, createErrorResponse } from '@/lib/error-handler'
 
 
 
@@ -78,7 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (orderError) {
-      console.warn('Primary insert failed, attempting minimal insert. Error:', orderError?.message || String(orderError))
+      logger.warn('Primary insert failed, attempting minimal insert. Error:', orderError?.message || String(orderError))
       // Fallback: minimal insert with the least assumptions about schema
       const minimalData: any = {
         order_number: orderData.orderNumber,
@@ -101,8 +105,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (orderError) {
-      console.error('Failed to create order record after fallback:', orderError)
-      console.error('Attempted payloads:', { basicOrderData })
+      logger.error('Failed to create order record after fallback:', orderError)
+      logger.error('Attempted payloads:', { basicOrderData })
       return NextResponse.json(
         { 
           error: 'Failed to create order record', 
@@ -133,8 +137,8 @@ export async function POST(request: NextRequest) {
         .insert(orderItems)
 
       if (orderItemsError) {
-        console.error('Failed to create order items:', orderItemsError)
-        console.error('Order items data:', orderItems)
+        logger.error('Failed to create order items:', orderItemsError)
+        logger.error('Order items data:', orderItems)
         // Don't fail the order creation, but log the error
       } else {
         logger.log('✅ Successfully created order items:', orderItems.length, 'items')
@@ -161,7 +165,10 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Admin order submission error:', error)
+    logError(error, {
+      action: 'admin_orders_post',
+      endpoint: '/api/admin/orders'
+    })
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -170,27 +177,62 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  try {
-    console.log('🔍 [DEBUG] /api/admin/orders GET called')
-    console.log('🔍 [DEBUG] Request headers:', {
-      authorization: request.headers.get('authorization'),
-      cookie: request.headers.get('cookie')?.substring(0, 100) + '...',
-      userAgent: request.headers.get('user-agent')?.substring(0, 50)
-    })
-    
-    // Validate admin access first
-    const { user, error: authError } = await validateAdminAccess()
-    console.log('🔍 [DEBUG] validateAdminAccess result:', {
-      hasUser: !!user,
-      hasError: !!authError,
-      errorStatus: authError?.status,
-      errorMessage: authError ? await authError.text().catch(() => '') : null
-    })
-    
-    if (authError) {
-      console.log('❌ [DEBUG] Authentication failed, returning error')
-      return authError
-    }
+  return performanceMonitor.measure('admin_orders_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/orders',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Check cache first (with short TTL for admin data)
+      const cacheKey = `admin_orders_${request.nextUrl.searchParams.toString()}`
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            'X-Cache': 'HIT',
+            'Cache-Control': 'private, max-age=30'
+          }
+        })
+      }
+      
+      // Validate admin access first
+      const { user, error: authError } = await validateAdminAccess()
+      
+      if (authError) {
+        // Don't try to read the response body - it will be consumed by the return
+        // Just use the status code to determine the error message
+        const errorMessage = authError.status === 403 
+          ? 'Admin privileges required' 
+          : authError.status === 401 
+          ? 'Authentication required'
+          : 'Admin authentication failed'
+        
+        // Only log non-403 errors (403 is expected for non-admin users)
+        if (authError.status !== 403) {
+          logError(new Error(errorMessage), {
+            userId: user?.id,
+            action: 'admin_orders_get',
+            endpoint: '/api/admin/orders',
+            authErrorStatus: authError.status,
+            authErrorStatusText: authError.statusText
+          })
+        }
+        return authError
+      }
 
     const { client: supabase, error: envError } = getAdminClient()
     if (envError) {
@@ -216,36 +258,48 @@ export async function GET(request: NextRequest) {
       `)
       .order('created_at', { ascending: false })
 
-    if (ordersError) {
-      console.error('Failed to fetch orders:', ordersError)
-      return NextResponse.json(
-        { error: 'Failed to fetch orders' },
-        { status: 500 }
-      )
+      if (ordersError) {
+        logError(ordersError, {
+          userId: user.id,
+          action: 'admin_orders_get',
+          endpoint: '/api/admin/orders'
+        })
+        return createErrorResponse(ordersError, 500)
+      }
+
+      // Transform the data to include order items in a more accessible format
+      const transformedOrders = (orders || []).map(order => ({
+        ...order,
+        order_items: order.order_items || [],
+        // Calculate total items count from order_items
+        total_items: (order.order_items || []).reduce((sum: number, item: any) => sum + (item.quantity || 0), 0),
+        // Calculate total amount from order_items if not present in order
+        calculated_total: (order.order_items || []).reduce((sum: number, item: any) => sum + (item.total_price || 0), 0)
+      }))
+
+      const responseData = {
+        success: true,
+        orders: transformedOrders,
+      }
+
+      // Cache response (short TTL for admin data - 30 seconds)
+      setCachedData(cacheKey, responseData, 30000)
+
+      return NextResponse.json(responseData, {
+        headers: {
+          'X-Cache': 'MISS',
+          'Cache-Control': 'private, max-age=30'
+        }
+      })
+
+    } catch (error) {
+      logError(error, {
+        action: 'admin_orders_get',
+        endpoint: '/api/admin/orders'
+      })
+      return createErrorResponse(error, 500)
     }
-
-    // Transform the data to include order items in a more accessible format
-    const transformedOrders = (orders || []).map(order => ({
-      ...order,
-      order_items: order.order_items || [],
-      // Calculate total items count from order_items
-      total_items: (order.order_items || []).reduce((sum: number, item: any) => sum + (item.quantity || 0), 0),
-      // Calculate total amount from order_items if not present in order
-      calculated_total: (order.order_items || []).reduce((sum: number, item: any) => sum + (item.total_price || 0), 0)
-    }))
-
-    return NextResponse.json({
-      success: true,
-      orders: transformedOrders,
-    })
-
-  } catch (error) {
-    console.error('Orders fetch error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
+  })
 }
 
 // PATCH /api/admin/orders - update order status or metadata
@@ -284,7 +338,10 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Order update error:', error)
+    logError(error, {
+      action: 'admin_orders_put',
+      endpoint: '/api/admin/orders'
+    })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -320,7 +377,7 @@ export async function DELETE(request: NextRequest) {
         .single()
 
       if (fetchError) {
-        console.error('❌ Order not found:', fetchError)
+        logger.error('Order not found:', fetchError)
         return NextResponse.json(
           { error: 'Order not found', details: fetchError.message },
           { status: 404 }
@@ -336,7 +393,7 @@ export async function DELETE(request: NextRequest) {
         .eq('order_id', orderId)
 
       if (deleteItemsError) {
-        console.warn('⚠️ Failed to delete order_items, assuming cascade:', deleteItemsError)
+        logger.warn('Failed to delete order_items, assuming cascade:', deleteItemsError)
       } else {
         logger.log('✅ Order items deleted successfully')
       }
@@ -347,7 +404,7 @@ export async function DELETE(request: NextRequest) {
         .eq('id', orderId)
 
       if (deleteOrderError) {
-        console.error('❌ Failed to delete order from database:', deleteOrderError)
+        logger.error('Failed to delete order from database:', deleteOrderError)
         return NextResponse.json(
           { error: 'Failed to delete order', details: deleteOrderError.message },
           { status: 500 }
@@ -364,7 +421,7 @@ export async function DELETE(request: NextRequest) {
         .neq('order_id', '') // noop filter to satisfy API requirements
 
       if (deleteItemsError) {
-        console.warn('Failed to delete order_items directly, proceeding to delete orders (assuming cascade):', deleteItemsError)
+        logger.warn('Failed to delete order_items directly, proceeding to delete orders (assuming cascade):', deleteItemsError)
       }
 
       const { error: deleteOrdersError } = await supabase
@@ -383,7 +440,10 @@ export async function DELETE(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Orders delete error:', error)
+    logError(error, {
+      action: 'admin_orders_delete',
+      endpoint: '/api/admin/orders'
+    })
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -413,7 +473,7 @@ async function sendAdminNotification(orderData: any, orderId: string, referenceI
     
     return { success: true }
   } catch (error) {
-    console.error('Failed to send admin notification:', error)
+    logger.error('Failed to send admin notification:', error)
     throw error
   }
 }
@@ -421,12 +481,12 @@ async function sendAdminNotification(orderData: any, orderId: string, referenceI
 // Function to generate payment URL
 function generatePaymentUrl(referenceId: string, amount: number): string {
   // Generate payment URL (simulate ClickPesa or other payment gateway)
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+  const { buildUrl } = require('@/lib/url-utils')
   const paymentId = `PAY_${Date.now()}`
   
   // In a real app, this would integrate with your payment gateway
   // Use Reference ID for secure internal tracking
-  const paymentUrl = `${baseUrl}/payment/${paymentId}?ref=${referenceId}&amount=${amount}`
+  const paymentUrl = buildUrl(`/payment/${paymentId}?ref=${referenceId}&amount=${amount}`)
   
   logger.log('💰 Payment URL Generated:', paymentUrl)
   

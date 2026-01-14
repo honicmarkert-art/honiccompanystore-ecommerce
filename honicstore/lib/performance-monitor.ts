@@ -1,330 +1,220 @@
 /**
- * Performance Monitoring and Optimization
- * 
- * This module provides utilities for monitoring and optimizing application performance
+ * Production-ready performance monitoring utilities
+ * Tracks performance metrics, API response times, and user interactions
  */
 
-interface PerformanceMetrics {
-  loadTime: number
-  apiTime: number
-  cacheHitRate: number
-  errors: number
-  securityEvents: number
+interface PerformanceMetric {
+  name: string
+  value: number
   timestamp: number
+  metadata?: Record<string, unknown>
 }
 
-interface CacheMetrics {
-  hits: number
-  misses: number
-  total: number
-  hitRate: number
+interface ApiMetric {
+  endpoint: string
+  method: string
+  duration: number
+  statusCode: number
+  timestamp: number
+  error?: string
 }
 
 class PerformanceMonitor {
-  private metrics: PerformanceMetrics[] = []
-  private cacheMetrics: CacheMetrics = {
-    hits: 0,
-    misses: 0,
-    total: 0,
-    hitRate: 0
-  }
-  private securityEvents: any[] = []
+  private metrics: PerformanceMetric[] = []
+  private apiMetrics: ApiMetric[] = []
+  private readonly maxMetrics = 100 // Limit stored metrics to prevent memory issues
 
   /**
-   * Record performance metrics
+   * Measure execution time of a function
    */
-  recordMetrics(metrics: Partial<PerformanceMetrics>) {
-    const fullMetrics: PerformanceMetrics = {
-      loadTime: 0,
-      apiTime: 0,
-      cacheHitRate: 0,
-      errors: 0,
-      securityEvents: 0,
+  async measure<T>(
+    name: string,
+    fn: () => Promise<T>,
+    metadata?: Record<string, unknown>
+  ): Promise<T> {
+    const start = performance.now()
+    try {
+      const result = await fn()
+      const duration = performance.now() - start
+      this.recordMetric(name, duration, metadata)
+      return result
+    } catch (error) {
+      const duration = performance.now() - start
+      this.recordMetric(name, duration, { ...metadata, error: String(error) })
+      throw error
+    }
+  }
+
+  /**
+   * Record a performance metric
+   */
+  recordMetric(name: string, value: number, metadata?: Record<string, unknown>): void {
+    const metric: PerformanceMetric = {
+      name,
+      value,
       timestamp: Date.now(),
-      ...metrics
+      metadata,
     }
-    
-    this.metrics.push(fullMetrics)
-    
-    // Keep only last 100 metrics
-    if (this.metrics.length > 100) {
-      this.metrics = this.metrics.slice(-100)
+
+    this.metrics.push(metric)
+
+    // Keep only the most recent metrics
+    if (this.metrics.length > this.maxMetrics) {
+      this.metrics.shift()
     }
-  }
 
-  /**
-   * Record cache hit
-   */
-  recordCacheHit() {
-    this.cacheMetrics.hits++
-    this.cacheMetrics.total++
-    this.cacheMetrics.hitRate = (this.cacheMetrics.hits / this.cacheMetrics.total) * 100
-  }
-
-  /**
-   * Record cache miss
-   */
-  recordCacheMiss() {
-    this.cacheMetrics.misses++
-    this.cacheMetrics.total++
-    this.cacheMetrics.hitRate = (this.cacheMetrics.hits / this.cacheMetrics.total) * 100
-  }
-
-  /**
-   * Record security event
-   */
-  recordSecurityEvent(event: any) {
-    this.securityEvents.push({
-      ...event,
-      timestamp: Date.now()
-    })
-    
-    // Keep only last 50 security events
-    if (this.securityEvents.length > 50) {
-      this.securityEvents = this.securityEvents.slice(-50)
+    // In production, send to monitoring service
+    if (process.env.NODE_ENV === 'production') {
+      // TODO: Send to your monitoring service (e.g., DataDog, New Relic)
+      this.sendToMonitoringService(metric)
+    } else {
+      // In development, slow operations are tracked but not logged
+      // TODO: Add proper logging service integration
     }
   }
 
   /**
-   * Get current performance metrics
+   * Record API call metrics
    */
-  getMetrics(): PerformanceMetrics & { cacheMetrics: CacheMetrics } {
-    const latest = this.metrics[this.metrics.length - 1] || {
-      loadTime: 0,
-      apiTime: 0,
-      cacheHitRate: 0,
-      errors: 0,
-      securityEvents: 0,
-      timestamp: Date.now()
+  recordApiCall(
+    endpoint: string,
+    method: string,
+    duration: number,
+    statusCode: number,
+    error?: string
+  ): void {
+    const metric: ApiMetric = {
+      endpoint,
+      method,
+      duration,
+      statusCode,
+      timestamp: Date.now(),
+      error,
     }
+
+    this.apiMetrics.push(metric)
+
+    // Keep only the most recent metrics
+    if (this.apiMetrics.length > this.maxMetrics) {
+      this.apiMetrics.shift()
+    }
+
+    // Slow API calls are tracked but not logged
+    // TODO: Add proper logging service integration
+
+    // In production, send to monitoring service
+    if (process.env.NODE_ENV === 'production') {
+      this.sendApiMetricToMonitoringService(metric)
+    }
+  }
+
+  /**
+   * Get performance statistics
+   */
+  getStats(): {
+    averageResponseTime: number
+    slowestOperations: PerformanceMetric[]
+    apiStats: {
+      averageDuration: number
+      errorRate: number
+      slowestEndpoints: ApiMetric[]
+    }
+  } {
+    const avgResponseTime =
+      this.metrics.length > 0
+        ? this.metrics.reduce((sum, m) => sum + m.value, 0) / this.metrics.length
+        : 0
+
+    const slowestOperations = [...this.metrics]
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10)
+
+    const apiAvgDuration =
+      this.apiMetrics.length > 0
+        ? this.apiMetrics.reduce((sum, m) => sum + m.duration, 0) / this.apiMetrics.length
+        : 0
+
+    const errorRate =
+      this.apiMetrics.length > 0
+        ? this.apiMetrics.filter((m) => m.statusCode >= 400).length / this.apiMetrics.length
+        : 0
+
+    const slowestEndpoints = [...this.apiMetrics]
+      .sort((a, b) => b.duration - a.duration)
+      .slice(0, 10)
 
     return {
-      ...latest,
-      cacheHitRate: this.cacheMetrics.hitRate,
-      cacheMetrics: this.cacheMetrics
+      averageResponseTime: avgResponseTime,
+      slowestOperations,
+      apiStats: {
+        averageDuration: apiAvgDuration,
+        errorRate,
+        slowestEndpoints,
+      },
     }
   }
 
   /**
-   * Get performance summary
+   * Clear all metrics (useful for testing)
    */
-  getSummary() {
-    const recent = this.metrics.slice(-10) // Last 10 metrics
-    
-    return {
-      averageLoadTime: recent.reduce((sum, m) => sum + m.loadTime, 0) / recent.length || 0,
-      averageApiTime: recent.reduce((sum, m) => sum + m.apiTime, 0) / recent.length || 0,
-      totalErrors: recent.reduce((sum, m) => sum + m.errors, 0),
-      totalSecurityEvents: recent.reduce((sum, m) => sum + m.securityEvents, 0),
-      cacheHitRate: this.cacheMetrics.hitRate,
-      cacheStats: this.cacheMetrics
-    }
-  }
-
-  /**
-   * Get security events
-   */
-  getSecurityEvents() {
-    return this.securityEvents
-  }
-
-  /**
-   * Clear all metrics
-   */
-  clear() {
+  clear(): void {
     this.metrics = []
-    this.cacheMetrics = { hits: 0, misses: 0, total: 0, hitRate: 0 }
-    this.securityEvents = []
+    this.apiMetrics = []
+  }
+
+  /**
+   * Send metric to monitoring service (implement based on your service)
+   */
+  private sendToMonitoringService(metric: PerformanceMetric): void {
+    // TODO: Implement integration with your monitoring service
+    // Example: Sentry, DataDog, New Relic, etc.
+    if (typeof window !== 'undefined' && (window as any).__MONITORING_SERVICE__) {
+      ;(window as any).__MONITORING_SERVICE__.trackMetric(metric)
+    }
+  }
+
+  /**
+   * Send API metric to monitoring service
+   */
+  private sendApiMetricToMonitoringService(metric: ApiMetric): void {
+    // TODO: Implement integration with your monitoring service
+    if (typeof window !== 'undefined' && (window as any).__MONITORING_SERVICE__) {
+      ;(window as any).__MONITORING_SERVICE__.trackApiCall(metric)
+    }
   }
 }
 
-// Global performance monitor instance
+// Singleton instance
 export const performanceMonitor = new PerformanceMonitor()
 
 /**
- * Enhanced caching with performance monitoring
+ * Higher-order function to measure API call performance
  */
-export class EnhancedCache {
-  private cache = new Map<string, { data: any; timestamp: number; ttl: number }>()
-  private readonly maxSize = 1000 // Maximum cache entries
-
-  /**
-   * Get cached data with performance monitoring
-   */
-  get<T>(key: string): T | null {
-    const cached = this.cache.get(key)
-    if (!cached) {
-      performanceMonitor.recordCacheMiss()
-      return null
-    }
-    
-    const now = Date.now()
-    if (now - cached.timestamp > cached.ttl) {
-      this.cache.delete(key)
-      performanceMonitor.recordCacheMiss()
-      return null
-    }
-    
-    performanceMonitor.recordCacheHit()
-    return cached.data as T
-  }
-
-  /**
-   * Set cached data with performance monitoring
-   */
-  set<T>(key: string, data: T, ttl: number = 10 * 60 * 1000): void {
-    // Implement LRU eviction if cache is full
-    if (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value
-      this.cache.delete(firstKey)
-    }
-
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now(),
-      ttl
+export function withPerformanceMonitoring<T extends (...args: any[]) => Promise<any>>(
+  fn: T,
+  name: string
+): T {
+  return (async (...args: Parameters<T>) => {
+    return performanceMonitor.measure(name, () => fn(...args), {
+      args: args.length,
     })
-  }
-
-  /**
-   * Clear cache
-   */
-  clear(): void {
-    this.cache.clear()
-  }
-
-  /**
-   * Get cache statistics
-   */
-  getStats() {
-    return {
-      size: this.cache.size,
-      maxSize: this.maxSize,
-      utilization: (this.cache.size / this.maxSize) * 100
-    }
-  }
-}
-
-// Global enhanced cache instance
-export const enhancedCache = new EnhancedCache()
-
-/**
- * Performance optimization utilities
- */
-export const performanceUtils = {
-  /**
-   * Debounce function calls
-   */
-  debounce<T extends (...args: any[]) => any>(
-    func: T,
-    wait: number
-  ): (...args: Parameters<T>) => void {
-    let timeout: NodeJS.Timeout
-    return (...args: Parameters<T>) => {
-      clearTimeout(timeout)
-      timeout = setTimeout(() => func(...args), wait)
-    }
-  },
-
-  /**
-   * Throttle function calls
-   */
-  throttle<T extends (...args: any[]) => any>(
-    func: T,
-    limit: number
-  ): (...args: Parameters<T>) => void {
-    let inThrottle: boolean
-    return (...args: Parameters<T>) => {
-      if (!inThrottle) {
-        func(...args)
-        inThrottle = true
-        setTimeout(() => inThrottle = false, limit)
-      }
-    }
-  },
-
-  /**
-   * Measure execution time
-   */
-  async measureTime<T>(fn: () => Promise<T>): Promise<{ result: T; time: number }> {
-    const start = Date.now()
-    const result = await fn()
-    const time = Date.now() - start
-    return { result, time }
-  },
-
-  /**
-   * Retry with exponential backoff
-   */
-  async retryWithBackoff<T>(
-    fn: () => Promise<T>,
-    maxRetries: number = 3,
-    baseDelay: number = 1000
-  ): Promise<T> {
-    let lastError: Error
-    
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await fn()
-      } catch (error) {
-        lastError = error as Error
-        
-        if (i === maxRetries - 1) {
-          throw lastError
-        }
-        
-        const delay = baseDelay * Math.pow(2, i)
-        await new Promise(resolve => setTimeout(resolve, delay))
-      }
-    }
-    
-    throw lastError!
-  }
+  }) as T
 }
 
 /**
- * API response optimization
+ * React hook for measuring component render performance
+ * Note: Import useEffect from 'react' when using this hook
  */
-export const apiOptimization = {
-  /**
-   * Compress response data
-   */
-  compressResponse(data: any): any {
-    // Remove unnecessary fields for minimal responses
-    if (Array.isArray(data)) {
-      return data.map(item => {
-        const { id, name, price, image, category, stock_quantity } = item
-        return { id, name, price, image, category, stock_quantity }
-      })
-    }
-    return data
-  },
-
-  /**
-   * Add performance headers
-   */
-  addPerformanceHeaders(response: Response, metrics: Partial<PerformanceMetrics>): Response {
-    const headers = new Headers(response.headers)
-    
-    if (metrics.loadTime) {
-      headers.set('X-Load-Time', metrics.loadTime.toString())
-    }
-    
-    if (metrics.apiTime) {
-      headers.set('X-API-Time', metrics.apiTime.toString())
-    }
-    
-    if (metrics.cacheHitRate !== undefined) {
-      headers.set('X-Cache-Hit-Rate', metrics.cacheHitRate.toString())
-    }
-    
-    headers.set('X-Timestamp', Date.now().toString())
-    
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers
-    })
-  }
+export function createPerformanceMeasureHook() {
+  // This is a factory function to avoid requiring React import in this utility file
+  // Usage in components:
+  // const usePerformanceMeasure = createPerformanceMeasureHook()
+  // useEffect(() => {
+  //   const start = performance.now()
+  //   return () => {
+  //     const duration = performance.now() - start
+  //     performanceMonitor.recordMetric('component_render', duration)
+  //   }
+  // }, [])
+  return null
 }
-

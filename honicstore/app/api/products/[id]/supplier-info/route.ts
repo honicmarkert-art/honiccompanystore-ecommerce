@@ -11,7 +11,7 @@ export async function GET(
 ) {
   try {
     const { id: productId } = await params
-    
+
     // Rate limiting
     const rateLimitResult = enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
@@ -24,14 +24,12 @@ export async function GET(
         { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
       )
     }
-
     if (!productId) {
       return NextResponse.json(
         { error: 'Product ID is required' },
         { status: 400 }
       )
     }
-
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
     // Fetch product to get supplier_id or user_id
@@ -47,12 +45,11 @@ export async function GET(
         { status: 404 }
       )
     }
-
     const supplierId = productData.supplier_id || productData.user_id
 
     if (!supplierId) {
       return NextResponse.json(
-        { 
+        {
           companyName: null,
           companyLogo: null,
           isVerified: false,
@@ -68,7 +65,6 @@ export async function GET(
         { status: 200 }
       )
     }
-
     // Fetch supplier profile data
     const { data: supplierData, error: supplierError } = await supabase
       .from('profiles')
@@ -82,7 +78,6 @@ export async function GET(
         { status: 404 }
       )
     }
-
     // Fetch product count for this supplier
     const { count: productCount, error: countError } = await supabase
       .from('products')
@@ -114,13 +109,9 @@ export async function GET(
       region: supplierData.region || null
     })
   } catch (error: any) {
-    console.error('Error fetching supplier info:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
     )
   }
 }
-
-
-

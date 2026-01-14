@@ -38,7 +38,7 @@ const CSP_HEADER = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https: http:",
   "font-src 'self' https://fonts.gstatic.com",
-  "connect-src 'self' https://*.supabase.co https://api.clickpesa.com wss://*.supabase.co https://va.vercel-scripts.com",
+  `connect-src 'self' https://*.supabase.co ${process.env.CLICKPESA_API_URL || process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'} wss://*.supabase.co https://va.vercel-scripts.com`,
   "media-src 'self' data: blob: https: http:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -80,7 +80,7 @@ function sanitizeInput(input: string): string {
     .trim()
 }
 
-// CSRF token validation
+// CSRF token validation with constant-time comparison
 function validateCSRFToken(request: NextRequest): boolean {
   const token = request.headers.get('x-csrf-token')
   const cookieToken = request.cookies.get('csrf-token')?.value
@@ -89,7 +89,17 @@ function validateCSRFToken(request: NextRequest): boolean {
     return false
   }
   
-  return token === cookieToken
+  // Constant-time comparison to prevent timing attacks
+  if (token.length !== cookieToken.length) {
+    return false
+  }
+  
+  let result = 0
+  for (let i = 0; i < token.length; i++) {
+    result |= token.charCodeAt(i) ^ cookieToken.charCodeAt(i)
+  }
+  
+  return result === 0
 }
 
 // Admin route protection - Hidden path for security
@@ -114,7 +124,6 @@ export function middleware(request: NextRequest) {
   if (!isDevelopment) {
     const isApi = isApiRoute(pathname)
     if (!checkRateLimit(ip, isApi)) {
-      console.warn(`Rate limit exceeded for IP: ${ip} on ${pathname}`)
       return new NextResponse('Too Many Requests', { 
         status: 429,
         headers: {
@@ -147,9 +156,7 @@ export function middleware(request: NextRequest) {
     // Debug: trace auth state for admin routes
     try {
       const rawCookieHeader = request.headers.get('cookie') || ''
-      console.log('[MW][Admin] Path:', pathname)
-      console.log('[MW][Admin] Cookie header length:', rawCookieHeader.length)
-    } catch {}
+      } catch {}
 
     // Check for Supabase session cookies (derive cookie name from env)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -159,25 +166,12 @@ export function middleware(request: NextRequest) {
     const accessToken = request.cookies.get('sb-access-token')
     const fullAuthToken = fullAuthCookieName ? request.cookies.get(fullAuthCookieName) : undefined
     
-    console.log('[MW][Admin] Supabase config:', {
-      supabaseUrl: supabaseUrl.substring(0, 30) + '...',
-      projectRef,
-      fullAuthCookieName
-    })
-    console.log('[MW][Admin] Cookies present:', {
-      hasAccessToken: !!accessToken?.value,
-      hasFullAuthToken: !!fullAuthToken?.value
-    })
-    
     // If no session indicators found, redirect to login
     if (!accessToken && !fullAuthToken) {
       const loginUrl = new URL('/auth/login', request.url)
       loginUrl.searchParams.set('redirect', pathname)
-      console.log('[MW][Admin] Redirecting to login with redirect param:', pathname)
       return NextResponse.redirect(loginUrl)
     }
-
-    console.log('[MW][Admin] Access allowed to admin route:', pathname)
 
     // CSRF protection for state-changing operations
     if (request.method !== 'GET' && !validateCSRFToken(request)) {
@@ -199,7 +193,6 @@ export function middleware(request: NextRequest) {
     // Block suspicious user agents
     const userAgent = request.headers.get('user-agent') || ''
     if (userAgent.includes('bot') && !userAgent.includes('googlebot')) {
-      console.warn(`Blocked bot request from IP: ${ip}, User-Agent: ${userAgent}`)
       return new NextResponse('Forbidden', { status: 403 })
     }
   }

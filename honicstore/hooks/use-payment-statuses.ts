@@ -44,14 +44,12 @@ export function usePaymentStatuses(): UsePaymentStatusesReturn {
 
       if (!response.ok) {
         const errorText = await response.text()
-        console.error('Payment statuses API error:', response.status, errorText)
         throw new Error(`Failed to fetch payment statuses: ${response.status}`)
       }
 
       const data = await response.json()
       setPaymentStatuses(data.paymentStatuses || [])
     } catch (err) {
-      console.error('Payment statuses fetch error:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch payment statuses')
       setPaymentStatuses([])
     } finally {

@@ -116,8 +116,7 @@ export async function GET(request: NextRequest) {
             }
           )
         } catch (error) {
-          console.error(`Error notifying supplier ${supplier.id}:`, error)
-        }
+          }
 
         // Notify admins (batch notification at end)
       }
@@ -135,8 +134,7 @@ export async function GET(request: NextRequest) {
           }
         )
       } catch (error) {
-        console.error('Error notifying admins of expired plans:', error)
-      }
+        }
     }
 
     return NextResponse.json({

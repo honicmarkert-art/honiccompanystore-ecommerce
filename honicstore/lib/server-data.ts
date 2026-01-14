@@ -80,7 +80,6 @@ export async function getServerSideProducts(limit = 20, offset = 0): Promise<Pro
       .range(offset, offset + limit - 1)
 
     if (error) {
-      console.error('Error fetching products:', error)
       return []
     }
 
@@ -110,7 +109,6 @@ export async function getServerSideProducts(limit = 20, offset = 0): Promise<Pro
       view360: product.view360
     })) || []
   } catch (error) {
-    console.error('Error in getServerSideProducts:', error)
     return []
   }
 }
@@ -124,13 +122,11 @@ export async function getServerSideCategories(): Promise<Category[]> {
       .order('display_order', { ascending: true })
 
     if (error) {
-      console.error('Error fetching categories:', error)
       return []
     }
 
     return data || []
   } catch (error) {
-    console.error('Error in getServerSideCategories:', error)
     return []
   }
 }
@@ -168,7 +164,6 @@ export async function getServerSideProductById(id: number): Promise<Product | nu
       .single()
 
     if (error) {
-      console.error('Error fetching product by ID:', error)
       return null
     }
 
@@ -200,7 +195,6 @@ export async function getServerSideProductById(id: number): Promise<Product | nu
       view360: data.view360
     }
   } catch (error) {
-    console.error('Error in getServerSideProductById:', error)
     return null
   }
 }

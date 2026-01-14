@@ -86,8 +86,7 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
         setUnreadCount(data.unreadCount || 0)
       }
     } catch (error) {
-      console.error('Error fetching notifications:', error)
-    } finally {
+      } finally {
       setLoading(false)
     }
   }, [])
@@ -146,7 +145,6 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
                 'high_risk_order'
               ]
               if (adminTypes.includes(newNotification.type)) {
-                console.log('🔔 New admin notification received via real-time:', newNotification)
                 fetchNotifications(true)
               }
             }
@@ -185,9 +183,7 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
           )
           .subscribe((status) => {
             if (status === 'SUBSCRIBED') {
-              console.log('✅ Subscribed to real-time admin notifications')
-            } else if (status === 'CHANNEL_ERROR') {
-              console.warn('⚠️ Real-time subscription error, will retry...')
+              } else if (status === 'CHANNEL_ERROR') {
               setTimeout(() => {
                 if (isMounted) {
                   setupRealtime()
@@ -197,8 +193,7 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
           })
 
       } catch (error) {
-        console.error('Error setting up real-time notifications:', error)
-      }
+        }
     }
 
     setupRealtime()
@@ -209,8 +204,7 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
         try {
           supabaseClient.removeChannel(channel)
         } catch (error) {
-          console.warn('Error removing notification channel:', error)
-        }
+          }
       }
     }
   }, [fetchNotifications])
@@ -237,8 +231,7 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
         fetchNotifications()
       }
     } catch (error) {
-      console.error('Error marking notification as read:', error)
-    }
+      }
   }
 
   // Mark all as read
@@ -255,8 +248,7 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
         fetchNotifications()
       }
     } catch (error) {
-      console.error('Error marking all as read:', error)
-    }
+      }
   }
 
   // Delete notification
@@ -293,10 +285,8 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
       
       // Keep in deleted set permanently for this session - don't remove it
       // This prevents the notification from reappearing if refetched
-      console.log('✅ Notification deleted successfully:', notificationId)
-    } catch (error) {
-      console.error('Error deleting notification:', error)
-    }
+      } catch (error) {
+      }
   }
 
   // Delete all read notifications
@@ -338,8 +328,7 @@ export function AdminNotificationCenter({ className }: AdminNotificationCenterPr
       // Keep in deleted set permanently for this session - don't remove them
       // This prevents notifications from reappearing if refetched
     } catch (error) {
-      console.error('Error deleting all read notifications:', error)
-    }
+      }
   }
 
   // Get icon based on notification type

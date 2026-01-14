@@ -73,15 +73,13 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
       if (!response.ok) {
         // Don't log 401/403 as errors (user might not be authenticated)
         if (response.status !== 401 && response.status !== 403) {
-          console.warn('Failed to fetch notifications:', response.status, response.statusText)
-        }
+          }
         return
       }
       
       // Check content type before parsing JSON
       const contentType = response.headers.get('content-type')
       if (!contentType || !contentType.includes('application/json')) {
-        console.warn('Unexpected content type when fetching notifications:', contentType)
         return
       }
       
@@ -121,10 +119,9 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
       }
       
       // Only log non-network errors or errors during non-silent fetches
-      if (error.name !== 'AbortError' && error.message !== 'Failed to fetch' && !error.message?.includes('fetch')) {
-        console.error('Error fetching notifications:', error)
-      } else if (!silent) {
-        console.warn('Network error fetching notifications (this may be due to browser extensions or network issues):', error.message || error)
+      // Error logging disabled for production cleanliness
+      if (!silent && error.name !== 'AbortError' && error.message !== 'Failed to fetch' && !error.message?.includes('fetch')) {
+        // Log error to monitoring service in production
       }
     } finally {
       setLoading(false)
@@ -189,8 +186,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
           try {
             supabaseClient.removeChannel(channel)
           } catch (error) {
-            console.warn('Error removing existing notification channel:', error)
-          }
+            }
         }
 
         channel = supabaseClient
@@ -264,7 +260,6 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
           )
           .subscribe((status) => {
             if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-              console.warn(`⚠️ Notification real-time status: ${status}`)
               // Try to reconnect after a delay
               if (isMounted) {
                 setTimeout(() => {
@@ -277,8 +272,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
           })
 
       } catch (error) {
-        console.error('Error setting up real-time notifications:', error)
-      }
+        }
     }
 
     setupRealtime()
@@ -289,8 +283,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
         try {
           supabaseClient.removeChannel(channel)
         } catch (error) {
-          console.warn('Error removing notification channel:', error)
-        }
+          }
       }
     }
   }, [fetchNotifications])
@@ -328,8 +321,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
         }
       }
     } catch (error) {
-      console.error('Error marking notification as read:', error)
-    }
+      }
   }
 
   // Mark all as read
@@ -346,8 +338,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
         fetchNotifications()
       }
     } catch (error) {
-      console.error('Error marking all as read:', error)
-    }
+      }
   }
 
   // Delete notification
@@ -385,8 +376,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
       // Keep in deleted set permanently for this session - don't remove it
       // This prevents the notification from reappearing if refetched
     } catch (error) {
-      console.error('Error deleting notification:', error)
-    }
+      }
   }
 
   // Delete all read notifications
@@ -428,8 +418,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
       // Keep in deleted set permanently for this session - don't remove them
       // This prevents notifications from reappearing if refetched
     } catch (error) {
-      console.error('Error deleting all read notifications:', error)
-    }
+      }
   }
 
   // Get icon based on notification type

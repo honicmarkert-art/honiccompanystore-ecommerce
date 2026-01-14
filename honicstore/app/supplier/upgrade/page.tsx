@@ -81,7 +81,6 @@ export default function SupplierUpgradePage() {
         }
       }
     } catch (error) {
-      console.error('Error fetching plans:', error)
       // Reset hasFetched on error so we can retry
       setHasFetched(false)
       toast({
@@ -228,7 +227,6 @@ export default function SupplierUpgradePage() {
       window.open(paymentData.checkoutUrl, '_blank', 'noopener,noreferrer')
       
     } catch (error: any) {
-      console.error('Error changing plan:', error)
       toast({
         title: 'Error',
         description: error.message || 'Failed to change plan. Please try again.',

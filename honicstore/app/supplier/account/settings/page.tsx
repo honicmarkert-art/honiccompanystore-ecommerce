@@ -45,8 +45,7 @@ export default function AccountSettingsPage() {
           }
         }
       } catch (error) {
-        console.error('Error fetching profile:', error)
-      } finally {
+        } finally {
         setLoadingProfile(false)
       }
     }

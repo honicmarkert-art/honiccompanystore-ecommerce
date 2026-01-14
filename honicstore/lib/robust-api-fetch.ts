@@ -213,8 +213,7 @@ export function useCachedApiFetch<T>(
           setState(prev => ({ ...prev, data: parsedData, isLoading: false, error: null }))
           return
         } catch (error) {
-          console.warn('Failed to parse cached data:', error)
-        }
+          }
       }
     }
 

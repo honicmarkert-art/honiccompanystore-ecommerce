@@ -6,7 +6,7 @@ import { ThemeProvider } from '@/components/theme-provider'
 import { WebThemeProvider } from '@/contexts/theme-context'
 import { CompanyProvider } from '@/components/company-provider'
 import { PublicCompanyProvider } from '@/contexts/public-company-context'
-import { AuthProvider } from '@/contexts/auth-context'
+import { AuthProviderWrapper } from '@/components/auth-provider-wrapper'
 import { GlobalAuthModalProvider } from '@/contexts/global-auth-modal'
 import { CurrencyProvider } from '@/contexts/currency-context'
 import { LanguageProvider } from '@/contexts/language-context'
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   keywords: 'online shopping, Tanzania, electronics, fashion, home goods, marketplace, best deals, free shipping',
   authors: [{ name: 'Honic Company Store' }],
   alternates: {
-    canonical: 'https://www.honiccompanystore.com'
+    canonical: process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'
   },
   icons: {
     icon: [
@@ -52,7 +52,7 @@ export const metadata: Metadata = {
     description: 'Shop the best deals on electronics, fashion, home goods, and more. Free shipping across Tanzania.',
     type: 'website',
     locale: 'en_US',
-    url: 'https://www.honiccompanystore.com',
+    url: process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com',
     siteName: 'Honic Company Store',
   },
   twitter: {
@@ -97,8 +97,8 @@ export default function RootLayout({
             <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_SUPABASE_URL} />
           </>
         )}
-        <link rel="preconnect" href="https://api.clickpesa.com" crossOrigin="anonymous" />
-        <link rel="dns-prefetch" href="https://api.clickpesa.com" />
+        <link rel="preconnect" href={process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'} crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'} />
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         
@@ -216,7 +216,7 @@ export default function RootLayout({
           <WebThemeProvider>
           <SharedDataCacheProvider>
             <SWRProvider>
-              <AuthProvider>
+              <AuthProviderWrapper>
                 <GlobalAuthModalProvider>
                   <CurrencyProvider>
                     <LanguageProvider>
@@ -242,7 +242,7 @@ export default function RootLayout({
                     </LanguageProvider>
                   </CurrencyProvider>
                 </GlobalAuthModalProvider>
-              </AuthProvider>
+              </AuthProviderWrapper>
             </SWRProvider>
           </SharedDataCacheProvider>
           </WebThemeProvider>

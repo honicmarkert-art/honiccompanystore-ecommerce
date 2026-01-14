@@ -3,6 +3,11 @@ import { createClient } from '@supabase/supabase-js'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 import { autoAssignTrackingNumbers } from '@/lib/tracking-number-generator'
+import { buildUrl } from '@/lib/url-utils'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData } from '@/lib/database-optimization'
+import { logError, createErrorResponse } from '@/lib/error-handler'
 
 
 
@@ -20,12 +25,48 @@ function getAdminClient() {
 }
 
 export async function GET(request: NextRequest) {
-  try {
-    // Validate admin access first
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_confirmed_orders_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/confirmed-orders',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Check cache
+      const cacheKey = 'admin_confirmed_orders_all'
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            'X-Cache': 'HIT',
+            'Cache-Control': 'private, max-age=30' // 30 seconds cache
+          }
+        })
+      }
+
+      // Validate admin access first
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_confirmed_orders_get',
+          endpoint: '/api/admin/confirmed-orders'
+        })
+        return authError
+      }
 
     const { client: supabase, error: envError } = getAdminClient()
     if (envError) {
@@ -52,12 +93,14 @@ export async function GET(request: NextRequest) {
       `)
       .order('confirmed_at', { ascending: false })
 
-    if (ordersError) {
-      return NextResponse.json(
-        { error: 'Failed to fetch confirmed orders' },
-        { status: 500 }
-      )
-    }
+      if (ordersError) {
+        logError(ordersError, {
+          userId: user.id,
+          action: 'admin_confirmed_orders_get',
+          endpoint: '/api/admin/confirmed-orders'
+        })
+        return createErrorResponse(ordersError, 500)
+      }
 
     // Get all product IDs to fetch supplier information
     const allProductIds = new Set<number>()
@@ -131,27 +174,62 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({
-      success: true,
-      orders: transformedOrders,
-    })
+      const responseData = {
+        success: true,
+        orders: transformedOrders,
+      }
 
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
+      // Cache response (30 seconds TTL)
+      setCachedData(cacheKey, responseData, 30000)
+
+      return NextResponse.json(responseData, {
+        headers: {
+          'X-Cache': 'MISS',
+          'Cache-Control': 'private, max-age=30'
+        }
+      })
+    } catch (error) {
+      logError(error, {
+        action: 'admin_confirmed_orders_get',
+        endpoint: '/api/admin/confirmed-orders'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 // POST /api/admin/confirmed-orders - Create a new confirmed order
 export async function POST(request: NextRequest) {
-  try {
-    // Validate admin access first
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_confirmed_orders_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/confirmed-orders',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Validate admin access first
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_confirmed_orders_post',
+          endpoint: '/api/admin/confirmed-orders'
+        })
+        return authError
+      }
 
     const { client: supabase, error: envError } = getAdminClient()
     if (envError) {
@@ -208,21 +286,15 @@ export async function POST(request: NextRequest) {
       .select()
       .single()
 
-    if (orderError) {
-      logger.error('❌ Failed to create confirmed order:', {
-        error: orderError,
-        message: orderError.message,
-        details: orderError.details,
-        hint: orderError.hint,
-        code: orderError.code
-      })
-      logger.error('📝 Order data being inserted:', confirmedOrderData)
-      
-      return NextResponse.json(
-        { error: 'Failed to create confirmed order', details: orderError.message },
-        { status: 500 }
-      )
-    }
+      if (orderError) {
+        logError(orderError, {
+          userId: user.id,
+          action: 'admin_confirmed_orders_post',
+          endpoint: '/api/admin/confirmed-orders',
+          metadata: { orderNumber: orderData.orderNumber }
+        })
+        return createErrorResponse(orderError, 500)
+      }
 
     logger.log('✅ Successfully created confirmed order:', confirmedOrder.id)
 
@@ -268,32 +340,68 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      order: {
-        id: confirmedOrder.id,
-        orderNumber: confirmedOrder.order_number,
-        status: confirmedOrder.status,
-        confirmedAt: confirmedOrder.confirmed_at
-      }
-    })
+      // Clear cache
+      setCachedData('admin_confirmed_orders_all', null, 0)
 
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
+      // Log admin action
+      logSecurityEvent('CONFIRMED_ORDER_CREATED', user.id, {
+        orderId: confirmedOrder.id,
+        orderNumber: confirmedOrder.order_number,
+        endpoint: '/api/admin/confirmed-orders'
+      })
+
+      return NextResponse.json({
+        success: true,
+        order: {
+          id: confirmedOrder.id,
+          orderNumber: confirmedOrder.order_number,
+          status: confirmedOrder.status,
+          confirmedAt: confirmedOrder.confirmed_at
+        }
+      })
+
+    } catch (error) {
+      logError(error, {
+        action: 'admin_confirmed_orders_post',
+        endpoint: '/api/admin/confirmed-orders'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 // PATCH /api/admin/confirmed-orders - Update confirmed order status
 export async function PATCH(request: NextRequest) {
-  try {
-    // Validate admin access first
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_confirmed_orders_patch', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/confirmed-orders',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Validate admin access first
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_confirmed_orders_patch',
+          endpoint: '/api/admin/confirmed-orders'
+        })
+        return authError
+      }
 
     const { client: supabase, error: envError } = getAdminClient()
     if (envError) {
@@ -404,7 +512,7 @@ export async function PATCH(request: NextRequest) {
                 name: item.product_name,
                 quantity: item.quantity
               })) || [],
-              orderUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/account/orders/${confirmedOrder.order_number || id}`
+              orderUrl: buildUrl(`/account/orders/${confirmedOrder.order_number || id}`)
             })
           }
           // Handle shipping notification separately
@@ -423,7 +531,7 @@ export async function PATCH(request: NextRequest) {
                 orderNumber: confirmedOrder.order_number || id.toString(),
                 trackingNumber: trackingInfo.tracking_number,
                 carrier: trackingInfo.carrier || 'Standard Shipping',
-                trackingUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'}/account/orders/${confirmedOrder.order_number || id}`,
+                trackingUrl: buildUrl(`/account/orders/${confirmedOrder.order_number || id}`),
                 estimatedDelivery: confirmedOrder.estimated_delivery || '5-7 business days',
                 shippingAddress: shippingAddress || {},
                 items: orderItems?.map((item: any) => ({
@@ -472,9 +580,24 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
+      // Clear cache
+      setCachedData('admin_confirmed_orders_all', null, 0)
+
+      // Log admin action
+      logSecurityEvent('CONFIRMED_ORDER_UPDATED', user.id, {
+        orderId: id,
+        status,
+        endpoint: '/api/admin/confirmed-orders'
+      })
+
+      return NextResponse.json({ success: true })
+    } catch (error) {
+      logError(error, {
+        action: 'admin_confirmed_orders_patch',
+        endpoint: '/api/admin/confirmed-orders'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 

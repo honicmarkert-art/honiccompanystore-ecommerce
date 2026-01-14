@@ -61,7 +61,7 @@ function AuthCodeErrorContent() {
           <div className="space-y-2">
             <h3 className="font-semibold text-sm">Troubleshooting Steps:</h3>
             <ol className="list-decimal list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
-              <li>Check that <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">http://localhost:3000/auth/callback</code> is in Google Cloud Console</li>
+              <li>Check that <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://www.honiccompanystore.com'))}/auth/callback</code> is in Google Cloud Console</li>
               <li>Verify redirect URLs are configured in Supabase Dashboard</li>
               <li>Make sure you're testing on the same URL (localhost vs production)</li>
               <li>Wait a few minutes after changing Google Cloud Console settings</li>

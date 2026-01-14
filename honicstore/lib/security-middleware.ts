@@ -42,7 +42,6 @@ export async function validateMiddlewareSession(request: NextRequest): Promise<U
 			profile
 		}
 	} catch (error) {
-		console.error('Middleware session validation error:', error)
 		return null
 	}
 }

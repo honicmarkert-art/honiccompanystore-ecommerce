@@ -61,12 +61,16 @@ async function getCompanySettings(): Promise<EmailTemplateOptions> {
       companyLogo: process.env.COMPANY_LOGO_URL || '',
       primaryColor: process.env.PRIMARY_COLOR || '#f59e0b',
       supportEmail: process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com',
+      contactEmail: process.env.CONTACT_EMAIL || 'contact@honiccompanystore.com',
+      salesEmail: process.env.SALES_EMAIL || 'sales@honiccompanystore.com',
     }
   } catch {
     return {
       companyName: 'Honic Company Store',
       primaryColor: '#f59e0b',
-      supportEmail: 'support@honiccompanystore.com',
+      supportEmail: process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com',
+      contactEmail: process.env.CONTACT_EMAIL || 'contact@honiccompanystore.com',
+      salesEmail: process.env.SALES_EMAIL || 'sales@honiccompanystore.com',
     }
   }
 }
@@ -81,7 +85,7 @@ function getSenderEmailForFrom(): string {
     return process.env.SMTP_SENDER_EMAIL_NOREPLY || 
            process.env.SMTP_SENDER_EMAIL_INFO || 
            process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-           'noreply@mail.honiccompanystore.com'
+           process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
   }
   
   // Use SMTP_USER for non-Resend providers

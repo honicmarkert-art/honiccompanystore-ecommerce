@@ -132,7 +132,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ products: filteredProducts })
 
   } catch (error) {
-    console.error('Error fetching products by IDs:', error)
     return NextResponse.json({ products: [] })
   }
 }

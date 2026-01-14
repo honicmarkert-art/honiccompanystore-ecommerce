@@ -160,8 +160,6 @@ export async function POST(request: NextRequest) {
       })
 
     if (error) {
-      console.error('Storage upload error:', error)
-      
       // Check if it's a bucket not found error
       if (error.message && error.message.includes('Bucket not found')) {
         return NextResponse.json(
@@ -214,7 +212,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Error in supplier document upload:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

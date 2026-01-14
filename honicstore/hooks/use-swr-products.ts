@@ -131,8 +131,7 @@ export function useSWRProducts(options: UseSWRProductsOptions = {}): UseSWRProdu
       errorRetryCount: 3,
       errorRetryInterval: 2000,
       onError: (error) => {
-        console.error('SWR Error:', error)
-      }
+        }
     }
   )
 
@@ -150,8 +149,7 @@ export function useSWRProducts(options: UseSWRProductsOptions = {}): UseSWRProdu
         setCurrentOffset(prev => prev + limit)
       },
       onError: (error) => {
-        console.error('Mutation Error:', error)
-      }
+        }
     }
   )
 
@@ -207,8 +205,7 @@ export function useSWRProducts(options: UseSWRProductsOptions = {}): UseSWRProdu
         setCurrentOffset(limit)
       })
       .catch(err => {
-        console.error('Error searching products:', err)
-      })
+        })
   }, [currentFilters, buildEndpoint, limit])
 
   // Filter by category
@@ -235,8 +232,7 @@ export function useSWRProducts(options: UseSWRProductsOptions = {}): UseSWRProdu
         setCurrentOffset(limit)
       })
       .catch(err => {
-        console.error('Error filtering by category:', err)
-      })
+        })
   }, [currentFilters, buildEndpoint, limit])
 
   // Filter by brand
@@ -263,8 +259,7 @@ export function useSWRProducts(options: UseSWRProductsOptions = {}): UseSWRProdu
         setCurrentOffset(limit)
       })
       .catch(err => {
-        console.error('Error filtering by brand:', err)
-      })
+        })
   }, [currentFilters, buildEndpoint, limit])
 
   // Clear all filters
@@ -291,8 +286,7 @@ export function useSWRProducts(options: UseSWRProductsOptions = {}): UseSWRProdu
         setCurrentOffset(limit)
       })
       .catch(err => {
-        console.error('Error clearing filters:', err)
-      })
+        })
   }, [buildEndpoint, limit])
 
   return {

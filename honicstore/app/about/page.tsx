@@ -347,7 +347,7 @@ export default function AboutPage() {
                 </p>
                 <p className="flex items-center justify-center gap-2">
                   <Mail className="w-4 h-4" />
-                  sales@honiccompanystore.com
+                  {process.env.NEXT_PUBLIC_SALES_EMAIL || process.env.SALES_EMAIL || 'sales@honiccompanystore.com'}
                 </p>
               </div>
             </div>

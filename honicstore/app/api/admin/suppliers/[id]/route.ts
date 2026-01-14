@@ -1,31 +1,86 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { logError, createErrorResponse } from '@/lib/error-handler'
+import { logger } from '@/lib/logger'
+import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+// Validation schemas
+const supplierUpdateSchema = z.object({
+  action: z.enum(['activate', 'deactivate', 'update', 'reset_account_info']),
+  isVerified: z.boolean().optional(),
+  detailSentence: z.string().max(500).optional(),
+  rating: z.number().min(0).max(5).nullable().optional(),
+  reviewCount: z.number().int().min(0).nullable().optional(),
+})
 
 // PATCH /api/admin/suppliers/[id] - Update supplier status (activate/deactivate) or info
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // Validate admin access
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_suppliers_patch', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/suppliers/[id]',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
 
-    const { id } = await params
-    const body = await request.json()
-    const { action } = body // 'activate', 'deactivate', 'update', or 'reset_account_info'
+      // Validate admin access
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_suppliers_patch',
+          endpoint: '/api/admin/suppliers/[id]'
+        })
+        return authError
+      }
 
-    if (!action || !['activate', 'deactivate', 'update', 'reset_account_info'].includes(action)) {
-      return NextResponse.json(
-        { error: 'Invalid action. Must be "activate", "deactivate", "update", or "reset_account_info"' },
-        { status: 400 }
-      )
-    }
+      const { id } = await params
+      const body = await request.json()
+
+      // Validate UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      if (!uuidRegex.test(id)) {
+        return NextResponse.json({ error: 'Invalid supplier ID format' }, { status: 400 })
+      }
+
+      // Validate input with Zod
+      let validatedData
+      try {
+        validatedData = supplierUpdateSchema.parse(body)
+      } catch (validationError) {
+        if (validationError instanceof z.ZodError) {
+          return NextResponse.json(
+            { 
+              error: 'Validation failed',
+              details: validationError.errors.map(e => `${e.path.join('.')}: ${e.message}`)
+            },
+            { status: 400 }
+          )
+        }
+        throw validationError
+      }
+
+      const { action } = validatedData
 
     // Handle update action for seller info
     if (action === 'update') {
@@ -136,13 +191,13 @@ export async function PATCH(
             })
 
           if (notificationError) {
-            console.error('Error creating update notification:', notificationError)
+            logger.error('Error creating update notification:', notificationError)
           } else {
-            console.log(`✅ Notification created for account update of supplier ${id}`)
+            logger.log(`Notification created for account update of supplier ${id}`)
           }
         }
       } catch (notificationError) {
-        console.error('Error creating update notification:', notificationError)
+        logger.error('Error creating update notification:', notificationError)
       }
 
       return NextResponse.json({
@@ -270,7 +325,7 @@ export async function PATCH(
       .or(`supplier_id.eq.${id},user_id.eq.${id}`)
 
     if (productsError) {
-      console.error('Error updating products visibility:', productsError)
+      logger.error('Error updating products visibility:', productsError)
       // Don't fail the request, just log the error
     }
 
@@ -307,13 +362,13 @@ export async function PATCH(
         .single()
 
       if (notificationError) {
-        console.error('Error creating notification:', notificationError)
+        logger.error('Error creating notification:', notificationError)
         // Don't fail the request, just log the error
       } else {
-        console.log(`✅ Notification created for ${isActive ? 'activation' : 'deactivation'} of account ${id}`)
+        logger.log(`Notification created for ${isActive ? 'activation' : 'deactivation'} of account ${id}`)
       }
     } catch (notificationError) {
-      console.error('Error creating notification:', notificationError)
+      logger.error('Error creating notification:', notificationError)
       // Don't fail the request, just log the error
     }
 
@@ -377,7 +432,7 @@ export async function DELETE(
       .or(`supplier_id.eq.${id},user_id.eq.${id}`)
 
     if (hideProductsError) {
-      console.error('Error hiding products:', hideProductsError)
+      logger.error('Error hiding products:', hideProductsError)
       // Continue with deletion even if hiding products fails
     }
 
@@ -421,11 +476,11 @@ export async function DELETE(
           .remove(filesToRemove)
 
         if (storageError) {
-          console.error('Error deleting supplier files from storage:', storageError)
+          logger.error('Error deleting supplier files from storage:', storageError)
         }
       }
     } catch (storageCleanupError) {
-      console.error('Exception during supplier storage cleanup:', storageCleanupError)
+      logger.error('Exception during supplier storage cleanup:', storageCleanupError)
     }
 
     // Remove supplier flag and set is_active to false
@@ -451,17 +506,29 @@ export async function DELETE(
       )
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Supplier account deleted successfully. All products have been hidden.'
-    })
+      // Log admin action
+      logSecurityEvent('SUPPLIER_DELETED', user.id, {
+        supplierId: id,
+        endpoint: '/api/admin/suppliers/[id]'
+      })
 
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
-      { status: 500 }
-    )
-  }
+      // Clear cache
+      const { setCachedData } = await import('@/lib/database-optimization')
+      setCachedData('admin_suppliers_all', null, 0)
+
+      return NextResponse.json({
+        success: true,
+        message: 'Supplier account deleted successfully. All products have been hidden.'
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        action: 'admin_suppliers_patch',
+        endpoint: '/api/admin/suppliers/[id]'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 

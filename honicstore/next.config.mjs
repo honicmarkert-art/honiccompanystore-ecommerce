@@ -73,9 +73,15 @@ const nextConfig = {
   // Performance optimizations
   // Allow cross-origin requests from dev domain
   allowedDevOrigins: [
-    'https://dev.honiccompanystore.com',
-    'http://dev.honiccompanystore.com',
-    'dev.honiccompanystore.com',
+    ...(process.env.DEV_DOMAIN ? [
+      `https://${process.env.DEV_DOMAIN}`,
+      `http://${process.env.DEV_DOMAIN}`,
+      process.env.DEV_DOMAIN,
+    ] : [
+      'https://dev.honiccompanystore.com',
+      'http://dev.honiccompanystore.com',
+      'dev.honiccompanystore.com',
+    ]),
   ],
   experimental: {
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
@@ -137,22 +143,43 @@ const nextConfig = {
       unknownContextCritical: false
     }
     
-    // Disable problematic optimizations that cause exports issues
-    config.optimization = {
-      ...config.optimization,
-      // Remove splitChunks to avoid exports issues
-      splitChunks: false,
-      // Remove runtimeChunk to avoid exports issues
-      runtimeChunk: false
-    }
-    
-    // Add chunk load error handling
+    // Configure chunk loading and optimizations
     if (!isServer) {
-      // Configure webpack to handle chunk loading errors better
+      // Increase timeout for chunk loading to prevent premature failures
       config.output = {
         ...config.output,
-        // Increase public path timeout handling
-        crossOriginLoading: 'anonymous',
+        chunkLoadTimeout: 120000, // 2 minutes instead of default 30 seconds
+        crossOriginLoading: 'anonymous', // Improve CORS handling for chunks
+      }
+      
+      // Configure splitChunks to separate large modules (like auth context)
+      // This helps prevent chunk loading timeouts by creating smaller, more manageable chunks
+      config.optimization = {
+        ...config.optimization,
+        splitChunks: {
+          chunks: 'all',
+          cacheGroups: {
+            default: false,
+            vendors: false,
+            // Separate auth context into its own chunk to prevent blocking
+            auth: {
+              name: 'auth',
+              test: /[\\/]contexts[\\/]auth-context/,
+              priority: 20,
+              reuseExistingChunk: true,
+              enforce: true,
+            },
+          },
+        },
+        // Keep runtimeChunk disabled to avoid exports issues
+        runtimeChunk: false,
+      }
+    } else {
+      // For server-side, keep the original optimization settings
+      config.optimization = {
+        ...config.optimization,
+        splitChunks: false,
+        runtimeChunk: false
       }
     }
     
@@ -270,7 +297,7 @@ const nextConfig = {
           // Content Security Policy
           {
             key: 'Content-Security-Policy',
-            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} https://*.supabase.co; connect-src 'self' https://api.clickpesa.com ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} wss://${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('https://', '').replace('http://', '') || ''} https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';`
+            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} https://*.supabase.co; connect-src 'self' ${process.env.CLICKPESA_API_URL || process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'} ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} wss://${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('https://', '').replace('http://', '') || ''} https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';`
           },
           // Security Headers
           {

@@ -64,7 +64,6 @@ export function SearchSuggestions({
           setShowDropdown(false)
         }
       } catch (error) {
-        console.error('Failed to fetch suggestions:', error)
         setSuggestions([])
         setShowDropdown(false)
       } finally {

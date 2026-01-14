@@ -3,6 +3,10 @@ import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth
 import { logger } from '@/lib/logger'
 import { z } from 'zod'
 import { clearSupplierPlansCache } from '../../supplier-plans/route'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData } from '@/lib/database-optimization'
+import { logError, createErrorResponse } from '@/lib/error-handler'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -23,11 +27,47 @@ const planSchema = z.object({
 
 // GET - Fetch all supplier plans (including inactive)
 export async function GET(request: NextRequest) {
-  try {
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_supplier_plans_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/supplier-plans',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      // Check cache
+      const cacheKey = 'admin_supplier_plans_all'
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            'X-Cache': 'HIT',
+            'Cache-Control': 'private, max-age=300' // 5 minutes cache
+          }
+        })
+      }
+
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_supplier_plans_get',
+          endpoint: '/api/admin/supplier-plans'
+        })
+        return authError
+      }
 
     const supabase = createAdminSupabaseClient()
 
@@ -45,13 +85,14 @@ export async function GET(request: NextRequest) {
       `)
       .order('display_order', { ascending: true })
 
-    if (error) {
-      logger.error('Error fetching supplier plans:', error)
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch supplier plans' },
-        { status: 500 }
-      )
-    }
+      if (error) {
+        logError(error, {
+          userId: user.id,
+          action: 'admin_supplier_plans_get',
+          endpoint: '/api/admin/supplier-plans'
+        })
+        return createErrorResponse(error, 500)
+      }
 
     // Transform features
     const transformedPlans = (plans || []).map((plan: any) => {
@@ -71,26 +112,61 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({
-      success: true,
-      plans: transformedPlans
-    })
-  } catch (error: any) {
-    logger.error('Error in GET /api/admin/supplier-plans:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
+      const responseData = {
+        success: true,
+        plans: transformedPlans
+      }
+
+      // Cache response (5 minutes TTL)
+      setCachedData(cacheKey, responseData, 300000)
+
+      return NextResponse.json(responseData, {
+        headers: {
+          'X-Cache': 'MISS',
+          'Cache-Control': 'private, max-age=300'
+        }
+      })
+    } catch (error: any) {
+      logError(error, {
+        action: 'admin_supplier_plans_get',
+        endpoint: '/api/admin/supplier-plans'
+      })
+      return createErrorResponse(error, 500)
+    }
+  })
 }
 
 // POST - Create a new supplier plan
 export async function POST(request: NextRequest) {
-  try {
-    const { user, error: authError } = await validateAdminAccess()
-    if (authError) {
-      return authError
-    }
+  return performanceMonitor.measure('admin_supplier_plans_post', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/admin/supplier-plans',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { error: rateLimitResult.reason || 'Too many requests. Please try again later.' },
+          { 
+            status: 429,
+            headers: {
+              'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+            }
+          }
+        )
+      }
+
+      const { user, error: authError } = await validateAdminAccess()
+      if (authError) {
+        logError(new Error('Admin authentication failed'), {
+          userId: user?.id,
+          action: 'admin_supplier_plans_post',
+          endpoint: '/api/admin/supplier-plans'
+        })
+        return authError
+      }
 
     const body = await request.json()
     const validatedData = planSchema.parse(body)
@@ -122,36 +198,44 @@ export async function POST(request: NextRequest) {
       .select()
       .single()
 
-    if (planError) {
-      logger.error('Error creating supplier plan:', planError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to create supplier plan' },
-        { status: 500 }
-      )
+      if (planError) {
+        logError(planError, {
+          userId: user.id,
+          action: 'admin_supplier_plans_post',
+          endpoint: '/api/admin/supplier-plans'
+        })
+        return createErrorResponse(planError, 500)
+      }
+
+      // Log admin action
+      logSecurityEvent('SUPPLIER_PLAN_CREATED', user.id, {
+        planId: plan.id,
+        planName: plan.name,
+        endpoint: '/api/admin/supplier-plans'
+      })
+
+      // Clear caches
+      clearSupplierPlansCache()
+      setCachedData('admin_supplier_plans_all', null, 0)
+
+      return NextResponse.json({
+        success: true,
+        plan
+      }, { status: 201 })
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return NextResponse.json(
+          { success: false, error: 'Validation error', details: error.errors },
+          { status: 400 }
+        )
+      }
+      logError(error, {
+        action: 'admin_supplier_plans_post',
+        endpoint: '/api/admin/supplier-plans'
+      })
+      return createErrorResponse(error, 500)
     }
-
-    logger.log(`Supplier plan created: ${plan.name} by admin ${user.email}`)
-
-    // Clear public cache
-    clearSupplierPlansCache()
-
-    return NextResponse.json({
-      success: true,
-      plan
-    }, { status: 201 })
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { success: false, error: 'Validation error', details: error.errors },
-        { status: 400 }
-      )
-    }
-    logger.error('Error in POST /api/admin/supplier-plans:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
+  })
 }
 
 

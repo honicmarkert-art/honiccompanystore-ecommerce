@@ -63,12 +63,10 @@ export async function POST(request: NextRequest) {
 
     const appUrl = process.env.NEXT_PUBLIC_SITE_URL || 
                    process.env.NEXT_PUBLIC_APP_URL ||
-                   (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : undefined)
-    
-    if (!appUrl) {
-      console.error('❌ NEXT_PUBLIC_SITE_URL and NEXT_PUBLIC_APP_URL not configured')
-      throw new Error('Base URL not configured. Please set NEXT_PUBLIC_SITE_URL or NEXT_PUBLIC_APP_URL environment variable.')
-    }
+                   process.env.NEXT_PUBLIC_WEBSITE_URL ||
+                   (process.env.NODE_ENV === 'development' 
+                     ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` 
+                     : 'https://www.honiccompanystore.com')
 
     if (isSupplier) {
       // Send supplier welcome email
@@ -110,7 +108,6 @@ export async function POST(request: NextRequest) {
       }
     }
   } catch (error: any) {
-    console.error('Error sending welcome email:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

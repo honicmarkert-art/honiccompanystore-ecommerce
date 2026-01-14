@@ -36,7 +36,6 @@ export async function generateQRCodeDataURL(
     })
     return dataURL
   } catch (error) {
-    console.error('Error generating QR code:', error)
     throw new Error('Failed to generate QR code')
   }
 }
@@ -68,7 +67,6 @@ export async function generateQRCodeSVG(
     })
     return svg
   } catch (error) {
-    console.error('Error generating QR code SVG:', error)
     throw new Error('Failed to generate QR code SVG')
   }
 }

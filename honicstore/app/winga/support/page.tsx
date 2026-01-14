@@ -77,7 +77,6 @@ export default function WingaSupportPage() {
         })
       }
     } catch (error) {
-      console.error('Support request error:', error)
       toast({
         title: 'Error',
         description: 'Failed to send support request. Please try again.',
@@ -95,7 +94,7 @@ export default function WingaSupportPage() {
       description: 'Get help via email',
       available: true,
       responseTime: '24-48 hours',
-      contact: 'support@honiccompanystore.com'
+      contact: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'
     },
     {
       icon: MessageCircle,

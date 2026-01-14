@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { performanceMonitor } from '@/lib/performance-monitor'
+import { getCachedData, setCachedData, generateCacheKey } from '@/lib/database-optimization'
+import { createErrorResponse, logError } from '@/lib/error-handler'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 // GET /api/supplier/orders/unread-count - Get count of unread orders for supplier
 export async function GET(request: NextRequest) {
-  try {
+  return performanceMonitor.measure('supplier_orders_unread_count_get', async () => {
+    try {
+      // Rate limiting
+      const rateLimitResult = enhancedRateLimit(request)
+      if (!rateLimitResult.allowed) {
+        logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+          endpoint: '/api/supplier/orders/unread-count',
+          reason: rateLimitResult.reason
+        }, request)
+        return NextResponse.json(
+          { success: false, error: rateLimitResult.reason },
+          { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+        )
+      }
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
@@ -24,26 +41,46 @@ export async function GET(request: NextRequest) {
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     
-    if (authError || !user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
+      if (authError || !user) {
+        logSecurityEvent('UNAUTHORIZED_ACCESS_ATTEMPT', undefined, {
+          endpoint: '/api/supplier/orders/unread-count',
+          action: 'GET'
+        })
+        return NextResponse.json(
+          { success: false, error: 'Unauthorized' },
+          { status: 401 }
+        )
+      }
 
-    // Check if user is a supplier
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('is_supplier')
-      .eq('id', user.id)
-      .single()
+      // Check if user is a supplier
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('is_supplier')
+        .eq('id', user.id)
+        .single()
 
-    if (profileError || !profile?.is_supplier) {
-      return NextResponse.json(
-        { success: false, error: 'Access denied. Supplier access required.' },
-        { status: 403 }
-      )
-    }
+      if (profileError || !profile?.is_supplier) {
+        logSecurityEvent('FORBIDDEN_ACCESS_ATTEMPT', user.id, {
+          endpoint: '/api/supplier/orders/unread-count',
+          action: 'GET',
+          reason: 'Not a supplier'
+        })
+        return NextResponse.json(
+          { success: false, error: 'Access denied. Supplier access required.' },
+          { status: 403 }
+        )
+      }
+
+      // Check cache (30 seconds TTL for unread count)
+      const cacheKey = generateCacheKey('supplier_orders_unread_count', { supplierId: user.id })
+      const cachedData = getCachedData<any>(cacheKey)
+      if (cachedData !== null) {
+        return NextResponse.json({
+          success: true,
+          unreadCount: cachedData.unreadCount || 0,
+          cached: true
+        })
+      }
 
     // Get all product IDs owned by this supplier
     const { data: supplierProducts, error: productsError } = await supabase
@@ -51,20 +88,22 @@ export async function GET(request: NextRequest) {
       .select('id')
       .or(`user_id.eq.${user.id},supplier_id.eq.${user.id}`)
 
-    if (productsError) {
-      console.error('Error fetching supplier products:', productsError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch supplier products' },
-        { status: 500 }
-      )
-    }
+      if (productsError) {
+        logError(productsError, {
+          context: 'supplier_orders_unread_count_get',
+          userId: user.id
+        })
+        return createErrorResponse(productsError, 'Failed to fetch supplier products', 500)
+      }
 
-    if (!supplierProducts || supplierProducts.length === 0) {
-      return NextResponse.json({
-        success: true,
-        unreadCount: 0
-      })
-    }
+      if (!supplierProducts || supplierProducts.length === 0) {
+        const responseData = { unreadCount: 0 }
+        setCachedData(cacheKey, responseData, 30 * 1000) // 30 seconds
+        return NextResponse.json({
+          success: true,
+          ...responseData
+        })
+      }
 
     const supplierProductIds = supplierProducts.map(p => p.id)
 
@@ -79,20 +118,22 @@ export async function GET(request: NextRequest) {
       .select('confirmed_order_id')
       .in('product_id', supplierProductIds)
 
-    if (itemsError) {
-      console.error('Error fetching order items:', itemsError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to fetch order items' },
-        { status: 500 }
-      )
-    }
+      if (itemsError) {
+        logError(itemsError, {
+          context: 'supplier_orders_unread_count_get',
+          userId: user.id
+        })
+        return createErrorResponse(itemsError, 'Failed to fetch order items', 500)
+      }
 
-    if (!supplierOrderItems || supplierOrderItems.length === 0) {
-      return NextResponse.json({
-        success: true,
-        unreadCount: 0
-      })
-    }
+      if (!supplierOrderItems || supplierOrderItems.length === 0) {
+        const responseData = { unreadCount: 0 }
+        setCachedData(cacheKey, responseData, 30 * 1000) // 30 seconds
+        return NextResponse.json({
+          success: true,
+          ...responseData
+        })
+      }
 
     // Get unique confirmed_order_ids
     const orderIds = [...new Set(supplierOrderItems.map(item => item.confirmed_order_id))]
@@ -104,26 +145,32 @@ export async function GET(request: NextRequest) {
       .in('id', orderIds)
       .gte('confirmed_at', twentyFourHoursAgo.toISOString())
 
-    if (countError) {
-      console.error('Error counting orders:', countError)
-      return NextResponse.json(
-        { success: false, error: 'Failed to count orders' },
-        { status: 500 }
-      )
+      if (countError) {
+        logError(countError, {
+          context: 'supplier_orders_unread_count_get',
+          userId: user.id
+        })
+        return createErrorResponse(countError, 'Failed to count orders', 500)
+      }
+
+      const unreadCount = count || 0
+      const responseData = { unreadCount }
+
+      // Cache response (30 seconds TTL)
+      setCachedData(cacheKey, responseData, 30 * 1000)
+
+      return NextResponse.json({
+        success: true,
+        ...responseData
+      })
+
+    } catch (error: any) {
+      logError(error, {
+        context: 'supplier_orders_unread_count_get'
+      })
+      return createErrorResponse(error, 'Internal server error', 500)
     }
-
-    return NextResponse.json({
-      success: true,
-      unreadCount: count || 0
-    })
-
-  } catch (error: any) {
-    console.error('Error in supplier orders unread count API:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error', details: error.message },
-      { status: 500 }
-    )
-  }
+  })
 }
 
 

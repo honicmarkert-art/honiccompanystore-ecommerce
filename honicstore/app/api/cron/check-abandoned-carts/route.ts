@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/admin-auth'
 import { logger } from '@/lib/logger'
 import { sendAbandonedCartEmail } from '@/lib/user-email-service'
+import { buildUrl } from '@/lib/url-utils'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -81,10 +82,7 @@ export async function GET(request: NextRequest) {
             image: item.product?.image || item.image
           })),
           total,
-          cartUrl: (() => {
-            const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : '')
-            return baseUrl ? `${baseUrl}/cart` : ''
-          })()
+          cartUrl: buildUrl('/cart')
         })
 
         if (emailResult.success) {

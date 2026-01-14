@@ -264,9 +264,20 @@ export async function GET(
       )
     }
 
+
     // Transform variants to match expected format (simplified structure)
     const transformedProduct = {
       ...product,
+      // Ensure original_price and stock_quantity are explicitly included
+      original_price: product.original_price !== null && product.original_price !== undefined ? product.original_price : null,
+      stock_quantity: product.stock_quantity !== null && product.stock_quantity !== undefined ? product.stock_quantity : null,
+      in_stock: product.in_stock !== undefined ? product.in_stock : true,
+      // Add camelCase versions for form compatibility (form expects these)
+      originalPrice: product.original_price !== null && product.original_price !== undefined ? product.original_price : null,
+      stockQuantity: product.stock_quantity !== null && product.stock_quantity !== undefined ? product.stock_quantity : null,
+      inStock: product.in_stock !== undefined ? product.in_stock : true,
+      view360: product.view360 || product.view_360 || null,
+      importChina: product.import_china || false,
       variants: product.product_variants?.map((v: any) => ({
         id: v.id,
         variant_name: v.variant_name || '',
@@ -295,13 +306,13 @@ export async function GET(
     // Remove the raw product_variants array
     delete transformedProduct.product_variants
 
+
     return NextResponse.json({
       success: true,
       product: transformedProduct
     })
 
   } catch (error) {
-    console.error('Supplier product GET error:', error)
     // Security: Sanitize error messages in production
     const isProduction = process.env.NODE_ENV === 'production'
     const errorMessage = isProduction 
@@ -395,6 +406,7 @@ export async function PUT(
         { status: 400 }
       )
     }
+
 
     // Extract only the fields we need
     const {
@@ -490,7 +502,10 @@ export async function PUT(
     if (categoryId !== undefined) updateData.category_id = categoryId
     if (brand !== undefined) updateData.brand = brand?.trim() || ''
     if (price !== undefined) updateData.price = parseFloat(price)
-    if (originalPrice !== undefined) updateData.original_price = originalPrice ? parseFloat(originalPrice) : null
+    if (originalPrice !== undefined) {
+      const parsedOriginalPrice = originalPrice ? parseFloat(originalPrice) : null
+      updateData.original_price = parsedOriginalPrice
+    }
     if (image !== undefined) updateData.image = image?.trim() || ''
     if (sku !== undefined) updateData.sku = sku?.trim() || ''
     // Only include model if it's provided and has a non-empty value
@@ -500,7 +515,8 @@ export async function PUT(
     }
     if (inStock !== undefined) updateData.in_stock = inStock
     if (calculatedStock !== null || stockQuantity !== undefined) {
-      updateData.stock_quantity = calculatedStock !== null ? calculatedStock : (stockQuantity ? parseInt(String(stockQuantity)) : null)
+      const finalStockQty = calculatedStock !== null ? calculatedStock : (stockQuantity ? parseInt(String(stockQuantity)) : null)
+      updateData.stock_quantity = finalStockQty
     }
     if (specifications !== undefined) updateData.specifications = specifications
     if (variantConfig !== undefined) updateData.variant_config = variantConfig
@@ -521,11 +537,8 @@ export async function PUT(
       .maybeSingle()
 
     if (error) {
-      console.error('Error updating product:', error)
-      
       // If the error is about a missing column, try updating without that column
       if (error.code === '42703' && error.message?.includes('model')) {
-        console.warn('Model column does not exist, retrying update without model field')
         delete updateData.model
         
         const { data: retryProduct, error: retryError } = await supabase
@@ -536,7 +549,6 @@ export async function PUT(
           .maybeSingle()
         
         if (retryError) {
-          console.error('Error updating product (retry):', retryError)
           return NextResponse.json(
             { success: false, error: 'Failed to update product: ' + retryError.message },
             { status: 500 }
@@ -606,6 +618,16 @@ export async function PUT(
         
         const transformedProduct = {
           ...finalProduct,
+          // Add camelCase versions for form compatibility
+          originalPrice: finalProduct.original_price !== null && finalProduct.original_price !== undefined 
+            ? finalProduct.original_price 
+            : null,
+          stockQuantity: finalProduct.stock_quantity !== null && finalProduct.stock_quantity !== undefined 
+            ? finalProduct.stock_quantity 
+            : null,
+          inStock: finalProduct.in_stock !== undefined ? finalProduct.in_stock : true,
+          view360: finalProduct.view360 || finalProduct.view_360 || null,
+          importChina: finalProduct.import_china || false,
           variants: finalProduct.product_variants?.map((v: any) => ({
             id: v.id,
             variant_name: v.variant_name || '',
@@ -650,6 +672,16 @@ export async function PUT(
         // Update succeeded, use fetched product
         const transformedProduct = {
           ...fetchedProduct,
+          // Add camelCase versions for form compatibility
+          originalPrice: fetchedProduct.original_price !== null && fetchedProduct.original_price !== undefined 
+            ? fetchedProduct.original_price 
+            : null,
+          stockQuantity: fetchedProduct.stock_quantity !== null && fetchedProduct.stock_quantity !== undefined 
+            ? fetchedProduct.stock_quantity 
+            : null,
+          inStock: fetchedProduct.in_stock !== undefined ? fetchedProduct.in_stock : true,
+          view360: fetchedProduct.view360 || fetchedProduct.view_360 || null,
+          importChina: fetchedProduct.import_china || false,
           variants: fetchedProduct.product_variants?.map((v: any) => ({
             id: v.id,
             variant_name: v.variant_name || '',
@@ -707,7 +739,6 @@ export async function PUT(
           .insert(variantRecords)
 
         if (variantError) {
-          console.error('Error updating variants:', variantError)
           // Don't fail the entire request
         }
       }
@@ -731,11 +762,22 @@ export async function PUT(
       )
     }
 
+
     // Transform variants to match expected format (simplified structure)
-    const finalProduct = completeProduct
+    // Also include camelCase versions of snake_case fields for form compatibility
     const transformedProduct = {
-      ...finalProduct,
-      variants: finalProduct.product_variants?.map((v: any) => ({
+      ...completeProduct,
+      // Add camelCase versions for form compatibility (form expects these)
+      originalPrice: completeProduct.original_price !== null && completeProduct.original_price !== undefined 
+        ? completeProduct.original_price 
+        : null,
+      stockQuantity: completeProduct.stock_quantity !== null && completeProduct.stock_quantity !== undefined 
+        ? completeProduct.stock_quantity 
+        : null,
+      inStock: completeProduct.in_stock !== undefined ? completeProduct.in_stock : true,
+      view360: completeProduct.view360 || completeProduct.view_360 || null,
+      importChina: completeProduct.import_china || false,
+      variants: completeProduct.product_variants?.map((v: any) => ({
         id: v.id,
         variant_name: v.variant_name || '',
         price: v.price,
@@ -745,7 +787,7 @@ export async function PUT(
         image: v.image || null
       })) || [],
       variantImages: (() => {
-        const images = finalProduct.variant_images || []
+        const images = completeProduct.variant_images || []
         // Normalize to ensure consistent format
         const normalized = images.map((img: any): { imageUrl: string } => {
           if (typeof img === 'string') {
@@ -757,11 +799,12 @@ export async function PUT(
         }).filter((img: { imageUrl: string }) => img.imageUrl)
         return normalized
       })(),
-      specificationImages: finalProduct.specification_images || []
+      specificationImages: completeProduct.specification_images || []
     }
 
     // Remove the raw product_variants array
     delete transformedProduct.product_variants
+
 
     return NextResponse.json({
       success: true,
@@ -769,7 +812,6 @@ export async function PUT(
     })
 
   } catch (error) {
-    console.error('Supplier product PUT error:', error)
     // Security: Sanitize error messages in production
     const isProduction = process.env.NODE_ENV === 'production'
     let errorMessage = 'An unexpected error occurred'
@@ -859,7 +901,6 @@ export async function DELETE(
       .or(`supplier_id.eq.${user.id},user_id.eq.${user.id}`)
 
     if (error) {
-      console.error('Error deleting product:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to delete product' },
         { status: 500 }
@@ -872,7 +913,6 @@ export async function DELETE(
     })
 
   } catch (error) {
-    console.error('Supplier product DELETE error:', error)
     // Security: Sanitize error messages in production
     const isProduction = process.env.NODE_ENV === 'production'
     const errorMessage = isProduction 

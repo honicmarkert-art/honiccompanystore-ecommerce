@@ -643,7 +643,7 @@ export default function DataProtectionPage() {
                       </p>
                       <ul className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
                         <li>• Emergency hotline: +1 (555) 911-SECURITY</li>
-                        <li>• Email: security@honic.co</li>
+                        <li>• Email: {process.env.NEXT_PUBLIC_SECURITY_EMAIL || process.env.SECURITY_EMAIL || process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'security@honic.co'}</li>
                         <li>• 24/7 availability</li>
                       </ul>
                     </div>
@@ -847,7 +847,7 @@ export default function DataProtectionPage() {
                           <div>
                             <p className={cn("text-sm font-medium", themeClasses.mainText)}>General Inquiries</p>
                             <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {adminSettings?.contactEmail || 'privacy@honic.co'}
+                              {adminSettings?.contactEmail || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || process.env.NEXT_PUBLIC_LEGAL_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co'}
                             </p>
                           </div>
                         </div>

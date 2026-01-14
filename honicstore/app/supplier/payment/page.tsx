@@ -125,7 +125,6 @@ function SupplierPaymentPageContent() {
             }
           }
         } catch (statusError) {
-          console.error('Error checking payment status:', statusError)
           // Continue loading plan even if status check fails
         }
       }
@@ -156,7 +155,6 @@ function SupplierPaymentPageContent() {
         setError('Failed to load plan details. Please try again.')
       }
     } catch (err) {
-      console.error('Error fetching plan details:', err)
       setError('An error occurred while loading plan details. Please try again.')
     } finally {
       setLoading(false)
@@ -197,7 +195,6 @@ function SupplierPaymentPageContent() {
         }
       }
     } catch (error) {
-      console.error('Error checking payment status:', error)
       toast({
         title: 'Error',
         description: 'Failed to check payment status. Please try again.',
@@ -255,7 +252,6 @@ function SupplierPaymentPageContent() {
         throw new Error('Payment gateway did not return a checkout URL')
       }
     } catch (err: any) {
-      console.error('Payment initiation error:', err)
       setError(err.message || 'Failed to initiate payment. Please try again.')
       setProcessing(false)
       toast({

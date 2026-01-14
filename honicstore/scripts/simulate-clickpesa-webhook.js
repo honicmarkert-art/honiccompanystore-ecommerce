@@ -25,13 +25,14 @@ if (!referenceId) {
 // Get environment variables
 // Allow override with LOCAL_DEV=true to test against localhost
 const USE_LOCAL = process.env.LOCAL_DEV === 'true' || process.argv.includes('--local');
+const LOCALHOST_PORT = process.env.LOCALHOST_PORT || '3000'
 const SITE_URL = USE_LOCAL 
-  ? 'http://localhost:3000'
-  : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
+  ? `http://localhost:${LOCALHOST_PORT}`
+  : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || `http://localhost:${LOCALHOST_PORT}`);
 const CLICKPESA_CHECKSUM_KEY = process.env.CLICKPESA_CHECKSUM_KEY || '';
 
 if (USE_LOCAL) {
-  console.log('🏠 Using LOCAL development server (localhost:3000)');
+  console.log(`🏠 Using LOCAL development server (localhost:${LOCALHOST_PORT})`);
 } else {
   console.log(`🌐 Using server: ${SITE_URL}`);
 }

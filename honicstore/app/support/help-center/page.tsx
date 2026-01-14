@@ -97,7 +97,7 @@ export default function HelpCenterPage() {
     {
       id: 'bulk-orders',
       question: 'Do you offer bulk order discounts?',
-      answer: 'Yes! For orders over TZS 500,000, we offer special bulk pricing. Contact our sales team at sales@honiccompanystore.com for custom quotes.',
+      answer: `Yes! For orders over TZS 500,000, we offer special bulk pricing. Contact our sales team at ${process.env.NEXT_PUBLIC_SALES_EMAIL || process.env.SALES_EMAIL || 'sales@honiccompanystore.com'} for custom quotes.`,
       category: 'orders'
     },
     {
@@ -328,7 +328,7 @@ export default function HelpCenterPage() {
               <h3 className="font-semibold mb-2">Email Support</h3>
               <p className="text-sm text-muted-foreground mb-4">Get help via email</p>
               <Button variant="outline" size="sm">
-                support@honiccompanystore.com
+                {process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'}
               </Button>
             </CardContent>
           </Card>

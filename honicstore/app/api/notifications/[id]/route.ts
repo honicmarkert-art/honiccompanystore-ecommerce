@@ -29,14 +29,13 @@ export async function PATCH(
 
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
-    
+
     if (authError || !user) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
       )
     }
-
     const body = await request.json()
     const { is_read } = body
 
@@ -46,7 +45,6 @@ export async function PATCH(
         { status: 400 }
       )
     }
-
     // Update notification (RLS will ensure user can only update their own)
     const { data: notification, error } = await supabase
       .from('notifications')
@@ -57,34 +55,29 @@ export async function PATCH(
       .single()
 
     if (error) {
-      console.error('Error updating notification:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to update notification' },
         { status: 500 }
       )
     }
-
     if (!notification) {
       return NextResponse.json(
         { success: false, error: 'Notification not found' },
         { status: 404 }
       )
     }
-
     return NextResponse.json({
       success: true,
       notification
     })
 
   } catch (error: any) {
-    console.error('Error in PATCH /api/notifications/[id]:', error)
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }
     )
   }
 }
-
 // DELETE /api/notifications/[id] - Delete a notification
 export async function DELETE(
   request: NextRequest,
@@ -110,14 +103,13 @@ export async function DELETE(
 
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
-    
+
     if (authError || !user) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
       )
     }
-
     // First verify the notification exists and belongs to the user
     // This prevents admins from deleting user notifications and vice versa
     const { data: notification, error: fetchError } = await supabase
@@ -133,7 +125,6 @@ export async function DELETE(
         { status: 404 }
       )
     }
-
     // Delete notification (RLS will also ensure user can only delete their own)
     // Admins can only delete their own admin notifications, not user/supplier notifications
     const { error } = await supabase
@@ -143,24 +134,20 @@ export async function DELETE(
       .eq('user_id', user.id) // Extra security check - ensures admins can't delete user notifications
 
     if (error) {
-      console.error('Error deleting notification:', error)
       return NextResponse.json(
         { success: false, error: 'Failed to delete notification' },
         { status: 500 }
       )
     }
-
     return NextResponse.json({
       success: true,
       message: 'Notification deleted successfully'
     })
 
   } catch (error: any) {
-    console.error('Error in DELETE /api/notifications/[id]:', error)
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }
     )
   }
 }
-

@@ -78,42 +78,55 @@ export async function GET(request: NextRequest) {
     // First, try to get session (Supabase SSR manages its own cookies)
     let { data: { session }, error: sessionError } = await supabase.auth.getSession()
     
+    // SECURITY: Check for device verification header
+    // If device is not verified, don't auto-refresh sessions (prevents auto-login on new devices)
+    const deviceVerified = request.headers.get('x-device-verified') === 'true'
+    
     // If no session, try to refresh using Supabase's refresh mechanism
-    // Supabase SSR will automatically use refresh tokens from its own cookies
+    // SECURITY: Only auto-refresh if device is verified OR if there's an explicit session cookie
+    // This prevents auto-login on new devices
     if (!session) {
-      try {
-        // Try to refresh - Supabase SSR will look for refresh token in its own cookies
-        const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession()
-        
-        if (refreshError) {
-          // Only log specific refresh token errors, suppress common ones to reduce noise
-          const errorCode = (refreshError as any)?.code || ''
-          const errorMessage = refreshError.message?.toLowerCase() || ''
+      // Only attempt auto-refresh if:
+      // 1. Device is verified (user has explicitly logged in on this device), OR
+      // 2. There's an explicit Supabase auth cookie (user just logged in)
+      const hasSupabaseCookie = !!supabaseAuthCookie
+      
+      if (deviceVerified || hasSupabaseCookie) {
+        try {
+          // Try to refresh - Supabase SSR will look for refresh token in its own cookies
+          const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession()
           
-          // Suppress "refresh_token_not_found" errors - these are common when cookies are cleared
-          if (errorCode !== 'refresh_token_not_found' && !errorMessage.includes('refresh token not found')) {
-            console.error('❌ Refresh failed:', refreshError.message)
-          }
-          
-          // If automatic refresh fails and we have a custom refresh token, try using it
-          if (refreshToken && refreshError.message?.includes('refresh') && errorCode !== 'refresh_token_not_found') {
-            const { data: { session: manualRefresh }, error: manualError } = await supabase.auth.refreshSession({
-              refresh_token: refreshToken
-            })
-            if (!manualError && manualRefresh) {
-              session = manualRefresh
+          if (refreshError) {
+            // Only log specific refresh token errors, suppress common ones to reduce noise
+            const errorCode = (refreshError as any)?.code || ''
+            const errorMessage = refreshError.message?.toLowerCase() || ''
+            
+            // Suppress "refresh_token_not_found" errors - these are common when cookies are cleared
+            if (errorCode !== 'refresh_token_not_found' && !errorMessage.includes('refresh token not found')) {
+              }
+            
+            // If automatic refresh fails and we have a custom refresh token, try using it
+            // SECURITY: Only if device is verified
+            if (deviceVerified && refreshToken && refreshError.message?.includes('refresh') && errorCode !== 'refresh_token_not_found') {
+              const { data: { session: manualRefresh }, error: manualError } = await supabase.auth.refreshSession({
+                refresh_token: refreshToken
+              })
+              if (!manualError && manualRefresh) {
+                session = manualRefresh
+              }
             }
+          } else if (refreshedSession) {
+            session = refreshedSession
           }
-        } else if (refreshedSession) {
-          session = refreshedSession
-        }
-      } catch (refreshErr: any) {
-        // Suppress common refresh token errors
-        const errorCode = (refreshErr as any)?.code || ''
-        if (errorCode !== 'refresh_token_not_found') {
-          console.error('❌ Error refreshing session:', refreshErr?.message || refreshErr)
+        } catch (refreshErr: any) {
+          // Suppress common refresh token errors
+          const errorCode = (refreshErr as any)?.code || ''
+          if (errorCode !== 'refresh_token_not_found') {
+            }
         }
       }
+      // If device is not verified and no explicit cookie, don't auto-refresh
+      // This prevents auto-login on new devices
     }
     
     // Get user from session or directly
@@ -133,19 +146,6 @@ export async function GET(request: NextRequest) {
         const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
         const authCookieName = projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
         const authCookie = request.cookies.get(authCookieName)?.value
-        
-        console.error('❌ Session API - getUser() failed:', {
-          error: userError?.message,
-          hasCookies: {
-            customAccessToken: !!accessToken,
-            customRefreshToken: !!refreshToken,
-            supabaseAuthCookie: !!supabaseAuthCookie,
-            supabaseCookieName: supabaseAuthCookieName
-          },
-          allSupabaseCookies: request.cookies.getAll()
-            .filter(c => c.name.includes('sb-') || c.name.includes('supabase'))
-            .map(c => ({ name: c.name, hasValue: !!c.value, valueLength: c.value?.length || 0 }))
-        })
       }
       
       const errorResponse = NextResponse.json({
@@ -249,14 +249,7 @@ export async function GET(request: NextRequest) {
     
     // Debug logging for Google OAuth users
     if (process.env.NODE_ENV === 'development' && user.user_metadata?.provider === 'google') {
-      console.log('🔍 Google user name extraction:', {
-        full_name: user.user_metadata?.full_name,
-        name: user.user_metadata?.name,
-        display_name: user.user_metadata?.display_name,
-        extracted: userName,
-        email: user.email
-      })
-    }
+      }
 
     // OAuth providers (like Google) automatically verify emails
     // Check if user is from OAuth provider - check identities array (most reliable)
@@ -295,8 +288,6 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     // Log the error for debugging
-    console.error('❌ Session API - Unexpected error:', error)
-    
     return NextResponse.json({
       success: false,
       authenticated: false,
@@ -342,7 +333,6 @@ export async function POST(request: NextRequest) {
     })
 
     if (sessionError) {
-      console.error('❌ Error setting session:', sessionError)
       return NextResponse.json({ 
         success: false, 
         error: sessionError.message || 'Failed to set session' 
@@ -358,15 +348,12 @@ export async function POST(request: NextRequest) {
     
     // Verify refresh token is in the session
     if (!session.refresh_token) {
-      console.warn('⚠️ Session created but refresh_token is missing - session may not persist')
       // Try to use the provided refresh_token if session doesn't have it
       if (refresh_token) {
-        console.log('⚠️ Attempting to set refresh token manually...')
         // Note: Supabase SSR should handle this automatically, but log for debugging
       }
     } else {
-      console.log('✅ Session created with refresh token')
-    }
+      }
 
     // Set role cookie if provided (custom cookie, not managed by Supabase)
     if (role) {
@@ -380,10 +367,8 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    console.log('✅ Session set successfully via Supabase SSR')
     return response
   } catch (error: any) {
-    console.error('❌ POST /api/auth/session error:', error)
     return NextResponse.json({ 
       success: false, 
       error: error?.message || 'Failed to set session' 

@@ -40,7 +40,10 @@ export function SEOHead({ title, description, image, product }: SEOHeadProps) {
       if (ogDescription && description) ogDescription.setAttribute('content', description)
       
       const ogUrl = document.querySelector('meta[property="og:url"]')
-      if (ogUrl) ogUrl.setAttribute('content', `https://www.honiccompanystore.com${pathname}`)
+      if (ogUrl) {
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'
+        ogUrl.setAttribute('content', `${baseUrl}${pathname}`)
+      }
 
       // Update Twitter Card tags
       const twitterTitle = document.querySelector('meta[name="twitter:title"]')

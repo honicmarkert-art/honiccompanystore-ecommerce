@@ -42,7 +42,6 @@ export async function validateAuth(request: NextRequest) {
   let session = null
   
   if (userError || !user) {
-    console.error('User validation error:', userError)
     // Try to get session for refresh logic
     const { data: { session: sessionData }, error: sessionError } = await supabase.auth.getSession()
     
@@ -76,7 +75,6 @@ export async function validateAuth(request: NextRequest) {
       })
       
       if (refreshError || !refreshedSession) {
-        console.error('Refresh error:', refreshError)
         // Fallback: try Authorization Bearer header
         const authHeader = request.headers.get('authorization') || request.headers.get('Authorization')
         const bearer = authHeader?.startsWith('Bearer ')
@@ -100,8 +98,7 @@ export async function validateAuth(request: NextRequest) {
               return { user: userData.user, error: null, response, supabase: headerClient as any }
             }
           } catch (e) {
-            console.error('Authorization header validation failed:', e)
-          }
+            }
         }
         return { user: null, error: 'Authentication failed', response, supabase }
       }
@@ -128,8 +125,7 @@ export async function validateAuth(request: NextRequest) {
             return { user: userData.user, error: null, response, supabase: headerClient as any }
           }
         } catch (e) {
-          console.error('Authorization header validation failed:', e)
-        }
+          }
       }
       return { user: null, error: 'No valid session', response, supabase }
     }
@@ -168,7 +164,6 @@ export async function getUserAndRole(userId: string) {
     .single()
 
   if (error) {
-    console.error('Profile fetch error:', error)
     return { role: 'user', profile: null }
   }
 

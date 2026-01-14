@@ -298,7 +298,7 @@ export default function TechnicalSupportPage() {
               <h3 className="font-semibold mb-2">Email Support</h3>
               <p className="text-sm text-muted-foreground mb-4">Send detailed issue description</p>
               <Button variant="outline" size="sm">
-                tech@honiccompanystore.com
+                {process.env.NEXT_PUBLIC_TECH_EMAIL || process.env.TECH_EMAIL || process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'tech@honiccompanystore.com'}
               </Button>
             </CardContent>
           </Card>

@@ -31,9 +31,10 @@ export function PerformanceOptimizer() {
 
     // Add resource hints for external domains
     const addResourceHints = () => {
+      const clickpesaUrl = process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'
       const hints = [
         ...(process.env.NEXT_PUBLIC_SUPABASE_URL ? [{ rel: 'dns-prefetch', href: process.env.NEXT_PUBLIC_SUPABASE_URL }] : []),
-        { rel: 'preconnect', href: 'https://api.clickpesa.com' },
+        { rel: 'preconnect', href: clickpesaUrl },
         { rel: 'preconnect', href: 'https://www.google.com' },
       ]
       

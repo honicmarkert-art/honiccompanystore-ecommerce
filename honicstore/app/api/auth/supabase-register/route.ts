@@ -208,7 +208,6 @@ export async function POST(request: NextRequest) {
     let emailExists = false
     try {
       const adminSupabase = createAdminSupabaseClient()
-      console.log('🔍 Checking if email exists (Method 1 - Profiles table):', email)
       
       // Method 1: Check profiles table (primary method - most reliable)
       const { data: profile, error: profileError } = await adminSupabase
@@ -218,14 +217,6 @@ export async function POST(request: NextRequest) {
         .limit(1)
         .maybeSingle()
       
-      console.log('🔍 Profiles table check result:', {
-        hasError: !!profileError,
-        errorMessage: profileError?.message,
-        hasProfile: !!profile,
-        profileId: profile?.id,
-        createdAt: profile?.created_at
-      })
-      
       // If profile exists, email is already registered
       if (!profileError && profile) {
         emailExists = true
@@ -234,7 +225,6 @@ export async function POST(request: NextRequest) {
           profileId: profile.id,
           createdAt: profile.created_at 
         })
-        console.error('🚨 BLOCKING REGISTRATION - Email already exists in profiles:', email)
         return NextResponse.json(
           {
             success: false,
@@ -249,14 +239,12 @@ export async function POST(request: NextRequest) {
       // NOTE: listUsers() fetches ALL users and can be VERY slow (causes timeout with many users)
       // Supabase signUp() will catch duplicate emails as the final security layer
       // This is safe because Supabase Auth enforces unique emails at the database level
-      console.log('🔍 Skipping listUsers() check (prevents timeout) - Supabase signUp will validate email uniqueness')
       logger.log('⚠️ Skipping listUsers() check to prevent timeout - Supabase signUp will validate email uniqueness')
       
       // Email not found in profiles or auth - available for registration
       if (!emailExists) {
         logger.log('✅ Email available for registration:', email)
-        console.log('✅ Email is available - proceeding with registration')
-      }
+        }
     } catch (checkError: any) {
       // If all checks fail, log but continue
       // Supabase signUp will catch duplicates as final security layer
@@ -264,12 +252,10 @@ export async function POST(request: NextRequest) {
         error: checkError?.message || checkError,
         email: email
       })
-      console.error('⚠️ Exception during email pre-check:', checkError)
-    }
+      }
     
     // If we determined email exists, don't proceed
     if (emailExists) {
-      console.error('🚨 Email exists check failed - blocking registration')
       return NextResponse.json(
         {
           success: false,
@@ -281,15 +267,6 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await supabaseAuth.signUp(name, email, password, confirmPassword, phone, isSupplier)
-    
-    console.log('📝 signUp result:', {
-      success: result.success,
-      hasError: !!result.error,
-      error: result.error,
-      errorType: result.type,
-      hasUser: !!(result.data as any)?.user,
-      userId: (result.data as any)?.user?.id
-    })
 
     // CRITICAL: Double-check after signUp - verify user was actually created
     if (result.success && (result.data as any)?.user) {
@@ -303,19 +280,8 @@ export async function POST(request: NextRequest) {
           const now = new Date()
           const secondsSinceCreation = userCreatedAt ? (now.getTime() - userCreatedAt.getTime()) / 1000 : null
           
-          console.log('🔍 Post-signUp verification:', {
-            userId: verifyUser.user.id,
-            email: verifyUser.user.email,
-            createdAt: userCreatedAt,
-            secondsSinceCreation: secondsSinceCreation
-          })
-          
           // If user was created more than 10 seconds ago, this is an existing user
           if (secondsSinceCreation !== null && secondsSinceCreation > 10) {
-            console.error('🚨 SECURITY ALERT: User already existed - registration blocked!', {
-              email,
-              userId: verifyUser.user.id,
-              secondsSinceCreation: secondsSinceCreation.toFixed(2)
             })
             return NextResponse.json(
               {
@@ -328,7 +294,6 @@ export async function POST(request: NextRequest) {
           }
         }
       } catch (verifyErr) {
-        console.error('⚠️ Error during post-signUp verification:', verifyErr)
         // Continue - this is just a safety check
       }
     }
@@ -356,7 +321,6 @@ export async function POST(request: NextRequest) {
       // If session exists, set cookies for auto-login
       const session = result.data?.session || result.session
       if (session) {
-        console.log('✅ Session available, setting cookies for auto-login')
         const supabase = createServerClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL || '',
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
@@ -382,13 +346,10 @@ export async function POST(request: NextRequest) {
         })
         
         if (sessionError) {
-          console.error('⚠️ Error setting session cookies:', sessionError)
-        } else {
-          console.log('✅ Session cookies set successfully')
-        }
+          } else {
+          }
       } else {
-        console.log('⚠️ No session returned - user will need to verify email first')
-      }
+        }
 
       // Ensure user_id/supplier_id are generated (safety check if trigger failed)
       if (userData) {
@@ -593,7 +554,6 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Supabase registration error:', error)
     return NextResponse.json(
       { 
         success: false,

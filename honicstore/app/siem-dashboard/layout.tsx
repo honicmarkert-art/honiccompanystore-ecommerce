@@ -17,7 +17,6 @@ import {
   DollarSign,
   Landmark,
   ShoppingCart,
-  Image as ImageIcon,
   FileImage,
   Building2,
   Wallet,
@@ -46,7 +45,6 @@ const navigation = [
   { name: "Payout Accounts", href: "/siem-dashboard/payout-accounts", icon: Wallet },
   { name: "Categories", href: "/siem-dashboard/categories", icon: Tags },
   { name: "Advertisements", href: "/siem-dashboard/advertisements", icon: FileImage },
-  { name: "Media", href: "/siem-dashboard/media", icon: ImageIcon },
   { name: "Users", href: "/siem-dashboard/users", icon: Users },
   { name: "Settings", href: "/siem-dashboard/settings", icon: Settings },
 ]

@@ -45,7 +45,6 @@ export function useImageSearch(): UseImageSearchReturn {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to search by image'
       setError(errorMessage)
-      console.error('Image search error:', err)
       return null
     } finally {
       setIsLoading(false)

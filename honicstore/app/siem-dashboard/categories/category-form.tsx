@@ -53,8 +53,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
           setMainCategories(mainCats)
         }
       } catch (error) {
-        console.error('Error fetching main categories:', error)
-      }
+        }
     }
     fetchMainCategories()
   }, [])

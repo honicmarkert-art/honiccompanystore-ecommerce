@@ -21,7 +21,13 @@ export function getBaseEmailTemplate(
     companyName = 'Honic Company Store',
     companyLogo = '',
     primaryColor = '#f59e0b',
-    supportEmail = 'support@honiccompanystore.com',
+    supportEmail = process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com',
+    contactEmail = process.env.CONTACT_EMAIL || 'contact@honiccompanystore.com',
+    salesEmail = process.env.SALES_EMAIL || 'sales@honiccompanystore.com',
+    legalEmail = process.env.LEGAL_EMAIL || process.env.CONTACT_EMAIL || 'legal@honic.co',
+    privacyEmail = process.env.PRIVACY_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co',
+    dpoEmail = process.env.DPO_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co',
+    securityEmail = process.env.SECURITY_EMAIL || process.env.SUPPORT_EMAIL || 'security@honic.co',
   } = options
 
   return `
@@ -1452,7 +1458,7 @@ export function getOrderPlacedWelcomeTemplate(order: {
       <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-top: 30px;">
         <p style="margin: 0; color: #6b7280; font-size: 14px;">
           <strong>Need Help?</strong><br>
-          Contact our support team at ${options.supportEmail || 'support@honiccompanystore.com'} or visit our help center.
+          Contact our support team at ${options.supportEmail || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'} or visit our help center.
         </p>
       </div>
     </div>

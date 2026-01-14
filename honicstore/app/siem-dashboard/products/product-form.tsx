@@ -116,6 +116,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
   useEffect(() => {
     
     if (product && !categoriesLoading && !brandsLoading) {
+      
       setFormData({
         name: product.name ?? "",
         description: product.description ?? "",
@@ -766,7 +767,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
           }
           return total
         } catch (error) {
-          console.error('Error calculating stock:', error)
           return parseInt(String(formData.stockQuantity || 0)) || 0
         }
       })()
@@ -880,7 +880,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
             }
             return total > 0
           } catch (error) {
-            console.error('Error calculating inStock:', error)
             return formData.inStock !== false
           }
         })(),
@@ -914,7 +913,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
       }
 
 
-
       // Call onSave if provided with retry logic and timeout
       if (onSave) {
         const MAX_RETRIES = 2
@@ -944,6 +942,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
           setSelectedVariantForImage(null)
           // Attributes removed
           setNewVariantImageUrl("")
+          
           
           setFormData(prev => ({
             ...prev,
@@ -1040,8 +1039,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         onClose()
       }
     } catch (error: any) {
-      console.error('Form submission error:', error)
-      
       // Determine user-friendly error message
       let errorMessage = "Failed to save product. Please try again."
       

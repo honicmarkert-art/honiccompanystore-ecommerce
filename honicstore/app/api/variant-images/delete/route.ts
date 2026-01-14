@@ -3,8 +3,12 @@ import { createClient } from '@supabase/supabase-js'
 import { validateServerSession } from '@/lib/security-server'
 import { logger } from '@/lib/logger'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL'
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'YOUR_SERVICE_ROLE_KEY'
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required')
+}
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
@@ -34,7 +38,6 @@ export async function DELETE(request: NextRequest) {
       .single()
 
     if (fetchError) {
-      console.error('Error fetching product:', fetchError)
       return NextResponse.json({ 
         error: 'Failed to fetch product' 
       }, { status: 500 })
@@ -61,7 +64,6 @@ export async function DELETE(request: NextRequest) {
       .eq('id', productId)
 
     if (updateError) {
-      console.error('Error updating product:', updateError)
       return NextResponse.json({ 
         error: 'Failed to update product' 
       }, { status: 500 })
@@ -80,7 +82,6 @@ export async function DELETE(request: NextRequest) {
         .remove([filename])
 
       if (deleteError) {
-        console.error('Error deleting file from storage:', deleteError)
         // Don't fail the request if storage deletion fails
         // The database update was successful
         logger.log('⚠️ File deletion from storage failed, but database was updated')
@@ -88,20 +89,22 @@ export async function DELETE(request: NextRequest) {
         logger.log('✅ File deleted from storage successfully')
       }
     } catch (storageError) {
-      console.error('Storage deletion error:', storageError)
       // Continue - database update was successful
     }
 
     logger.log('✅ Variant image deletion completed')
 
-    return NextResponse.json({ 
-      success: true, 
+    // Clear product cache to ensure immediate visibility
+    const { clearCache } = await import('@/lib/database-optimization')
+    clearCache()
+
+    return NextResponse.json({
+      success: true,
       message: 'Variant image deleted successfully',
       remainingImages: updatedVariantImages.length
     })
 
   } catch (error) {
-    console.error('Error in variant image deletion:', error)
     return NextResponse.json({ 
       error: 'Internal server error' 
     }, { status: 500 })

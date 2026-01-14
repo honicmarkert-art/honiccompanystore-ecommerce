@@ -174,12 +174,6 @@ export async function POST(request: NextRequest) {
       })
 
     if (error) {
-      console.error('❌ Supabase upload error:', error)
-      console.error('Error details:', {
-        message: error.message,
-        statusCode: error.statusCode,
-        bucket: bucketName
-      })
       return NextResponse.json({ 
         error: 'Upload failed', 
         details: error.message,
@@ -232,7 +226,6 @@ export async function POST(request: NextRequest) {
         .eq('id', parseInt(productId))
         
       if (updateError) {
-        console.error('❌ Error updating product image:', updateError)
         // Don't fail the upload, just log the error
       } else {
         logger.log('✅ Product image field updated successfully')
@@ -265,11 +258,14 @@ export async function POST(request: NextRequest) {
           .eq('id', pid)
 
         if (updErr) {
-          console.error('❌ Error updating variant_images:', updErr)
+          } else {
+          // Clear product cache to ensure immediate visibility
+          const { clearCache, generateCacheKey } = await import('@/lib/database-optimization')
+          // Clear all product-related caches
+          clearCache() // Clear all cache to ensure product updates are visible immediately
         }
       } catch (e) {
-        console.error('❌ Variant image DB append error:', e)
-      }
+        }
     }
 
     return NextResponse.json({
@@ -287,8 +283,6 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('❌ Upload error:', error)
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace')
     return NextResponse.json({ 
       error: 'Internal server error',
       details: error instanceof Error ? error.message : 'Unknown error'
@@ -350,7 +344,6 @@ export async function GET(request: NextRequest) {
       })
 
     if (error) {
-      console.error('Supabase list error:', error)
       return NextResponse.json({ error: 'Failed to list files' }, { status: 500 })
     }
 
@@ -382,7 +375,6 @@ export async function GET(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('List error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -416,7 +408,6 @@ export async function DELETE(request: NextRequest) {
       .remove([fileName])
 
     if (error) {
-      console.error('Supabase delete error:', error)
       return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
     }
 
@@ -426,7 +417,6 @@ export async function DELETE(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('Delete error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
