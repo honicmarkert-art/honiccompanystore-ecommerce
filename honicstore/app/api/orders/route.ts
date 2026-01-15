@@ -6,6 +6,7 @@ import { secureOrderCreation, ReferenceIdSecurity } from '@/lib/reference-id-sec
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { securityUtils } from '@/lib/secure-config'
 import { validateAuth } from '@/lib/auth-server'
+import { sendOrderNotificationEmail } from '@/lib/email-service'
 
 
 
@@ -558,6 +559,37 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Send order notification email to admin
+    try {
+      const shippingAddress = orderData.shippingAddress || {}
+      await sendOrderNotificationEmail({
+        orderId: order.id.toString(),
+        orderNumber: order.order_number,
+        referenceId: order.reference_id,
+        customerName: shippingAddress?.fullName || shippingAddress?.name,
+        customerEmail: shippingAddress?.email,
+        customerPhone: shippingAddress?.phone,
+        items: validatedItems.map(item => ({
+          productName: item.product_name,
+          variantName: item.variant_name || undefined,
+          quantity: item.quantity,
+          unitPrice: item.price,
+          totalPrice: item.total_price,
+        })),
+        totalAmount: order.total_amount,
+        shippingAddress: shippingAddress,
+        deliveryOption: orderData.deliveryOption || 'shipping',
+        paymentMethod: 'clickpesa',
+        paymentStatus: order.payment_status,
+        createdAt: order.created_at,
+      })
+    } catch (emailError: any) {
+      // Log email error but don't fail the order creation
+      logger.error('Failed to send order notification email', emailError, {
+        orderId: order.id,
+        userId: orderData.userId,
+      })
+    }
 
     // Return order data with stored IDs
     const responseData = {

@@ -115,11 +115,13 @@ class EmailService {
     
     let senderEmail: string
     if (isResendSmtp || !smtpUserAuth || smtpUserAuth.toLowerCase() === 'resend' || !smtpUserAuth.includes('@')) {
-      // Use sender email configs (prioritize noreply for automated emails)
+      // Use sender email configs (matches .env.local: prioritize NOREPLY > INFO > SUPPORT)
       senderEmail = process.env.SMTP_SENDER_EMAIL_NOREPLY || 
+                    process.env.NOREPLY_EMAIL ||
                     process.env.SMTP_SENDER_EMAIL_INFO || 
                     process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-                    process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
+                    process.env.SUPPORT_EMAIL ||
+                    'noreply@mail.honiccompanystore.com'
     } else {
       // Use SMTP_USER as sender email (for non-Resend providers)
       senderEmail = smtpUserAuth
@@ -132,11 +134,11 @@ class EmailService {
       }
     }
 
-    // Get sender name from config
+    // Get sender name from config (matches .env.local configuration)
     const senderName = process.env.SMTP_SENDER_NAME_NOREPLY || 
                        process.env.SMTP_SENDER_NAME_INFO || 
                        process.env.SMTP_SENDER_NAME_SUPPORT || 
-                       'Honic Company Store'
+                       'Honic Store'
 
     // Validate and format "from" address
     let fromAddress: string
@@ -206,14 +208,23 @@ class EmailService {
       }
     }
 
-    // Get sender email for Resend fallback
+    // Get sender email for Resend fallback (matches .env.local configuration)
     const senderConfig = this.getSenderEmail('noreply')
-    const smtpUser = senderConfig.email
+    let smtpUser = senderConfig.email
 
     if (!smtpUser || !smtpUser.includes('@')) {
-      return {
-        success: false,
-        error: 'SMTP_USER or SMTP_SENDER_EMAIL_NOREPLY is not configured. Cannot use Resend fallback without a valid sender email.'
+      // Try fallback to other sender emails (matches .env.local priority)
+      smtpUser = process.env.SMTP_SENDER_EMAIL_INFO || 
+                 process.env.SMTP_SENDER_EMAIL_SUPPORT || 
+                 process.env.SUPPORT_EMAIL ||
+                 process.env.NOREPLY_EMAIL ||
+                 ''
+      
+      if (!smtpUser || !smtpUser.includes('@')) {
+        return {
+          success: false,
+          error: 'SMTP_SENDER_EMAIL_NOREPLY, SMTP_SENDER_EMAIL_INFO, or SMTP_SENDER_EMAIL_SUPPORT is not configured. Cannot use Resend fallback without a valid sender email.'
+        }
       }
     }
 
@@ -333,11 +344,13 @@ class EmailService {
       const isResendSmtp = process.env.SMTP_HOST?.includes('resend.com') || smtpUser?.toLowerCase() === 'resend'
       
       if (isResendSmtp || !smtpUser || smtpUser.toLowerCase() === 'resend' || !smtpUser.includes('@')) {
-        // For Resend: use sender email configs
+        // For Resend: use sender email configs (matches .env.local priority: NOREPLY > INFO > SUPPORT)
         return process.env.SMTP_SENDER_EMAIL_NOREPLY || 
+               process.env.NOREPLY_EMAIL ||
                process.env.SMTP_SENDER_EMAIL_INFO || 
                process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-               process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
+               process.env.SUPPORT_EMAIL ||
+               'noreply@mail.honiccompanystore.com'
       }
       // For other providers: use SMTP_USER if it's a valid email
       return smtpUser
@@ -346,23 +359,23 @@ class EmailService {
     switch (emailType) {
       case 'support':
         return {
-          email: process.env.SMTP_SENDER_EMAIL_SUPPORT || getValidSenderEmail(),
-          name: process.env.SMTP_SENDER_NAME_SUPPORT || 'Honic Co'
+          email: process.env.SMTP_SENDER_EMAIL_SUPPORT || process.env.SUPPORT_EMAIL || getValidSenderEmail(),
+          name: process.env.SMTP_SENDER_NAME_SUPPORT || 'Honic Store Support'
         }
       case 'info':
         return {
           email: process.env.SMTP_SENDER_EMAIL_INFO || getValidSenderEmail(),
-          name: process.env.SMTP_SENDER_NAME_INFO || 'Honic Co'
+          name: process.env.SMTP_SENDER_NAME_INFO || 'Honic Store Info'
         }
       case 'noreply':
         return {
-          email: process.env.SMTP_SENDER_EMAIL_NOREPLY || getValidSenderEmail(),
-          name: process.env.SMTP_SENDER_NAME_NOREPLY || 'Honic Co'
+          email: process.env.SMTP_SENDER_EMAIL_NOREPLY || process.env.NOREPLY_EMAIL || getValidSenderEmail(),
+          name: process.env.SMTP_SENDER_NAME_NOREPLY || 'Honic Store noreply'
         }
       default:
         return {
           email: getValidSenderEmail(),
-          name: process.env.SMTP_SENDER_NAME_NOREPLY || process.env.SMTP_SENDER_NAME_INFO || 'Honic Co'
+          name: process.env.SMTP_SENDER_NAME_NOREPLY || process.env.SMTP_SENDER_NAME_INFO || process.env.SMTP_SENDER_NAME_SUPPORT || 'Honic Store'
         }
     }
   }
@@ -400,6 +413,228 @@ export async function sendEmailToCompany(
 
 export async function sendEmail(options: EmailOptions): Promise<EmailResult> {
   return emailService.sendEmailWithFallback(options)
+}
+
+/**
+ * Send order notification email to admin
+ * Sends an email to NEXT_PUBLIC_ORDER_EMAIL when a new order is created
+ */
+export async function sendOrderNotificationEmail(orderData: {
+  orderId: string
+  orderNumber: string
+  referenceId: string
+  customerName?: string
+  customerEmail?: string
+  customerPhone?: string
+  items: Array<{
+    productName: string
+    variantName?: string
+    quantity: number
+    unitPrice: number
+    totalPrice: number
+  }>
+  totalAmount: number
+  shippingAddress: any
+  deliveryOption: string
+  paymentMethod: string
+  paymentStatus: string
+  createdAt: string
+}): Promise<EmailResult> {
+  const orderEmail = process.env.NEXT_PUBLIC_ORDER_EMAIL
+
+  if (!orderEmail) {
+    return {
+      success: false,
+      error: 'NEXT_PUBLIC_ORDER_EMAIL not configured'
+    }
+  }
+
+  // Format order items for email
+  const itemsHtml = orderData.items.map(item => `
+    <tr>
+      <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+        <strong>${item.productName}</strong>
+        ${item.variantName ? `<br><span style="color: #6b7280; font-size: 14px;">${item.variantName}</span>` : ''}
+      </td>
+      <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: center;">${item.quantity}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: right;">${item.unitPrice.toLocaleString('en-US', { style: 'currency', currency: 'TZS' })}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: 600;">${item.totalPrice.toLocaleString('en-US', { style: 'currency', currency: 'TZS' })}</td>
+    </tr>
+  `).join('')
+
+  const itemsText = orderData.items.map(item => 
+    `- ${item.productName}${item.variantName ? ` (${item.variantName})` : ''} - Qty: ${item.quantity} - ${item.unitPrice.toLocaleString('en-US', { style: 'currency', currency: 'TZS' })} each = ${item.totalPrice.toLocaleString('en-US', { style: 'currency', currency: 'TZS' })}`
+  ).join('\n')
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Order Notification</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+        <h2 style="color: #111827; margin: 0 0 10px 0;">📦 New Order Received</h2>
+        <p style="margin: 0; color: #6b7280;">A new order has been placed and requires your attention.</p>
+      </div>
+
+      <div style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="color: #111827; margin-top: 0; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">Order Information</h3>
+        
+        <table style="width: 100%; margin-bottom: 20px;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; width: 40%;"><strong>Order Number:</strong></td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">#${orderData.orderNumber}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Reference ID:</strong></td>
+            <td style="padding: 8px 0; color: #111827;">${orderData.referenceId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Order ID:</strong></td>
+            <td style="padding: 8px 0; color: #111827;">${orderData.orderId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Order Date:</strong></td>
+            <td style="padding: 8px 0; color: #111827;">${new Date(orderData.createdAt).toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Payment Status:</strong></td>
+            <td style="padding: 8px 0;">
+              <span style="background: ${orderData.paymentStatus === 'paid' ? '#d1fae5' : '#fef3c7'}; color: ${orderData.paymentStatus === 'paid' ? '#065f46' : '#92400e'}; padding: 4px 12px; border-radius: 4px; font-weight: 600; text-transform: uppercase; font-size: 12px;">
+                ${orderData.paymentStatus}
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Payment Method:</strong></td>
+            <td style="padding: 8px 0; color: #111827;">${orderData.paymentMethod}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Delivery Option:</strong></td>
+            <td style="padding: 8px 0; color: #111827; text-transform: capitalize;">${orderData.deliveryOption}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="color: #111827; margin-top: 0; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">Customer Information</h3>
+        
+        <table style="width: 100%;">
+          ${orderData.customerName ? `
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; width: 40%;"><strong>Name:</strong></td>
+            <td style="padding: 8px 0; color: #111827;">${orderData.customerName}</td>
+          </tr>
+          ` : ''}
+          ${orderData.customerEmail ? `
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Email:</strong></td>
+            <td style="padding: 8px 0; color: #111827;"><a href="mailto:${orderData.customerEmail}" style="color: #2563eb;">${orderData.customerEmail}</a></td>
+          </tr>
+          ` : ''}
+          ${orderData.customerPhone ? `
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;"><strong>Phone:</strong></td>
+            <td style="padding: 8px 0; color: #111827;"><a href="tel:${orderData.customerPhone}" style="color: #2563eb;">${orderData.customerPhone}</a></td>
+          </tr>
+          ` : ''}
+        </table>
+      </div>
+
+      <div style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="color: #111827; margin-top: 0; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">Shipping Address</h3>
+        <p style="margin: 0; color: #111827; line-height: 1.8;">
+          ${orderData.shippingAddress.fullName || orderData.shippingAddress.name || 'N/A'}<br>
+          ${orderData.shippingAddress.address || orderData.shippingAddress.address1 || ''}<br>
+          ${orderData.shippingAddress.city || ''}${orderData.shippingAddress.state || orderData.shippingAddress.region ? `, ${orderData.shippingAddress.state || orderData.shippingAddress.region}` : ''}<br>
+          ${orderData.shippingAddress.postalCode || orderData.shippingAddress.postal_code || ''}<br>
+          ${orderData.shippingAddress.country || ''}
+        </p>
+      </div>
+
+      <div style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="color: #111827; margin-top: 0; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">Order Items</h3>
+        
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="background: #f9fafb;">
+              <th style="padding: 10px; text-align: left; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-weight: 600;">Product</th>
+              <th style="padding: 10px; text-align: center; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-weight: 600;">Qty</th>
+              <th style="padding: 10px; text-align: right; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-weight: 600;">Unit Price</th>
+              <th style="padding: 10px; text-align: right; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-weight: 600;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3" style="padding: 15px 10px; text-align: right; font-weight: 600; color: #111827; border-top: 2px solid #e5e7eb;">Total Amount:</td>
+              <td style="padding: 15px 10px; text-align: right; font-weight: 600; font-size: 18px; color: #059669; border-top: 2px solid #e5e7eb;">
+                ${orderData.totalAmount.toLocaleString('en-US', { style: 'currency', currency: 'TZS' })}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin-top: 20px;">
+        <p style="margin: 0; color: #92400e; font-size: 14px;">
+          <strong>⚠️ Action Required:</strong> Please review this order and process it accordingly. The customer is waiting for confirmation.
+        </p>
+      </div>
+    </body>
+    </html>
+  `
+
+  const text = `
+New Order Received
+
+A new order has been placed and requires your attention.
+
+ORDER INFORMATION
+================
+Order Number: #${orderData.orderNumber}
+Reference ID: ${orderData.referenceId}
+Order ID: ${orderData.orderId}
+Order Date: ${new Date(orderData.createdAt).toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })}
+Payment Status: ${orderData.paymentStatus.toUpperCase()}
+Payment Method: ${orderData.paymentMethod}
+Delivery Option: ${orderData.deliveryOption}
+
+CUSTOMER INFORMATION
+===================
+${orderData.customerName ? `Name: ${orderData.customerName}` : ''}
+${orderData.customerEmail ? `Email: ${orderData.customerEmail}` : ''}
+${orderData.customerPhone ? `Phone: ${orderData.customerPhone}` : ''}
+
+SHIPPING ADDRESS
+===============
+${orderData.shippingAddress.fullName || orderData.shippingAddress.name || 'N/A'}
+${orderData.shippingAddress.address || orderData.shippingAddress.address1 || ''}
+${orderData.shippingAddress.city || ''}${orderData.shippingAddress.state || orderData.shippingAddress.region ? `, ${orderData.shippingAddress.state || orderData.shippingAddress.region}` : ''}
+${orderData.shippingAddress.postalCode || orderData.shippingAddress.postal_code || ''}
+${orderData.shippingAddress.country || ''}
+
+ORDER ITEMS
+==========
+${itemsText}
+
+Total Amount: ${orderData.totalAmount.toLocaleString('en-US', { style: 'currency', currency: 'TZS' })}
+
+⚠️ ACTION REQUIRED: Please review this order and process it accordingly. The customer is waiting for confirmation.
+  `.trim()
+
+  return sendEmail({
+    to: orderEmail,
+    subject: `New Order #${orderData.orderNumber} - ${orderData.totalAmount.toLocaleString('en-US', { style: 'currency', currency: 'TZS' })}`,
+    html,
+    text,
+    from: `${emailService.getSenderEmail('noreply').name} <${emailService.getSenderEmail('noreply').email}>`,
+  })
 }
 
 

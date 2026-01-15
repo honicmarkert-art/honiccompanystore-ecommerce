@@ -15,6 +15,7 @@ import {
 } from '@/lib/error-handler'
 import { dbOptimizer } from '@/lib/database-optimizer'
 import { cacheInvalidator } from '@/lib/cache'
+import { sendOrderNotificationEmail } from '@/lib/email-service'
 
 
 
@@ -290,6 +291,38 @@ export async function POST(request: NextRequest) {
       totalAmount: orderTotal,
       itemsCount: cartItems.length
     })
+
+    // Send order notification email to admin
+    try {
+      const shippingAddress = sanitizedShippingAddress
+      await sendOrderNotificationEmail({
+        orderId: order.id,
+        orderNumber: order.order_number || orderId,
+        referenceId: referenceId,
+        customerName: shippingAddress?.fullName || shippingAddress?.name,
+        customerEmail: shippingAddress?.email,
+        customerPhone: shippingAddress?.phone,
+        items: cartItems.map(item => ({
+          productName: item.product_name || 'Unknown Product',
+          variantName: item.variant_name || undefined,
+          quantity: item.quantity,
+          unitPrice: item.price,
+          totalPrice: item.price * item.quantity,
+        })),
+        totalAmount: orderTotal,
+        shippingAddress: shippingAddress,
+        deliveryOption: requestData.deliveryOption || 'shipping',
+        paymentMethod: 'clickpesa',
+        paymentStatus: 'pending',
+        createdAt: order.created_at,
+      })
+    } catch (emailError: any) {
+      // Log email error but don't fail the order creation
+      logger.error('Failed to send order notification email', emailError, {
+        orderId: order.id,
+        userId: user.id,
+      })
+    }
 
     const finalResponse = NextResponse.json({
       success: true,

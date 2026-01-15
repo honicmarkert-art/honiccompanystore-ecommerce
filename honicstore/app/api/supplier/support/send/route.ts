@@ -123,14 +123,16 @@ Please respond directly to: ${fromEmail}
       </div>
     `
 
-    // Send email using centralized email service (SMTP from .env.local)
+    // Send email using centralized email service (SMTP from .env.local with Resend fallback)
+    const senderConfig = emailService.getSenderEmail('support')
+    
     const emailResult = await sendEmail({
       to: supportEmail,
       replyTo: fromEmail,
       subject: emailSubject,
       text: emailBody,
       html: emailHtml,
-      from: `Support <${process.env.SMTP_SENDER_EMAIL_SUPPORT || process.env.SUPPORT_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || process.env.SMTP_SENDER_EMAIL_INFO || 'support@honiccompanystore.com'}>`,
+      from: `${senderConfig.name} <${senderConfig.email}>`,
     })
 
     // Log to console if email service not configured (development)
