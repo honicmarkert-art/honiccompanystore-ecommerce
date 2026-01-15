@@ -111,7 +111,6 @@ export async function POST(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     
     if (authError || !user || !user.email || !user.id) {
-      }`)
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -373,9 +372,6 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     )
   } catch (error: any) {
-    const errorMessage = error.message || 'Unknown error'
-    }, Error: ${errorMessage}`)
-    
     // Don't expose internal error details
     return NextResponse.json(
       { error: 'An error occurred. Please try again later.' },

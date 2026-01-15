@@ -387,6 +387,7 @@ export async function PATCH(
       { status: 500 }
     )
   }
+  })
 }
 
 // DELETE /api/admin/suppliers/[id] - Delete supplier account
@@ -506,29 +507,28 @@ export async function DELETE(
       )
     }
 
-      // Log admin action
-      logSecurityEvent('SUPPLIER_DELETED', user.id, {
-        supplierId: id,
-        endpoint: '/api/admin/suppliers/[id]'
-      })
+    // Log admin action
+    logSecurityEvent('SUPPLIER_DELETED', user.id, {
+      supplierId: id,
+      endpoint: '/api/admin/suppliers/[id]'
+    })
 
-      // Clear cache
-      const { setCachedData } = await import('@/lib/database-optimization')
-      setCachedData('admin_suppliers_all', null, 0)
+    // Clear cache
+    const { setCachedData } = await import('@/lib/database-optimization')
+    setCachedData('admin_suppliers_all', null, 0)
 
-      return NextResponse.json({
-        success: true,
-        message: 'Supplier account deleted successfully. All products have been hidden.'
-      })
+    return NextResponse.json({
+      success: true,
+      message: 'Supplier account deleted successfully. All products have been hidden.'
+    })
 
-    } catch (error: any) {
-      logError(error, {
-        action: 'admin_suppliers_patch',
-        endpoint: '/api/admin/suppliers/[id]'
-      })
-      return createErrorResponse(error, 500)
-    }
-  })
+  } catch (error: any) {
+    logError(error, {
+      action: 'admin_suppliers_delete',
+      endpoint: '/api/admin/suppliers/[id]'
+    })
+    return createErrorResponse(error, 500)
+  }
 }
 
 

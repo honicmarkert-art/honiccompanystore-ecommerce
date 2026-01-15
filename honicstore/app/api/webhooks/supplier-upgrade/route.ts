@@ -15,8 +15,6 @@ export async function POST(request: NextRequest) {
     const signature = request.headers.get('x-clickpesa-signature') || request.headers.get('signature') || ''
 
     const timestamp = new Date().toISOString()
-    const body = await request.text()
-    const signature = request.headers.get('x-clickpesa-signature') || request.headers.get('signature')
     
     logger.log('Supplier upgrade webhook received:', {
       signature: signature ? signature.substring(0, 20) + '...' : 'NOT PROVIDED',
@@ -92,7 +90,6 @@ export async function POST(request: NextRequest) {
       
       if (signatureValid) {
         validationMethod = 'custom'
-        ')
         logger.log('✅ Custom webhook signature validation PASSED (fallback)')
       } else {
         logger.log('❌ Custom webhook signature validation FAILED')
@@ -139,7 +136,7 @@ export async function POST(request: NextRequest) {
     let payload
     try {
       payload = parseWebhookPayload(parsedBody)
-      } catch (e) {
+    } catch (e) {
       // If parsing fails, try to extract data directly
       logger.log('Standard parsing failed, trying direct extraction:', e)
       // Handle nested data structure from ClickPesa webhooks
@@ -151,15 +148,13 @@ export async function POST(request: NextRequest) {
         amount: data.amount || data.totalPrice || data.total_price || parsedBody.amount || parsedBody.totalPrice || parsedBody.total_price,
         currency: data.currency || data.orderCurrency || data.order_currency || parsedBody.currency || parsedBody.orderCurrency || parsedBody.order_currency
       }
-      }
+    }
     
-    )
     logger.log('Supplier upgrade webhook payload:', payload)
 
     const { orderReference, transactionId, status, amount, currency } = payload
 
     if (!orderReference) {
-      )
       logger.error('Missing orderReference in webhook payload:', payload)
       return NextResponse.json(
         { success: false, error: 'Missing orderReference' },
@@ -168,8 +163,6 @@ export async function POST(request: NextRequest) {
     }
     
     const supabase = createAdminSupabaseClient()
-
-    )
 
     // Find payment transaction by reference ID in profiles table
     // Try exact match first, then try without hyphens
@@ -204,7 +197,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (findError || !profile || !profile.payment_reference_id) {
-      ].filter(Boolean))
       logger.error('Payment transaction not found:', {
         orderReference,
         error: findError,
@@ -335,7 +327,6 @@ export async function POST(request: NextRequest) {
     const statusUpper = String(status || '').toUpperCase()
     const statusLower = statusUpper.toLowerCase()
     
-    :', status)
     logger.log('Processing payment status (using webhook):', { 
       webhookStatus: status, 
       statusUpper, 
@@ -384,7 +375,6 @@ export async function POST(request: NextRequest) {
       updateData.payment_status = 'pending'
       // Always set transaction ID even for pending payments
       updateData.clickpesa_transaction_id = finalTransactionId
-      ')
       logger.log('Setting payment status to PENDING (unknown status)')
     }
 

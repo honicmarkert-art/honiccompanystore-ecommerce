@@ -221,3 +221,182 @@ export function createErrorResponse(
     }
   )
 }
+
+/**
+ * Create validation error
+ */
+export function createValidationError(
+  message: string,
+  field?: string,
+  metadata?: Record<string, unknown>
+): ProductionError {
+  return new ProductionError(
+    message,
+    ErrorCodes.VALIDATION_ERROR,
+    400,
+    { field, ...metadata }
+  )
+}
+
+/**
+ * Create authentication error
+ */
+export function createAuthError(
+  message: string,
+  metadata?: Record<string, unknown>
+): ProductionError {
+  return new ProductionError(
+    message,
+    ErrorCodes.AUTH_REQUIRED,
+    401,
+    metadata
+  )
+}
+
+/**
+ * Create rate limit error
+ */
+export function createRateLimitError(
+  message: string,
+  metadata?: Record<string, unknown>
+): ProductionError {
+  return new ProductionError(
+    message,
+    ErrorCodes.RATE_LIMIT_EXCEEDED,
+    429,
+    metadata
+  )
+}
+
+/**
+ * Create stock error
+ */
+export function createStockError(
+  message: string,
+  metadata?: Record<string, unknown>
+): ProductionError {
+  return new ProductionError(
+    message,
+    ErrorCodes.VALIDATION_ERROR,
+    400,
+    { ...metadata, type: 'stock' }
+  )
+}
+
+/**
+ * Create order error
+ */
+export function createOrderError(
+  message: string,
+  metadata?: Record<string, unknown>
+): ProductionError {
+  return new ProductionError(
+    message,
+    ErrorCodes.VALIDATION_ERROR,
+    400,
+    { ...metadata, type: 'order' }
+  )
+}
+
+/**
+ * Create database error
+ */
+export function createDatabaseError(
+  message: string,
+  metadata?: Record<string, unknown>
+): ProductionError {
+  return new ProductionError(
+    message,
+    ErrorCodes.DATABASE_ERROR,
+    500,
+    metadata
+  )
+}
+
+/**
+ * Handle API errors consistently
+ */
+export function handleApiError(
+  error: Error | ProductionError | unknown,
+  defaultMessage: string = 'An error occurred'
+): ProductionError {
+  if (error instanceof ProductionError) {
+    return error
+  }
+  
+  if (error instanceof Error) {
+    return new ProductionError(
+      error.message || defaultMessage,
+      ErrorCodes.SERVER_ERROR,
+      500
+    )
+  }
+  
+  return new ProductionError(
+    defaultMessage,
+    ErrorCodes.SERVER_ERROR,
+    500
+  )
+}
+
+/**
+ * Measure performance of async operations
+ */
+export async function measurePerformance<T>(
+  label: string,
+  fn: () => Promise<T>,
+  metadata?: Record<string, unknown>
+): Promise<T> {
+  const startTime = Date.now()
+  try {
+    const result = await fn()
+    const duration = Date.now() - startTime
+    logError(new Error(`Performance: ${label} took ${duration}ms`), {
+      action: 'performance',
+      metadata: { ...metadata, duration, label }
+    })
+    return result
+  } catch (error) {
+    const duration = Date.now() - startTime
+    logError(error, {
+      action: 'performance_error',
+      metadata: { ...metadata, duration, label }
+    })
+    throw error
+  }
+}
+
+/**
+ * Logger class for compatibility
+ */
+export class Logger {
+  private static instance: Logger | null = null
+  
+  static getInstance(): Logger {
+    if (!Logger.instance) {
+      Logger.instance = new Logger()
+    }
+    return Logger.instance
+  }
+  
+  log(message: string, data?: any): void {
+    // Use the logger from logger.ts
+    const { logger } = require('./logger')
+    logger.log(message, data)
+  }
+  
+  error(message: string, error?: any): void {
+    const { logger } = require('./logger')
+    logger.error(message, error)
+  }
+  
+  info(message: string, data?: any): void {
+    const { logger } = require('./logger')
+    logger.info(message, data)
+  }
+  
+  warn(message: string, data?: any): void {
+    const { logger } = require('./logger')
+    logger.warn(message, data)
+  }
+}

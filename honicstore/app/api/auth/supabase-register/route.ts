@@ -282,7 +282,6 @@ export async function POST(request: NextRequest) {
           
           // If user was created more than 10 seconds ago, this is an existing user
           if (secondsSinceCreation !== null && secondsSinceCreation > 10) {
-            })
             return NextResponse.json(
               {
                 success: false,

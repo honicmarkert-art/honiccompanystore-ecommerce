@@ -252,6 +252,7 @@ export async function GET(
       { status: 500 }
     )
   }
+  })
 }
 
 // Function to send payment confirmation

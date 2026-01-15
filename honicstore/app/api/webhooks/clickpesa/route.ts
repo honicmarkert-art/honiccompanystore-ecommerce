@@ -131,8 +131,6 @@ export async function POST(request: NextRequest) {
     const event = payload.event || payload.eventType
     const data = payload.data
     
-    )
-    
     // Handle different event types
     let paymentStatus = 'unpaid'
     let orderReference = null
@@ -472,8 +470,6 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        ')
-        :', paymentStatus)
         logger.log('✅ Transaction verified - using webhook status as primary source', {
           webhookStatus: paymentStatus,
           apiStatus: verifiedStatus,
@@ -577,7 +573,6 @@ export async function POST(request: NextRequest) {
       }
       
       // Not found in either table
-      )
       logger.error('❌ Transaction not found in orders or profiles table:', {
         orderReference: orderReference,
         normalizedReference: normalizedReference,
@@ -706,7 +701,6 @@ export async function POST(request: NextRequest) {
 
     // Use secure order update with reference_id protection
     // Always use webhook status as primary source
-    const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
     let updateData: any = {
       payment_status: verifiedPaymentStatus, // Always use webhook status
       status: orderStatus,
@@ -1086,7 +1080,6 @@ export async function POST(request: NextRequest) {
     const isRetryPayment = order.payment_status === 'failed' || order.payment_status === 'pending'
     const processingTime = Date.now() - startTime
     
-    )
     return NextResponse.json({
       success: true,
       message: isRetryPayment ? 'Retry payment processed successfully' : 'Initial payment processed successfully',

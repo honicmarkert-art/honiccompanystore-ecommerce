@@ -302,7 +302,7 @@ function AuthCallbackContent() {
               // Run these asynchronously without waiting
               Promise.all([
                 // Refresh user context in background
-                refreshUser().catch(err => ),
+                refreshUser().catch(() => {}),
                 
                 // Send welcome email for new users (fire and forget)
                 (async () => {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAdminAccess, createAdminSupabaseClient } from '@/lib/admin-auth'
-import { logger } from '@/lib/user-email-service'
+import { logger } from '@/lib/logger'
 import { sendRefundConfirmationEmail } from '@/lib/user-email-service'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { performanceMonitor } from '@/lib/performance-monitor'

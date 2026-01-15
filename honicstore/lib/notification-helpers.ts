@@ -127,7 +127,6 @@ export async function notifyAllAdmins(
       return { success: false, notified: 0, errors: adminIds.length }
     }
 
-    : ${title}`)
     return { success: true, notified: adminIds.length, errors: 0 }
   } catch (error: any) {
     return { success: false, notified: 0, errors: 1 }

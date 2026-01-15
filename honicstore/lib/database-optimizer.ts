@@ -2,7 +2,7 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { cache, CACHE_KEYS, CACHE_TTL, cacheInvalidator } from './cache'
-import { Logger } from './error-handler'
+import { logger } from './logger'
 
 interface QueryOptions {
   useCache?: boolean
@@ -20,14 +20,12 @@ interface BatchQueryOptions {
 class DatabaseOptimizer {
   private static instance: DatabaseOptimizer
   private supabase: SupabaseClient
-  private logger: Logger
 
   private constructor() {
     this.supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.SUPABASE_SERVICE_ROLE_KEY || ''
     )
-    this.logger = Logger.getInstance()
   }
 
   public static getInstance(): DatabaseOptimizer {
@@ -83,7 +81,7 @@ class DatabaseOptimizer {
 
       return data
     } catch (error) {
-      this.logger.error('Failed to fetch product', error instanceof Error ? error : new Error(String(error)), { productId: id })
+      logger.error('Failed to fetch product', error instanceof Error ? error : new Error(String(error)), { productId: id })
       throw error
     }
   }
@@ -170,7 +168,7 @@ class DatabaseOptimizer {
 
       return result
     } catch (error) {
-      this.logger.error('Failed to fetch products', error instanceof Error ? error : new Error(String(error)), { page, limit, filters })
+      logger.error('Failed to fetch products', error instanceof Error ? error : new Error(String(error)), { page, limit, filters })
       throw error
     }
   }
@@ -219,7 +217,7 @@ class DatabaseOptimizer {
 
       return data || []
     } catch (error) {
-      this.logger.error('Failed to fetch user cart', error instanceof Error ? error : new Error(String(error)), { userId })
+      logger.error('Failed to fetch user cart', error instanceof Error ? error : new Error(String(error)), { userId })
       throw error
     }
   }
@@ -291,7 +289,7 @@ class DatabaseOptimizer {
 
         return result
       } catch (error) {
-        this.logger.error('Failed to validate stock for product', error instanceof Error ? error : new Error(String(error)), { productId: item.product_id })
+        logger.error('Failed to validate stock for product', error instanceof Error ? error : new Error(String(error)), { productId: item.product_id })
         return {
           product_id: item.product_id,
           valid: false,
@@ -362,7 +360,7 @@ class DatabaseOptimizer {
 
       return data
     } catch (error) {
-      this.logger.error('Failed to fetch order', error instanceof Error ? error : new Error(String(error)), { orderId })
+      logger.error('Failed to fetch order', error instanceof Error ? error : new Error(String(error)), { orderId })
       throw error
     }
   }
@@ -396,7 +394,7 @@ class DatabaseOptimizer {
 
       return data
     } catch (error) {
-      this.logger.error('Failed to fetch user profile', error instanceof Error ? error : new Error(String(error)), { userId })
+      logger.error('Failed to fetch user profile', error instanceof Error ? error : new Error(String(error)), { userId })
       throw error
     }
   }
@@ -457,7 +455,7 @@ class DatabaseOptimizer {
         cartItems: cartResult.count || 0
       }
     } catch (error) {
-      this.logger.error('Failed to get database stats', error instanceof Error ? error : new Error(String(error)))
+      logger.error('Failed to get database stats', error instanceof Error ? error : new Error(String(error)))
       return {
         products: 0,
         orders: 0,
