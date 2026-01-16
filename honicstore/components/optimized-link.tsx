@@ -91,18 +91,16 @@ export function OptimizedLink({
       }
     }
 
-    // Ensure prefetch is complete before navigation
+    // Don't prevent default - let Next.js Link handle client-side navigation
+    // Only handle prefetch in background, don't block navigation
     if (!isPrefetched && (prefetch === 'always' || prefetch === true)) {
-      e.preventDefault()
-      handlePrefetch().then(() => {
-        if (replace) {
-          router.replace(href, { scroll })
-        } else {
-          router.push(href, { scroll })
-        }
-      })
+      // Prefetch in background but don't block navigation
+      handlePrefetch().catch(() => {})
     }
-  }, [isPrefetched, prefetch, handlePrefetch, replace, router, href, scroll])
+    
+    // Let Next.js Link component handle the navigation (client-side)
+    // Don't call preventDefault() to ensure smooth client-side navigation
+  }, [isPrefetched, prefetch, handlePrefetch])
 
   // Intersection Observer for visible prefetch
   const handleIntersection = useCallback((entries: IntersectionObserverEntry[]) => {

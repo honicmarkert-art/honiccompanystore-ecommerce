@@ -147,7 +147,7 @@ function SupplierProductsContent() {
         } else {
           toast({
             title: 'Error',
-            description: data.error || 'Failed to fetch products',
+            description: 'Failed',
             variant: 'destructive'
           })
         }
@@ -290,14 +290,14 @@ function SupplierProductsContent() {
       } else {
         toast({
           title: 'Error',
-          description: data.error || 'Failed to delete product',
+          description: 'Failed',
           variant: 'destructive'
         })
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to delete product',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -487,7 +487,7 @@ function SupplierProductsContent() {
                               } catch (error: any) {
                                 toast({
                                   title: 'Error',
-                                  description: error.message || 'Failed to initiate upgrade. Please try again.',
+                                  description: 'Failed',
                                   variant: 'destructive'
                                 })
                               }
@@ -611,7 +611,7 @@ function SupplierProductsContent() {
                                   } catch (error: any) {
                                     toast({
                                       title: 'Error',
-                                      description: error.message || 'Failed to initiate upgrade. Please try again.',
+                                      description: 'Failed',
                                       variant: 'destructive'
                                     })
                                   }
@@ -627,10 +627,9 @@ function SupplierProductsContent() {
                       }
                     }
                   } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : 'Failed to save product'
                     toast({
                       title: 'Error',
-                      description: errorMessage,
+                      description: 'Failed',
                       variant: 'destructive'
                     })
                     throw error

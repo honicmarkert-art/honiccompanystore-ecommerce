@@ -229,7 +229,7 @@ export default function SupplierUpgradePage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to change plan. Please try again.',
+        description: 'Failed',
         variant: 'destructive'
       })
       setIsUpgrading(false)

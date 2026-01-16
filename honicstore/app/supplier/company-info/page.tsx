@@ -248,14 +248,14 @@ function CompanyInfoPageContent() {
       } else {
         toast({
           title: 'Error',
-          description: result.error || 'Failed to update company information',
+          description: 'Failed',
           variant: 'destructive'
         })
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'An error occurred. Please try again.',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -291,7 +291,7 @@ function CompanyInfoPageContent() {
       } else {
         toast({
           title: 'Error',
-          description: result.error || 'Failed to send reset request. Please try again.',
+          description: 'Failed',
           variant: 'destructive',
         })
       }
@@ -354,14 +354,14 @@ function CompanyInfoPageContent() {
       } else {
         toast({
           title: "Error",
-          description: result.error || "Failed to upload logo",
+          description: "Failed",
           variant: "destructive",
         })
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "An error occurred while uploading the logo",
+        description: "Failed",
         variant: "destructive",
       })
     } finally {
@@ -424,14 +424,14 @@ function CompanyInfoPageContent() {
       } else {
         toast({
           title: "Error",
-          description: result.error || "Failed to upload certificate",
+          description: "Failed",
           variant: "destructive",
         })
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "An error occurred while uploading the certificate",
+        description: "Failed",
         variant: "destructive",
       })
     } finally {

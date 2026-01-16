@@ -91,7 +91,7 @@ function SupplierEditProductContent() {
       } else {
         toast({
           title: 'Error',
-          description: data.error || 'Product not found',
+          description: 'Failed',
           variant: 'destructive'
         })
         router.push('/supplier/products')
@@ -100,7 +100,7 @@ function SupplierEditProductContent() {
       const errorMessage = error?.message || 'Failed to load product'
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed',
         variant: 'destructive'
       })
       router.push('/supplier/products')
@@ -229,7 +229,7 @@ function SupplierEditProductContent() {
       const errorMessage = error instanceof Error ? error.message : 'Failed to update product'
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed',
         variant: 'destructive'
       })
       throw error

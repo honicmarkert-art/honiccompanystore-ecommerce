@@ -265,7 +265,7 @@ export default function SupplierOrdersPage() {
         const errorMessage = error?.message || 'Failed to fetch orders'
         toast({
           title: 'Error',
-          description: errorMessage,
+          description: 'Failed',
           variant: 'destructive'
         })
       }
@@ -379,7 +379,7 @@ export default function SupplierOrdersPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to update order status',
+        description: 'Failed',
         variant: 'destructive',
       })
     } finally {

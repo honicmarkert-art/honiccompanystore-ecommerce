@@ -1143,11 +1143,13 @@ function ProductsPageContent() {
     }
   }, [PRODUCTS_BATCH_SIZE])
   
-  // Save displayedCount to sessionStorage whenever it changes
+  // Save displayedCount and scroll position to sessionStorage whenever they change
   useEffect(() => {
     if (typeof window === 'undefined') return
     try {
       sessionStorage.setItem('products_displayed_count', displayedCount.toString())
+      // Also save current scroll position
+      sessionStorage.setItem('products_scroll_position', window.scrollY.toString())
       sessionStorage.setItem('products_filters', JSON.stringify({
         search: actualSearchQuery,
         mainCategory: selectedMainCategory,
@@ -1188,29 +1190,68 @@ function ProductsPageContent() {
     return allFilteredProducts.slice(0, displayedCount)
   }, [allFilteredProducts, displayedCount])
   
-  // Restore scroll position when navigating back
+  // Restore scroll position when navigating back from product detail page
+  const hasRestoredScrollRef = useRef(false)
+  
   useEffect(() => {
     if (typeof window === 'undefined') return
+    if (hasRestoredScrollRef.current) return // Only restore once per navigation
     
-    // Only restore if we have a saved scroll position and displayedCount was restored
-    const savedScroll = sessionStorage.getItem('products_scroll_position')
-    const savedDisplayedCount = sessionStorage.getItem('products_displayed_count')
+    // Check if we're returning from a product detail page
+    const isReturningFromDetail = sessionStorage.getItem('navigated_from_product_detail') === 'true'
     
-    if (savedScroll && savedDisplayedCount && parseInt(savedDisplayedCount, 10) === displayedCount) {
-      // Wait for products to render before restoring scroll
-      const timer = setTimeout(() => {
-        const scrollY = parseInt(savedScroll, 10)
-        if (!isNaN(scrollY) && scrollY > 0) {
-          window.scrollTo({
-            top: scrollY,
-            behavior: 'auto' // Instant scroll for restoration
-          })
-        }
-      }, 100) // Small delay to ensure DOM is ready
+    if (isReturningFromDetail) {
+      // Clear the flag immediately to prevent multiple restorations
+      sessionStorage.removeItem('navigated_from_product_detail')
+      hasRestoredScrollRef.current = true
       
-      return () => clearTimeout(timer)
+      // Get saved scroll position and displayed count
+      const savedScroll = sessionStorage.getItem('products_scroll_position')
+      const savedDisplayedCount = sessionStorage.getItem('products_displayed_count')
+      
+      if (savedScroll && savedDisplayedCount) {
+        const scrollY = parseInt(savedScroll, 10)
+        const savedCount = parseInt(savedDisplayedCount, 10)
+        
+        // Restore displayed count first if it was saved and is larger
+        if (!isNaN(savedCount) && savedCount > displayedCount && savedCount <= allFilteredProducts.length) {
+          setDisplayedCount(savedCount)
+        }
+        
+        // Wait for products to render before restoring scroll
+        // Products should be restored from cache, so they should be available quickly
+        const restoreScroll = () => {
+          // Check if products are rendered (from cache or fetch)
+          if (allFilteredProducts.length > 0) {
+            const timer = setTimeout(() => {
+              if (!isNaN(scrollY) && scrollY > 0) {
+                // Use requestAnimationFrame for smooth restoration
+                requestAnimationFrame(() => {
+                  window.scrollTo({
+                    top: scrollY,
+                    behavior: 'auto' // Instant scroll for restoration
+                  })
+                })
+              }
+            }, 100) // Reduced delay since products should be cached
+            
+            return () => clearTimeout(timer)
+          } else {
+            // Products not ready yet, try again (but with shorter timeout since cache should be fast)
+            setTimeout(restoreScroll, 50)
+          }
+        }
+        
+        // Start restoration process (reduced delay since cache should be instant)
+        setTimeout(restoreScroll, 150) // Reduced delay - products should be cached
+      }
     }
   }, [displayedCount, allFilteredProducts.length])
+  
+  // Reset restoration flag when filters change (new search/filter)
+  useEffect(() => {
+    hasRestoredScrollRef.current = false
+  }, [actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange])
   
   // Save scroll position before navigation
   useEffect(() => {
@@ -1258,10 +1299,113 @@ function ProductsPageContent() {
   }, [allFilteredProducts.length, displayedCount])
   
   // Shuffled products for display (only when no filters active)
-  // IMPORTANT: Only shuffle once on initial load, don't reshuffle on scroll
+  // IMPORTANT: Preserve order when returning from detail page, only shuffle if > 5 minutes passed
   const [shuffledProducts, setShuffledProducts] = useState<any[]>([])
   const [hasShuffled, setHasShuffled] = useState(false)
   const previousDisplayedCountRef = useRef(0)
+  
+  // Check if user is returning from detail page
+  const isReturningFromDetail = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    const referrer = document.referrer
+    const returnTo = urlSearchParams?.get('returnTo')
+    // Check if referrer contains product detail page (pattern: /products/123-product-name)
+    const isFromDetailPage = referrer.includes('/products/') && referrer.match(/\/products\/\d+-/) !== null
+    // Also check if returnTo is set (indicates we came back from detail page)
+    return isFromDetailPage || !!returnTo
+  }, [urlSearchParams])
+  
+  // Check if 5 minutes passed and clear shuffle state (return to normal order)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    const checkAndClearShuffle = () => {
+      try {
+        const savedShuffleTimestamp = sessionStorage.getItem('products_shuffle_timestamp')
+        if (savedShuffleTimestamp) {
+          const shuffleTime = parseInt(savedShuffleTimestamp, 10)
+          const timeSinceShuffle = Date.now() - shuffleTime
+          const fiveMinutes = 5 * 60 * 1000 // 5 minutes in milliseconds
+          
+          // If more than 5 minutes passed, clear shuffle state (return to normal order)
+          if (timeSinceShuffle >= fiveMinutes) {
+            sessionStorage.removeItem('products_shuffled_order')
+            sessionStorage.removeItem('products_shuffle_timestamp')
+            sessionStorage.removeItem('products_has_shuffled')
+            setShuffledProducts([])
+            setHasShuffled(false)
+          }
+        }
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+    
+    // Check immediately
+    checkAndClearShuffle()
+    
+    // Check periodically every 30 seconds to catch when 5 minutes pass
+    const interval = setInterval(checkAndClearShuffle, 30000)
+    
+    return () => clearInterval(interval)
+  }, [displayedProducts])
+  
+  // When returning from detail page, always clear shuffle (show normal order)
+  useEffect(() => {
+    if (isReturningFromDetail && typeof window !== 'undefined') {
+      try {
+        // Clear shuffle state when returning from detail page
+        sessionStorage.removeItem('products_shuffled_order')
+        sessionStorage.removeItem('products_shuffle_timestamp')
+        sessionStorage.removeItem('products_has_shuffled')
+        setShuffledProducts([])
+        setHasShuffled(false)
+        previousDisplayedCountRef.current = 0
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+  }, [isReturningFromDetail])
+  
+  // Save shuffled products order whenever it changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    try {
+      if (shuffledProducts.length > 0 && hasShuffled) {
+        sessionStorage.setItem('products_shuffled_order', JSON.stringify(shuffledProducts))
+        // Only update timestamp if we don't have one (preserve original shuffle time)
+        const existingTimestamp = sessionStorage.getItem('products_shuffle_timestamp')
+        if (!existingTimestamp) {
+          sessionStorage.setItem('products_shuffle_timestamp', Date.now().toString())
+        }
+        sessionStorage.setItem('products_has_shuffled', 'true')
+      }
+    } catch (e) {
+      // Ignore storage errors
+    }
+  }, [shuffledProducts, hasShuffled])
+  
+  // Also save on beforeunload as backup
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    const handleBeforeUnload = () => {
+      try {
+        if (shuffledProducts.length > 0 && hasShuffled) {
+          sessionStorage.setItem('products_shuffled_order', JSON.stringify(shuffledProducts))
+          const shuffleTimestamp = sessionStorage.getItem('products_shuffle_timestamp') || Date.now().toString()
+          sessionStorage.setItem('products_shuffle_timestamp', shuffleTimestamp)
+          sessionStorage.setItem('products_has_shuffled', 'true')
+        }
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [shuffledProducts, hasShuffled])
   
   useEffect(() => {
     // Only shuffle when no filters are active
@@ -1272,6 +1416,16 @@ function ProductsPageContent() {
       setShuffledProducts([])
       setHasShuffled(false)
       previousDisplayedCountRef.current = 0
+      // Clear saved shuffle state
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('products_shuffled_order')
+          sessionStorage.removeItem('products_shuffle_timestamp')
+          sessionStorage.removeItem('products_has_shuffled')
+        } catch (e) {
+          // Ignore storage errors
+        }
+      }
       return
     }
     
@@ -1283,14 +1437,57 @@ function ProductsPageContent() {
       const currentDisplayedCount = displayedProducts.length
       const previousDisplayedCount = previousDisplayedCountRef.current
       
+      // Check if we should shuffle based on time
+      let shouldShuffle = false
+      if (typeof window !== 'undefined') {
+        try {
+          const savedShuffleTimestamp = sessionStorage.getItem('products_shuffle_timestamp')
+          if (savedShuffleTimestamp) {
+            const shuffleTime = parseInt(savedShuffleTimestamp, 10)
+            const timeSinceShuffle = Date.now() - shuffleTime
+            const fiveMinutes = 5 * 60 * 1000 // 5 minutes in milliseconds
+            
+            // Only shuffle if less than 5 minutes passed (after 5 min, show normal order)
+            // Never shuffle when returning from detail page
+            if (isReturningFromDetail) {
+              shouldShuffle = false // Always show normal order when returning
+            } else if (timeSinceShuffle < fiveMinutes) {
+              // Less than 5 minutes passed - can shuffle if not shuffled yet
+              shouldShuffle = !hasShuffled
+            } else {
+              // More than 5 minutes passed - don't shuffle (show normal order)
+              shouldShuffle = false
+            }
+          } else {
+            // No timestamp - only shuffle if we haven't shuffled yet and not returning
+            shouldShuffle = !hasShuffled && !isReturningFromDetail
+          }
+        } catch (e) {
+          shouldShuffle = !hasShuffled && !isReturningFromDetail
+        }
+      } else {
+        shouldShuffle = !hasShuffled && !isReturningFromDetail
+      }
+      
       // If displayedCount decreased, reset shuffle (user cleared/reset filters)
       if (currentDisplayedCount < previousDisplayedCount) {
         setHasShuffled(false)
         previousDisplayedCountRef.current = 0
+        shouldShuffle = true
+        // Clear saved shuffle state
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.removeItem('products_shuffled_order')
+            sessionStorage.removeItem('products_shuffle_timestamp')
+            sessionStorage.removeItem('products_has_shuffled')
+          } catch (e) {
+            // Ignore storage errors
+          }
+        }
       }
       
-      // Only shuffle if we haven't shuffled yet OR if this is a reset (count decreased)
-      if (!hasShuffled || currentDisplayedCount < previousDisplayedCount) {
+      // Only shuffle if we haven't shuffled yet OR if this is a reset (count decreased) OR time passed
+      if (shouldShuffle && (!hasShuffled || currentDisplayedCount < previousDisplayedCount)) {
         // Shuffle all displayed products
         const shuffled = [...displayedProducts]
         for (let i = shuffled.length - 1; i > 0; i--) {
@@ -1300,8 +1497,20 @@ function ProductsPageContent() {
         setShuffledProducts(shuffled)
         setHasShuffled(true)
         previousDisplayedCountRef.current = currentDisplayedCount
-      } else if (currentDisplayedCount > previousDisplayedCount) {
+        
+        // Save shuffle timestamp
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.setItem('products_shuffle_timestamp', Date.now().toString())
+            sessionStorage.setItem('products_shuffled_order', JSON.stringify(shuffled))
+            sessionStorage.setItem('products_has_shuffled', 'true')
+          } catch (e) {
+            // Ignore storage errors
+          }
+        }
+      } else if (currentDisplayedCount > previousDisplayedCount && !isReturningFromDetail && hasShuffled) {
         // User scrolled - append new products WITHOUT reshuffling existing ones
+        // But only if not returning from detail page and we're still in shuffle mode (< 5 min)
         const newProducts = displayedProducts.slice(previousDisplayedCountRef.current)
         // Shuffle only the new products
         const shuffledNew = [...newProducts]
@@ -1310,15 +1519,31 @@ function ProductsPageContent() {
           [shuffledNew[i], shuffledNew[j]] = [shuffledNew[j], shuffledNew[i]]
         }
         // Append shuffled new products to existing shuffled products
-        setShuffledProducts(prev => [...prev, ...shuffledNew])
+        const updatedShuffled = [...shuffledProducts, ...shuffledNew]
+        setShuffledProducts(updatedShuffled)
         previousDisplayedCountRef.current = currentDisplayedCount
+        
+        // Update saved shuffle state (preserve original timestamp)
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.setItem('products_shuffled_order', JSON.stringify(updatedShuffled))
+            // Don't update timestamp - preserve original shuffle time
+            const existingTimestamp = sessionStorage.getItem('products_shuffle_timestamp')
+            if (!existingTimestamp) {
+              sessionStorage.setItem('products_shuffle_timestamp', Date.now().toString())
+            }
+            sessionStorage.setItem('products_has_shuffled', 'true')
+          } catch (e) {
+            // Ignore storage errors
+          }
+        }
       }
     } else {
       setShuffledProducts([])
       setHasShuffled(false)
       previousDisplayedCountRef.current = 0
     }
-  }, [displayedProducts, actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange])
+  }, [displayedProducts, actualSearchQuery, selectedMainCategory, selectedSubCategories, activeBrand, priceRange, isReturningFromDetail])
 
   // Check if we have products ready (for skeleton display logic)
   const hasCachedProductsInitial = primaryProducts.length > 0
@@ -1645,22 +1870,13 @@ function ProductsPageContent() {
   }
 
   // Memoized add to cart handler to prevent unnecessary re-renders
-  const handleAddToCart = useCallback(async (productId: number, productName: string, productPrice: number, productVariants?: any[]) => {
-    // Fetch full product data from database to get accurate variant info and prices
-    let fullProductData = null
-    let selectedVariant: any = null
-    let variantPrice: number = productPrice
+  const handleAddToCart = useCallback((productId: number, productName: string, productPrice: number, productVariants?: any[]) => {
+    // Use cached product data from primaryProducts for instant response
+    const cachedProduct = primaryProducts.find((p: any) => p.id === productId)
     
-      try {
-        const response = await fetch(`/api/products/${productId}`)
-        if (response.ok) {
-          fullProductData = await response.json()
-          
-        // Use simplified variant system - get variants from database
-        const variants = fullProductData.variants || []
-
-    // Check basic product stock before proceeding
-        const stockCheck = checkProductStock(fullProductData)
+    // Quick stock check using cached data
+    if (cachedProduct) {
+      const stockCheck = checkProductStock(cachedProduct)
       if (!stockCheck.isAvailable) {
         toast({
           title: "Out of Stock",
@@ -1669,85 +1885,80 @@ function ProductsPageContent() {
         })
         return
       }
-        
-        // If product has variants, auto-select first variant (like detail page)
-        if (variants && variants.length > 0) {
-          selectedVariant = variants[0] // Auto-select first variant
-          variantPrice = parseFloat(selectedVariant.price) || productPrice
-          
-          // Check variant stock
-          const variantStockQty = selectedVariant.stock_quantity || selectedVariant.stockQuantity || 0
-          if (variantStockQty <= 0) {
-            toast({
-              title: "Out of Stock",
-              description: "This variant is currently unavailable.",
-              variant: "destructive",
-            })
-            return
-          }
-        } else {
-          // No variants - use product price
-          variantPrice = parseFloat(fullProductData.price) || productPrice
-        }
-      } else {
-        // Fallback if API fails
-        const productForStockCheck = primaryProducts.find((p: any) => p.id === productId)
-        if (productForStockCheck) {
-          const stockCheck = checkProductStock(productForStockCheck)
+    }
+    
+    // Use cached variants or provided variants
+    const variants = cachedProduct?.variants || productVariants || []
+    let selectedVariant: any = null
+    let variantPrice: number = productPrice
+    
+    // If product has variants, auto-select first variant (like detail page)
+    if (variants && variants.length > 0) {
+      selectedVariant = variants[0] // Auto-select first variant
+      variantPrice = parseFloat(selectedVariant.price) || productPrice
+      
+      // Quick variant stock check
+      const variantStockQty = selectedVariant.stock_quantity || selectedVariant.stockQuantity || 0
+      if (variantStockQty <= 0) {
+        toast({
+          title: "Out of Stock",
+          description: "This variant is currently unavailable.",
+          variant: "destructive",
+        })
+        return
+      }
+    } else {
+      // No variants - use product price from cache
+      variantPrice = cachedProduct?.price ? parseFloat(String(cachedProduct.price)) : productPrice
+    }
+    
+    // Auto-set quantity to 5 for products under 500 TZS
+    const quantity = variantPrice < 500 ? 5 : 1
+    
+    // Check if this is a China import item
+    if (cachedProduct && (cachedProduct.importChina || cachedProduct.import_china)) {
+      // Show modal for China import items
+      setPendingCartItem({
+        productId,
+        quantity,
+        variantId: selectedVariant?.id?.toString(),
+        price: variantPrice
+      })
+      setShowChinaImportModal(true)
+      return
+    }
+    
+    // Add to cart immediately with cached data
+    // Fetch full product data in background for validation (non-blocking)
+    addItem(
+      productId,
+      quantity,
+      selectedVariant?.id ? String(selectedVariant.id) : undefined, // Variant ID from database
+      {}, // No complex attributes
+      variantPrice, // Price from cache (will be validated by API)
+      selectedVariant?.sku,
+      selectedVariant?.image,
+      cachedProduct // Pass cached product data to avoid API fetch
+    )
+    
+    // Fetch full product data in background for server validation (non-blocking)
+    fetch(`/api/products/${productId}`)
+      .then(response => response.ok ? response.json() : null)
+      .then(fullProductData => {
+        if (fullProductData) {
+          // Validate stock with fresh data
+          const stockCheck = checkProductStock(fullProductData)
           if (!stockCheck.isAvailable) {
+            // Show error toast if stock check fails
             toast({
               title: "Out of Stock",
               description: stockCheck.message || "This product is currently unavailable.",
               variant: "destructive",
             })
-            return
           }
         }
-      }
-    } catch (error) {
-      // Fallback to basic check
-      const productForStockCheck = primaryProducts.find((p: any) => p.id === productId)
-      if (productForStockCheck) {
-        const stockCheck = checkProductStock(productForStockCheck)
-        if (!stockCheck.isAvailable) {
-          toast({
-            title: "Out of Stock",
-            description: stockCheck.message || "This product is currently unavailable.",
-            variant: "destructive",
-          })
-          return
-        }
-      }
-    }
-        
-        // Auto-set quantity to 5 for products under 500 TZS
-        const quantity = variantPrice < 500 ? 5 : 1
-        
-        // Check if this is a China import item
-    const product = primaryProducts.find((p: any) => p.id === productId) || fullProductData
-        if (product && (product.importChina || product.import_china)) {
-          // Show modal for China import items
-          setPendingCartItem({
-            productId,
-            quantity,
-        variantId: selectedVariant?.id?.toString(),
-            price: variantPrice
-          })
-          setShowChinaImportModal(true)
-          return
-        }
-        
-    // Add to cart - simplified variant system (like detail page)
-    // Pass variantId (numeric ID from database), no attributes, price from database
-    addItem(
-        productId,
-        quantity,
-      selectedVariant?.id?.toString(), // Variant ID from database
-      {}, // No complex attributes
-      variantPrice, // Price from database (will be validated by API)
-      selectedVariant?.sku,
-      selectedVariant?.image
-    )
+      })
+      .catch(() => {}) // Silently handle errors - item already added optimistically
   }, [addItem, toast, setPendingCartItem, setShowChinaImportModal, primaryProducts])
 
   return (
@@ -1888,9 +2099,9 @@ function ProductsPageContent() {
           </div>
 
           {/* Search Bar Container - Moved to start */}
-          <div className="flex-1 min-w-0 mx-2 sm:mx-3 md:mx-4 lg:mx-6 xl:mx-8 2xl:mx-10 flex items-center relative" suppressHydrationWarning>
+          <div className="flex-1 min-w-0 mx-2 sm:mx-3 md:mx-4 lg:mx-6 xl:mx-8 2xl:mx-10 flex items-center relative overflow-hidden" suppressHydrationWarning>
             <form 
-              className="relative flex-1 flex items-center" 
+              className="relative flex-1 flex items-center min-w-0" 
               onSubmit={(e: React.FormEvent) => {
                 e.preventDefault()
                 if (searchTerm.trim()) {
@@ -1900,10 +2111,10 @@ function ProductsPageContent() {
               suppressHydrationWarning
             >
               {/* Search Input */}
-              <div className="relative flex-1" suppressHydrationWarning>
+              <div className="relative flex-1 min-w-0 w-full" suppressHydrationWarning>
               <Search
                 className={cn(
-                    "absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 z-10",
+                    "absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 z-10 pointer-events-none",
                     darkHeaderFooterClasses.textNeutralSecondaryFixed,
                 )}
                   suppressHydrationWarning
@@ -1912,15 +2123,16 @@ function ProductsPageContent() {
                 type="text"
                 placeholder="Search for products... (min 3 chars)"
                 className={cn(
-                    "w-full pl-8 sm:pl-10 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
+                    "w-full min-w-0 pl-8 sm:pl-10 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
                     // Adjust padding-right based on whether there's text and screen size
                     searchTerm.trim() 
-                      ? "pr-8 sm:pr-44 md:pr-48" // Less padding on mobile when typing
-                      : "pr-20 sm:pr-44 md:pr-48", // Reduced padding on mobile when empty to show placeholder
+                      ? "pr-8 sm:pr-12 md:pr-16" // Reduced padding to prevent cutting
+                      : "pr-12 sm:pr-16 md:pr-20", // Reduced padding on mobile when empty
                     darkHeaderFooterClasses.inputBg,
                     darkHeaderFooterClasses.inputBorder,
                     darkHeaderFooterClasses.textNeutralPrimary,
                     darkHeaderFooterClasses.inputPlaceholder,
+                    "overflow-hidden text-ellipsis", // Prevent text overflow
                 )}
                 value={searchTerm}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1987,7 +2199,7 @@ function ProductsPageContent() {
                 type="submit"
                 disabled={!searchTerm.trim() || searchTerm.trim().length < 3}
                 className={cn(
-                  "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors z-10",
+                  "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors z-10 flex-shrink-0",
                   searchTerm.trim() && searchTerm.trim().length >= 3
                     ? cn(darkHeaderFooterClasses.textNeutralSecondaryFixed, "hover:bg-neutral-200 dark:hover:bg-neutral-700")
                     : "text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50"
@@ -2698,27 +2910,16 @@ function ProductsPageContent() {
                       ? 'text-yellow-500 hover:text-yellow-600' 
                       : cn(themeClasses.mainText, "hover:text-yellow-500")
                 )}
-                prefetch={false}
-                scroll={false}
-                onClick={(e) => {
-                  e.preventDefault()
-                  // Set category state and update URL without full navigation
+                prefetch={true}
+                scroll={true}
+                onClick={() => {
+                  // Update state for immediate UI feedback
+                  // Next.js Link will handle client-side navigation automatically
                   setSelectedMainCategory(cat.slug)
                   // Get all subcategories for this main category
                   const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === cat.id)
                   const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
                   setSelectedSubCategories(allSubSlugs)
-                  
-                  // Update URL
-                  const params = new URLSearchParams(urlSearchParams?.toString())
-                  params.set('mainCategory', cat.slug)
-                  if (allSubSlugs.length > 0) {
-                    params.set('subCategories', allSubSlugs.join(','))
-                  } else {
-                    params.delete('subCategories')
-                  }
-                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                  router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
                   setIsCategoryMegaMenuOpen(false)
                 }}
               >
@@ -3138,18 +3339,11 @@ function ProductsPageContent() {
                                 key={sub.id}
                                 href={`/products?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
                                 className="flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110 flex-shrink-0 min-w-[80px] sm:min-w-[90px] lg:min-w-0"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  // Set subcategory state and update URL
+                                onClick={() => {
+                                  // Update state for immediate UI feedback
+                                  // Next.js Link will handle client-side navigation automatically
                                   setSelectedMainCategory(hoveredMegaCategoryData.slug)
                                   setSelectedSubCategories([sub.slug])
-                                  
-                                  const params = new URLSearchParams(urlSearchParams?.toString())
-                                  params.set('mainCategory', hoveredMegaCategoryData.slug)
-                                  params.set('subCategories', sub.slug)
-                                  params.delete('subCategory') // Remove singular form
-                                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                                  router.replace(nextUrl, { scroll: false })
                                   setIsCategoryMegaMenuOpen(false)
                                 }}
                               >
@@ -3177,18 +3371,11 @@ function ProductsPageContent() {
                                 key={sub.id}
                                 href={`/products?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
                                 className="hidden lg:flex flex-col items-center gap-2 border-0 rounded-lg p-2 hover:shadow-md transition-all duration-300 ease-in-out transform hover:scale-110"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  // Set subcategory state and update URL
+                                onClick={() => {
+                                  // Update state for immediate UI feedback
+                                  // Next.js Link will handle client-side navigation automatically
                                   setSelectedMainCategory(hoveredMegaCategoryData.slug)
                                   setSelectedSubCategories([sub.slug])
-                                  
-                                  const params = new URLSearchParams(urlSearchParams?.toString())
-                                  params.set('mainCategory', hoveredMegaCategoryData.slug)
-                                  params.set('subCategories', sub.slug)
-                                  params.delete('subCategory') // Remove singular form
-                                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                                  router.replace(nextUrl, { scroll: false })
                                   setIsCategoryMegaMenuOpen(false)
                                 }}
                               >
@@ -3223,18 +3410,11 @@ function ProductsPageContent() {
                                   key={sub.id}
                                   href={`/products?mainCategory=${hoveredMegaCategoryData.slug}&subCategory=${sub.slug}`}
                                   className="group flex items-center justify-between py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-300 ease-in-out transform hover:scale-105"
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    // Set subcategory state and update URL
-                                  setSelectedMainCategory(hoveredMegaCategoryData.slug)
-                                  setSelectedSubCategories([sub.slug])
-                                  
-                                  const params = new URLSearchParams(urlSearchParams?.toString())
-                                  params.set('mainCategory', hoveredMegaCategoryData.slug)
-                                  params.set('subCategories', sub.slug)
-                                  params.delete('subCategory') // Remove singular form
-                                  const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                                  router.replace(nextUrl, { scroll: false })
+                                  onClick={() => {
+                                    // Update state for immediate UI feedback
+                                    // Next.js Link will handle client-side navigation automatically
+                                    setSelectedMainCategory(hoveredMegaCategoryData.slug)
+                                    setSelectedSubCategories([sub.slug])
                                     setIsCategoryMegaMenuOpen(false)
                                   }}
                                 >
@@ -3742,7 +3922,7 @@ function ProductsPageContent() {
                       key={cat.id}
                       href={`/products?mainCategory=${cat.slug}`}
                       className="flex flex-col items-center flex-shrink-0 w-20 sm:w-40"
-                      prefetch={false}
+                      prefetch={true}
                       scroll={false}
                     >
                       {cat.image_url ? (

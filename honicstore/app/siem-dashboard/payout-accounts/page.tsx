@@ -95,7 +95,7 @@ export default function PayoutAccountsPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to fetch payout accounts',
+        description: 'Failed',
         variant: 'destructive'
       })
       setAccounts([])

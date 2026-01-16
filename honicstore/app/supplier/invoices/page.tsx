@@ -122,7 +122,7 @@ function InvoicesContent() {
       setError(errorMessage)
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -628,7 +628,7 @@ For support, please contact customer service.
                     } catch (error: any) {
                       toast({
                         title: 'Error',
-                        description: error.message || 'Failed to initiate upgrade. Please try again.',
+                        description: 'Failed',
                         variant: 'destructive'
                       })
                     }

@@ -6,7 +6,7 @@ import { secureOrderCreation, ReferenceIdSecurity } from '@/lib/reference-id-sec
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { securityUtils } from '@/lib/secure-config'
 import { validateAuth } from '@/lib/auth-server'
-import { sendOrderNotificationEmail } from '@/lib/email-service'
+import { emailService } from '@/lib/email-service'
 
 
 
@@ -506,10 +506,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate dual ID system
+    console.log('📝 [ORDER-API] Step 1: Generating order IDs...')
     const { referenceId, pickupId } = generateOrderIds()
     
     // Remove hyphens from UUID for consistent format
     const cleanReferenceId = referenceId.replace(/-/g, '')
+    console.log('📝 [ORDER-API] Step 1: Order IDs generated', { 
+      referenceId: cleanReferenceId, 
+      pickupId 
+    })
     
     // Create order record with server-calculated total
     const basicOrderData = {
@@ -529,10 +534,18 @@ export async function POST(request: NextRequest) {
     } as any
 
     // Use secure order creation with reference_id validation
+    console.log('💾 [ORDER-API] Step 2: Creating order in database...', {
+      orderNumber: basicOrderData.order_number,
+      referenceId: basicOrderData.reference_id,
+      totalAmount: basicOrderData.total_amount
+    })
     const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
     const creationResult = await secureOrderCreation(basicOrderData, null, clientIP)
     
     if (!creationResult.success) {
+      console.error('❌ [ORDER-API] Step 2: Order creation failed', { 
+        error: creationResult.error 
+      })
       return NextResponse.json(
         { error: 'Order creation failed', details: creationResult.error },
         { status: 500 }
@@ -540,6 +553,10 @@ export async function POST(request: NextRequest) {
     }
     
     const order = creationResult.data
+    console.log('✅ [ORDER-API] Step 2: Order created successfully', {
+      orderId: order.id,
+      referenceId: order.reference_id
+    })
 
     // Set order_id for all items
     const orderItemsData = validatedItems.map(item => ({
@@ -548,43 +565,227 @@ export async function POST(request: NextRequest) {
     }))
 
     // Create order items with server-validated prices
+    console.log('📦 [ORDER-API] Step 3: Creating order items...', {
+      itemCount: orderItemsData.length,
+      orderId: order.id
+    })
     const { error: itemsError } = await supabase
       .from('order_items')
       .insert(orderItemsData)
 
     if (itemsError) {
+      console.error('❌ [ORDER-API] Step 3: Order items creation failed', {
+        error: itemsError.message
+      })
       return NextResponse.json(
         { error: 'Order items creation failed', details: itemsError.message },
         { status: 500 }
       )
     }
+    
+    console.log('✅ [ORDER-API] Step 3: Order items created successfully')
 
-    // Send order notification email to admin
+    // Send order notification email to admin (optional - doesn't block order creation)
     try {
-      const shippingAddress = orderData.shippingAddress || {}
-      await sendOrderNotificationEmail({
-        orderId: order.id.toString(),
-        orderNumber: order.order_number,
-        referenceId: order.reference_id,
-        customerName: shippingAddress?.fullName || shippingAddress?.name,
-        customerEmail: shippingAddress?.email,
-        customerPhone: shippingAddress?.phone,
-        items: validatedItems.map(item => ({
-          productName: item.product_name,
-          variantName: item.variant_name || undefined,
-          quantity: item.quantity,
-          unitPrice: item.price,
-          totalPrice: item.total_price,
-        })),
-        totalAmount: order.total_amount,
-        shippingAddress: shippingAddress,
-        deliveryOption: orderData.deliveryOption || 'shipping',
-        paymentMethod: 'clickpesa',
-        paymentStatus: order.payment_status,
-        createdAt: order.created_at,
+      console.log('📧 [ORDER-API] Step 4: Sending admin notification...', {
+        orderId: order.id,
+        orderNumber: order.order_number
       })
+
+      const adminEmail = process.env.NEXT_PUBLIC_ORDER_EMAIL
+      if (!adminEmail) {
+        console.log('⚠️ [ORDER-API] Step 4: NEXT_PUBLIC_ORDER_EMAIL not configured, skipping email notification')
+        console.log('📧 [EMAIL] Status: SKIPPED - No admin email configured')
+      } else {
+        console.log('📧 [EMAIL] Status: STARTING - Preparing to send order notification email')
+        console.log('📧 [EMAIL] Configuration:', {
+          adminEmail: adminEmail,
+          hasResendApiKey: !!process.env.RESEND_API_KEY,
+          smtpHost: process.env.SMTP_HOST || 'Not configured',
+          smtpUser: process.env.SMTP_USER || 'Not configured'
+        })
+        // Format order items for email
+        const orderItemsHtml = orderItemsData.map((item, index) => `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${index + 1}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.product_name || `Product ${item.product_id}`}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.variant_name || 'Default'}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${(item.price || 0).toLocaleString('en-TZ', { style: 'currency', currency: 'TZS' })}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${(item.total_price || 0).toLocaleString('en-TZ', { style: 'currency', currency: 'TZS' })}</td>
+          </tr>
+        `).join('')
+
+        const orderItemsText = orderItemsData.map((item, index) => 
+          `${index + 1}. ${item.product_name || `Product ${item.product_id}`} (${item.variant_name || 'Default'}) - Qty: ${item.quantity} - ${(item.total_price || 0).toLocaleString('en-TZ', { style: 'currency', currency: 'TZS' })}`
+        ).join('\n')
+
+        // Get customer info
+        const customerName = orderData.shippingAddress?.fullName || orderData.billingAddress?.fullName || 'Guest Customer'
+        const customerEmail = orderData.shippingAddress?.email || orderData.billingAddress?.email || 'No email provided'
+        const customerPhone = orderData.shippingAddress?.phone || orderData.billingAddress?.phone || 'No phone provided'
+        const deliveryOption = orderData.deliveryOption || 'shipping'
+        
+        // Get sender email
+        const smtpUser = process.env.SMTP_USER
+        const isResendSmtp = process.env.SMTP_HOST?.includes('resend.com') || smtpUser?.toLowerCase() === 'resend'
+        let senderEmail = process.env.SMTP_SENDER_EMAIL_NOREPLY || 
+                          process.env.NOREPLY_EMAIL || 
+                          (isResendSmtp ? (process.env.SMTP_SENDER_EMAIL_INFO || 'noreply@mail.honiccompanystore.com') : smtpUser) ||
+                          'noreply@mail.honiccompanystore.com'
+
+        const emailSubject = `New Order Received: ${order.order_number}`
+        const emailHtml = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>New Order Notification</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 20px; border-radius: 8px 8px 0 0;">
+              <h1 style="color: white; margin: 0;">New Order Received</h1>
+            </div>
+            
+            <div style="background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; border-top: none;">
+              <h2 style="color: #1f2937; margin-top: 0;">Order Details</h2>
+              
+              <div style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #f59e0b;">
+                <p style="margin: 5px 0;"><strong>Order Number:</strong> ${order.order_number}</p>
+                <p style="margin: 5px 0;"><strong>Reference ID:</strong> ${order.reference_id}</p>
+                ${order.pickup_id ? `<p style="margin: 5px 0;"><strong>Pickup ID:</strong> ${order.pickup_id}</p>` : ''}
+                <p style="margin: 5px 0;"><strong>Delivery Option:</strong> ${deliveryOption === 'pickup' ? 'Pickup' : 'Shipping'}</p>
+                <p style="margin: 5px 0;"><strong>Total Amount:</strong> <span style="color: #059669; font-size: 1.2em; font-weight: bold;">${order.total_amount.toLocaleString('en-TZ', { style: 'currency', currency: 'TZS' })}</span></p>
+                <p style="margin: 5px 0;"><strong>Order Date:</strong> ${new Date(order.created_at).toLocaleString('en-TZ', { timeZone: 'Africa/Dar_es_Salaam' })}</p>
+              </div>
+
+              <h3 style="color: #1f2937; margin-top: 20px;">Customer Information</h3>
+              <div style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                <p style="margin: 5px 0;"><strong>Name:</strong> ${customerName}</p>
+                <p style="margin: 5px 0;"><strong>Email:</strong> ${customerEmail}</p>
+                <p style="margin: 5px 0;"><strong>Phone:</strong> ${customerPhone}</p>
+              </div>
+
+              ${deliveryOption === 'shipping' && orderData.shippingAddress ? `
+              <h3 style="color: #1f2937; margin-top: 20px;">Shipping Address</h3>
+              <div style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                <p style="margin: 5px 0;">${orderData.shippingAddress.address1 || ''}</p>
+                ${orderData.shippingAddress.address2 ? `<p style="margin: 5px 0;">${orderData.shippingAddress.address2}</p>` : ''}
+                <p style="margin: 5px 0;">${orderData.shippingAddress.city || ''}, ${orderData.shippingAddress.state || ''}</p>
+                <p style="margin: 5px 0;">${orderData.shippingAddress.postalCode || ''}</p>
+                <p style="margin: 5px 0;">${orderData.shippingAddress.country || 'Tanzania'}</p>
+              </div>
+              ` : ''}
+
+              <h3 style="color: #1f2937; margin-top: 20px;">Order Items</h3>
+              <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 6px; overflow: hidden;">
+                <thead>
+                  <tr style="background: #f3f4f6;">
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">#</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Product</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb;">Variant</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e5e7eb;">Qty</th>
+                    <th style="padding: 12px; text-align: right; border-bottom: 2px solid #e5e7eb;">Unit Price</th>
+                    <th style="padding: 12px; text-align: right; border-bottom: 2px solid #e5e7eb;">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${orderItemsHtml}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="5" style="padding: 12px; text-align: right; font-weight: bold; border-top: 2px solid #e5e7eb;">Total:</td>
+                    <td style="padding: 12px; text-align: right; font-weight: bold; font-size: 1.1em; color: #059669; border-top: 2px solid #e5e7eb;">${order.total_amount.toLocaleString('en-TZ', { style: 'currency', currency: 'TZS' })}</td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <div style="margin-top: 30px; padding: 15px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 6px;">
+                <p style="margin: 0; color: #92400e;"><strong>Action Required:</strong> Please review this order and process it accordingly.</p>
+              </div>
+            </div>
+
+            <div style="margin-top: 20px; padding: 15px; background: #f3f4f6; border-radius: 0 0 8px 8px; text-align: center; color: #6b7280; font-size: 12px;">
+              <p style="margin: 0;">This is an automated notification from the Honic Store order system.</p>
+              <p style="margin: 5px 0 0 0;">Order ID: ${order.id}</p>
+            </div>
+          </body>
+          </html>
+        `
+
+        const emailText = `
+New Order Received: ${order.order_number}
+
+Order Details:
+- Order Number: ${order.order_number}
+- Reference ID: ${order.reference_id}
+${order.pickup_id ? `- Pickup ID: ${order.pickup_id}` : ''}
+- Delivery Option: ${deliveryOption === 'pickup' ? 'Pickup' : 'Shipping'}
+- Total Amount: ${order.total_amount.toLocaleString('en-TZ', { style: 'currency', currency: 'TZS' })}
+- Order Date: ${new Date(order.created_at).toLocaleString('en-TZ', { timeZone: 'Africa/Dar_es_Salaam' })}
+
+Customer Information:
+- Name: ${customerName}
+- Email: ${customerEmail}
+- Phone: ${customerPhone}
+
+${deliveryOption === 'shipping' && orderData.shippingAddress ? `
+Shipping Address:
+${orderData.shippingAddress.address1 || ''}
+${orderData.shippingAddress.address2 || ''}
+${orderData.shippingAddress.city || ''}, ${orderData.shippingAddress.state || ''}
+${orderData.shippingAddress.postalCode || ''}
+${orderData.shippingAddress.country || 'Tanzania'}
+` : ''}
+
+Order Items:
+${orderItemsText}
+
+Total: ${order.total_amount.toLocaleString('en-TZ', { style: 'currency', currency: 'TZS' })}
+
+---
+This is an automated notification from the Honic Store order system.
+Order ID: ${order.id}
+        `.trim()
+
+        // Send email using Resend API
+        const emailResult = await emailService.sendEmailViaResend({
+          to: adminEmail,
+          from: senderEmail,
+          subject: emailSubject,
+          text: emailText,
+          html: emailHtml,
+          replyTo: customerEmail !== 'No email provided' ? customerEmail : undefined
+        })
+
+        if (emailResult.success) {
+          console.log('✅ [ORDER-API] Step 4: Admin notification email sent successfully', {
+            orderId: order.id,
+            orderNumber: order.order_number,
+            messageId: emailResult.messageId
+          })
+        } else {
+          console.error('❌ [ORDER-API] Step 4: Failed to send admin notification email', {
+            orderId: order.id,
+            orderNumber: order.order_number,
+            error: emailResult.error
+          })
+          logger.error('Failed to send order notification email', new Error(emailResult.error || 'Unknown error'), {
+            orderId: order.id,
+            orderNumber: order.order_number
+          })
+        }
+      }
     } catch (emailError: any) {
       // Log email error but don't fail the order creation
+      console.error('❌ [ORDER-API] Step 4: Email notification error (non-blocking)', emailError)
+      console.error('📧 [EMAIL] Status: ERROR - Exception occurred', {
+        error: emailError?.message || String(emailError),
+        errorName: emailError?.name || 'Unknown',
+        stack: emailError?.stack || 'No stack trace',
+        timestamp: new Date().toISOString()
+      })
       logger.error('Failed to send order notification email', emailError, {
         orderId: order.id,
         userId: orderData.userId,

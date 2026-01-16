@@ -75,40 +75,29 @@ async function getCompanySettings(): Promise<EmailTemplateOptions> {
   }
 }
 
-// Helper function to get sender email (handles Resend SMTP case, matches .env.local configuration)
+// Helper function to get sender email (handles Resend SMTP case)
 function getSenderEmailForFrom(): string {
   const smtpUser = process.env.SMTP_USER
   const isResendSmtp = process.env.SMTP_HOST?.includes('resend.com') || smtpUser?.toLowerCase() === 'resend'
   
   if (isResendSmtp || !smtpUser || smtpUser.toLowerCase() === 'resend' || !smtpUser.includes('@')) {
-    // Use sender email configs for Resend SMTP (priority: NOREPLY > INFO > SUPPORT)
+    // Use sender email configs for Resend SMTP
     return process.env.SMTP_SENDER_EMAIL_NOREPLY || 
-           process.env.NOREPLY_EMAIL ||
            process.env.SMTP_SENDER_EMAIL_INFO || 
            process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-           process.env.SUPPORT_EMAIL ||
-           'noreply@mail.honiccompanystore.com'
+           process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
   }
   
   // Use SMTP_USER for non-Resend providers
   return smtpUser
 }
 
-// Helper function to get sender name based on email type (matches .env.local configuration)
-function getSenderName(emailType: 'support' | 'info' | 'noreply' | 'default' = 'default'): string {
-  switch (emailType) {
-    case 'support':
-      return process.env.SMTP_SENDER_NAME_SUPPORT || 'Honic Store Support'
-    case 'info':
-      return process.env.SMTP_SENDER_NAME_INFO || 'Honic Store Info'
-    case 'noreply':
-      return process.env.SMTP_SENDER_NAME_NOREPLY || 'Honic Store noreply'
-    default:
-      return process.env.SMTP_SENDER_NAME_NOREPLY || 
-             process.env.SMTP_SENDER_NAME_INFO || 
-             process.env.SMTP_SENDER_NAME_SUPPORT || 
-             'Honic Store'
-  }
+// Helper function to get sender name
+function getSenderName(): string {
+  return process.env.SMTP_SENDER_NAME_NOREPLY || 
+         process.env.SMTP_SENDER_NAME_INFO || 
+         process.env.SMTP_SENDER_NAME_SUPPORT || 
+         'Honic Co'
 }
 
 // Validate email address
@@ -158,7 +147,7 @@ export async function sendSupplierPremiumReceiptEmail(
       subject: `Payment Receipt – ${data.planName}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Billing <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -198,7 +187,7 @@ export async function sendOrderPlacedWelcomeEmail(
       subject: `Thank You for Your Order #${orderData.orderNumber}!`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Orders <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -250,7 +239,7 @@ export async function sendOrderConfirmationEmail(
       subject: `Order Confirmation #${orderData.orderNumber}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Orders <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -292,7 +281,7 @@ export async function sendOrderStatusUpdateEmail(
       subject: `Order Status Update #${orderData.orderNumber}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Orders <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -334,7 +323,7 @@ export async function sendShippingNotificationEmail(
       subject: `Your Order #${orderData.orderNumber} Has Shipped!`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Shipping <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -373,7 +362,7 @@ export async function sendDeliveryConfirmationEmail(
       subject: `Your Order #${orderData.orderNumber} Has Been Delivered!`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Delivery <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -417,7 +406,7 @@ export async function sendInvoiceEmail(
       subject: `Invoice #${invoiceData.invoiceNumber} for Order #${invoiceData.orderNumber}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Billing <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -454,7 +443,7 @@ export async function sendWelcomeUserEmail(
       subject: `Welcome to ${options.companyName || 'Honic Company Store'}!`,
       html,
       text,
-      from: `${getSenderName('info')} <${getSenderEmailForFrom()}>`,
+      from: `Welcome <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -493,7 +482,7 @@ export async function sendWelcomeSupplierEmail(
       subject: `Welcome to ${options.companyName || 'Honic Company Store'} Supplier Program!`,
       html,
       text,
-      from: `${getSenderName('info')} <${getSenderEmailForFrom()}>`,
+      from: `Supplier Support <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -533,7 +522,7 @@ export async function sendPasswordChangeOTPEmail(
       subject: `Password Change Verification - ${options.companyName || 'Honic Company Store'}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Security <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -575,7 +564,7 @@ export async function sendPriceDropAlertEmail(
       subject: `Price Drop Alert: ${productData.name}`,
       html,
       text,
-      from: `${getSenderName('info')} <${getSenderEmailForFrom()}>`,
+      from: `Alerts <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -615,7 +604,7 @@ export async function sendBackInStockEmail(
       subject: `Back in Stock: ${productData.name}`,
       html,
       text,
-      from: `${getSenderName('info')} <${getSenderEmailForFrom()}>`,
+      from: `Alerts <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -654,7 +643,7 @@ export async function sendAbandonedCartEmail(
       subject: 'Don\'t Forget Your Cart!',
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Reminders <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -694,7 +683,7 @@ export async function sendOrderCancellationEmail(
       subject: `Order Cancelled #${orderData.orderNumber}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Orders <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -734,7 +723,7 @@ export async function sendRefundConfirmationEmail(
       subject: `Refund Processed for Order #${refundData.orderNumber}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Billing <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -774,7 +763,7 @@ export async function sendNewsletterWelcomeEmail(
       subject: `Welcome to ${options.companyName || 'Honic Company Store'} Newsletter!`,
       html,
       text,
-      from: `${getSenderName('info')} <${senderEmail}>`,
+      from: `Newsletter <${senderEmail}>`,
     })
 
     if (result.success) {
@@ -817,7 +806,7 @@ export async function sendSecurityAlertEmail(
       subject: `Security Alert: ${alertData.alertType}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Security <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -857,7 +846,7 @@ export async function sendReviewRequestEmail(
       subject: `How Was Your Purchase? Review Order #${orderData.orderNumber}`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Reviews <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {
@@ -898,7 +887,7 @@ export async function sendPickupReminderEmail(
       subject: `Your Order #${orderData.orderNumber} is Ready for Pickup!`,
       html,
       text,
-      from: `${getSenderName('noreply')} <${getSenderEmailForFrom()}>`,
+      from: `Pickup <${getSenderEmailForFrom()}>`,
     })
 
     if (result.success) {

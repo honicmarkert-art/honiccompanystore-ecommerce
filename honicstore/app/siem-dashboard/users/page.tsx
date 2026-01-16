@@ -282,7 +282,7 @@ function AdminUsersContent() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to update user status',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {

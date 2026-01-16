@@ -100,14 +100,14 @@ export default function SupplierSupportPage() {
       } else {
         toast({
           title: 'Error',
-          description: result.error || 'Failed to send support request. Please try again.',
+          description: 'Failed',
           variant: 'destructive'
         })
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to send support request. Please try again.',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -272,7 +272,7 @@ export default function SupplierSupportPage() {
                       } catch (error: any) {
                         toast({
                           title: 'Error',
-                          description: error.message || 'Failed to initiate upgrade. Please try again.',
+                          description: 'Failed',
                           variant: 'destructive'
                         })
                       }

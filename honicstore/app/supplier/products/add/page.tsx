@@ -117,7 +117,7 @@ function SupplierAddProductContent() {
       const errorMessage = error instanceof Error ? error.message : 'Failed to create product'
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed',
         variant: 'destructive'
       })
       throw error

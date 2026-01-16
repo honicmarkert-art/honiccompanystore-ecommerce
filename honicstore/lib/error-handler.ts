@@ -111,60 +111,22 @@ export function logError(
 }
 
 /**
+ * Sanitize error message for client display
+ * Never exposes sensitive information to users
+ * Returns generic "Failed" for all errors
+ */
+export function sanitizeErrorMessage(error: unknown): string {
+  // Always return generic message - never expose error details to clients
+  return 'Failed'
+}
+
+/**
  * Get user-friendly error message
  * Never exposes sensitive information to users
+ * @deprecated Use sanitizeErrorMessage instead - this function now always returns "Failed"
  */
 export function getUserFriendlyMessage(error: Error | ProductionError | unknown): string {
-  if (error instanceof ProductionError) {
-    // Return user-friendly message based on error code
-    switch (error.code) {
-      case ErrorCodes.AUTH_REQUIRED:
-        return 'Please log in to continue.'
-      case ErrorCodes.AUTH_INVALID:
-        return 'Invalid credentials. Please check your email and password.'
-      case ErrorCodes.AUTH_EXPIRED:
-        return 'Your session has expired. Please log in again.'
-      case ErrorCodes.AUTH_LOCKED:
-        return 'Your account has been temporarily locked. Please try again later.'
-      case ErrorCodes.VALIDATION_ERROR:
-      case ErrorCodes.INVALID_INPUT:
-        return 'Please check your input and try again.'
-      case ErrorCodes.NETWORK_ERROR:
-        return 'Network error. Please check your connection and try again.'
-      case ErrorCodes.TIMEOUT_ERROR:
-        return 'Request timed out. Please try again.'
-      case ErrorCodes.RATE_LIMIT_EXCEEDED:
-        return 'Too many requests. Please wait a moment and try again.'
-      case ErrorCodes.NOT_FOUND:
-        return 'The requested resource was not found.'
-      case ErrorCodes.FORBIDDEN:
-      case ErrorCodes.UNAUTHORIZED:
-        return 'You do not have permission to perform this action.'
-      case ErrorCodes.SERVER_ERROR:
-      case ErrorCodes.DATABASE_ERROR:
-        return 'An unexpected error occurred. Please try again later.'
-      default:
-        return 'Something went wrong. Please try again.'
-    }
-  }
-
-  if (error instanceof Error) {
-    // For generic errors, return a safe message
-    const message = error.message.toLowerCase()
-    
-    if (message.includes('network') || message.includes('fetch')) {
-      return 'Network error. Please check your connection and try again.'
-    }
-    
-    if (message.includes('timeout')) {
-      return 'Request timed out. Please try again.'
-    }
-    
-    // Default safe message
-    return 'An error occurred. Please try again.'
-  }
-
-  return 'An unexpected error occurred. Please try again.'
+  return sanitizeErrorMessage(error)
 }
 
 /**
@@ -201,7 +163,8 @@ export function createErrorResponse(
   error: Error | ProductionError | unknown,
   statusCode: number = 500
 ): Response {
-  const userMessage = getUserFriendlyMessage(error)
+  // Always return generic "Failed" message - never expose error details
+  const userMessage = 'Failed'
   const code = error instanceof ProductionError ? error.code : ErrorCodes.SERVER_ERROR
   
   logError(error)

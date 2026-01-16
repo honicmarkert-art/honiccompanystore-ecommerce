@@ -1039,24 +1039,8 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         onClose()
       }
     } catch (error: any) {
-      // Determine user-friendly error message
-      let errorMessage = "Failed to save product. Please try again."
-      
-      if (error?.message?.includes('timeout')) {
-        errorMessage = "Request timed out. Please check your connection and try again."
-      } else if (error?.message?.includes('network') || error?.message?.includes('fetch')) {
-        errorMessage = "Network error. Please check your internet connection and try again."
-      } else if (error?.response?.status === 401) {
-        errorMessage = "Your session has expired. Please log in again."
-      } else if (error?.response?.status === 403) {
-        errorMessage = "You don't have permission to perform this action."
-      } else if (error?.response?.status === 429) {
-        errorMessage = "Too many requests. Please wait a moment and try again."
-      } else if (error?.response?.status >= 500) {
-        errorMessage = "Server error. Please try again in a few moments."
-      } else if (error?.message) {
-        errorMessage = error.message
-      }
+      // Always show generic error message
+      const errorMessage = "Failed"
       
       setSubmitError(errorMessage)
       

@@ -191,14 +191,14 @@ export default function SupplierPlansPage() {
         const data = await response.json()
         toast({
           title: "Error",
-          description: data.error || "Failed to delete plan",
+          description: "Failed",
           variant: "destructive"
         })
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to delete plan",
+        description: "Failed",
         variant: "destructive"
       })
     } finally {
@@ -274,14 +274,14 @@ export default function SupplierPlansPage() {
         const data = await response.json()
         toast({
           title: "Error",
-          description: data.error || "Failed to save plan",
+          description: "Failed",
           variant: "destructive"
         })
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to save plan",
+        description: "Failed",
         variant: "destructive"
       })
     } finally {

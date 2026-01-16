@@ -352,17 +352,17 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
               registrationType: formRegistrationType,
               businessRegistrationNumber: profile.business_registration_number || '',
               tinOrNida: profile.tin_or_nida || '',
-              fullLegalName: profile.full_legal_name || '',
+              fullLegalName: (profile as any).full_legal_name || '',
               region: profile.region || '',
               nation: profile.nation || 'Tanzania'
             })
             setHasInitializedCompanyInfoForm(true)
           }
-          if (profile.nida_card_photo_url) {
-            setNidaCardPhoto(profile.nida_card_photo_url)
+          if ((profile as any).nida_card_photo_url) {
+            setNidaCardPhoto((profile as any).nida_card_photo_url)
           }
-          if (profile.self_face_photo_url) {
-            setSelfFacePhoto(profile.self_face_photo_url)
+          if ((profile as any).self_face_photo_url) {
+            setSelfFacePhoto((profile as any).self_face_photo_url)
           }
           if (profile.business_tin_certificate_url) {
             setBusinessTinCertificate(profile.business_tin_certificate_url)
@@ -542,10 +542,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         if (type === 'company_certificate') setCompanyCertificate(result.url)
         toast({ title: "Success", description: `${type.replace(/_/g, ' ')} uploaded successfully.` })
       } else {
-        toast({ title: "Error", description: result.error || `Failed to upload ${type.replace(/_/g, ' ')}.`, variant: "destructive" })
+        toast({ title: "Error", description: "Failed", variant: "destructive" })
       }
     } catch (error) {
-      toast({ title: "Error", description: `An error occurred while uploading ${type.replace(/_/g, ' ')}.`, variant: "destructive" })
+      toast({ title: "Error", description: "Failed", variant: "destructive" })
     } finally {
       setUploadingDocument(null)
       event.target.value = ''
@@ -644,16 +644,16 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                 registrationType: formRegistrationType,
                 businessRegistrationNumber: profile.business_registration_number || '',
                 tinOrNida: profile.tin_or_nida || '',
-                fullLegalName: profile.full_legal_name || '',
+                fullLegalName: (profile as any).full_legal_name || '',
                 region: profile.region || '',
                 nation: profile.nation || 'Tanzania'
               })
             }
-            if (profile.nida_card_photo_url) {
-              setNidaCardPhoto(profile.nida_card_photo_url)
+            if ((profile as any).nida_card_photo_url) {
+              setNidaCardPhoto((profile as any).nida_card_photo_url)
             }
-            if (profile.self_face_photo_url) {
-              setSelfFacePhoto(profile.self_face_photo_url)
+            if ((profile as any).self_face_photo_url) {
+              setSelfFacePhoto((profile as any).self_face_photo_url)
             }
             if (profile.business_tin_certificate_url) {
               setBusinessTinCertificate(profile.business_tin_certificate_url)
@@ -692,14 +692,14 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       } else {
         toast({
           title: 'Error',
-          description: result.error || 'Failed to save company information',
+          description: 'Failed',
           variant: 'destructive'
         })
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'An error occurred. Please try again.',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -1094,7 +1094,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                             } catch (error: any) {
                               toast({
                                 title: 'Error',
-                                description: error.message || 'Failed to initiate upgrade. Please try again.',
+                                description: 'Failed',
                                 variant: 'destructive'
                               })
                             }
@@ -1393,7 +1393,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                                     <Button
                                       type="button"
                                       variant="outline"
-                                      size="xs"
+                                      size="sm"
                                       className="mt-1 text-[10px] px-2 h-6"
                                       onClick={() => window.open(businessTinCertificate, '_blank', 'noopener,noreferrer')}
                                     >
@@ -1464,7 +1464,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                                     <Button
                                       type="button"
                                       variant="outline"
-                                      size="xs"
+                                      size="sm"
                                       className="mt-1 text-[10px] px-2 h-6"
                                       onClick={() => window.open(companyCertificate, '_blank', 'noopener,noreferrer')}
                                     >
@@ -1585,7 +1585,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                             <Button
                               type="button"
                               variant="outline"
-                              size="xs"
+                              size="sm"
                               className="mt-1 text-[10px] px-2 h-6"
                               onClick={() => window.open(nidaCardPhoto, '_blank', 'noopener,noreferrer')}
                             >

@@ -150,7 +150,7 @@ export function CategoryForm({ category, onClose, onSave }: CategoryFormProps) {
         const error = await response.json()
         toast({
           title: "Error",
-          description: error.error || "Failed to save category. Please try again.",
+          description: "Failed",
           variant: "destructive"
         })
       }

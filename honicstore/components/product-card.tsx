@@ -227,8 +227,23 @@ export const ProductCard = React.memo<ProductCardProps>(({
       <OptimizedLink 
         href={productUrl}
         className="block relative aspect-square overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600" 
-        prefetch={false}
-        priority="low"
+        prefetch="hover"
+        priority="medium"
+        scroll={false}
+        onClick={() => {
+          // Mark that we're navigating to product detail
+          // This helps identify when we're returning from detail page
+          if (typeof window !== 'undefined') {
+            try {
+              sessionStorage.setItem('navigated_from_product_detail', 'true')
+              // Save current scroll position
+              sessionStorage.setItem('products_scroll_position', window.scrollY.toString())
+              // Save displayed count will be handled by products page useEffect
+            } catch (e) {
+              // Ignore storage errors
+            }
+          }
+        }}
         suppressHydrationWarning
       >
         {product.image && (

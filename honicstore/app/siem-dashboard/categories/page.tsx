@@ -284,14 +284,14 @@ export default function SiemCategories() {
         const error = await response.json()
         toast({
           title: "Error",
-          description: error.error || "Failed to delete category",
+          description: "Failed",
           variant: "destructive"
         })
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to delete category",
+        description: "Failed",
         variant: "destructive"
       })
     }

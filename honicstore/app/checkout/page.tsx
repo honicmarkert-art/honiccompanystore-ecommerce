@@ -157,6 +157,8 @@ function CheckoutPageContent() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [hasTimedOut, setHasTimedOut] = useState(false)
+  const [paymentLinkGenerated, setPaymentLinkGenerated] = useState(false)
+  const [checkoutLinkUrl, setCheckoutLinkUrl] = useState<string | null>(null)
   const [orderId, setOrderId] = useState<string>("")
   const [orderReferenceId, setOrderReferenceId] = useState<string | null>(null)
   const [orderPickupId, setOrderPickupId] = useState<string | null>(null)
@@ -207,13 +209,15 @@ function CheckoutPageContent() {
   const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
   const orderTotal = selectedSubtotal + shippingFee - promotionDiscount
 
-  // Timeout for payment processing (30 seconds)
+  // Timeout for payment processing (increased to 60 seconds for slower networks)
   useEffect(() => {
     if (isProcessingPayment) {
       setHasTimedOut(false)
       const timeoutId = setTimeout(() => {
+        console.warn('⏱️ [CHECKOUT] Payment processing timeout (60s) - this should not happen if flow completes')
         setHasTimedOut(true)
-      }, 30000) // 30 seconds timeout
+        setIsProcessingPayment(false) // Clear processing state on timeout
+      }, 60000) // Increased to 60 seconds timeout (was 30s)
 
       return () => clearTimeout(timeoutId)
     } else {
@@ -225,8 +229,11 @@ function CheckoutPageContent() {
   const handleRetryPayment = () => {
     setHasTimedOut(false)
     setIsProcessingPayment(false)
+    setPaymentLinkGenerated(false)
+    setCheckoutLinkUrl(null)
     setPaymentError(null)
-    // The user can click "Place Order" again to retry
+    // Note: We keep orderId and orderReferenceId so we can reuse the existing order
+    // Only create a new order if no order exists yet
   }
   
   const [isClient, setIsClient] = useState(false)
@@ -378,6 +385,8 @@ function CheckoutPageContent() {
 
     setIsProcessingPayment(true)
     setPaymentError(null)
+    setPaymentLinkGenerated(false) // Reset payment link state
+    setCheckoutLinkUrl(null)
 
     try {
       // For pickup orders, validate billing address; for shipping, validate shipping address
@@ -458,118 +467,306 @@ function CheckoutPageContent() {
         timestamp: new Date().toISOString(),
       }
 
-      // Submit order to admin (no authentication required for guest checkout)
-      const result = await submitOrder(orderData)
+      // Start payment flow timing after orderData is created
+      const paymentFlowStartTime = performance.now()
+      const paymentFlowStartTimestamp = Date.now()
+      console.log('🚀 [CHECKOUT] Payment flow started', {
+        timestamp: new Date(paymentFlowStartTimestamp).toISOString(),
+        orderId,
+        totalAmount: orderData.totalAmount,
+        itemCount: orderData.items?.length || 0
+      })
+
+      // Check if we already have an order (from previous failed payment link generation)
+      // If order exists, reuse it instead of creating a new one
+      let result
+      let orderSubmissionDuration = 0
       
-      setOrderId(orderId)
-      setOrderReferenceId(result.order.referenceId)
-      setOrderPickupId(result.order.pickupId)
-      setPaymentStatus(result.order.paymentStatus)
+      if (orderReferenceId && orderId) {
+        // Reuse existing order - don't create a new one
+        console.log('♻️ [CHECKOUT] Step 1: Reusing existing order (payment link generation failed previously)', {
+          orderId,
+          referenceId: orderReferenceId,
+          timestamp: new Date().toISOString()
+        })
+        
+        // Fetch order details to get current payment status
+        try {
+          const orderResponse = await fetch(`/api/orders/${orderReferenceId}`)
+          if (orderResponse.ok) {
+            const orderData = await orderResponse.json()
+            result = {
+              success: true,
+              order: {
+                id: orderId,
+                referenceId: orderReferenceId,
+                pickupId: orderPickupId,
+                paymentStatus: orderData.paymentStatus || 'pending',
+                status: orderData.status || 'pending'
+              }
+            }
+            console.log('✅ [CHECKOUT] Step 1: Existing order retrieved', {
+              orderId: result.order?.id,
+              referenceId: result.order?.referenceId,
+              paymentStatus: result.order?.paymentStatus
+            })
+          } else {
+            // Order not found, create new one
+            console.log('⚠️ [CHECKOUT] Step 1: Existing order not found, creating new order')
+            const orderSubmissionStartTime = performance.now()
+            result = await submitOrder(orderData)
+            const orderSubmissionEndTime = performance.now()
+            orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
+            setOrderId(result.order.id)
+            setOrderReferenceId(result.order.referenceId)
+            setOrderPickupId(result.order.pickupId)
+            setPaymentStatus(result.order.paymentStatus)
+          }
+        } catch (error) {
+          // Error fetching order, create new one
+          console.error('❌ [CHECKOUT] Step 1: Error fetching existing order, creating new one', error)
+          const orderSubmissionStartTime = performance.now()
+          result = await submitOrder(orderData)
+          const orderSubmissionEndTime = performance.now()
+          orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
+          setOrderId(result.order.id)
+          setOrderReferenceId(result.order.referenceId)
+          setOrderPickupId(result.order.pickupId)
+          setPaymentStatus(result.order.paymentStatus)
+        }
+      } else {
+        // No existing order, create new one
+        const orderSubmissionStartTime = performance.now()
+        console.log('🛒 [CHECKOUT] Step 1: Starting order submission...', { 
+          orderId, 
+          totalAmount: orderData.totalAmount,
+          timestamp: new Date().toISOString()
+        })
+        result = await submitOrder(orderData)
+        const orderSubmissionEndTime = performance.now()
+        orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
+        console.log('✅ [CHECKOUT] Step 1: Order submission successful', { 
+          orderId: result.order?.id, 
+          referenceId: result.order?.referenceId,
+          status: result.order?.status,
+          duration: `${orderSubmissionDuration.toFixed(2)}ms`,
+          durationSeconds: `${(orderSubmissionDuration / 1000).toFixed(2)}s`,
+          timestamp: new Date().toISOString()
+        })
+        
+        setOrderId(result.order.id)
+        setOrderReferenceId(result.order.referenceId)
+        setOrderPickupId(result.order.pickupId)
+        setPaymentStatus(result.order.paymentStatus)
+      }
       
       // DON'T remove items from cart yet - wait until payment is confirmed
       // Items will be removed after successful payment via webhook or return page
 
-      // Generate ClickPesa checkout link
-        const reference = result.order.referenceId || orderId
-      const response = await fetch('/api/payment/clickpesa', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'create-checkout-link',
-              amount: String(orderData.totalAmount),
-              currency: 'TZS',
-              orderId: reference,
-              returnUrl: buildReturnUrl(reference),
-              cancelUrl: buildCancelUrl(reference),
-              customerDetails: {
-                fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
-                email: formData.billingAddress.email || formData.shippingAddress.email,
-                phone: formData.billingAddress.phone || formData.shippingAddress.phone,
-                // Additional billing information for better ClickPesa experience
-                firstName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ')[0] || '',
-                lastName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ').slice(1).join(' ') || '',
-                address: formData.billingAddress.address1 || formData.shippingAddress.address1 || '',
-                city: formData.billingAddress.city || formData.shippingAddress.city || '',
-                country: formData.billingAddress.country || formData.shippingAddress.country || 'Tanzania',
-              },
-            }),
+      // Generate ClickPesa checkout link immediately using order data from response
+      // No delay needed - order is already committed and we use the reference from response
+      // Use the order's total amount (in case we're reusing an existing order)
+      const reference = result.order.referenceId || orderId
+      const orderTotalAmount = result.order.totalAmount || orderData.totalAmount
+      const checkoutLinkStartTime = performance.now()
+      const checkoutLinkStartTimestamp = Date.now()
+      console.log('💳 [CHECKOUT] Step 2: Starting checkout link creation...', { 
+        reference, 
+        amount: orderTotalAmount,
+        isReusingOrder: !!(orderReferenceId && orderId && result.order.referenceId === orderReferenceId),
+        timestamp: new Date(checkoutLinkStartTimestamp).toISOString()
       })
+      
+      // Optimized: Use fetchWithRetry with faster retries (2 retries, shorter delays)
+      // Retries on: network errors, 5xx server errors, 429 rate limits, 408 timeouts
+      const response = await fetchWithRetry(
+        '/api/payment/clickpesa',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create-checkout-link',
+            amount: String(orderTotalAmount),
+            currency: 'TZS',
+            orderId: reference,
+            returnUrl: buildReturnUrl(reference),
+            cancelUrl: buildCancelUrl(reference),
+            customerDetails: {
+              fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
+              email: formData.billingAddress.email || formData.shippingAddress.email,
+              phone: formData.billingAddress.phone || formData.shippingAddress.phone,
+              firstName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ')[0] || '',
+              lastName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ').slice(1).join(' ') || '',
+              address: formData.billingAddress.address1 || formData.shippingAddress.address1 || '',
+              city: formData.billingAddress.city || formData.shippingAddress.city || '',
+              country: formData.billingAddress.country || formData.shippingAddress.country || 'Tanzania',
+            },
+          }),
+        },
+        1 // Reduced to 1 retry for fastest failure (handles network errors, 5xx, 429, 408)
+      )
 
-      // Parse response with error handling
-      let data: any
-      try {
-        const responseText = await response.text()
-        logger.log('ClickPesa API Raw Response:', {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          responseText: responseText.substring(0, 500) // Log first 500 chars
+      // Optimized: Parse JSON directly instead of text() then parse
+      console.log('📡 [CHECKOUT] Step 2: Received response from payment API', { 
+        ok: response.ok, 
+        status: response.status 
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed' }))
+        console.error('❌ [CHECKOUT] Step 2: Payment API error', { 
+          status: response.status, 
+          error: errorData.error 
         })
-        
-        if (!responseText) {
-          throw new Error('Empty response from payment API')
-        }
-        
-        data = JSON.parse(responseText)
-      } catch (parseError) {
-        logger.error('Failed to parse ClickPesa API response:', parseError)
-        throw new Error('Invalid response from payment gateway. Please try again.')
+        throw new Error(errorData.error || 'Failed')
       }
 
-      // Log the parsed response for debugging
-      logger.log('ClickPesa API Response:', {
-        ok: response.ok,
-        status: response.status,
+      const data = await response.json()
+      console.log('📦 [CHECKOUT] Step 2: Parsed response data', { 
         hasCheckoutLink: !!data.checkoutLink,
-        error: data.error,
-        success: data.success,
-        checkoutLink: data.checkoutLink ? `${data.checkoutLink.substring(0, 50)}...` : null
+        success: data.success 
       })
 
-      if (!response.ok || !data.checkoutLink) {
-        const errorMsg = data.error || data.message || 'Payment gateway did not return a checkout URL'
-        logger.error('ClickPesa API Error:', {
-          status: response.status,
-          error: errorMsg,
-          responseData: data
-        })
-        throw new Error(errorMsg)
+      if (!data.checkoutLink) {
+        console.error('❌ [CHECKOUT] Step 2: Missing checkout link in response', { data })
+        throw new Error('Failed')
       }
+
+      const checkoutLinkEndTime = performance.now()
+      const checkoutLinkDuration = checkoutLinkEndTime - checkoutLinkStartTime
+      const checkoutLinkEndTimestamp = Date.now()
+      console.log('✅ [CHECKOUT] Step 2: Checkout link created successfully', { 
+        checkoutLink: data.checkoutLink.substring(0, 50) + '...',
+        duration: `${checkoutLinkDuration.toFixed(2)}ms`,
+        durationSeconds: `${(checkoutLinkDuration / 1000).toFixed(2)}s`,
+        startTime: new Date(checkoutLinkStartTimestamp).toISOString(),
+        endTime: new Date(checkoutLinkEndTimestamp).toISOString()
+      })
 
       // Store reference for later use
       safeSessionStorage.setItem('last_order_reference', reference)
 
-      // Always open ClickPesa checkout in new tab
-      // Since this is called from a user click event, window.open should work
-      const popupWindow = window.open(data.checkoutLink, '_blank', 'noopener,noreferrer')
+      // Store checkout link for fallback if popup is blocked
+      setCheckoutLinkUrl(data.checkoutLink)
       
-      if (popupWindow && !popupWindow.closed) {
+      // Mark payment link as generated (for UI message update)
+      setPaymentLinkGenerated(true)
+ // Reset popup blocked state
+      console.log('✅ [CHECKOUT] Payment flow completed - checkout link ready')
+
+      // Track redirect timing
+      const redirectStartTime = performance.now()
+      const redirectStartTimestamp = Date.now()
+      console.log('🔀 [CHECKOUT] Step 3: Initiating redirect to ClickPesa...', {
+        checkoutLink: data.checkoutLink.substring(0, 50) + '...',
+        timestamp: new Date(redirectStartTimestamp).toISOString()
+      })
+
+      // Immediately open ClickPesa checkout in new window/tab
+      // Since this is called from a user click event, window.open should work
+      let popupOpened = false
+      try {
+        const popupWindow = window.open(data.checkoutLink, '_blank', 'noopener,noreferrer')
+        
+        // Check if popup was blocked (check immediately and after brief delay)
+        if (popupWindow) {
+          // Check immediately
+          if (popupWindow.closed === false) {
+            popupOpened = true
+          } else {
+            // Check again after a brief delay (popup might take time to open)
+            setTimeout(() => {
+              if (popupWindow && !popupWindow.closed) {
+                popupOpened = true
+              }
+            }, 100)
+          }
+        }
+      } catch (error) {
+        // Popup failed to open
+        console.error('❌ [CHECKOUT] Failed to open popup:', error)
+      }
+      
+      const redirectEndTime = performance.now()
+      const redirectDuration = redirectEndTime - redirectStartTime
+      const redirectCompleteTimestamp = Date.now()
+      
+      if (popupOpened) {
         // Successfully opened in new tab
+        const totalFlowDuration = performance.now() - paymentFlowStartTime
+        console.log('✅ [CHECKOUT] Step 3: Payment page opened in new window successfully', {
+          redirectDuration: `${redirectDuration.toFixed(2)}ms`,
+          redirectDurationSeconds: `${(redirectDuration / 1000).toFixed(2)}s`,
+          redirectInitiatedAt: new Date(redirectStartTimestamp).toISOString(),
+          redirectCompletedAt: new Date(redirectCompleteTimestamp).toISOString(),
+          checkoutLinkUrl: data.checkoutLink.substring(0, 80) + '...'
+        })
+        
+        console.log('⏱️ [CHECKOUT] Complete timing breakdown:', {
+          totalFlowDuration: `${totalFlowDuration.toFixed(2)}ms`,
+          totalFlowDurationSeconds: `${(totalFlowDuration / 1000).toFixed(2)}s`,
+          breakdown: {
+            orderSubmission: `${orderSubmissionDuration.toFixed(2)}ms (${(orderSubmissionDuration / 1000).toFixed(2)}s)`,
+            checkoutLinkCreation: `${checkoutLinkDuration.toFixed(2)}ms (${(checkoutLinkDuration / 1000).toFixed(2)}s)`,
+            redirect: `${redirectDuration.toFixed(2)}ms (${(redirectDuration / 1000).toFixed(2)}s)`
+          },
+          timestamps: {
+            flowStart: new Date(paymentFlowStartTimestamp).toISOString(),
+            orderSubmitted: new Date(paymentFlowStartTimestamp + orderSubmissionDuration).toISOString(),
+            checkoutLinkCreated: new Date(checkoutLinkEndTimestamp).toISOString(),
+            redirectInitiated: new Date(redirectStartTimestamp).toISOString(),
+            redirectCompleted: new Date(redirectCompleteTimestamp).toISOString()
+          }
+        })
+        
         toast({
           title: 'Payment Page Opened',
-          description: 'Please complete your payment in the new tab. You will be redirected back after payment.',
+          description: 'Please complete your payment in the new window. You will be redirected back after payment.',
           duration: 5000
         })
       } else {
-        // Popup was blocked - try alternative approach
-        logger.log('Popup blocked, using alternative method')
-        // Create a temporary anchor element and click it (works better with user interaction)
-        const link = document.createElement('a')
-        link.href = data.checkoutLink
-        link.target = '_blank'
-        link.rel = 'noopener noreferrer'
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
+        // Popup was blocked or failed - show fallback button
         
         toast({
-          title: 'Opening Payment Page',
-          description: 'Please complete your payment in the new tab.',
+          title: 'Payment Link Ready',
+          description: 'Click the button below to open the payment page in a new window.',
           duration: 5000
         })
       }
+      
+      // Clear processing state after redirect is initiated (keep message visible briefly)
+      // Small delay to ensure redirect happens and user sees success message
+      setTimeout(() => {
+        setIsProcessingPayment(false)
+      }, 500) // Brief delay to show success message
+
+      // Log total payment flow duration
+      const totalPaymentFlowDuration = performance.now() - paymentFlowStartTime
+      console.log('🎉 [CHECKOUT] Complete payment flow finished', {
+        totalDuration: `${totalPaymentFlowDuration.toFixed(2)}ms`,
+        totalDurationSeconds: `${(totalPaymentFlowDuration / 1000).toFixed(2)}s`,
+        startTime: new Date(paymentFlowStartTimestamp).toISOString(),
+        endTime: new Date().toISOString(),
+        breakdown: {
+          orderSubmission: `${orderSubmissionDuration.toFixed(2)}ms`,
+          checkoutLinkCreation: `${checkoutLinkDuration.toFixed(2)}ms`,
+          redirect: `${redirectDuration.toFixed(2)}ms`
+        }
+      })
 
     } catch (error: any) {
+      const totalPaymentFlowDuration = performance.now() - paymentFlowStartTime
+      console.error('❌ [CHECKOUT] Payment flow failed:', {
+        error: error?.message,
+        stack: error?.stack,
+        name: error?.name,
+        step: error?.step || 'unknown',
+        totalDuration: `${totalPaymentFlowDuration.toFixed(2)}ms`,
+        totalDurationSeconds: `${(totalPaymentFlowDuration / 1000).toFixed(2)}s`,
+        startTime: new Date(paymentFlowStartTimestamp).toISOString(),
+        failureTime: new Date().toISOString()
+      })
+      
       logger.error('Payment initiation error:', {
         error: error,
         message: error?.message,
@@ -577,28 +774,31 @@ function CheckoutPageContent() {
         name: error?.name
       })
       
-      // Extract detailed error message
-      let errorMessage = 'Failed to initiate payment. Please try again.'
-      if (error?.message) {
-        errorMessage = error.message
-      } else if (typeof error === 'string') {
-        errorMessage = error
-      }
+      // Show generic error message to client
+      const errorMessage = 'Failed'
       
       setPaymentError(errorMessage)
       setIsProcessingPayment(false)
+      setPaymentLinkGenerated(false) // Reset on error
+      setCheckoutLinkUrl(null)
       toast({
         title: 'Payment Error',
         description: errorMessage,
         variant: 'destructive',
-        duration: 8000 // Show longer so user can read it
+        duration: 5000
       })
     }
   }
 
   // Function to submit order
   const submitOrder = async (orderData: any) => {
+    const apiCallStartTime = performance.now()
     try {
+      console.log('📤 [ORDER] Submitting order to API...', { 
+        orderNumber: orderData.orderNumber,
+        itemCount: orderData.items?.length || 0,
+        timestamp: new Date().toISOString()
+      })
       
       // Submit order to public API with retry logic
       const response = await fetchWithRetry(
@@ -613,8 +813,17 @@ function CheckoutPageContent() {
         2 // Max 2 retries with exponential backoff
       )
 
+      console.log('📥 [ORDER] Received order API response', { 
+        ok: response.ok, 
+        status: response.status 
+      })
+      
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
+        console.error('❌ [ORDER] Order submission failed', { 
+          status: response.status, 
+          error: errorData.error 
+        })
         const errorMessage = getSecureErrorMessage(
           errorData.error || new Error('Order submission failed'),
           'Failed to submit order. Please try again.'
@@ -623,6 +832,13 @@ function CheckoutPageContent() {
       }
 
       const result = await response.json()
+      const apiCallDuration = performance.now() - apiCallStartTime
+      console.log('✅ [ORDER] Order created successfully', { 
+        orderId: result.order?.id,
+        referenceId: result.order?.referenceId,
+        apiCallDuration: `${apiCallDuration.toFixed(2)}ms`,
+        timestamp: new Date().toISOString()
+      })
       
       // Store order IDs and payment URL for later use
       if (result.order.paymentUrl) {
@@ -631,6 +847,12 @@ function CheckoutPageContent() {
       
       return result
     } catch (error) {
+      const apiCallDuration = performance.now() - apiCallStartTime
+      console.error('❌ [ORDER] Order submission error:', {
+        error,
+        apiCallDuration: `${apiCallDuration.toFixed(2)}ms`,
+        timestamp: new Date().toISOString()
+      })
       throw error
     }
   }
@@ -1671,21 +1893,52 @@ function CheckoutPageContent() {
         )
         } else {
           // For pickup, case 2 is order review
-          if (isProcessingPayment) {
+          if (isProcessingPayment || paymentLinkGenerated) {
             // Show loading message when order is placed or processing payment
             return (
               <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
                 <CardContent className="text-center py-12">
                   {!hasTimedOut ? (
                     <>
-                      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
-                      <div className="space-y-2">
-                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
-                          Loading to ClickPesa for complete payment
-                        </h3>
-                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                          Please wait while we redirect you to complete your payment...
-                        </p>
+                      {paymentLinkGenerated ? (
+                        <div className="mb-6">
+                          <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                            <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
+                      )}
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
+                            {paymentLinkGenerated ? 'Payment link generated' : 'Generating payment link...'}
+                          </h3>
+                          <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
+                            {paymentLinkGenerated ? 'Waiting for payment completion...' : 'Please wait while we generate your payment link...'}
+                          </p>
+                        </div>
+                        {paymentLinkGenerated && checkoutLinkUrl && (
+                          <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <Button
+                              onClick={() => {
+                                if (checkoutLinkUrl) {
+                                  window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')
+                                }
+                              }}
+                              className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
+                              size="lg"
+                            >
+                              <Navigation className="mr-2 h-4 w-4" />
+                              Open Payment Page
+                            </Button>
+                            <p className={cn("text-xs text-center", themeClasses.textNeutralSecondary)}>
+                              Complete your payment in the new window. You will be redirected back after payment.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1700,6 +1953,16 @@ function CheckoutPageContent() {
                         <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
                           The payment redirect is taking longer than expected. You can try again or check if the payment page opened in a new tab.
                         </p>
+                        {checkoutLinkUrl && (
+                          <Button
+                            onClick={() => window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')}
+                            className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
+                            size="lg"
+                          >
+                            <Navigation className="mr-2 h-4 w-4" />
+                            Open Payment Page
+                          </Button>
+                        )}
                         <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
                           <Button
                             onClick={handleRetryPayment}
@@ -1728,11 +1991,11 @@ function CheckoutPageContent() {
             <CardHeader>
               <CardTitle className={themeClasses.mainText}>Order Review</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-3 sm:gap-6" style={{ contentVisibility: 'auto' }}>
+            <CardContent className="grid gap-3 sm:gap-4 md:gap-6 p-3 sm:p-4 md:p-6" style={{ contentVisibility: 'auto' }}>
               {/* Order Summary */}
-                <div className="space-y-4">
-                <h3 className={cn("text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
+                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
+                <div className="space-y-3 sm:space-y-4">
                   {selectedItems.length === 0 ? (
                     <div className="text-center py-8">
                       <p className={cn("text-gray-500", themeClasses.textNeutralSecondary)}>
@@ -1742,7 +2005,7 @@ function CheckoutPageContent() {
                   ) : (
                     selectedItems.flatMap((item, itemIndex) => 
                       (item.variants || []).map((variant: any, variantIndex: number) => (
-                    <div key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`} className="flex items-start gap-2 sm:gap-4 p-2 sm:p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`} className="flex flex-row items-start gap-2 sm:gap-3 md:gap-4 p-2 sm:p-3 md:p-4 rounded-lg border border-gray-200 dark:border-gray-700 w-full">
                       <div className="flex-shrink-0 self-start">
                           {item.product?.image ? (
                             <Link 
@@ -1754,7 +2017,7 @@ function CheckoutPageContent() {
                                 alt={item.product.name || "Product image"}
                                 width={64}
                                 height={64}
-                                className="rounded-md object-contain w-16 h-16 sm:w-20 sm:h-20 bg-gray-50 hover:opacity-80 transition-opacity"
+                                className="rounded-md object-contain w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-50 hover:opacity-80 transition-opacity"
                                 priority={false} // Not priority since it's in a list
                                 quality={80}
                               />
@@ -1764,7 +2027,7 @@ function CheckoutPageContent() {
                               href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
                               className="block"
                             >
-                              <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
+                              <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
                                 <span className="text-gray-400 text-xs">No Image</span>
                               </div>
                             </Link>
@@ -1775,16 +2038,18 @@ function CheckoutPageContent() {
                             href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
                             className="hover:underline"
                           >
-                            <h4 className={cn("font-medium truncate text-sm sm:text-base", themeClasses.mainText)}>
+                            <h4 className={cn("font-medium text-xs sm:text-sm md:text-base break-words", themeClasses.mainText)}>
                               {item.product?.name || `Product ${item.productId}`}
                               {variant.variant_name && (
-                                <span className={cn("font-normal text-blue-600 dark:text-blue-400")}>
-                                  {" | "}{variant.variant_name}
+                                <span className={cn("font-normal text-blue-600 dark:text-blue-400 block sm:inline")}>
+                                  <span className="hidden sm:inline">{" | "}</span>
+                                  <span className="sm:hidden"> - </span>
+                                  {variant.variant_name}
                                 </span>
                               )}
                             </h4>
                           </Link>
-                          <div className={cn("flex items-center justify-between mt-1 gap-2")}>
+                          <div className={cn("flex flex-col sm:flex-row items-start sm:items-center justify-between mt-1 sm:mt-0 gap-1 sm:gap-2")}>
                             <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
                               Unit Price: {formatPrice(variant.price || 0)}
                             </p>
@@ -1792,7 +2057,7 @@ function CheckoutPageContent() {
                               <span className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
                                 Qty: {variant.quantity || 1}
                               </span>
-                              <span className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
+                              <span className={cn("text-xs sm:text-sm md:text-base font-medium", themeClasses.mainText)}>
                                 {formatPrice((variant.price || 0) * (variant.quantity || 1))}
                               </span>
                             </div>
@@ -1806,13 +2071,13 @@ function CheckoutPageContent() {
                     </div>
 
                 {/* Order Total */}
-                  <div className="border-t pt-4 space-y-2">
-                    <div className="flex justify-between items-center text-sm">
+                  <div className="border-t pt-3 sm:pt-4 space-y-2">
+                    <div className="flex justify-between items-center text-xs sm:text-sm">
                       <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
                       <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
                     </div>
                     {promotionDiscount > 0 && (
-                      <div className="flex justify-between items-center text-sm">
+                      <div className="flex justify-between items-center text-xs sm:text-sm">
                         <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
                         <span className="text-green-600 dark:text-green-400 font-medium">
                           -{formatPrice(promotionDiscount)}
@@ -1820,7 +2085,7 @@ function CheckoutPageContent() {
                       </div>
                     )}
                     {(deliveryOption as string) === 'shipping' && (
-                      <div className="flex justify-between items-center text-sm">
+                      <div className="flex justify-between items-center text-xs sm:text-sm">
                         <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
                         <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
                           {shippingFee === 0 ? 'Free' : formatPrice(shippingFee)}
@@ -1828,8 +2093,8 @@ function CheckoutPageContent() {
                       </div>
                     )}
                     <div className="flex justify-between items-center pt-2 border-t">
-                    <span className={cn("text-lg font-semibold", themeClasses.mainText)}>Total</span>
-                    <span className={cn("text-lg font-semibold", themeClasses.mainText)}>
+                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Total</span>
+                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
                         {formatPrice(orderTotal)}
                     </span>
                       </div>
@@ -1842,21 +2107,52 @@ function CheckoutPageContent() {
       case 3:
         if ((deliveryOption as string) === 'shipping') {
           // For shipping, case 3 is order review
-          if (isProcessingPayment) {
+          if (isProcessingPayment || paymentLinkGenerated) {
             // Show loading message when order is placed or processing payment
             return (
               <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
                 <CardContent className="text-center py-12">
                   {!hasTimedOut ? (
                     <>
-                      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
-                      <div className="space-y-2">
-                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
-                          Loading to ClickPesa for complete payment
-                        </h3>
-                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                          Please wait while we redirect you to complete your payment...
-                        </p>
+                      {paymentLinkGenerated ? (
+                        <div className="mb-6">
+                          <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                            <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
+                      )}
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
+                            {paymentLinkGenerated ? 'Payment link generated' : 'Generating payment link...'}
+                          </h3>
+                          <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
+                            {paymentLinkGenerated ? 'Waiting for payment completion...' : 'Please wait while we generate your payment link...'}
+                          </p>
+                        </div>
+                        {paymentLinkGenerated && checkoutLinkUrl && (
+                          <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <Button
+                              onClick={() => {
+                                if (checkoutLinkUrl) {
+                                  window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')
+                                }
+                              }}
+                              className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
+                              size="lg"
+                            >
+                              <Navigation className="mr-2 h-4 w-4" />
+                              Open Payment Page
+                            </Button>
+                            <p className={cn("text-xs text-center", themeClasses.textNeutralSecondary)}>
+                              Complete your payment in the new window. You will be redirected back after payment.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1871,6 +2167,16 @@ function CheckoutPageContent() {
                         <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
                           The payment redirect is taking longer than expected. You can try again or check if the payment page opened in a new tab.
                         </p>
+                        {checkoutLinkUrl && (
+                          <Button
+                            onClick={() => window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')}
+                            className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
+                            size="lg"
+                          >
+                            <Navigation className="mr-2 h-4 w-4" />
+                            Open Payment Page
+                          </Button>
+                        )}
                         <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
                           <Button
                             onClick={handleRetryPayment}
@@ -1899,14 +2205,14 @@ function CheckoutPageContent() {
             <CardHeader>
               <CardTitle className={themeClasses.mainText}>Order Review</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-6">
+            <CardContent className="grid gap-3 sm:gap-4 md:gap-6 p-3 sm:p-4 md:p-6">
               {/* Order Summary */}
-                <div className="space-y-4">
-                <h3 className={cn("text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
+                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
+                <div className="space-y-3 sm:space-y-4">
                   {selectedItems.map((item, index) => (
-                    <div key={index} className="flex items-start space-x-4 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <div className="flex-shrink-0">
+                    <div key={index} className="flex flex-row items-start gap-2 sm:gap-3 md:gap-4 p-2 sm:p-3 md:p-4 rounded-lg border border-gray-200 dark:border-gray-700 w-full">
+                      <div className="flex-shrink-0 self-start">
                           {item.product?.image ? (
                             <Link 
                               href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
@@ -1917,7 +2223,7 @@ function CheckoutPageContent() {
                                 alt={item.product.name || "Product image"}
                                 width={80}
                                 height={80}
-                                className="rounded-md object-cover hover:opacity-80 transition-opacity"
+                                className="rounded-md object-cover w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 hover:opacity-80 transition-opacity"
                                 priority={false} // Not priority since it's in a list
                                 quality={80}
                               />
@@ -1927,7 +2233,7 @@ function CheckoutPageContent() {
                               href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
                               className="block"
                             >
-                              <div className="w-20 h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
+                              <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
                                 <span className="text-gray-400 text-xs">No Image</span>
                               </div>
                             </Link>
@@ -1938,19 +2244,19 @@ function CheckoutPageContent() {
                             href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
                             className="hover:underline"
                           >
-                            <h4 className={cn("font-medium truncate", themeClasses.mainText)}>
+                            <h4 className={cn("font-medium text-xs sm:text-sm md:text-base break-words", themeClasses.mainText)}>
                               {item.product?.name || "Product"}
                             </h4>
                           </Link>
-                          <div className={cn("flex items-center justify-between mt-1 gap-2")}>
-                            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                          <div className={cn("flex flex-col sm:flex-row items-start sm:items-center justify-between mt-1 sm:mt-0 gap-1 sm:gap-2")}>
+                            <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
                               Unit Price: {formatPrice(item.totalPrice / (item.totalQuantity || 1))}
                             </p>
                             <div className="flex items-center gap-2">
-                              <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                              <span className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
                                 Qty: {item.totalQuantity}
                               </span>
-                              <span className={cn("text-sm font-medium", themeClasses.mainText)}>
+                              <span className={cn("text-xs sm:text-sm md:text-base font-medium", themeClasses.mainText)}>
                                 {formatPrice(item.totalPrice)}
                               </span>
                             </div>
@@ -1962,9 +2268,9 @@ function CheckoutPageContent() {
               </div>
 
                 {/* Shipping Address */}
-              <div className="space-y-4">
-                <h3 className={cn("text-lg font-semibold", themeClasses.mainText)}>Shipping Address</h3>
-                <div className={cn("p-4 rounded-lg border border-gray-200 dark:border-gray-700", themeClasses.cardBg)}>
+              <div className="space-y-3 sm:space-y-4">
+                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Shipping Address</h3>
+                <div className={cn("p-3 sm:p-4 rounded-lg border border-gray-200 dark:border-gray-700", themeClasses.cardBg)}>
                     <p className={themeClasses.mainText}>{formData.shippingAddress.fullName}</p>
                     <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.address1}</p>
                     <p className={themeClasses.textNeutralSecondary}>
@@ -1975,13 +2281,13 @@ function CheckoutPageContent() {
               </div>
 
               {/* Order Total */}
-                  <div className="border-t pt-4 space-y-2">
-                    <div className="flex justify-between items-center text-sm">
+                  <div className="border-t pt-3 sm:pt-4 space-y-2">
+                    <div className="flex justify-between items-center text-xs sm:text-sm">
                       <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
                       <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
                     </div>
                     {promotionDiscount > 0 && (
-                      <div className="flex justify-between items-center text-sm">
+                      <div className="flex justify-between items-center text-xs sm:text-sm">
                         <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
                         <span className="text-green-600 dark:text-green-400 font-medium">
                           -{formatPrice(promotionDiscount)}
@@ -1989,7 +2295,7 @@ function CheckoutPageContent() {
                       </div>
                     )}
                     {(deliveryOption as string) === 'shipping' && (
-                      <div className="flex justify-between items-center text-sm">
+                      <div className="flex justify-between items-center text-xs sm:text-sm">
                         <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
                         <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
                           {shippingFee === 0 ? 'Free' : formatPrice(shippingFee)}
@@ -1997,8 +2303,8 @@ function CheckoutPageContent() {
                       </div>
                     )}
                     <div className="flex justify-between items-center pt-2 border-t">
-                  <span className={cn("text-lg font-semibold", themeClasses.mainText)}>Total</span>
-                    <span className={cn("text-lg font-semibold", themeClasses.mainText)}>
+                  <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Total</span>
+                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
                           {formatPrice(orderTotal)}
                     </span>
                 </div>

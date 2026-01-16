@@ -239,7 +239,7 @@ export default function AdvertisementsPage() {
     } catch (error) {
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to update advertisement",
+        description: "Failed",
         variant: "destructive"
       })
     } finally {
@@ -302,7 +302,7 @@ export default function AdvertisementsPage() {
     } catch (error) {
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to upload advertisement",
+        description: "Failed",
         variant: "destructive"
       })
     } finally {

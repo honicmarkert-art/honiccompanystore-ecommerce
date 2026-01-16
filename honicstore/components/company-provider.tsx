@@ -81,7 +81,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   }
 
   const resetCompanyName = async () => {
-    await adminSettings.updateSetting('companyName', 'Honic Co.')
+    await adminSettings.updateSetting('companyName', 'Honic')
   }
 
   const resetCompanyColor = async () => {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { logger } from '@/lib/logger'
 import { secureOrderUpdate, ReferenceIdSecurity } from '@/lib/reference-id-security'
-import { verifyTransactionWithClickPesa } from '@/lib/clickpesa-api'
+import { verifyTransactionWithClickPesa, normalizeOrderReference } from '@/lib/clickpesa-api'
 
 
 
@@ -174,11 +174,12 @@ export async function POST(request: NextRequest) {
     }
     
     // Find the order in our database using orderReference
-    // Handle different reference formats (with/without hyphens, different cases)
+    // Handle different reference formats (with/without hyphens)
     const supabase = await import('@/lib/supabase-server').then(m => m.getSupabaseClient())
     
-    // Normalize the reference ID (remove hyphens, convert to lowercase)
-    const normalizedReference = orderReference.replace(/[^A-Za-z0-9]/g, '').toLowerCase()
+    // Normalize the reference ID (remove hyphens and non-alphanumeric, preserve case for consistency)
+    // Use consistent normalization function to match checkout link creation
+    const normalizedReference = normalizeOrderReference(orderReference)
     
     logger.log('🔍 Looking for order with reference:', {
       originalReference: orderReference,
@@ -1154,12 +1155,32 @@ function verifyCustomWebhookSignature(payload: string, signature: string, secret
   }
 }
 
-// Verify webhook checksum using ClickPesa's method:
+// Canonicalize payload recursively - sort all object keys alphabetically at every nesting level
+function canonicalizeWebhook(obj: any): any {
+  if (obj === null || typeof obj !== 'object') {
+    return obj
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(canonicalizeWebhook)
+  }
+  
+  // Recursively sort object keys alphabetically
+  return Object.keys(obj)
+    .sort()
+    .reduce((acc: Record<string, any>, key: string) => {
+      acc[key] = canonicalizeWebhook(obj[key])
+      return acc
+    }, {})
+}
+
+// Verify webhook checksum using ClickPesa's NEW method (Updated 2024):
 // 1. Parse JSON payload
-// 2. Sort keys alphabetically
-// 3. Concatenate values only (not keys)
-// 4. Generate HMAC-SHA256 hash
-// 5. Compare with received signature
+// 2. Exclude checksum and checksumMethod fields
+// 3. Recursively canonicalize (sort keys alphabetically at all nesting levels)
+// 4. Serialize to compact JSON
+// 5. Generate HMAC-SHA256 hash
+// 6. Compare with received signature
 function verifyWebhookSignature(payload: string, signature: string | null, secretKey?: string): boolean {
   logger.log('🔐 verifyWebhookSignature called:', {
     hasSignature: !!signature,
@@ -1185,25 +1206,23 @@ function verifyWebhookSignature(payload: string, signature: string | null, secre
     const payloadObj = JSON.parse(payload)
     logger.log('✅ Successfully parsed JSON payload')
     
-    // 1. Sort keys alphabetically and create sorted payload
-    const sortedPayload = Object.keys(payloadObj)
-      .sort()
-      .reduce((obj: any, key) => {
-        obj[key] = payloadObj[key]
-        return obj
-      }, {})
+    // 1. Exclude checksum and checksumMethod fields
+    const payloadForValidation = { ...payloadObj }
+    delete payloadForValidation.checksum
+    delete payloadForValidation.checksumMethod
     
-    logger.log('📋 Sorted payload keys:', Object.keys(sortedPayload))
+    // 2. Recursively canonicalize payload (sort keys alphabetically at all nesting levels)
+    const canonicalPayload = canonicalizeWebhook(payloadForValidation)
     
-    // 2. Concatenate values only (join all values directly)
-    const payloadString = Object.values(sortedPayload).join('')
+    // 3. Serialize to compact JSON (no extra whitespace)
+    const payloadString = JSON.stringify(canonicalPayload)
     
     logger.log('📝 Payload string for checksum:', {
       first100Chars: payloadString.substring(0, 100),
       fullLength: payloadString.length
     })
     
-    // 3. Generate HMAC-SHA256 hash
+    // 4. Generate HMAC-SHA256 hash
     const expectedSignature = crypto
       .createHmac('sha256', checksumKey)
       .update(payloadString)

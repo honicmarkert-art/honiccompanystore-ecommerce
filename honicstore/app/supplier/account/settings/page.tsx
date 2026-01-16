@@ -156,7 +156,7 @@ export default function AccountSettingsPage() {
       } catch (error: any) {
         toast({
           title: 'Error',
-          description: error.message || 'Failed to send verification code. Please try again.',
+          description: 'Failed',
           variant: 'destructive'
         })
       } finally {
@@ -273,7 +273,7 @@ export default function AccountSettingsPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to delete account. Please try again.',
+        description: 'Failed',
         variant: 'destructive'
       })
       setIsDeleting(false)

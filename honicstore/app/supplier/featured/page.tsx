@@ -114,7 +114,7 @@ export default function SupplierFeaturedPage() {
       } else {
         toast({
           title: 'Error',
-          description: result.error || 'Failed to update featured status',
+          description: 'Failed',
           variant: 'destructive'
         })
       }
@@ -226,7 +226,7 @@ export default function SupplierFeaturedPage() {
                     } catch (error: any) {
                       toast({
                         title: 'Error',
-                        description: error.message || 'Failed to initiate upgrade. Please try again.',
+                        description: 'Failed',
                         variant: 'destructive'
                       })
                     }

@@ -99,6 +99,7 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
   const abortControllerRef = useRef<AbortController | null>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isInitialLoadRef = useRef(true)
+  const hasRestoredFromCacheRef = useRef(false)
 
   // Build API URL with filters
   const buildApiUrl = useCallback((currentOffset: number) => {
@@ -270,6 +271,68 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     return 500
   }, [search])
 
+  // Cache key for sessionStorage
+  const getCacheKey = useCallback(() => {
+    const filterSig = JSON.stringify({
+      category,
+      brand,
+      search,
+      sortBy,
+      sortOrder,
+      minPrice,
+      maxPrice,
+      categories: categories && categories.length > 0 ? categories : undefined,
+      inStock,
+      isChina
+    })
+    return `products_cache_${btoa(filterSig).replace(/[^a-zA-Z0-9]/g, '_')}`
+  }, [category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina])
+
+  // Restore products from cache on mount if available
+  useEffect(() => {
+    if (!enabled || hasRestoredFromCacheRef.current) return
+    
+    try {
+      const cacheKey = getCacheKey()
+      const cached = sessionStorage.getItem(cacheKey)
+      if (cached) {
+        const cachedData = JSON.parse(cached)
+        const cacheAge = Date.now() - (cachedData.timestamp || 0)
+        // Use cache if less than 5 minutes old
+        if (cacheAge < 5 * 60 * 1000 && Array.isArray(cachedData.products)) {
+          setProducts(cachedData.products)
+          setOffset(cachedData.offset || 0)
+          setHasMore(cachedData.hasMore !== undefined ? cachedData.hasMore : true)
+          setTotalCount(cachedData.totalCount || 0)
+          hasRestoredFromCacheRef.current = true
+          isInitialLoadRef.current = false
+          return
+        }
+      }
+    } catch (e) {
+      // Ignore cache errors
+    }
+  }, [enabled, getCacheKey])
+
+  // Save products to cache whenever they change
+  useEffect(() => {
+    if (!enabled || products.length === 0) return
+    
+    try {
+      const cacheKey = getCacheKey()
+      const cacheData = {
+        products,
+        offset,
+        hasMore,
+        totalCount,
+        timestamp: Date.now()
+      }
+      sessionStorage.setItem(cacheKey, JSON.stringify(cacheData))
+    } catch (e) {
+      // Ignore cache errors (e.g., quota exceeded)
+    }
+  }, [enabled, products, offset, hasMore, totalCount, getCacheKey])
+
   // Initial fetch and refetch on filter changes with debouncing
   // Products load immediately on initial load, debounced on filter changes
   useEffect(() => {
@@ -300,7 +363,31 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     }
 
     if (filtersChanged) {
+      // Reset cache restoration flag when filters change
+      hasRestoredFromCacheRef.current = false
       reset()
+      
+      // Try to restore from cache first
+      try {
+        const cacheKey = getCacheKey()
+        const cached = sessionStorage.getItem(cacheKey)
+        if (cached) {
+          const cachedData = JSON.parse(cached)
+          const cacheAge = Date.now() - (cachedData.timestamp || 0)
+          // Use cache if less than 5 minutes old
+          if (cacheAge < 5 * 60 * 1000 && Array.isArray(cachedData.products)) {
+            setProducts(cachedData.products)
+            setOffset(cachedData.offset || 0)
+            setHasMore(cachedData.hasMore !== undefined ? cachedData.hasMore : true)
+            setTotalCount(cachedData.totalCount || 0)
+            hasRestoredFromCacheRef.current = true
+            isInitialLoadRef.current = false
+            return // Don't fetch if cache is valid
+          }
+        }
+      } catch (e) {
+        // Ignore cache errors, proceed with fetch
+      }
       
       // Initial load: fetch immediately (no debounce)
       if (isInitialLoadRef.current && products.length === 0) {
@@ -315,8 +402,8 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
         fetchProducts(0, false)
         debounceTimerRef.current = null
       }, debounceDelay)
-    } else if (products.length === 0 && !loadingRef.current && isInitialLoadRef.current) {
-      // Initial load - start immediately (no debounce)
+    } else if (products.length === 0 && !loadingRef.current && isInitialLoadRef.current && !hasRestoredFromCacheRef.current) {
+      // Initial load - start immediately (no debounce) only if not restored from cache
       isInitialLoadRef.current = false
       fetchProducts(0, false)
     }
@@ -333,7 +420,7 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
         debounceTimerRef.current = null
       }
     }
-  }, [enabled, category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina, reset, fetchProducts, products.length, getDebounceDelay])
+  }, [enabled, category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina, reset, fetchProducts, products.length, getDebounceDelay, getCacheKey])
 
   return {
     products,

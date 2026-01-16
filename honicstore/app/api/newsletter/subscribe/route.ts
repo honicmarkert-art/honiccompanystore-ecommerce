@@ -113,10 +113,22 @@ This is an automated notification from the Newsletter Subscription System.
       </div>
     `
 
-    // Get sender email using email service helper (handles Resend SMTP case)
-    const senderConfig = emailService.getSenderEmail('info')
+    // Get sender email (handle Resend SMTP case where SMTP_USER="resend")
+    const smtpUserAuth = process.env.SMTP_USER
+    const isResendSmtp = process.env.SMTP_HOST?.includes('resend.com') || smtpUserAuth?.toLowerCase() === 'resend'
     
-    if (!senderConfig.email || !senderConfig.email.includes('@')) {
+    let senderEmail: string
+    if (isResendSmtp || !smtpUserAuth || smtpUserAuth.toLowerCase() === 'resend' || !smtpUserAuth.includes('@')) {
+      // Use sender email configs for Resend SMTP
+      senderEmail = process.env.SMTP_SENDER_EMAIL_INFO || 
+                    process.env.SMTP_SENDER_EMAIL_NOREPLY || 
+                    process.env.SMTP_SENDER_EMAIL_SUPPORT || 
+                    process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
+    } else {
+      senderEmail = smtpUserAuth
+    }
+
+    if (!senderEmail || !senderEmail.includes('@')) {
       // Still return success for subscription, just without email notification
       return NextResponse.json({
         success: true,
@@ -124,16 +136,18 @@ This is an automated notification from the Newsletter Subscription System.
       })
     }
 
-    // Use 'info' type sender name for newsletter emails
-    const senderName = emailService.getSenderEmail('info').name
+    // Get sender name
+    const senderName = process.env.SMTP_SENDER_NAME_INFO || 
+                       process.env.SMTP_SENDER_NAME_NOREPLY || 
+                       'Honic Co'
 
-    // Send notification email to company (from .env.local) using centralized email service with Resend fallback
+    // Send notification email to company (from .env.local)
     const emailResult = await sendEmail({
       to: promotionEmail,
       subject: emailSubject,
       text: emailBody,
       html: emailHtml,
-      from: `${senderName} <${senderConfig.email}>`,
+      from: `${senderName} <${senderEmail}>`,
     })
 
     // Send welcome email to subscriber

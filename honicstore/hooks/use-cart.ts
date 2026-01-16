@@ -217,9 +217,32 @@ export function useCart() {
     return migratedItem
   }, [])
 
-  // Load cart data
-  const loadServerCart = useCallback(async () => {
+  // Load cart data with caching for instant display
+  const loadServerCart = useCallback(async (useCache: boolean = true) => {
     if (!isAuthenticated) return
+
+    // Try to load from cache first for instant display
+    if (useCache) {
+      try {
+        const cachedCart = sessionStorage.getItem('cart_cache')
+        const cacheTimestamp = sessionStorage.getItem('cart_cache_timestamp')
+        if (cachedCart && cacheTimestamp) {
+          const cacheAge = Date.now() - parseInt(cacheTimestamp, 10)
+          // Use cache if less than 30 seconds old
+          if (cacheAge < 30000) {
+            const cachedData: CartResponse = JSON.parse(cachedCart)
+            const migratedCart = (cachedData.items || []).map(migrateCartItem)
+            setCart(migratedCart)
+            setCartSubtotal(cachedData.totals.subtotal)
+            setCartTotalItems(cachedData.totals.total_items)
+            setIsLoading(false)
+            // Continue to refresh in background
+          }
+        }
+      } catch (error) {
+        // Ignore cache errors, continue to fetch
+      }
+    }
 
     // Prevent multiple simultaneous calls
     if (cartAbortRef.current) {
@@ -268,6 +291,14 @@ export function useCart() {
         setCart(migratedCart)
         setCartSubtotal(data.totals.subtotal)
         setCartTotalItems(data.totals.total_items)
+        
+        // Cache cart data for faster subsequent loads
+        try {
+          sessionStorage.setItem('cart_cache', JSON.stringify(data))
+          sessionStorage.setItem('cart_cache_timestamp', Date.now().toString())
+        } catch (error) {
+          // Ignore cache errors
+        }
       } else {
         // Parse error response
         let errorData: any = null
@@ -305,6 +336,7 @@ export function useCart() {
 
   // Load product data for cart items that don't have it, and fetch variant_name for variants
   // SECURITY: Always re-fetch supplier info from API for guest users to prevent localStorage tampering
+  // OPTIMIZED: Batch fetch product data instead of individual calls
   const loadProductDataForCartItems = useCallback(async (cartItems: CartItem[], forceRefreshSupplierInfo: boolean = false) => {
     const itemsNeedingProductData = cartItems.filter(item => !item.product)
     const itemsNeedingVariantName = cartItems.filter(item =>
@@ -316,43 +348,92 @@ export function useCart() {
 
     if (itemsNeedingProductData.length === 0 && itemsNeedingVariantName.length === 0 && !needsSupplierInfoRefresh) return cartItems
 
+    // Batch fetch product IDs that need data
+    const productIdsToFetch = [...new Set(cartItems
+      .filter(item => !item.product || item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId))))
+      .map(item => item.productId)
+    )]
+
+    // Batch fetch products if needed
+    let productsMap: { [key: number]: any } = {}
+    if (productIdsToFetch.length > 0) {
+      try {
+        // Fetch all products in parallel (non-blocking)
+        const productPromises = productIdsToFetch.map(productId => 
+          fetch(`/api/products/${productId}`)
+            .then(res => res.ok ? res.json() : null)
+            .catch(() => null)
+        )
+        const products = await Promise.all(productPromises)
+        products.forEach((product, index) => {
+          if (product) {
+            productsMap[productIdsToFetch[index]] = product
+          }
+        })
+      } catch (error) {
+        safeError('🛒 [USE-CART] Error batch fetching products:', error)
+      }
+    }
+
     const updatedItems = await Promise.all(
       cartItems.map(async (item) => {
         const needsProductData = !item.product
         const needsVariantName = item.variants.some(v => !v.variant_name && v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId)))
 
-        // Fetch product data if needed (for product info or variant_name)
-        // SECURITY: Always fetch supplier info from API for guest users (never trust localStorage)
-        if (needsProductData || needsVariantName || needsSupplierInfoRefresh) {
-          try {
-            // Fetch product data and supplier info in parallel
-            // SECURITY: Always fetch supplier info from API, even if it exists in localStorage
-            const [productResponse, supplierResponse] = await Promise.all([
-              needsProductData || needsVariantName ? fetch(`/api/products/${item.productId}`) : Promise.resolve(null),
-              needsSupplierInfoRefresh ? fetch(`/api/products/${item.productId}/supplier-info`).catch(() => null) : Promise.resolve(null)
-            ])
+        // Use cached product data from batch fetch
+        const productData = productsMap[item.productId] || null
 
-            const productData = productResponse && productResponse.ok ? await productResponse.json() : null
-
-            // SECURITY: Always fetch supplier info from API for guest users (prevent tampering)
-            let supplierInfo: any = null
-            if (needsSupplierInfoRefresh && supplierResponse && supplierResponse.ok) {
-              try {
-                supplierInfo = await supplierResponse.json()
-                // SECURITY: Remove any supplierId if present (should not be in response, but double-check)
-                if (supplierInfo && 'supplierId' in supplierInfo) {
-                  delete supplierInfo.supplierId
-                }
-              } catch (e) {
-                // Ignore supplier info errors, but don't use localStorage data
-                supplierInfo = null
+        // Fetch supplier info if needed (in background, non-blocking)
+        if (needsSupplierInfoRefresh) {
+          // Fetch supplier info in background without blocking
+          fetch(`/api/products/${item.productId}/supplier-info`)
+            .then(supplierResponse => {
+              if (supplierResponse && supplierResponse.ok) {
+                return supplierResponse.json()
               }
+              return null
+            })
+            .then(supplierInfo => {
+              if (supplierInfo) {
+                // Update cart item with supplier info in background
+                setCart(prev => prev.map(cartItem => {
+                  if (cartItem.productId === item.productId) {
+                    return {
+                      ...cartItem,
+                      supplierCompanyName: supplierInfo.companyName || null,
+                      supplierIsVerified: supplierInfo.isVerified || false,
+                      supplierRegion: supplierInfo.region || null,
+                      supplierNation: null,
+                      supplierCompanyLogo: supplierInfo.companyLogo || null
+                    } as any
+                  }
+                  return cartItem
+                }))
+              }
+            })
+            .catch(() => {})
+        }
+
+        // If product data not in batch, fetch individually (fallback)
+        if ((needsProductData || needsVariantName) && !productData) {
+          try {
+            const productResponse = await fetch(`/api/products/${item.productId}`)
+            if (productResponse.ok) {
+              const fetchedProductData = await productResponse.json()
+              productsMap[item.productId] = fetchedProductData
             }
+          } catch (error) {
+            safeError('🛒 [USE-CART] Error fetching product data:', error)
+          }
+        }
+
+        const finalProductData = productData || productsMap[item.productId]
+
             // Update variants with variant_name and price from database
-            const updatedVariants = productData ? item.variants.map((v: any) => {
+            const updatedVariants = finalProductData ? item.variants.map((v: any) => {
               let updatedVariant = { ...v }
               if (v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId))) {
-                const variant = productData.variants?.find((pv: any) => pv.id === Number(v.variantId))
+                const variant = finalProductData.variants?.find((pv: any) => pv.id === Number(v.variantId))
                 if (variant) {
                   // Always update variant_name and price from database
                   updatedVariant.variant_name = variant.variant_name || null
@@ -360,7 +441,7 @@ export function useCart() {
                 }
               } else if (needsProductData) {
                 // For products without variants, use product price
-                updatedVariant.price = parseFloat(productData.price) || updatedVariant.price
+                updatedVariant.price = parseFloat(finalProductData.price) || updatedVariant.price
               }
               return updatedVariant
             }) : item.variants
@@ -368,43 +449,23 @@ export function useCart() {
             return {
               ...item,
               variants: updatedVariants,
-              product: needsProductData && productData ? {
-                id: productData.id,
-                name: productData.name,
-                image: productData.image,
-                price: productData.price,
-                originalPrice: productData.original_price,
-                inStock: productData.in_stock,
-                stockQuantity: productData.stock_quantity,
-                sku: productData.sku
-              } : item.product,
-              // SECURITY: Always use API-supplied supplier info, never trust localStorage
-              // If API fetch failed, remove supplier info (don't use potentially tampered data)
-              supplierCompanyName: supplierInfo?.companyName || null,
-              supplierIsVerified: supplierInfo?.isVerified || false,
-              supplierRegion: supplierInfo?.region || null,
-              supplierNation: null, // supplier-info doesn't return nation separately
-              supplierCompanyLogo: supplierInfo?.companyLogo || null
+              product: needsProductData && finalProductData ? {
+                id: finalProductData.id,
+                name: finalProductData.name,
+                image: finalProductData.image,
+                price: finalProductData.price,
+                originalPrice: finalProductData.original_price,
+                inStock: finalProductData.in_stock,
+                stockQuantity: finalProductData.stock_quantity,
+                sku: finalProductData.sku
+              } : item.product
+              // Supplier info updated in background above
             }
-          } catch (error) {
-            safeError('🛒 [USE-CART] Error fetching product data:', error)
-            // On error, remove supplier info to prevent using tampered data
-            return {
-              ...item,
-              supplierCompanyName: null,
-              supplierIsVerified: false,
-              supplierRegion: null,
-              supplierNation: null,
-              supplierCompanyLogo: null
-            } as any
-          }
-        }
-        return item // Return original item if no updates needed
       })
     )
 
     return updatedItems
-  }, [isAuthenticated])
+  }, [isAuthenticated, setCart])
 
   // Load guest cart from localStorage
   // SECURITY: Always re-fetch supplier info from API to prevent localStorage tampering
@@ -657,19 +718,41 @@ export function useCart() {
         let variantPriceFromDB: number | null = null
         let productDataToUse = productData
 
-        // Only fetch if product data not provided
+        // Only fetch if product data not provided AND variant ID is numeric
+        // Skip fetch if productData is already provided (performance optimization)
         if (!productDataToUse && normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
+          // Fetch in background without blocking - use cached data if available
           const requestKey = `product-${productId}`
           
           // Check for duplicate request
           if (addItemRequestMap.current.has(requestKey)) {
-            try {
-              productDataToUse = await addItemRequestMap.current.get(requestKey)
-            } catch (error) {
-              safeError('🛒 [CLIENT] Error waiting for duplicate request:', error)
-            }
+            // Don't await - let it happen in background
+            addItemRequestMap.current.get(requestKey)
+              .then(data => {
+                if (data) {
+                  productDataToUse = data
+                  // Update variant name in background if needed
+                  const variant = data.variants?.find((v: any) => v.id === Number(normalizedVariantId))
+                  if (variant) {
+                    setCart(prev => prev.map(item => {
+                      if (item.productId === productId) {
+                        return {
+                          ...item,
+                          variants: item.variants.map(v =>
+                            v.variantId === normalizedVariantId
+                              ? { ...v, variant_name: variant.variant_name || null }
+                              : v
+                          )
+                        }
+                      }
+                      return item
+                    }))
+                  }
+                }
+              })
+              .catch(() => {})
           } else {
-            // Create new fetch request
+            // Create new fetch request in background (non-blocking)
             const fetchPromise = fetch(`/api/products/${productId}`, {
               cache: 'default', // Use CDN cache
               headers: {
@@ -679,14 +762,34 @@ export function useCart() {
             
             addItemRequestMap.current.set(requestKey, fetchPromise)
             
-            try {
-              productDataToUse = await fetchPromise
-          } catch (error) {
-            safeError('🛒 [CLIENT] Error fetching variant data:', error)
-            } finally {
-              // Clean up after 2 seconds
-              setTimeout(() => addItemRequestMap.current.delete(requestKey), 2000)
-            }
+            // Don't await - fetch in background
+            fetchPromise
+              .then(data => {
+                if (data) {
+                  // Update variant name in background if needed
+                  const variant = data.variants?.find((v: any) => v.id === Number(normalizedVariantId))
+                  if (variant) {
+                    setCart(prev => prev.map(item => {
+                      if (item.productId === productId) {
+                        return {
+                          ...item,
+                          variants: item.variants.map(v =>
+                            v.variantId === normalizedVariantId
+                              ? { ...v, variant_name: variant.variant_name || null }
+                              : v
+                          )
+                        }
+                      }
+                      return item
+                    }))
+                  }
+                }
+              })
+              .catch(() => {})
+              .finally(() => {
+                // Clean up after 2 seconds
+                setTimeout(() => addItemRequestMap.current.delete(requestKey), 2000)
+              })
           }
         }
         
@@ -763,18 +866,41 @@ export function useCart() {
       let variantPriceFromDB: number | null = null
 
       // Only fetch if product data not provided
+      // If productData is provided, use it immediately (no blocking fetch)
       if (!productDataToUse) {
+        // Fetch in background without blocking - proceed with optimistic update
         const requestKey = `product-${productId}`
         
         // Check for duplicate request
         if (addItemRequestMap.current.has(requestKey)) {
-          try {
-            productDataToUse = await addItemRequestMap.current.get(requestKey)
-          } catch (error) {
-            safeError('🛒 [CLIENT] Error waiting for duplicate request:', error)
-          }
+          // Don't await - let it happen in background
+          addItemRequestMap.current.get(requestKey)
+            .then(data => {
+              if (data) {
+                // Update cart with product data in background
+                setCart(prev => prev.map(item => {
+                  if (item.productId === productId && !item.product) {
+                    return {
+                      ...item,
+                      product: {
+                        id: data.id,
+                        name: data.name,
+                        image: data.image,
+                        price: data.price,
+                        originalPrice: data.original_price || data.originalPrice,
+                        inStock: data.in_stock !== undefined ? data.in_stock : data.inStock,
+                        stockQuantity: data.stock_quantity || data.stockQuantity,
+                        sku: data.sku
+                      }
+                    }
+                  }
+                  return item
+                }))
+              }
+            })
+            .catch(() => {})
         } else {
-          // Create new fetch request with CDN caching
+          // Create new fetch request in background (non-blocking)
           const fetchPromise = fetch(`/api/products/${productId}`, {
             cache: 'default', // Use CDN cache
             headers: {
@@ -784,18 +910,41 @@ export function useCart() {
           
           addItemRequestMap.current.set(requestKey, fetchPromise)
           
-          try {
-            productDataToUse = await fetchPromise
-          } catch (error) {
-            safeError('🛒 [CLIENT] Error fetching product data:', error)
-          } finally {
-            // Clean up after 2 seconds
-            setTimeout(() => addItemRequestMap.current.delete(requestKey), 2000)
-          }
+          // Don't await - fetch in background
+          fetchPromise
+            .then(data => {
+              if (data) {
+                // Update cart with product data in background
+                setCart(prev => prev.map(item => {
+                  if (item.productId === productId && !item.product) {
+                    return {
+                      ...item,
+                      product: {
+                        id: data.id,
+                        name: data.name,
+                        image: data.image,
+                        price: data.price,
+                        originalPrice: data.original_price || data.originalPrice,
+                        inStock: data.in_stock !== undefined ? data.in_stock : data.inStock,
+                        stockQuantity: data.stock_quantity || data.stockQuantity,
+                        sku: data.sku
+                      }
+                    }
+                  }
+                  return item
+                }))
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              // Clean up after 2 seconds
+              setTimeout(() => addItemRequestMap.current.delete(requestKey), 2000)
+            })
         }
       }
 
       // Extract variant_name and price from product data
+      // Use provided productData immediately if available, otherwise use provided price
       if (productDataToUse) {
           // Extract variant_name and price if variantId is numeric
           if (normalizedVariantId && normalizedVariantId !== 'default' && !normalizedVariantId.toString().startsWith('combination-') && !isNaN(Number(normalizedVariantId))) {
@@ -809,9 +958,6 @@ export function useCart() {
           if (variantPriceFromDB === null) {
           variantPriceFromDB = parseFloat(productDataToUse.price) || 0
           }
-      } else if (variantPrice !== undefined && variantPrice !== null) {
-        // Fallback to provided price if no product data available
-        variantPriceFromDB = variantPrice
       }
       // Use database price if available, otherwise fall back to provided price
       const finalPriceToUse = variantPriceFromDB !== null && variantPriceFromDB > 0 ? variantPriceFromDB : (variantPrice || finalVariantPrice || 0)
@@ -826,17 +972,35 @@ export function useCart() {
         sku: variantSku,
         image: variantImage
       }
-      // Fetch supplier info for guest users
+      // Fetch supplier info for guest users in background (non-blocking)
       let supplierInfo: any = null
       if (!isAuthenticated) {
-        try {
-          const supplierResponse = await fetch(`/api/products/${productId}/supplier-info`).catch(() => null)
-          if (supplierResponse && supplierResponse.ok) {
-            supplierInfo = await supplierResponse.json()
-          }
-        } catch (e) {
-          // Ignore supplier info fetch errors
-        }
+        // Fetch supplier info in background without blocking
+        fetch(`/api/products/${productId}/supplier-info`)
+          .then(supplierResponse => {
+            if (supplierResponse && supplierResponse.ok) {
+              return supplierResponse.json()
+            }
+            return null
+          })
+          .then(info => {
+            if (info) {
+              // Update cart item with supplier info in background
+              setCart(prev => prev.map(item => {
+                if (item.productId === productId) {
+                  return {
+                    ...item,
+                    supplierCompanyName: info.companyName || null,
+                    supplierIsVerified: info.isVerified || false,
+                    supplierRegion: info.region || null,
+                    supplierCompanyLogo: info.companyLogo || null
+                  } as any
+                }
+                return item
+              }))
+            }
+          })
+          .catch(() => {}) // Ignore supplier info fetch errors
       }
       const newItem: CartItem = {
           id: Date.now(), // Temporary ID
@@ -878,6 +1042,13 @@ export function useCart() {
       setCartTotalItems(prev => prev + quantity)
       setCartSubtotal(prev => prev + (finalPriceToUse * quantity))
     }
+    // Show success toast immediately for instant feedback
+    toast({
+      title: "Added to cart",
+      description: "Item has been added to your cart successfully.",
+      duration: 2000, // Show for 2 seconds
+    })
+
     // Call API for authenticated users in background (non-blocking)
     if (isAuthenticated) {
       // Don't await - let it happen in background
@@ -948,10 +1119,10 @@ export function useCart() {
                 return item
               }))
             }
-            // Reload cart from server to get latest data including supplier info
-            await loadServerCart()
+            // Reload cart from server to get latest data including supplier info (in background)
+            loadServerCart().catch(() => {})
 
-          // Check if this was a partial stock response
+          // Check if this was a partial stock response - show additional toast
           if (responseData.partialStock) {
             const { partialStock } = responseData
             toast({
@@ -959,12 +1130,6 @@ export function useCart() {
               description: `${responseData.message}\n\n${partialStock.restockMessage}\n\n${partialStock.customerCare.message}\n\nContact: ${partialStock.customerCare.contactInfo.email} | ${partialStock.customerCare.contactInfo.phone}`,
               variant: "default",
               duration: 8000, // Show for 8 seconds to give time to read
-            })
-          } else {
-            toast({
-              title: "Added to cart",
-              description: "Item has been added to your cart successfully.",
-              duration: 500, // Success message: 500ms (within 300-1000ms range)
             })
           }
         } else {
@@ -979,41 +1144,33 @@ export function useCart() {
           if (errorData.error === 'Product out of stock') {
             toast({
               title: "Out of Stock",
-              description: errorData.message,
+              description: "This product is currently unavailable.",
               variant: "outOfStock",
               duration: 6000, // Warning message: 6 seconds (within 5000-8000ms range)
             })
           } else {
             toast({
               title: "Error",
-              description: errorData.error || "Failed to add item to cart",
+              description: "Failed to sync with server. Item added locally.",
               variant: "destructive",
-              duration: 6000, // Error message: 6 seconds (within 5000-8000ms range)
+              duration: 4000, // Error message: 4 seconds
             })
           }
           // Rollback optimistic update
-          await loadServerCart()
+          loadServerCart().catch(() => {})
         }
       } catch (error) {
         toast({
           title: "Error",
-          description: "Failed to add item to cart. Please try again.",
+          description: "Failed to sync with server. Item added locally.",
           variant: "destructive",
-          duration: 6000, // Error message: 6 seconds (within 5000-8000ms range)
+          duration: 4000, // Error message: 4 seconds
         })
 
         // Rollback optimistic update
-        await loadServerCart()
+        loadServerCart().catch(() => {})
       }
       })() // Close the async function
-    } else {
-      // For guest users, just show success message
-
-      toast({
-        title: "Added to cart",
-        description: "Item has been added to your cart successfully.",
-        duration: 500, // Success message: 500ms (within 300-1000ms range)
-      })
     }
   }, [cart, isAuthenticated, loadServerCart, toast])
 

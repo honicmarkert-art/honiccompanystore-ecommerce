@@ -76,26 +76,8 @@ export async function GET(request: NextRequest) {
       } : null
     })
 
-    // Validate all product IDs exist in database
-    const productIds = [...new Set((data || []).map((item: any) => item.product_id).filter((id: any) => id && !isNaN(Number(id))))]
-    if (productIds.length > 0) {
-      const { data: validProducts, error: productErr } = await supabase
-        .from('products')
-        .select('id')
-        .in('id', productIds)
-      
-      if (productErr) {
-        logger.error('Error validating products:', productErr)
-      } else {
-        const validProductIds = new Set((validProducts || []).map((p: any) => p.id))
-        const invalidProductIds = productIds.filter(id => !validProductIds.has(id))
-        if (invalidProductIds.length > 0) {
-          logger.error('Invalid product IDs found in cart:', invalidProductIds)
-          // Filter out invalid products
-          data = (data || []).filter((item: any) => validProductIds.has(item.product_id))
-        }
-      }
-    }
+    // Skip product validation query - products join already validates existence
+    // If product doesn't exist, the join will return null, which we handle below
 
     // Fetch variant names for numeric variant IDs
     const allVariantIds = (data || []).map((item: any) => item.variant_id)
@@ -352,29 +334,8 @@ export async function GET(request: NextRequest) {
           reason: !isNaN(variantIdNum) ? 'Not in variantMap' : 'Not a number'
         })
         
-        // Fallback: Try to fetch directly from database if not in map
-        try {
-          const { data: directVariant, error: directError } = await supabase
-            .from('product_variants')
-            .select('id, variant_name')
-            .eq('id', variantIdNum)
-            .maybeSingle()
-          
-          logger.log('🛒 [CART GET] Step 3a Fallback: Direct fetch result', {
-            variantId: variantIdNum,
-            found: !!directVariant,
-            variant_name: directVariant?.variant_name || null,
-            error: directError?.message
-          })
-          
-          if (directVariant) {
-            variantName = directVariant.variant_name
-            // Also add to map for future lookups
-            variantMap[variantIdNum] = { variant_name: directVariant.variant_name }
-          }
-        } catch (fallbackError) {
-          logger.error('🛒 [CART GET] Step 3a Fallback: Error fetching variant:', fallbackError)
-        }
+        // Skip fallback fetch - if not in map, variant doesn't exist or was deleted
+        // This prevents N+1 query problem
       }
     } else {
       logger.log('🛒 [CART GET] Step 3a: Skipped (default or combination variant)')

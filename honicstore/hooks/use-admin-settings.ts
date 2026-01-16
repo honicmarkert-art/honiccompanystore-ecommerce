@@ -6,7 +6,7 @@ import { logger } from '@/lib/logger'
 // Default values for all admin settings
 const DEFAULT_ADMIN_SETTINGS = {
   // Company Branding
-  companyName: "Honic Co.",
+  companyName: "Honic",
   companyColor: "#3B82F6",
   companyTagline: "technology, innovation",
   companyLogo: "/android-chrome-512x512.png",

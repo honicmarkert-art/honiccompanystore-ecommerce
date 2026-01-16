@@ -592,7 +592,7 @@ function ProductDetailPageContent() {
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     if (searchTerm.trim()) {
-      router.push(`/products?search=${encodeURIComponent(searchTerm.trim())}`)
+      navigateWithPrefetch(`/products?search=${encodeURIComponent(searchTerm.trim())}`, { priority: 'medium', scroll: true })
     }
   }, [searchTerm, router])
 
@@ -601,13 +601,13 @@ function ProductDetailPageContent() {
     setSearchTerm(suggestion)
     setShowSuggestions(false)
     setIsSearchFocused(false)
-    router.push(`/products?search=${encodeURIComponent(suggestion)}`)
+    navigateWithPrefetch(`/products?search=${encodeURIComponent(suggestion)}`, { priority: 'medium', scroll: true })
   }, [router])
 
   // Handle text search from modal
   const handleModalTextSearch = useCallback((query: string) => {
     setSearchTerm(query)
-    router.push(`/products?search=${encodeURIComponent(query)}`)
+    navigateWithPrefetch(`/products?search=${encodeURIComponent(query)}`, { priority: 'medium', scroll: true })
   }, [router])
 
   // Handle image search from modal
@@ -619,7 +619,7 @@ function ProductDetailPageContent() {
     if (keywords.length > 0) {
       searchParams.set('image_search', keywords.join(' '))
     }
-    router.push(`/products?${searchParams.toString()}`)
+    navigateWithPrefetch(`/products?${searchParams.toString()}`, { priority: 'medium', scroll: true })
   }, [router])
   
   // "You May Also Like" rotation state - changes every 30 seconds
@@ -908,8 +908,17 @@ function ProductDetailPageContent() {
 
   // Optimize navigation with useCallback
   const handleBackNavigation = useCallback(() => {
+    // Mark that we're returning from product detail
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('navigated_from_product_detail', 'true')
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
     // Prefer returning to preserved URL with search state
-    navigateWithPrefetch(returnTo || '/products', { priority: 'medium' })
+    // Use scroll: false to prevent Next.js from scrolling to top
+    navigateWithPrefetch(returnTo || '/products', { priority: 'medium', scroll: false })
   }, [navigateWithPrefetch, returnTo])
 
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
@@ -1834,7 +1843,7 @@ function ProductDetailPageContent() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push(returnTo)}
+              onClick={handleBackNavigation}
               className={cn(
                 "flex items-center gap-1 sm:gap-2 text-sm sm:text-base lg:text-lg font-semibold flex-shrink-0 min-w-0",
                 darkHeaderFooterClasses.textNeutralPrimary,
@@ -1925,6 +1934,7 @@ function ProductDetailPageContent() {
           <div className="flex items-center h-16 px-4 sm:px-6 lg:px-8 w-full">
             <OptimizedLink
               href={returnTo}
+              scroll={false}
               prefetch="hover"
               priority="medium"
               className={cn(
@@ -1946,6 +1956,7 @@ function ProductDetailPageContent() {
             </p>
             <OptimizedLink
               href={returnTo}
+              scroll={false}
               prefetch="hover"
               priority="high"
               className="inline-flex items-center px-6 py-3 bg-yellow-500 text-neutral-950 rounded-md hover:bg-yellow-600 transition-colors"
@@ -4053,8 +4064,19 @@ function ProductDetailPageContent() {
             <OptimizedLink 
               href={returnTo} 
               prefetch="hover"
+              scroll={false}
               priority="medium"
               className={cn("text-sm font-medium hover:underline", themeClasses.textNeutralSecondary)}
+              onClick={() => {
+                // Mark that we're returning from product detail
+                if (typeof window !== 'undefined') {
+                  try {
+                    sessionStorage.setItem('navigated_from_product_detail', 'true')
+                  } catch (e) {
+                    // Ignore storage errors
+                  }
+                }
+              }}
             >
               View All Products
             </OptimizedLink>
@@ -4090,6 +4112,7 @@ function ProductDetailPageContent() {
                       className="block relative aspect-square overflow-hidden rounded-lg border border-gray-300 dark:border-gray-600"
                       prefetch="hover"
                       priority="medium"
+                      scroll={false}
                     >
                       {relatedProduct.image && (
                         <LazyImage

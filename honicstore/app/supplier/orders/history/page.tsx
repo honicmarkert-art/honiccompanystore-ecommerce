@@ -113,7 +113,7 @@ export default function SupplierOrderHistoryPage() {
       const errorMessage = error?.message || 'Failed to fetch order history'
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {

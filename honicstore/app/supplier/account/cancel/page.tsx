@@ -87,7 +87,7 @@ export default function DeleteAccountPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to delete account. Please try again.',
+        description: 'Failed',
         variant: 'destructive'
       })
       setIsDeleting(false)

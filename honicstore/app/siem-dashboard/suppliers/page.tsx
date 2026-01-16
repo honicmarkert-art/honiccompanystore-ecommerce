@@ -395,7 +395,7 @@ export default function SuppliersPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to activate supplier',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -449,7 +449,7 @@ export default function SuppliersPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to deactivate supplier',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -540,7 +540,7 @@ export default function SuppliersPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to update supplier info',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -1378,7 +1378,7 @@ export default function SuppliersPage() {
                             } catch (error: any) {
                               toast({
                                 title: 'Error',
-                                description: error.message || 'Failed to reset account info.',
+                                description: 'Failed',
                                 variant: 'destructive',
                               })
                             } finally {

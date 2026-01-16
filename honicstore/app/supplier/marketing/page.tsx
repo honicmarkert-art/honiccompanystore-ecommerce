@@ -266,7 +266,7 @@ export default function SupplierMarketingPage() {
       } else {
         toast({
           title: 'Error',
-          description: result.error || `Failed to ${editingPromotion ? 'update' : 'create'} promotion`,
+          description: 'Failed',
           variant: 'destructive'
         })
       }
@@ -474,7 +474,7 @@ export default function SupplierMarketingPage() {
       } else {
         toast({
           title: 'Error',
-          description: result.error || 'Failed to create advertisement',
+          description: 'Failed',
           variant: 'destructive'
         })
       }
@@ -519,7 +519,7 @@ export default function SupplierMarketingPage() {
       } else {
         toast({
           title: 'Error',
-          description: result.error || 'Failed to delete advertisement',
+          description: 'Failed',
           variant: 'destructive'
         })
       }
@@ -683,7 +683,7 @@ export default function SupplierMarketingPage() {
                     } catch (error: any) {
                       toast({
                         title: 'Error',
-                        description: error.message || 'Failed to initiate upgrade. Please try again.',
+                        description: 'Failed',
                         variant: 'destructive'
                       })
                     }

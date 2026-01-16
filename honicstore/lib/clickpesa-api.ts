@@ -19,6 +19,7 @@ export interface CheckoutLinkRequest {
   returnUrl?: string
   cancelUrl?: string
   webhookUrl?: string
+  description?: string
   checksum?: string
 }
 
@@ -56,17 +57,26 @@ export const CLICKPESA_CLIENT_SUPPLIER_ID = process.env.CLICKPESA_CLIENT_SUPPLIE
 // Shared keys (used by both)
 export const CLICKPESA_CHECKSUM_KEY = process.env.CLICKPESA_CHECKSUM_KEY || ""
 
+// Normalize order reference ID for ClickPesa (consistent across all endpoints)
+// Removes hyphens and other non-alphanumeric characters, preserves case
+// This ensures consistent matching between checkout link creation and webhook handling
+export const normalizeOrderReference = (referenceId: string): string => {
+  if (!referenceId) return referenceId
+  // Remove hyphens and other non-alphanumeric characters, preserve case
+  return referenceId.replace(/[^A-Za-z0-9]/g, '')
+}
+
 // Generate unique order reference for ClickPesa
 export const generateOrderReference = (orderId: string): string => {
-  // Return full UUID for ClickPesa (webhooks will use this)
+  // Return normalized order ID for ClickPesa (webhooks will use this)
   // ClickPesa will display a shorter version to customers
-  return orderId
+  return normalizeOrderReference(orderId)
 }
 
 // Generate display reference for customers (10 characters)
 export const generateDisplayReference = (orderId: string): string => {
   // Generate shorter reference for customer display
-  const cleanOrderId = orderId.replace(/[^A-Za-z0-9]/g, '')
+  const cleanOrderId = normalizeOrderReference(orderId)
   return cleanOrderId.substring(0, 10)
 }
 
@@ -114,6 +124,11 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     const clientId = useSupplierCredentials ? CLICKPESA_CLIENT_SUPPLIER_ID : CLICKPESA_CLIENT_ID
     const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
     
+    console.log(`🔑 [TOKEN] Generating access token (${credentialType})...`, {
+      baseUrl: CLICKPESA_CONFIG.baseUrl,
+      hasApiKey: Boolean(apiKey),
+      hasClientId: Boolean(clientId)
+    })
     logger.log(`ClickPesa: Generating access token (${credentialType})...`, {
       baseUrl: CLICKPESA_CONFIG.baseUrl,
       hasApiKey: Boolean(apiKey),
@@ -122,9 +137,11 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     })
 
     if (!apiKey || !clientId) {
+      console.error(`❌ [TOKEN] Missing credentials for ${credentialType} checkout`)
       throw new Error(`Missing ClickPesa credentials for ${credentialType} checkout. Please configure ${useSupplierCredentials ? 'CLICKPESA_API_SUPPLIER_KEY and CLICKPESA_CLIENT_SUPPLIER_ID' : 'CLICKPESA_API_KEY and CLICKPESA_CLIENT_ID'}`)
     }
 
+    console.log('📡 [TOKEN] Calling ClickPesa token API...')
     const response = await fetch(`${CLICKPESA_CONFIG.baseUrl}/third-parties/generate-token`, {
       method: "POST",
       headers: {
@@ -134,6 +151,10 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
       },
     })
 
+    console.log('📥 [TOKEN] Received token API response', {
+      status: response.status,
+      ok: response.ok
+    })
     logger.log("ClickPesa: Token generation response:", {
       status: response.status,
       statusText: response.statusText,
@@ -141,6 +162,7 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     })
 
     if (!response.ok) {
+      console.error('❌ [TOKEN] Token generation failed', { status: response.status })
       const responseText = await response.text()
       let errorData
       try {
@@ -148,6 +170,17 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
       } catch {
         errorData = { message: responseText }
       }
+
+      // Log detailed error for debugging
+      logger.error("ClickPesa token generation failed:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorData: errorData,
+        apiKeyPrefix: apiKey.substring(0, 8) + '...',
+        clientIdPrefix: clientId.substring(0, 8) + '...',
+        baseUrl: CLICKPESA_CONFIG.baseUrl,
+        endpoint: `${CLICKPESA_CONFIG.baseUrl}/third-parties/generate-token`
+      })
 
       throw new Error(
         errorData.message || 
@@ -162,35 +195,66 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     try {
       data = JSON.parse(responseText)
     } catch (parseError) {
+      logger.error("ClickPesa: Failed to parse token response:", {
+        responseText: responseText.substring(0, 500),
+        parseError: parseError instanceof Error ? parseError.message : String(parseError)
+      })
       throw new Error("Invalid JSON response from ClickPesa token generation API")
     }
     
     if (!data.success || !data.token) {
+      console.error('❌ [TOKEN] Invalid token response structure', {
+        success: data.success,
+        hasToken: !!data.token
+      })
+      logger.error("ClickPesa: Invalid token response structure:", {
+        success: data.success,
+        hasToken: !!data.token,
+        responseData: data
+      })
       throw new Error("Invalid response from ClickPesa token generation API")
     }
 
+    console.log('✅ [TOKEN] Access token generated successfully')
     logger.log("ClickPesa: Access token generated successfully")
     return data.token
   } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`Failed to generate access token: ${error.message}`)
-    }
-    
-    throw new Error("Failed to generate access token. Please try again.")
+    console.error('❌ [TOKEN] Token generation error:', error instanceof Error ? error.message : String(error))
+    // Log detailed error server-side but throw generic error for client
+    logger.error("Failed to generate access token:", error instanceof Error ? error.message : String(error))
+    throw new Error("Failed")
   }
 }
 
-// Generate checksum using official ClickPesa algorithm
+// Canonicalize payload recursively - sort all object keys alphabetically at every nesting level
+function canonicalize(obj: any): any {
+  if (obj === null || typeof obj !== 'object') {
+    return obj
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(canonicalize)
+  }
+  
+  // Recursively sort object keys alphabetically
+  return Object.keys(obj)
+    .sort()
+    .reduce((acc: Record<string, any>, key: string) => {
+      acc[key] = canonicalize(obj[key])
+      return acc
+    }, {})
+}
+
+// Generate checksum using official ClickPesa algorithm (Updated 2024)
+// New method: Recursive canonicalization + JSON serialization + HMAC-SHA256
 export const generateChecksum = (payload: CheckoutLinkRequest): string => {
   try {
-    // Official ClickPesa checksum algorithm:
-    // 1. Sort payload keys alphabetically
-    // 2. Concatenate sorted values into a single string
-    // 3. Generate HMAC-SHA256 hash with checksum key
-    // 4. Return hex digest
+    if (typeof window !== 'undefined') {
+      throw new Error("Checksum generation should only happen server-side")
+    }
     
-    // Create payload object (exclude checksum field itself)
-    const checksumPayload: Record<string, string> = {}
+    // Step 1: Create payload object (exclude checksum and checksumMethod fields)
+    const checksumPayload: Record<string, any> = {}
     
     // Add all non-empty fields to payload
     if (payload.totalPrice) checksumPayload.totalPrice = payload.totalPrice
@@ -202,38 +266,23 @@ export const generateChecksum = (payload: CheckoutLinkRequest): string => {
     if (payload.returnUrl) checksumPayload.returnUrl = payload.returnUrl
     if (payload.cancelUrl) checksumPayload.cancelUrl = payload.cancelUrl
     if (payload.webhookUrl) checksumPayload.webhookUrl = payload.webhookUrl
+    if (payload.description) checksumPayload.description = payload.description
     
-    // Step 1: Sort payload keys alphabetically
-    const sortedPayload = Object.keys(checksumPayload)
-      .sort()
-      .reduce((obj: Record<string, string>, key: string) => {
-        obj[key] = checksumPayload[key]
-        return obj
-      }, {})
+    // Step 2: Recursively canonicalize payload (sort keys alphabetically at all nesting levels)
+    const canonicalPayload = canonicalize(checksumPayload)
     
-    // Step 2: Concatenate sorted values
-    const payloadString = Object.values(sortedPayload).join("")
+    // Step 3: Serialize to compact JSON (no extra whitespace)
+    const payloadString = JSON.stringify(canonicalPayload)
     
-    logger.log("Checksum payload:", checksumPayload)
-    logger.log("Sorted payload:", sortedPayload)
-    logger.log("Concatenated string:", payloadString)
-    logger.log("Using checksum key:", CLICKPESA_CHECKSUM_KEY)
+    // Step 4: Generate HMAC-SHA256 hash (optimized: removed verbose logging)
+    const crypto = require('crypto')
+    const hmac = crypto.createHmac('sha256', CLICKPESA_CHECKSUM_KEY)
+    hmac.update(payloadString)
+    const checksum = hmac.digest('hex')
     
-    // Step 3: Generate HMAC-SHA256 hash
-    if (typeof window === 'undefined') {
-      // Server-side: Use Node.js crypto
-      const crypto = require('crypto')
-      const hmac = crypto.createHmac('sha256', CLICKPESA_CHECKSUM_KEY)
-      hmac.update(payloadString)
-      const checksum = hmac.digest('hex')
-      
-      logger.log("Generated checksum:", checksum)
-      return checksum
-    } else {
-      // Client-side: Should not happen for checksum generation
-      throw new Error("Checksum generation should only happen server-side")
-    }
+    return checksum
   } catch (error) {
+    logger.error("Checksum generation error:", error instanceof Error ? error.message : String(error))
     throw new Error(`Failed to generate checksum: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 }
@@ -247,90 +296,142 @@ export const createCheckoutLink = async (
   try {
     // Step 1: Generate access token with appropriate credentials
     const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
-    logger.log(`Generating ClickPesa access token (${credentialType})...`)
+    console.log(`🔑 [CLICKPESA-API] Step 1: Generating access token (${credentialType})...`)
     const accessToken = await generateAccessToken(useSupplierCredentials)
-    logger.log(`Access token generated successfully (${credentialType})`)
+    console.log(`✅ [CLICKPESA-API] Step 1: Access token generated`)
 
     // Step 2: Generate checksum if not provided
+    console.log('🔐 [CLICKPESA-API] Step 2: Generating checksum...')
     if (!request.checksum) {
       request.checksum = generateChecksum(request)
-      logger.log("Checksum generated:", request.checksum)
     }
+    console.log('✅ [CLICKPESA-API] Step 2: Checksum generated')
 
     // Step 3: Create checkout link
-    logger.log("Creating checkout link...")
+    const requestPayload = {
+      totalPrice: request.totalPrice,
+      orderReference: request.orderReference,
+      orderCurrency: request.orderCurrency,
+      customerName: request.customerName,
+      customerEmail: request.customerEmail,
+      customerPhone: request.customerPhone,
+      ...(request.returnUrl && { returnUrl: request.returnUrl }),
+      ...(request.cancelUrl && { cancelUrl: request.cancelUrl }),
+      ...(request.webhookUrl && { webhookUrl: request.webhookUrl }),
+      ...(request.checksum && { checksum: request.checksum })
+    }
+    
+    const authHeader = accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`
+    
+    console.log('📡 [CLICKPESA-API] Step 3: Calling ClickPesa API to create checkout link...', {
+      endpoint: `${CLICKPESA_CONFIG.baseUrl}/third-parties/checkout-link/generate-checkout-url`,
+      orderReference: requestPayload.orderReference,
+      totalPrice: requestPayload.totalPrice
+    })
     const response = await fetch(`${CLICKPESA_CONFIG.baseUrl}/third-parties/checkout-link/generate-checkout-url`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": accessToken, // Use generated JWT token (already includes Bearer)
+        "Authorization": authHeader,
       },
-      body: JSON.stringify({
-        totalPrice: request.totalPrice,
-        orderReference: request.orderReference,
-        orderCurrency: request.orderCurrency,
-        customerName: request.customerName,
-        customerEmail: request.customerEmail,
-        customerPhone: request.customerPhone,
-        ...(request.returnUrl && { returnUrl: request.returnUrl }),
-        ...(request.cancelUrl && { cancelUrl: request.cancelUrl }),
-        ...(request.webhookUrl && { webhookUrl: request.webhookUrl }),
-        ...(request.checksum && { checksum: request.checksum })
-      }),
+      body: JSON.stringify(requestPayload),
+    })
+
+    console.log('📥 [CLICKPESA-API] Step 3: Received response from ClickPesa API', {
+      status: response.status,
+      ok: response.ok
     })
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(
-        errorData.message || 
-        `ClickPesa API error: ${response.status} ${response.statusText}`
-      )
+      const responseText = await response.text()
+      let errorData
+      try {
+        errorData = JSON.parse(responseText)
+      } catch {
+        errorData = { message: responseText }
+      }
+      
+      console.error('❌ [CLICKPESA-API] Step 3: ClickPesa API error', {
+        status: response.status,
+        statusText: response.statusText,
+        errorData: errorData
+      })
+      // Log detailed error server-side but throw generic error for client
+      logger.error("ClickPesa checkout link creation failed:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorData: errorData,
+        endpoint: `${CLICKPESA_CONFIG.baseUrl}/third-parties/checkout-link/generate-checkout-url`,
+        requestPayload: {
+          totalPrice: request.totalPrice,
+          orderReference: request.orderReference,
+          orderCurrency: request.orderCurrency,
+          hasChecksum: !!request.checksum
+        }
+      })
+      throw new Error("Failed")
     }
 
     const data = await response.json()
+    console.log('📦 [CLICKPESA-API] Step 3: Parsed response', {
+      hasCheckoutLink: !!data.checkoutLink,
+      hasClientId: !!data.clientId
+    })
     
     if (!data.checkoutLink) {
-      throw new Error("Invalid response from ClickPesa API - missing checkout link")
+      console.error('❌ [CLICKPESA-API] Step 3: Missing checkout link in response', { data })
+      logger.error("Invalid response from ClickPesa API - missing checkout link")
+      throw new Error("Failed")
     }
 
+    console.log('✅ [CLICKPESA-API] Step 3: Checkout link created successfully')
     return {
       checkoutLink: data.checkoutLink,
       clientId: data.clientId
     }
   } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`Failed to create checkout link: ${error.message}`)
-    }
-    
-    throw new Error("Failed to create checkout link. Please try again.")
+    // Log detailed error server-side but throw generic error for client
+    logger.error("Failed to create checkout link:", error instanceof Error ? error.message : String(error))
+    throw new Error("Failed")
   }
 }
 
 // Validate ClickPesa webhook signature
+// Updated to match ClickPesa's new checksum method: recursive canonicalization + JSON.stringify
 export const validateWebhook = (payload: any, signature: string, secretKey: string): boolean => {
   try {
     if (!secretKey) {
       return false
     }
 
-    // ClickPesa webhook signature validation
-    // The signature is typically a HMAC-SHA256 hash of the payload
-    const crypto = require('crypto')
+    // ClickPesa webhook signature validation using new method
+    // 1. Exclude checksum and checksumMethod fields from payload
+    const payloadForValidation = { ...payload }
+    delete payloadForValidation.checksum
+    delete payloadForValidation.checksumMethod
     
-    // Create expected signature
+    // 2. Recursively canonicalize payload (sort keys alphabetically at all levels)
+    const canonicalPayload = canonicalize(payloadForValidation)
+    
+    // 3. Serialize to compact JSON
+    const payloadString = JSON.stringify(canonicalPayload)
+    
+    // 4. Generate HMAC-SHA256 hash
+    const crypto = require('crypto')
     const expectedSignature = crypto
       .createHmac('sha256', secretKey)
-      .update(JSON.stringify(payload))
+      .update(payloadString)
       .digest('hex')
     
-    // Compare signatures using timing-safe comparison
-    const providedSignature = signature.replace('sha256=', '') // Remove prefix if present
+    // 5. Compare signatures using timing-safe comparison
+    const providedSignature = signature.replace('sha256=', '').trim() // Remove prefix if present
     
     return crypto.timingSafeEqual(
       Buffer.from(expectedSignature, 'hex'),
       Buffer.from(providedSignature, 'hex')
     )
   } catch (error) {
+    logger.error("Webhook signature validation error:", error instanceof Error ? error.message : String(error))
     return false
   }
 }

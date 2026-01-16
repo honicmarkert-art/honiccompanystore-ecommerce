@@ -451,7 +451,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
         setAuthError(result.error || "Registration failed. Please try again.")
         
         // Keep toast for errors
-        toast({ title: "Registration Failed", description: result.error || "Please check your information and try again.", variant: "destructive" })
+        toast({ title: "Registration Failed", description: "Failed", variant: "destructive" })
       }
     } catch (error) {
       setAuthError("Network error. Please check your connection and try again.")
@@ -575,7 +575,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                               } catch (error) {
                                 toast({
                                   title: 'Error',
-                                  description: 'Network error. Please try again.',
+                                  description: 'Failed',
                                   variant: 'destructive'
                                 })
                               } finally {

@@ -105,7 +105,7 @@ export default function PayoutAccountsPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to load payout accounts',
+        description: 'Failed',
         variant: 'destructive'
       })
     } finally {
@@ -265,7 +265,7 @@ export default function PayoutAccountsPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to delete account',
+        description: 'Failed',
         variant: 'destructive'
       })
     }
@@ -292,7 +292,7 @@ export default function PayoutAccountsPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to set default account',
+        description: 'Failed',
         variant: 'destructive'
       })
     }

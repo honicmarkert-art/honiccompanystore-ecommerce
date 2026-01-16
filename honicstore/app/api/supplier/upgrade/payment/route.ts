@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
 
     if (!checkoutResult.checkoutLink) {
       return NextResponse.json(
-        { success: false, error: 'Failed to create checkout link' },
+        { success: false, error: 'Failed' },
         { status: 500 }
       )
     }
@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
         userId: user?.id,
         referenceId: body?.referenceId
       })
-      return createErrorResponse(error, 'Failed to create payment link', 500)
+      return createErrorResponse(error, 500)
     }
   })
 }

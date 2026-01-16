@@ -392,7 +392,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
             toast({
           title: "Login Failed",
-          description: result.error || "An error occurred during login",
+          description: "Failed",
           variant: "destructive"
         })
 
@@ -467,7 +467,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         toast({
           title: "Login Failed",
-          description: result.error || "An error occurred during login",
+          description: "Failed",
           variant: "destructive"
         })
 
@@ -481,12 +481,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       toast({
         title: "Login Error",
-        description: "Network error. Please check your connection and try again.",
+        description: "Failed",
         variant: "destructive"
       })
       return { 
         success: false, 
-        error: "Network error. Please check your connection and try again.",
+        error: "Failed",
         type: 'NETWORK_ERROR'
       }
     } finally {
@@ -602,10 +602,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      toast({ title: 'Registration Failed', description: result?.error || 'Please try again.', variant: 'destructive' })
+      toast({ title: 'Registration Failed', description: 'Failed', variant: 'destructive' })
       return { success: false, error: result?.error, type: result?.type }
     } catch (error) {
-      toast({ title: 'Registration Error', description: 'Network error. Please try again.', variant: 'destructive' })
+      toast({ title: 'Registration Error', description: 'Failed', variant: 'destructive' })
       return { success: false, error: 'NETWORK_ERROR', type: 'NETWORK_ERROR' }
     }
   }
@@ -636,10 +636,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         toast({
           title: "Google Sign-In Failed",
-          description: error.message || "An error occurred during Google sign-in",
+          description: "Failed",
           variant: "destructive"
         })
-        return { success: false, error: error.message }
+        return { success: false, error: "Failed" }
       }
 
       // If successful, the user will be redirected to Google, then back to the callback
@@ -648,10 +648,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error: any) {
       toast({
         title: "Google Sign-In Error",
-        description: "Network error. Please check your connection and try again.",
+        description: "Failed",
         variant: "destructive"
       })
-      return { success: false, error: "Network error" }
+      return { success: false, error: "Failed" }
     }
   }
 
@@ -777,7 +777,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         toast({
           title: "Reset Error",
-          description: result.error || "Failed to send reset email. Please try again.",
+          description: "Failed",
           variant: "destructive"
         })
         return { success: false, error: result.error }
@@ -785,10 +785,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error: any) {
       toast({
         title: "Reset Error",
-        description: error?.message || "An error occurred while sending reset email",
+        description: "Failed",
         variant: "destructive"
       })
-      return { success: false, error: "Network error" }
+      return { success: false, error: "Failed" }
     }
   }
 

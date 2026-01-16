@@ -146,8 +146,8 @@ export function getSecureErrorMessage(error: unknown, defaultMessage: string): s
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
-  initialDelay: number = 1000,
-  maxDelay: number = 10000
+  initialDelay: number = 300, // Reduced to 300ms for faster retries
+  maxDelay: number = 1500 // Reduced to 1500ms for faster failure
 ): Promise<T> {
   let lastError: unknown
   
@@ -162,14 +162,14 @@ export async function retryWithBackoff<T>(
         throw error
       }
       
-      // Calculate delay with exponential backoff
+      // Calculate delay with exponential backoff (faster: 500ms, 1000ms max)
       const delay = Math.min(
         initialDelay * Math.pow(2, attempt),
         maxDelay
       )
       
-      // Add jitter to prevent thundering herd
-      const jitter = Math.random() * 0.3 * delay
+      // Reduced jitter for faster retries
+      const jitter = Math.random() * 0.2 * delay
       const finalDelay = delay + jitter
       
       await new Promise(resolve => setTimeout(resolve, finalDelay))
@@ -181,6 +181,8 @@ export async function retryWithBackoff<T>(
 
 /**
  * Rate limit aware fetch with retry
+ * Retries on network errors, 5xx server errors, rate limits, and timeouts
+ * Also retries on 404 (order not found) to handle database replication lag
  */
 export async function fetchWithRetry(
   url: string,
@@ -189,20 +191,57 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   return retryWithBackoff(
     async () => {
-      const response = await fetch(url, options)
+      let response: Response
       
-      // If rate limited, throw error to trigger retry
+      try {
+        response = await fetch(url, options)
+      } catch (networkError: any) {
+        // Network errors (timeouts, connection failures) should be retried
+        // These are caught here and will trigger retry via retryWithBackoff
+        throw networkError
+      }
+      
+      // Retry on rate limit (429)
       if (response.status === 429) {
         const error = new Error('Rate limit exceeded')
         ;(error as any).status = 429
         throw error
       }
       
+      // Retry on server errors (5xx) - these are transient
+      if (response.status >= 500 && response.status < 600) {
+        const error = new Error(`Server error: ${response.status}`)
+        ;(error as any).status = response.status
+        throw error
+      }
+      
+      // Retry on timeout (408)
+      if (response.status === 408) {
+        const error = new Error('Request timeout')
+        ;(error as any).status = 408
+        throw error
+      }
+      
+      // Retry on 404 (order not found) - might be database replication lag
+      // Only retry once for 404 to avoid infinite loops
+      if (response.status === 404 && maxRetries > 0) {
+        // Check if this is a payment/order endpoint that might have replication lag
+        if (url.includes('/api/payment/') || url.includes('/api/orders')) {
+          const error = new Error('Order not found - possible replication lag')
+          ;(error as any).status = 404
+          ;(error as any).retryable = true
+          throw error
+        }
+      }
+      
+      // Don't retry on other 4xx client errors (except 429, 408, and conditional 404)
+      // These indicate a problem with the request that won't be fixed by retrying
+      
       return response
     },
     maxRetries,
-    1000, // Start with 1 second delay
-    5000  // Max 5 seconds delay
+    300, // Start with 300ms delay (faster)
+    1500  // Max 1.5 seconds delay (faster failure)
   )
 }
 
