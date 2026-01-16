@@ -66,6 +66,7 @@ import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { ValidationModal, useValidationModal } from "@/components/ui/validation-modal"
 import { UserProfile } from "@/components/user-profile"
 import { Footer } from "@/components/footer"
+import { useOptimizedNavigation } from "@/components/optimized-link"
 
 export default function CartPage() {
   return (
@@ -78,6 +79,7 @@ export default function CartPage() {
 function CartPageContent() {
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { cart, updateItemQuantity, removeItem, cartUniqueProducts, cartSubtotal, clearCart, isLoading } = useCart() // Use useCart hook
+  const { navigateWithPrefetch } = useOptimizedNavigation()
   
   // Calculate total cart items (count variants as separate items)
   const totalCartItems = useMemo(() => {
@@ -603,10 +605,26 @@ function CartPageContent() {
                 if (sameOrigin && !fromCheckout) {
                   router.back()
                 } else {
-                  router.push('/products')
+                  // Mark that we're returning from cart page
+                  if (typeof window !== 'undefined') {
+                    try {
+                      sessionStorage.setItem('navigated_from_cart', 'true')
+                    } catch (e) {
+                      // Ignore storage errors
+                    }
+                  }
+                  navigateWithPrefetch('/products', { priority: 'medium', scroll: false })
                 }
               } catch {
-                router.push('/products')
+                // Mark that we're returning from cart page
+                if (typeof window !== 'undefined') {
+                  try {
+                    sessionStorage.setItem('navigated_from_cart', 'true')
+                  } catch (e) {
+                    // Ignore storage errors
+                  }
+                }
+                navigateWithPrefetch('/products', { priority: 'medium', scroll: false })
               }
             }}
             className="flex items-center gap-1 text-xs font-semibold flex-shrink-0 text-gray-900 dark:text-white p-1"
@@ -1459,19 +1477,28 @@ function CartPageContent() {
                         Proceed to Checkout
                       </Button>
                       
-                      <Link href="/products" className="block mt-[10px]">
-                        <Button 
-                          variant="outline" 
-                          className={cn(
-                            "w-full",
-                            themeClasses.borderNeutralSecondary,
-                            themeClasses.buttonGhostHoverBg,
-                          )}
-                          size="lg"
-                        >
-                          Continue Shopping
-                        </Button>
-                      </Link>
+                      <Button 
+                        variant="outline" 
+                        className={cn(
+                          "w-full mt-[10px]",
+                          themeClasses.borderNeutralSecondary,
+                          themeClasses.buttonGhostHoverBg,
+                        )}
+                        size="lg"
+                        onClick={() => {
+                          // Mark that we're returning from cart page
+                          if (typeof window !== 'undefined') {
+                            try {
+                              sessionStorage.setItem('navigated_from_cart', 'true')
+                            } catch (e) {
+                              // Ignore storage errors
+                            }
+                          }
+                          navigateWithPrefetch('/products', { priority: 'medium', scroll: false })
+                        }}
+                      >
+                        Continue Shopping
+                      </Button>
                     </div>
 
                     {/* Additional Info */}

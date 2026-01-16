@@ -659,12 +659,12 @@ function ProductsPageContent() {
     if (categoryMegaMenuTimeoutRef.current) {
       clearTimeout(categoryMegaMenuTimeoutRef.current)
     }
-    // Add 400ms delay before opening
+    // Add 1.2 second delay before opening
     categoryMegaMenuTimeoutRef.current = setTimeout(() => {
     if (!isCategoryMegaMenuOpen) {
       setIsCategoryMegaMenuOpen(true)
     }
-    }, 400)
+    }, 1200)
   }, [isCategoryMegaMenuOpen])
 
   const closeCategoryMegaMenu = useCallback(() => {
@@ -1197,12 +1197,19 @@ function ProductsPageContent() {
     if (typeof window === 'undefined') return
     if (hasRestoredScrollRef.current) return // Only restore once per navigation
     
-    // Check if we're returning from a product detail page
+    // Check if we're returning from a product detail page or cart page
     const isReturningFromDetail = sessionStorage.getItem('navigated_from_product_detail') === 'true'
+    const isReturningFromCart = sessionStorage.getItem('navigated_from_cart') === 'true'
+    const isReturning = isReturningFromDetail || isReturningFromCart
     
-    if (isReturningFromDetail) {
-      // Clear the flag immediately to prevent multiple restorations
-      sessionStorage.removeItem('navigated_from_product_detail')
+    if (isReturning) {
+      // Clear the flags immediately to prevent multiple restorations
+      if (isReturningFromDetail) {
+        sessionStorage.removeItem('navigated_from_product_detail')
+      }
+      if (isReturningFromCart) {
+        sessionStorage.removeItem('navigated_from_cart')
+      }
       hasRestoredScrollRef.current = true
       
       // Get saved scroll position and displayed count
@@ -1304,9 +1311,16 @@ function ProductsPageContent() {
   const [hasShuffled, setHasShuffled] = useState(false)
   const previousDisplayedCountRef = useRef(0)
   
-  // Check if user is returning from detail page
+  // Check if user is returning from detail page or cart page
   const isReturningFromDetail = useMemo(() => {
     if (typeof window === 'undefined') return false
+    try {
+      const fromCart = sessionStorage.getItem('navigated_from_cart') === 'true'
+      const fromDetail = sessionStorage.getItem('navigated_from_product_detail') === 'true'
+      if (fromCart || fromDetail) return true
+    } catch (e) {
+      // Ignore storage errors
+    }
     const referrer = document.referrer
     const returnTo = urlSearchParams?.get('returnTo')
     // Check if referrer contains product detail page (pattern: /products/123-product-name)
