@@ -320,8 +320,6 @@ export const createCheckoutLink = async (
         errorData = { message: responseText }
       }
       
-        errorData: errorData
-      })
       // Log detailed error server-side but throw generic error for client
       logger.error("ClickPesa checkout link creation failed:", {
         status: response.status,
