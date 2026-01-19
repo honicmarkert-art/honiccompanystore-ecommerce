@@ -122,7 +122,12 @@ function AdminProductsContent() {
       
       const result = await fetchFullProducts(BATCH_SIZE, currentOffset)
       if (result && result.products) {
-        setLoadedProducts(prev => [...prev, ...result.products])
+        // Filter out duplicates before adding
+        setLoadedProducts(prev => {
+          const existingIds = new Set(prev.map(p => p.id))
+          const newProducts = result.products.filter((p: Product) => !existingIds.has(p.id))
+          return [...prev, ...newProducts]
+        })
         if (result.pagination) {
           setTotalCount(result.pagination.total || loadedProducts.length + result.products.length)
           setHasMore(result.pagination.hasMore !== undefined ? result.pagination.hasMore : result.products.length >= BATCH_SIZE)
@@ -208,7 +213,20 @@ function AdminProductsContent() {
   }, [subCategories, mainCategories, selectedMainCategoryId])
 
   // Use loadedProducts instead of products from hook for admin page
-  const adminProducts = loadedProducts.length > 0 ? loadedProducts : products
+  // Remove duplicates by using a Map with product ID as key
+  const adminProducts = useMemo(() => {
+    if (loadedProducts.length > 0) {
+      // Use Map to ensure unique products by ID
+      const uniqueProducts = new Map<number, Product>()
+      loadedProducts.forEach(product => {
+        if (!uniqueProducts.has(product.id)) {
+          uniqueProducts.set(product.id, product)
+        }
+      })
+      return Array.from(uniqueProducts.values())
+    }
+    return products
+  }, [loadedProducts, products])
 
   const brands = useMemo(() => {
     const brs = new Set(adminProducts.map(p => p.brand))

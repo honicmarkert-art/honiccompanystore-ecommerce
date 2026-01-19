@@ -212,8 +212,12 @@ function ProductsPageContent() {
   const [activeBrand, setActiveBrand] = useState<string | null>(null)
   // Debounce timer for clearing search URL
   const clearSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Track previous URL search value to detect changes
+  const prevUrlSearchRef = useRef<string>('')
   // Categories scroll state
   const categoriesScrollRef = useRef<HTMLDivElement>(null)
+  // Products section ref for scrolling
+  const productsSectionRef = useRef<HTMLDivElement>(null)
   const [showLeftArrow, setShowLeftArrow] = useState(false)
   const [showRightArrow, setShowRightArrow] = useState(true)
   // Initialize search state from URL query ?search= on mount and when URL changes
@@ -243,16 +247,26 @@ function ProductsPageContent() {
 
   useEffect(() => {
     const initial = (urlSearchParams?.get('search') || '').trim()
-    // Sync input field with URL search param (both when set and when cleared)
-    // This ensures the input reflects the actual search query, not just what user is typing
+    // Sync input field with URL search param (only when URL changes, not when user types)
+    // This ensures the input reflects the actual search query from URL
     // Cancel any pending clear timeout when URL changes (prevents race conditions)
     if (clearSearchTimeoutRef.current) {
       clearTimeout(clearSearchTimeoutRef.current)
       clearSearchTimeoutRef.current = null
     }
-    if (initial !== searchTerm) {
-      setSearchTerm(initial)
-    }
+    
+    // Check if URL search value changed
+    const searchChanged = prevUrlSearchRef.current !== initial
+    prevUrlSearchRef.current = initial
+    
+    // Only update searchTerm if URL value is different from current state
+    // Don't reset while user is typing (only sync from URL to state)
+    setSearchTerm(prev => {
+      if (prev !== initial) {
+        return initial
+      }
+      return prev
+    })
     
     // Initialize category state from URL
     // Read again after potential cleanup above
@@ -264,16 +278,35 @@ function ProductsPageContent() {
       ? [urlSubCategory] 
       : (urlSubCategoriesParam?.split(',') || [])
     
-    // Only set selectedMainCategory if it's different AND we're not in the middle of a checkbox operation
-    // The checkbox should only set selectedSubCategories, not selectedMainCategory
-    if (urlMainCategory && urlMainCategory !== selectedMainCategory) {
-      // Set selectedMainCategory when mainCategory is in URL
+    // Set selectedMainCategory when mainCategory is in URL
+    // Note: State setters will handle deduplication, so no need to compare
+    if (urlMainCategory) {
       setSelectedMainCategory(urlMainCategory)
+    } else if (!urlMainCategory && urlSearchParams?.get('mainCategory') === null) {
+      // Only clear if URL explicitly has no mainCategory (not just missing)
+      setSelectedMainCategory(null)
     }
     
-    if (urlSubCategories.length > 0 && JSON.stringify(urlSubCategories) !== JSON.stringify(selectedSubCategories)) {
+    // Set selectedSubCategories when subCategories are in URL
+    if (urlSubCategories.length > 0) {
       setSelectedSubCategories(urlSubCategories)
+    } else if (urlSubCategories.length === 0 && !urlSubCategory && !urlSubCategoriesParam) {
+      // Only clear if URL explicitly has no subCategories
+      setSelectedSubCategories([])
     }
+    
+    // Scroll to products section when search param is set (and changed)
+    if (initial && initial.length >= 3 && searchChanged) {
+      setTimeout(() => {
+        if (productsSectionRef.current) {
+          productsSectionRef.current.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'start' 
+          })
+        }
+      }, 300) // Slightly longer delay to ensure products are loaded
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSearchParams])
 
   // Submit search (updates URL and triggers server-side filtering)
@@ -290,7 +323,26 @@ function ProductsPageContent() {
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
     // Use replace instead of push to avoid adding to history stack
     // This prevents full page refresh and maintains client-side routing
+    // scroll: false prevents automatic scroll to top
     router.replace(nextUrl, { scroll: false })
+    
+    // Only scroll to products section if user is currently scrolled above it
+    // This preserves scroll position if user is already viewing products
+    setTimeout(() => {
+      if (productsSectionRef.current && typeof window !== 'undefined') {
+        const productsSectionTop = productsSectionRef.current.getBoundingClientRect().top + window.scrollY
+        const currentScrollY = window.scrollY
+        
+        // Only scroll if products section is below current viewport or user is near top
+        if (currentScrollY < productsSectionTop - 200 || currentScrollY < 200) {
+          productsSectionRef.current.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'start' 
+          })
+        }
+        // Otherwise, preserve current scroll position
+      }
+    }, 100)
   }, [router, urlSearchParams, searchTerm])
 
   // Removed useRobustProducts hook - was causing duplicate API calls!
@@ -656,22 +708,30 @@ function ProductsPageContent() {
   const desktopMoreButtonRef = useRef<HTMLDivElement>(null)
   const desktopCategoriesContainerRef = useRef<HTMLDivElement>(null)
   const openCategoryMegaMenu = useCallback(() => {
+    // Clear any existing timeout first
     if (categoryMegaMenuTimeoutRef.current) {
       clearTimeout(categoryMegaMenuTimeoutRef.current)
+      categoryMegaMenuTimeoutRef.current = null
     }
-    // Add 1.2 second delay before opening
+    // Only open if cursor stays hovered for 1.2 seconds (1200ms)
+    // Timer will be cleared if cursor leaves before 1.2 seconds
     categoryMegaMenuTimeoutRef.current = setTimeout(() => {
-    if (!isCategoryMegaMenuOpen) {
-      setIsCategoryMegaMenuOpen(true)
-    }
-    }, 1200)
+      if (!isCategoryMegaMenuOpen) {
+        setIsCategoryMegaMenuOpen(true)
+      }
+      categoryMegaMenuTimeoutRef.current = null
+    }, 1200) // 1.2 seconds delay
   }, [isCategoryMegaMenuOpen])
 
   const closeCategoryMegaMenu = useCallback(() => {
+    // Immediately clear the open timeout when cursor leaves
+    // This prevents the menu from opening if cursor left before 1.2 seconds
     if (categoryMegaMenuTimeoutRef.current) {
       clearTimeout(categoryMegaMenuTimeoutRef.current)
+      categoryMegaMenuTimeoutRef.current = null
     }
-    categoryMegaMenuTimeoutRef.current = setTimeout(() => {
+    // Small delay before closing to allow moving cursor to menu
+    setTimeout(() => {
       setIsCategoryMegaMenuOpen(false)
     }, 120)
   }, [])
@@ -2092,10 +2152,12 @@ function ProductsPageContent() {
             className="hidden sm:block ml-3"
             onMouseEnter={(e) => {
               e.stopPropagation()
+              // Start timer - will only open if cursor stays for 1.2 seconds
               openCategoryMegaMenu()
             }}
             onMouseLeave={(e) => {
               e.stopPropagation()
+              // Cancel timer if cursor leaves before 1.2 seconds
               closeCategoryMegaMenu()
             }}
             onFocusCapture={openCategoryMegaMenu}
@@ -2904,14 +2966,22 @@ function ProductsPageContent() {
                 className="relative flex-1"
                 data-category-nav
                 onMouseEnter={() => {
+                  // Clear any existing timeout and start fresh timer
+                  // Menu will only open if cursor stays for 1.2 seconds
                   if (categoryMegaMenuTimeoutRef.current) {
                     clearTimeout(categoryMegaMenuTimeoutRef.current)
+                    categoryMegaMenuTimeoutRef.current = null
                   }
                   setHoveredMegaCategory(cat.slug)
                   openCategoryMegaMenu()
                 }}
                 onMouseLeave={() => {
-                  // Don't close immediately, let the mega menu handle it
+                  // Cancel timer if cursor leaves before 1.2 seconds
+                  // This prevents menu from opening when cursor just passes through
+                  if (categoryMegaMenuTimeoutRef.current) {
+                    clearTimeout(categoryMegaMenuTimeoutRef.current)
+                    categoryMegaMenuTimeoutRef.current = null
+                  }
                 }}
             >
               <Link 
@@ -4048,6 +4118,7 @@ function ProductsPageContent() {
 
 
                 {/* Products Grid */}
+        <div ref={productsSectionRef} id="products-section">
         {/* Only show skeleton if: loading AND no products AND no cached data loaded - prevent multiple skeletons */}
         {(showSkeleton && primaryLoading && primaryProducts.length === 0 && !hasDataLoaded) ? (
           // Skeleton Loading State - only show when actually loading and no data available
@@ -4128,6 +4199,7 @@ function ProductsPageContent() {
             })()}
           </InfiniteScrollTrigger>
         ) : null}
+        </div>
 
         {/* Next Page Navigation */}
         {!hasMoreProducts && currentPageProductCount >= PRODUCTS_PER_PAGE && hasNextPage && (
