@@ -43,7 +43,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
-import { useProducts } from "@/hooks/use-products"
+import { useProducts, type Product } from "@/hooks/use-products"
 import { useCategories } from "@/hooks/use-categories"
 import { useCurrency } from "@/contexts/currency-context"
 import { useToast } from "@/hooks/use-toast"
@@ -73,27 +73,102 @@ function AdminProductsContent() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
   
-  // Pagination state
-  const PRODUCTS_PER_PAGE = 500
-  const [currentPage, setCurrentPage] = useState(1)
+  // Batch loading state
+  const BATCH_SIZE = 30 // Load 30 products per batch to avoid rate limiting
+  const [loadedProducts, setLoadedProducts] = useState<Product[]>([])
+  const [currentOffset, setCurrentOffset] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [hasMore, setHasMore] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
 
-  // Fetch full products with variants when admin page loads or page changes
+  // Initial fetch on mount
   useEffect(() => {
-    const offset = (currentPage - 1) * PRODUCTS_PER_PAGE
-    fetchFullProducts(PRODUCTS_PER_PAGE, offset).then((result) => {
+    const loadInitialBatch = async () => {
+      setIsInitialLoading(true)
+      try {
+        const result = await fetchFullProducts(BATCH_SIZE, 0)
+        if (result) {
+          setLoadedProducts(result.products || [])
+          if (result.pagination) {
+            setTotalCount(result.pagination.total || result.products.length)
+            setHasMore(result.pagination.hasMore !== undefined ? result.pagination.hasMore : result.products.length >= BATCH_SIZE)
+          } else {
+            setHasMore(result.products.length >= BATCH_SIZE)
+          }
+          setCurrentOffset(BATCH_SIZE)
+        }
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to load products",
+          variant: "destructive"
+        })
+      } finally {
+        setIsInitialLoading(false)
+      }
+    }
+    loadInitialBatch()
+  }, [fetchFullProducts, toast])
+
+  // Load more products function
+  const loadMoreProducts = async () => {
+    if (isLoadingMore || !hasMore) return
+    
+    setIsLoadingMore(true)
+    try {
+      // Add small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      const result = await fetchFullProducts(BATCH_SIZE, currentOffset)
+      if (result && result.products) {
+        setLoadedProducts(prev => [...prev, ...result.products])
+        if (result.pagination) {
+          setTotalCount(result.pagination.total || loadedProducts.length + result.products.length)
+          setHasMore(result.pagination.hasMore !== undefined ? result.pagination.hasMore : result.products.length >= BATCH_SIZE)
+        } else {
+          setHasMore(result.products.length >= BATCH_SIZE)
+        }
+        setCurrentOffset(prev => prev + BATCH_SIZE)
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load more products",
+        variant: "destructive"
+      })
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }
+
+  // Refresh function - reset and reload from beginning
+  const handleRefresh = async () => {
+    setIsInitialLoading(true)
+    setCurrentOffset(0)
+    setLoadedProducts([])
+    try {
+      const result = await fetchFullProducts(BATCH_SIZE, 0)
       if (result) {
+        setLoadedProducts(result.products || [])
         if (result.pagination) {
           setTotalCount(result.pagination.total || result.products.length)
-          setHasMore(result.pagination.hasMore !== undefined ? result.pagination.hasMore : result.products.length >= PRODUCTS_PER_PAGE)
+          setHasMore(result.pagination.hasMore !== undefined ? result.pagination.hasMore : result.products.length >= BATCH_SIZE)
         } else {
-          // Fallback: if no pagination info, assume hasMore if we got full page
-          setHasMore(result.products.length >= PRODUCTS_PER_PAGE)
+          setHasMore(result.products.length >= BATCH_SIZE)
         }
+        setCurrentOffset(BATCH_SIZE)
       }
-    })
-  }, [fetchFullProducts, currentPage])
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to refresh products",
+        variant: "destructive"
+      })
+    } finally {
+      setIsInitialLoading(false)
+    }
+  }
 
   // Initialize filters from URL (persist across refresh)
   useEffect(() => {
@@ -132,14 +207,17 @@ function AdminProductsContent() {
     return subCategories.filter(s => String((s as any).parent_id || s.parent_name) && s.parent_name === (mainCategories.find(m => String(m.id) === String(selectedMainCategoryId))?.name))
   }, [subCategories, mainCategories, selectedMainCategoryId])
 
+  // Use loadedProducts instead of products from hook for admin page
+  const adminProducts = loadedProducts.length > 0 ? loadedProducts : products
+
   const brands = useMemo(() => {
-    const brs = new Set(products.map(p => p.brand))
+    const brs = new Set(adminProducts.map(p => p.brand))
     return Array.from(brs).sort()
-  }, [products])
+  }, [adminProducts])
 
   // Filter products
   const filteredProducts = useMemo(() => {
-    return products.filter(product => {
+    return adminProducts.filter(product => {
       const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesBrand = selectedBrand === "all" || product.brand === selectedBrand
 
@@ -156,7 +234,7 @@ function AdminProductsContent() {
 
       return matchesSearch && matchesBrand && matchesMain && matchesSub
     })
-  }, [products, searchTerm, selectedBrand, selectedMainCategoryId, selectedSubCategoryId])
+  }, [adminProducts, searchTerm, selectedBrand, selectedMainCategoryId, selectedSubCategoryId])
 
   const handleEditProduct = async (product: any) => {
     // Refresh the product data from the database before opening the form
@@ -178,13 +256,13 @@ function AdminProductsContent() {
   }
 
   const stats = {
-    totalProducts: products.length,
-    activeProducts: products.filter(p => p.price > 0).length,
-    totalViews: products.reduce((sum, p) => sum + (p.views || 0), 0),
-    avgRating: products.length > 0 ? (products.reduce((sum, p) => sum + (p.rating || 0), 0) / products.length).toFixed(1) : "0.0",
+    totalProducts: adminProducts.length,
+    activeProducts: adminProducts.filter(p => p.price > 0).length,
+    totalViews: adminProducts.reduce((sum, p) => sum + (p.views || 0), 0),
+    avgRating: adminProducts.length > 0 ? (adminProducts.reduce((sum, p) => sum + (p.rating || 0), 0) / adminProducts.length).toFixed(1) : "0.0",
   }
 
-  if (isLoading) {
+  if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -207,10 +285,7 @@ function AdminProductsContent() {
         </div>
         <div className="flex items-center gap-4">
           <AuthStatusIndicator />
-          <MaterializedViewRefreshButton onRefresh={() => {
-            const offset = (currentPage - 1) * PRODUCTS_PER_PAGE
-            return fetchFullProducts(PRODUCTS_PER_PAGE, offset)
-          }} />
+          <MaterializedViewRefreshButton onRefresh={handleRefresh} />
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <Button 
               className="flex items-center gap-2"
@@ -263,8 +338,7 @@ function AdminProductsContent() {
                     }
                     
                     // Force refresh the products list to ensure UI is up to date
-                    const offset = (currentPage - 1) * PRODUCTS_PER_PAGE
-                    await fetchFullProducts(PRODUCTS_PER_PAGE, offset)
+                    await handleRefresh()
                   } catch (error) {
                     
                     // Show user-friendly error message
@@ -496,26 +570,17 @@ function AdminProductsContent() {
               Products ({filteredProducts.length} {totalCount > 0 ? `of ${totalCount}` : ''})
             </CardTitle>
             <div className="flex items-center gap-2">
-              {currentPage > 1 && (
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={isLoading}
-                >
-                  Previous
-                </Button>
-              )}
               {hasMore && (
                 <Button
                   variant="outline"
-                  onClick={() => setCurrentPage(prev => prev + 1)}
-                  disabled={isLoading}
+                  onClick={loadMoreProducts}
+                  disabled={isLoadingMore || isInitialLoading}
                 >
-                  Next Page
+                  {isLoadingMore ? "Loading..." : "See More"}
                 </Button>
               )}
               <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                Page {currentPage}
+                {loadedProducts.length} loaded
               </span>
             </div>
           </div>
@@ -538,7 +603,7 @@ function AdminProductsContent() {
               </thead>
               <tbody>
                 {filteredProducts.map((product, idx) => {
-                  const productNumber = (currentPage - 1) * PRODUCTS_PER_PAGE + idx + 1
+                  const productNumber = idx + 1
                   return (
                     <tr key={product.id} className={cn("border-b", themeClasses.cardBorder)}>
                     <td className="py-3 px-4 align-top">{productNumber}</td>
@@ -643,6 +708,18 @@ function AdminProductsContent() {
               </tbody>
             </table>
           </div>
+          {hasMore && (
+            <div className="flex justify-center mt-4 pb-4">
+              <Button
+                variant="outline"
+                onClick={loadMoreProducts}
+                disabled={isLoadingMore || isInitialLoading}
+                className="min-w-[120px]"
+              >
+                {isLoadingMore ? "Loading..." : "See More"}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

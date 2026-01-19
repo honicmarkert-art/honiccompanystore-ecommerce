@@ -245,28 +245,15 @@ function ProductDetailPageContent() {
   const product = useMemo(() => {
     // Priority 1: Use fetched product data (has full details from API)
     if (productData && typeof productData === 'object' && 'id' in productData && productData.id) {
-      console.log(`📦 [CLIENT] Product ${productIdNumber} using productData:`, {
-        hasDescription: !!productData.description,
-        descriptionLength: productData.description?.length || 0,
-        hasSpecifications: !!productData.specifications,
-        specificationsKeysCount: productData.specifications ? Object.keys(productData.specifications).length : 0
-      })
       return productData
     }
     // Priority 2: Check shared cache (may have limited fields from list page)
     if (Array.isArray(products) && products.length > 0 && productIdNumber) {
       const foundProduct = products.find((p) => p.id === productIdNumber)
       if (foundProduct) {
-        console.log(`📦 [CLIENT] Product ${productIdNumber} found in products cache (may have limited fields):`, {
-          hasDescription: !!foundProduct.description,
-          descriptionLength: foundProduct.description?.length || 0,
-          hasSpecifications: !!foundProduct.specifications,
-          specificationsKeysCount: foundProduct.specifications ? Object.keys(foundProduct.specifications).length : 0
-        })
         return foundProduct
       }
     }
-    console.log(`⚠️ [CLIENT] Product ${productIdNumber} not found in cache or productData`)
     return undefined
   }, [products, productIdNumber, productData])
 
@@ -370,25 +357,8 @@ function ProductDetailPageContent() {
       
       // Security: Validate product response before using
       if (productResult && validateProductResponse(productResult)) {
-        console.log(`📥 [CLIENT] Product ${productIdNumber} received from API:`, {
-          hasDescription: !!productResult.description,
-          descriptionLength: productResult.description?.length || 0,
-          descriptionPreview: productResult.description?.substring(0, 50) || 'null',
-          hasSpecifications: !!productResult.specifications,
-          specificationsType: typeof productResult.specifications,
-          specificationsKeysCount: productResult.specifications ? Object.keys(productResult.specifications).length : 0,
-          specificationsSample: productResult.specifications ? Object.keys(productResult.specifications).slice(0, 3) : []
-        })
-        
         // Sanitize product data to prevent XSS
         const sanitizedProduct = sanitizeProductData(productResult)
-        
-        console.log(`🧹 [CLIENT] Product ${productIdNumber} after sanitization:`, {
-          hasDescription: !!sanitizedProduct.description,
-          descriptionLength: sanitizedProduct.description?.length || 0,
-          hasSpecifications: !!sanitizedProduct.specifications,
-          specificationsKeysCount: sanitizedProduct.specifications ? Object.keys(sanitizedProduct.specifications).length : 0
-        })
         
         // Merge all data immediately - no delays
         const mergedProduct = {
@@ -397,13 +367,6 @@ function ProductDetailPageContent() {
           reviews: reviewsData?.reviews || sanitizedProduct.reviews || [],
           sold_count: soldCountData?.soldCount || sanitizedProduct.sold_count || 0
         }
-        
-        console.log(`🔀 [CLIENT] Product ${productIdNumber} merged product:`, {
-          hasDescription: !!mergedProduct.description,
-          descriptionLength: mergedProduct.description?.length || 0,
-          hasSpecifications: !!mergedProduct.specifications,
-          specificationsKeysCount: mergedProduct.specifications ? Object.keys(mergedProduct.specifications).length : 0
-        })
         
         setProductData(mergedProduct)
         
@@ -736,36 +699,19 @@ function ProductDetailPageContent() {
   // Use product data - already includes all details from parallel fetch
   const displayProduct = useMemo(() => {
     const base: any = product
-    if (!base) {
-      console.log(`⚠️ [CLIENT] displayProduct: base is null/undefined`)
-      return base
-    }
-
-    console.log(`🔄 [CLIENT] displayProduct useMemo processing product ${base.id}:`, {
-      hasDescription: !!base.description,
-      descriptionLength: base.description?.length || 0,
-      descriptionValue: base.description ? base.description.substring(0, 50) : 'null',
-      hasSpecifications: !!base.specifications,
-      specificationsType: typeof base.specifications,
-      specificationsValue: base.specifications ? (typeof base.specifications === 'string' ? base.specifications.substring(0, 100) : 'object') : 'null'
-    })
+    if (!base) return base
 
     // Parse specifications if it's a JSON string
     let parsedSpecifications = base.specifications || {}
     if (typeof base.specifications === 'string' && base.specifications.trim()) {
       try {
         parsedSpecifications = JSON.parse(base.specifications)
-        console.log(`✅ [CLIENT] displayProduct: parsed specifications from string, keys:`, Object.keys(parsedSpecifications).length)
       } catch (e) {
-        console.log(`❌ [CLIENT] displayProduct: failed to parse specifications:`, e)
         // If parsing fails, try to use as-is or set to empty object
         parsedSpecifications = {}
       }
     } else if (typeof base.specifications === 'object' && base.specifications !== null) {
       parsedSpecifications = base.specifications
-      console.log(`✅ [CLIENT] displayProduct: specifications already object, keys:`, Object.keys(parsedSpecifications).length)
-    } else {
-      console.log(`⚠️ [CLIENT] displayProduct: specifications is null/undefined/empty`)
     }
 
     // Normalize variants from either JSON column or relation
@@ -857,22 +803,12 @@ function ProductDetailPageContent() {
       }
     }
 
-    const result = {
+    return {
       ...base,
       specifications: parsedSpecifications,
       variants: normalizedVariants,
       variantConfig: normalizedVariantConfig,
     }
-    
-    console.log(`✅ [CLIENT] displayProduct final result for product ${base.id}:`, {
-      hasDescription: !!result.description,
-      descriptionLength: result.description?.length || 0,
-      hasSpecifications: !!result.specifications,
-      specificationsKeysCount: Object.keys(result.specifications).length,
-      specificationsSample: Object.keys(result.specifications).slice(0, 3)
-    })
-    
-    return result
   }, [product])
   
   // Combined loading state

@@ -74,38 +74,16 @@ export async function GET(
       .eq('is_hidden', false)
       .maybeSingle() // Use maybeSingle instead of single to handle 0 results gracefully
 
-    console.log(`🔍 [API] Product ${productId} fetched from DB:`, {
-      found: !!product,
-      error: error?.message,
-      errorCode: error?.code,
-      errorDetails: error?.details,
-      errorHint: error?.hint,
-      hasDescription: !!product?.description,
-      descriptionLength: product?.description?.length || 0,
-      hasSpecifications: !!product?.specifications,
-      specificationsType: typeof product?.specifications,
-      specificationsValue: product?.specifications ? (typeof product.specifications === 'string' ? product.specifications.substring(0, 100) : 'object') : 'null',
-      isHidden: product?.is_hidden
-    })
-
     if (error) {
-      console.log(`❌ [API] Product ${productId} DB error:`, {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
-      })
       return createErrorResponse('Product not found', 404)
     }
 
     if (!product) {
-      console.log(`❌ [API] Product ${productId} not found in DB`)
       return createErrorResponse('Product not found', 404)
     }
 
     // Check if product is hidden (optional - you might want to allow hidden products for admins)
     if (product.is_hidden) {
-      console.log(`⚠️ [API] Product ${productId} is hidden`)
       // Uncomment if you want to block hidden products:
       // return createErrorResponse('Product not found', 404)
     }
@@ -117,23 +95,13 @@ export async function GET(
       if (typeof product.specifications === 'string') {
         try {
           parsedSpecifications = JSON.parse(product.specifications)
-          console.log(`✅ [API] Product ${productId} parsed specifications from string:`, {
-            keysCount: Object.keys(parsedSpecifications).length,
-            sampleKeys: Object.keys(parsedSpecifications).slice(0, 3)
-          })
         } catch (e) {
-          console.log(`⚠️ [API] Product ${productId} failed to parse specifications:`, e)
           // If parsing fails, try to use as-is or set to empty object
           parsedSpecifications = {}
         }
       } else if (typeof product.specifications === 'object' && product.specifications !== null) {
         parsedSpecifications = product.specifications
-        console.log(`✅ [API] Product ${productId} specifications already object:`, {
-          keysCount: Object.keys(parsedSpecifications).length
-        })
       }
-    } else {
-      console.log(`⚠️ [API] Product ${productId} has no specifications field`)
     }
     
     const transformedProduct = {
@@ -262,14 +230,6 @@ export async function GET(
         return Array.isArray(images) ? images : []
       })()
     }
-
-    console.log(`📤 [API] Product ${productId} transformed response:`, {
-      hasDescription: !!transformedProduct.description,
-      descriptionLength: transformedProduct.description?.length || 0,
-      hasSpecifications: !!transformedProduct.specifications,
-      specificationsKeysCount: Object.keys(transformedProduct.specifications).length,
-      specificationsSample: Object.keys(transformedProduct.specifications).slice(0, 3)
-    })
 
     // Cache the result with longer TTL for product details
     setCachedData(cacheKey, transformedProduct, CACHE_TTL.PRODUCT_DETAIL)
