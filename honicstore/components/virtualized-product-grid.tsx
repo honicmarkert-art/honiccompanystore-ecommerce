@@ -83,7 +83,6 @@ export function VirtualizedProductGrid({
         setFixedSizeGrid(() => mod.FixedSizeGrid)
       })
       .catch((err) => {
-        console.error('Failed to load react-window:', err)
       })
   }, [])
 

@@ -230,12 +230,12 @@ function ProductDetailPageContent() {
   // Check if user came from China page
   const fromChina = searchParams?.get('from') === 'china'
   
-  // Validate product ID (but don't return early - violates Rules of Hooks!)
-  const isValidProductId = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
-  
   // Shared data cache for cross-page data
   const { set } = useSharedDataCache()
-  const productIdNumber = Number.parseInt(params.id as string)
+  
+  // Validate product ID (but don't return early - violates Rules of Hooks!)
+  const productIdNumber: number = Number.parseInt(params.id as string) || 0
+  const isValidProductId: boolean = !!(productId && !isNaN(Number(productId)) && Number(productId) > 0)
   
   // Single optimized product state - fetch once, use CDN cache
   const [productData, setProductData] = useState<any>(null)
@@ -243,17 +243,30 @@ function ProductDetailPageContent() {
   
   // Check cache first, then fetch - enables immediate display from cache
   const product = useMemo(() => {
-    // Priority 1: Check shared cache (instant - 0ms)
+    // Priority 1: Use fetched product data (has full details from API)
+    if (productData && typeof productData === 'object' && 'id' in productData && productData.id) {
+      console.log(`📦 [CLIENT] Product ${productIdNumber} using productData:`, {
+        hasDescription: !!productData.description,
+        descriptionLength: productData.description?.length || 0,
+        hasSpecifications: !!productData.specifications,
+        specificationsKeysCount: productData.specifications ? Object.keys(productData.specifications).length : 0
+      })
+      return productData
+    }
+    // Priority 2: Check shared cache (may have limited fields from list page)
     if (Array.isArray(products) && products.length > 0 && productIdNumber) {
       const foundProduct = products.find((p) => p.id === productIdNumber)
       if (foundProduct) {
+        console.log(`📦 [CLIENT] Product ${productIdNumber} found in products cache (may have limited fields):`, {
+          hasDescription: !!foundProduct.description,
+          descriptionLength: foundProduct.description?.length || 0,
+          hasSpecifications: !!foundProduct.specifications,
+          specificationsKeysCount: foundProduct.specifications ? Object.keys(foundProduct.specifications).length : 0
+        })
         return foundProduct
       }
     }
-    // Priority 2: Use fetched product data
-    if (productData && typeof productData === 'object' && 'id' in productData && productData.id) {
-      return productData
-    }
+    console.log(`⚠️ [CLIENT] Product ${productIdNumber} not found in cache or productData`)
     return undefined
   }, [products, productIdNumber, productData])
 
@@ -280,7 +293,7 @@ function ProductDetailPageContent() {
       }).catch(() => {
         setIsLoadingProduct(false)
       })
-      return () => abortController.abort()
+      return
     }
     
     // Performance tracking
@@ -309,7 +322,6 @@ function ProductDetailPageContent() {
         if (!response.ok) {
           // Log non-2xx responses for monitoring
           if (response.status >= 500) {
-            console.error(`[Product Detail] Server error ${response.status} for ${url}`, metrics)
           }
           return null
         }
@@ -324,9 +336,6 @@ function ProductDetailPageContent() {
         // Log metrics if available
         if (error.metrics) {
           performanceMetrics.push(error.metrics)
-          console.error(`[Product Detail] Fetch error for ${url}:`, error.metrics)
-        } else {
-          console.error(`[Product Detail] Fetch error for ${url}:`, error.message)
         }
         return null
       }
@@ -357,19 +366,29 @@ function ProductDetailPageContent() {
         const avgDuration = totalDuration / performanceMetrics.length
         const cacheHitRate = performanceMetrics.filter(m => m.cached).length / performanceMetrics.length
         
-        console.log(`[Product Detail] Performance metrics:`, {
-          totalRequests: performanceMetrics.length,
-          totalDuration: `${totalDuration.toFixed(2)}ms`,
-          avgDuration: `${avgDuration.toFixed(2)}ms`,
-          cacheHitRate: `${(cacheHitRate * 100).toFixed(1)}%`,
-          metrics: performanceMetrics
-        })
       }
       
       // Security: Validate product response before using
       if (productResult && validateProductResponse(productResult)) {
+        console.log(`📥 [CLIENT] Product ${productIdNumber} received from API:`, {
+          hasDescription: !!productResult.description,
+          descriptionLength: productResult.description?.length || 0,
+          descriptionPreview: productResult.description?.substring(0, 50) || 'null',
+          hasSpecifications: !!productResult.specifications,
+          specificationsType: typeof productResult.specifications,
+          specificationsKeysCount: productResult.specifications ? Object.keys(productResult.specifications).length : 0,
+          specificationsSample: productResult.specifications ? Object.keys(productResult.specifications).slice(0, 3) : []
+        })
+        
         // Sanitize product data to prevent XSS
         const sanitizedProduct = sanitizeProductData(productResult)
+        
+        console.log(`🧹 [CLIENT] Product ${productIdNumber} after sanitization:`, {
+          hasDescription: !!sanitizedProduct.description,
+          descriptionLength: sanitizedProduct.description?.length || 0,
+          hasSpecifications: !!sanitizedProduct.specifications,
+          specificationsKeysCount: sanitizedProduct.specifications ? Object.keys(sanitizedProduct.specifications).length : 0
+        })
         
         // Merge all data immediately - no delays
         const mergedProduct = {
@@ -378,6 +397,14 @@ function ProductDetailPageContent() {
           reviews: reviewsData?.reviews || sanitizedProduct.reviews || [],
           sold_count: soldCountData?.soldCount || sanitizedProduct.sold_count || 0
         }
+        
+        console.log(`🔀 [CLIENT] Product ${productIdNumber} merged product:`, {
+          hasDescription: !!mergedProduct.description,
+          descriptionLength: mergedProduct.description?.length || 0,
+          hasSpecifications: !!mergedProduct.specifications,
+          specificationsKeysCount: mergedProduct.specifications ? Object.keys(mergedProduct.specifications).length : 0
+        })
+        
         setProductData(mergedProduct)
         
         // Update variant images state (validate structure)
@@ -400,10 +427,9 @@ function ProductDetailPageContent() {
             soldCount: soldCountData.soldCount || 0,
             buyersCount: soldCountData.buyersCount || null
           })
-    }
+        }
       } else {
         // Log if product not found
-        console.warn(`[Product Detail] Product ${productIdNumber} not found or invalid response`)
       }
       
       setIsLoadingProduct(false)
@@ -413,7 +439,6 @@ function ProductDetailPageContent() {
       
       // Only log non-abort errors
       if (error?.name !== 'AbortError') {
-        console.error(`[Product Detail] Failed to load product ${productIdNumber}:`, error.message)
       }
       setIsLoadingProduct(false)
     })
@@ -587,22 +612,27 @@ function ProductDetailPageContent() {
   const [searchModalInitialTab, setSearchModalInitialTab] = useState<'text' | 'image'>('text')
   const [imageSearchResults, setImageSearchResults] = useState<any[]>([])
   const [imageSearchKeywords, setImageSearchKeywords] = useState<string[]>([])
+  // Debounce timer for clearing search URL
+  const clearSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   
-  // Handle search submission - redirect to products page with search query
-  const handleSearch = useCallback((e: React.FormEvent) => {
-    e.preventDefault()
-    if (searchTerm.trim()) {
-      navigateWithPrefetch(`/products?search=${encodeURIComponent(searchTerm.trim())}`, { priority: 'medium', scroll: true })
+  // Submit search (redirects to products page with search query)
+  // Minimum 3 characters required - same as product list page
+  const submitSearch = useCallback(() => {
+    const query = (searchTerm || '').trim()
+    if (query && query.length >= 3) {
+      navigateWithPrefetch(`/products?search=${encodeURIComponent(query)}`, { priority: 'medium', scroll: true })
     }
-  }, [searchTerm, router])
+  }, [searchTerm, navigateWithPrefetch])
 
   // Handle suggestion click
   const handleSuggestionClick = useCallback((suggestion: string) => {
     setSearchTerm(suggestion)
     setShowSuggestions(false)
     setIsSearchFocused(false)
-    navigateWithPrefetch(`/products?search=${encodeURIComponent(suggestion)}`, { priority: 'medium', scroll: true })
-  }, [router])
+    if (suggestion.trim().length >= 3) {
+      navigateWithPrefetch(`/products?search=${encodeURIComponent(suggestion)}`, { priority: 'medium', scroll: true })
+    }
+  }, [navigateWithPrefetch])
 
   // Handle text search from modal
   const handleModalTextSearch = useCallback((query: string) => {
@@ -706,7 +736,37 @@ function ProductDetailPageContent() {
   // Use product data - already includes all details from parallel fetch
   const displayProduct = useMemo(() => {
     const base: any = product
-    if (!base) return base
+    if (!base) {
+      console.log(`⚠️ [CLIENT] displayProduct: base is null/undefined`)
+      return base
+    }
+
+    console.log(`🔄 [CLIENT] displayProduct useMemo processing product ${base.id}:`, {
+      hasDescription: !!base.description,
+      descriptionLength: base.description?.length || 0,
+      descriptionValue: base.description ? base.description.substring(0, 50) : 'null',
+      hasSpecifications: !!base.specifications,
+      specificationsType: typeof base.specifications,
+      specificationsValue: base.specifications ? (typeof base.specifications === 'string' ? base.specifications.substring(0, 100) : 'object') : 'null'
+    })
+
+    // Parse specifications if it's a JSON string
+    let parsedSpecifications = base.specifications || {}
+    if (typeof base.specifications === 'string' && base.specifications.trim()) {
+      try {
+        parsedSpecifications = JSON.parse(base.specifications)
+        console.log(`✅ [CLIENT] displayProduct: parsed specifications from string, keys:`, Object.keys(parsedSpecifications).length)
+      } catch (e) {
+        console.log(`❌ [CLIENT] displayProduct: failed to parse specifications:`, e)
+        // If parsing fails, try to use as-is or set to empty object
+        parsedSpecifications = {}
+      }
+    } else if (typeof base.specifications === 'object' && base.specifications !== null) {
+      parsedSpecifications = base.specifications
+      console.log(`✅ [CLIENT] displayProduct: specifications already object, keys:`, Object.keys(parsedSpecifications).length)
+    } else {
+      console.log(`⚠️ [CLIENT] displayProduct: specifications is null/undefined/empty`)
+    }
 
     // Normalize variants from either JSON column or relation
     const normalizedVariants = Array.isArray(base.variants) && base.variants.length > 0
@@ -797,11 +857,22 @@ function ProductDetailPageContent() {
       }
     }
 
-    return {
+    const result = {
       ...base,
+      specifications: parsedSpecifications,
       variants: normalizedVariants,
       variantConfig: normalizedVariantConfig,
     }
+    
+    console.log(`✅ [CLIENT] displayProduct final result for product ${base.id}:`, {
+      hasDescription: !!result.description,
+      descriptionLength: result.description?.length || 0,
+      hasSpecifications: !!result.specifications,
+      specificationsKeysCount: Object.keys(result.specifications).length,
+      specificationsSample: Object.keys(result.specifications).slice(0, 3)
+    })
+    
+    return result
   }, [product])
   
   // Combined loading state
@@ -2051,71 +2122,169 @@ function ProductDetailPageContent() {
           </OptimizedLink>
 
 
-          {/* Search Bar Container */}
-          <div className="flex-1 max-w-2xl mx-2 sm:mx-4 lg:mx-6 xl:mx-8 flex items-center relative">
-            <form className="relative flex-1 flex items-center" onSubmit={handleSearch}>
+          {/* Search Bar Container - Same as product list page */}
+          <div className="flex-1 min-w-0 mx-2 sm:mx-3 md:mx-4 lg:mx-6 xl:mx-8 2xl:mx-10 flex items-center relative overflow-hidden" suppressHydrationWarning>
+            <form 
+              className="relative flex-1 flex items-center min-w-0" 
+              onSubmit={(e: React.FormEvent) => {
+                e.preventDefault()
+                if (searchTerm.trim() && searchTerm.trim().length >= 3) {
+                  submitSearch()
+                }
+              }} 
+              suppressHydrationWarning
+            >
               {/* Search Input */}
-              <div className="relative flex-1">
-                <Search
-                  className={cn(
-                    "absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 z-10",
+              <div className="relative flex-1 min-w-0 w-full" suppressHydrationWarning>
+              <Search
+                className={cn(
+                    "absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3 w-3 sm:h-4 sm:w-4 z-10 pointer-events-none",
                     darkHeaderFooterClasses.textNeutralSecondaryFixed,
-                  )}
-                />
-                <Input
-                  type="search"
-                  placeholder="Search for products..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value)
-                    setShowSuggestions(true)
-                  }}
-                  onFocus={() => {
-                    setIsSearchFocused(true)
-                    if (searchTerm.length >= 2) {
-                      setShowSuggestions(true)
-                    }
-                  }}
-                  onBlur={() => {
-                    // Delay hiding suggestions to allow clicks
-                    setTimeout(() => {
-                      setIsSearchFocused(false)
-                      setShowSuggestions(false)
-                    }, 200)
-                  }}
-                  className={cn(
-                    "w-full pl-8 sm:pl-10 pr-16 sm:pr-20 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-sm",
+                )}
+                  suppressHydrationWarning
+              />
+              <Input
+                type="text"
+                placeholder="Search for products... (min 3 chars)"
+                className={cn(
+                    "w-full min-w-0 pl-8 sm:pl-10 rounded-full h-8 sm:h-10 focus:border-yellow-500 focus:ring-yellow-500 text-xs sm:text-base",
+                    // Adjust padding-right based on whether there's text and screen size
+                    searchTerm.trim() 
+                      ? "pr-8 sm:pr-12 md:pr-16" // Reduced padding to prevent cutting
+                      : "pr-12 sm:pr-16 md:pr-20", // Reduced padding on mobile when empty
                     darkHeaderFooterClasses.inputBg,
                     darkHeaderFooterClasses.inputBorder,
                     darkHeaderFooterClasses.textNeutralPrimary,
                     darkHeaderFooterClasses.inputPlaceholder,
-                  )}
-                />
-                
-                {/* Search Suggestions */}
-                {showSuggestions && isSearchFocused && (
-                  <div className="mt-1">
-                <SearchSuggestions
-                  query={searchTerm}
-                      onSelect={handleSuggestionClick}
-                />
-                  </div>
+                    "overflow-hidden text-ellipsis", // Prevent text overflow
                 )}
-                
-                {/* Camera/Search by Image Button */}
+                value={searchTerm}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const newValue = e.target.value
+                  setSearchTerm(newValue)
+                  
+                  // If input is cleared (empty), cancel any pending clear timeout
+                  if (!newValue.trim()) {
+                    // Clear any existing timeout
+                    if (clearSearchTimeoutRef.current) {
+                      clearTimeout(clearSearchTimeoutRef.current)
+                      clearSearchTimeoutRef.current = null
+                    }
+                  } else {
+                    // If user is typing (not clearing), cancel any pending clear
+                    if (clearSearchTimeoutRef.current) {
+                      clearTimeout(clearSearchTimeoutRef.current)
+                      clearSearchTimeoutRef.current = null
+                    }
+                    // Show suggestions if length >= 2
+                    if (newValue.length >= 2) {
+                      setShowSuggestions(true)
+                      setIsSearchFocused(true)
+                    }
+                  }
+                }}
+                onFocus={() => {
+                  setIsSearchFocused(true)
+                  if (searchTerm.length >= 2) {
+                    setShowSuggestions(true)
+                  }
+                }}
+                onBlur={() => {
+                  // Delay hiding suggestions to allow clicks
+                  setTimeout(() => {
+                    setIsSearchFocused(false)
+                    setShowSuggestions(false)
+                  }, 200)
+                }}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (searchTerm.trim().length >= 3) {
+                      submitSearch()
+                    }
+                  }
+                }}
+                  suppressHydrationWarning
+              />
+              
+              {/* Search Helper Message - Show when typing but less than 3 chars */}
+              {searchTerm.trim().length > 0 && searchTerm.trim().length < 3 && (
+                <div className={cn(
+                  "absolute top-full left-0 right-0 mt-1 z-50 rounded-lg shadow-lg border p-3",
+                  themeClasses.cardBg,
+                  themeClasses.borderNeutralSecondary,
+                  themeClasses.textNeutralSecondary
+                )}>
+                  <p className="text-xs sm:text-sm">
+                    Type at least 3 characters to search (e.g., "ard", "uno", "load")
+                  </p>
+                </div>
+              )}
+              
+              {/* Search Suggestions */}
+              {showSuggestions && isSearchFocused && searchTerm.length >= 2 && (
+                <div className="mt-1 absolute top-full left-0 right-0 z-50">
+                  <SearchSuggestions
+                    query={searchTerm}
+                    onSelect={handleSuggestionClick}
+                  />
+                </div>
+              )}
+              
+              {/* Search Submit Button */}
+              <button
+                type="submit"
+                disabled={!searchTerm.trim() || searchTerm.trim().length < 3}
+                className={cn(
+                  "absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center transition-colors z-10 flex-shrink-0",
+                  searchTerm.trim() && searchTerm.trim().length >= 3
+                    ? cn(darkHeaderFooterClasses.textNeutralSecondaryFixed, "hover:bg-neutral-200 dark:hover:bg-neutral-700")
+                    : "text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50"
+                )}
+                title={searchTerm.trim().length < 3 ? "Type at least 3 characters to search" : "Search"}
+              >
+                <Search className="w-3 h-3 sm:w-4 sm:h-4" />
+              </button>
+              
+              {/* Clear Search Button */}
+              {searchTerm && (
                 <button
+                  type="button" // CRITICAL: Prevent form submission when clearing
                   onClick={() => {
-                    setSearchModalInitialTab('image')
-                    setIsSearchModalOpen(true)
+                    setSearchTerm("")
+                    setShowSuggestions(false)
+                    setIsSearchFocused(false)
                   }}
                   className={cn(
-                    "absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 h-6 w-6 sm:h-8 sm:w-8 rounded-full hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors flex items-center justify-center",
-                        darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                    // Adjust position: closer on mobile when camera button is hidden
+                    "absolute top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 rounded-full flex items-center justify-center z-10",
+                    searchTerm.trim() 
+                      ? "right-2 sm:right-10 md:right-12" // Position when typing (camera button hidden on mobile)
+                      : "right-20 sm:right-10 md:right-12", // Position when empty (camera button visible)
+                    darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                    "hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
                   )}
-                  title="Search by image"
                 >
-                      <ScanSearch className="w-3 h-3 sm:w-4 sm:h-4" />
+                  <X className="w-3 h-3 sm:w-4 sm:h-4" />
                 </button>
+              )}
+              
+              {/* Camera/Search by Image Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchModalInitialTab('image')
+                  setIsSearchModalOpen(true)
+                }}
+                className={cn(
+                  "absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 h-6 w-6 sm:h-8 sm:w-8 rounded-full hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors flex items-center justify-center z-10",
+                  searchTerm.trim() ? "hidden" : "flex", // Hide when typing
+                  darkHeaderFooterClasses.textNeutralSecondaryFixed,
+                )}
+                title="Search by image"
+              >
+                <ScanSearch className="w-3 h-3 sm:w-4 sm:h-4" />
+              </button>
               </div>
             </form>
           </div>
@@ -3025,11 +3194,15 @@ function ProductDetailPageContent() {
             <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold", themeClasses.mainText)}>{product.name}</h1>
             
             {/* Product Description */}
-            {displayProduct?.description && (
-              <p className={cn("text-sm sm:text-base leading-relaxed", themeClasses.mainText)}>
+            {displayProduct?.description ? (
+              <p className={cn("text-sm sm:text-base leading-relaxed mb-4", themeClasses.mainText)}>
                 {displayProduct.description}
               </p>
-            )}
+            ) : displayProduct?.description === '' || !displayProduct?.description ? (
+              <p className={cn("text-sm sm:text-base leading-relaxed mb-4 italic", themeClasses.textNeutralSecondary)}>
+                No description available for this product.
+              </p>
+            ) : null}
             
             <div className={cn("flex items-center gap-1 sm:gap-2 text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
               <div className="flex items-center gap-0.5">
@@ -3726,13 +3899,20 @@ function ProductDetailPageContent() {
           {activeTab === "specifications" && (
             <div className="bg-transparent p-4 sm:p-6">
               <h2 className={cn("text-xl font-bold mb-4", themeClasses.mainText)}>Product Specifications</h2>
-              <p className={cn("text-sm mb-6 leading-relaxed", themeClasses.mainText)}>{product.description}</p>
+              {/* Product Description */}
+              {displayProduct?.description ? (
+                <div className={cn("text-sm mb-6 leading-relaxed p-4 rounded-lg", themeClasses.cardBg, themeClasses.cardBorder)}>
+                  <h3 className={cn("font-semibold mb-2", themeClasses.mainText)}>Description</h3>
+                  <p className={cn("text-sm leading-relaxed", themeClasses.mainText)}>{displayProduct.description}</p>
+                </div>
+              ) : null}
               <div className="relative">
                 <div className={cn(
                   "grid grid-cols-1 md:grid-cols-2 gap-2 transition-all duration-300 ease-in-out",
                   !expandedSpecs ? "max-h-96 overflow-hidden" : ""
                 )}>
-                  {product.specifications && Object.entries(product.specifications).map(([key, value]) => {
+                  {displayProduct?.specifications && Object.keys(displayProduct.specifications).length > 0 ? (
+                    Object.entries(displayProduct.specifications).map(([key, value]) => {
                     // Handle both old format (string) and new format (object with value)
                     let specValue = ''
                     
@@ -3752,11 +3932,17 @@ function ProductDetailPageContent() {
                         </div>
                       </div>
                     )
-                  })}
+                  })
+                  ) : (
+                    <div className={cn("col-span-2 py-8 text-center", themeClasses.textNeutralSecondary)}>
+                      <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No specifications available for this product.</p>
+                    </div>
+                  )}
                 </div>
                 
                 {/* Show More/Less button for specifications table */}
-                {product.specifications && Object.entries(product.specifications).length > 4 && (
+                {displayProduct?.specifications && Object.keys(displayProduct.specifications).length > 4 && (
                   <div className="mt-4 text-center">
                     <Button
                       variant="ghost"
@@ -3773,7 +3959,7 @@ function ProductDetailPageContent() {
                 {/* Specification Images Section - Display below specifications table */}
                 {(() => {
                   // Handle both array of strings and array of objects
-                  const specImages = product?.specificationImages || []
+                  const specImages = displayProduct?.specificationImages || []
                   const imageUrls = Array.isArray(specImages) 
                     ? specImages.map((img: any) => {
                         if (typeof img === 'string') return img

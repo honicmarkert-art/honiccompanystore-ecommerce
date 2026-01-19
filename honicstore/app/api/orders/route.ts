@@ -506,15 +506,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate dual ID system
-    console.log('📝 [ORDER-API] Step 1: Generating order IDs...')
     const { referenceId, pickupId } = generateOrderIds()
     
     // Remove hyphens from UUID for consistent format
     const cleanReferenceId = referenceId.replace(/-/g, '')
-    console.log('📝 [ORDER-API] Step 1: Order IDs generated', { 
-      referenceId: cleanReferenceId, 
-      pickupId 
-    })
     
     // Create order record with server-calculated total
     const basicOrderData = {
@@ -534,18 +529,10 @@ export async function POST(request: NextRequest) {
     } as any
 
     // Use secure order creation with reference_id validation
-    console.log('💾 [ORDER-API] Step 2: Creating order in database...', {
-      orderNumber: basicOrderData.order_number,
-      referenceId: basicOrderData.reference_id,
-      totalAmount: basicOrderData.total_amount
-    })
     const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
     const creationResult = await secureOrderCreation(basicOrderData, null, clientIP)
     
     if (!creationResult.success) {
-      console.error('❌ [ORDER-API] Step 2: Order creation failed', { 
-        error: creationResult.error 
-      })
       return NextResponse.json(
         { error: 'Order creation failed', details: creationResult.error },
         { status: 500 }
@@ -553,10 +540,6 @@ export async function POST(request: NextRequest) {
     }
     
     const order = creationResult.data
-    console.log('✅ [ORDER-API] Step 2: Order created successfully', {
-      orderId: order.id,
-      referenceId: order.reference_id
-    })
 
     // Set order_id for all items
     const orderItemsData = validatedItems.map(item => ({
@@ -565,45 +548,24 @@ export async function POST(request: NextRequest) {
     }))
 
     // Create order items with server-validated prices
-    console.log('📦 [ORDER-API] Step 3: Creating order items...', {
-      itemCount: orderItemsData.length,
-      orderId: order.id
-    })
     const { error: itemsError } = await supabase
       .from('order_items')
       .insert(orderItemsData)
 
     if (itemsError) {
-      console.error('❌ [ORDER-API] Step 3: Order items creation failed', {
-        error: itemsError.message
-      })
       return NextResponse.json(
         { error: 'Order items creation failed', details: itemsError.message },
         { status: 500 }
       )
     }
     
-    console.log('✅ [ORDER-API] Step 3: Order items created successfully')
 
     // Send order notification email to admin (optional - doesn't block order creation)
     try {
-      console.log('📧 [ORDER-API] Step 4: Sending admin notification...', {
-        orderId: order.id,
-        orderNumber: order.order_number
-      })
 
       const adminEmail = process.env.NEXT_PUBLIC_ORDER_EMAIL
       if (!adminEmail) {
-        console.log('⚠️ [ORDER-API] Step 4: NEXT_PUBLIC_ORDER_EMAIL not configured, skipping email notification')
-        console.log('📧 [EMAIL] Status: SKIPPED - No admin email configured')
       } else {
-        console.log('📧 [EMAIL] Status: STARTING - Preparing to send order notification email')
-        console.log('📧 [EMAIL] Configuration:', {
-          adminEmail: adminEmail,
-          hasResendApiKey: !!process.env.RESEND_API_KEY,
-          smtpHost: process.env.SMTP_HOST || 'Not configured',
-          smtpUser: process.env.SMTP_USER || 'Not configured'
-        })
         // Format order items for email
         const orderItemsHtml = orderItemsData.map((item, index) => `
           <tr>
@@ -760,17 +722,7 @@ Order ID: ${order.id}
         })
 
         if (emailResult.success) {
-          console.log('✅ [ORDER-API] Step 4: Admin notification email sent successfully', {
-            orderId: order.id,
-            orderNumber: order.order_number,
-            messageId: emailResult.messageId
-          })
         } else {
-          console.error('❌ [ORDER-API] Step 4: Failed to send admin notification email', {
-            orderId: order.id,
-            orderNumber: order.order_number,
-            error: emailResult.error
-          })
           logger.error('Failed to send order notification email', new Error(emailResult.error || 'Unknown error'), {
             orderId: order.id,
             orderNumber: order.order_number
@@ -779,13 +731,6 @@ Order ID: ${order.id}
       }
     } catch (emailError: any) {
       // Log email error but don't fail the order creation
-      console.error('❌ [ORDER-API] Step 4: Email notification error (non-blocking)', emailError)
-      console.error('📧 [EMAIL] Status: ERROR - Exception occurred', {
-        error: emailError?.message || String(emailError),
-        errorName: emailError?.name || 'Unknown',
-        stack: emailError?.stack || 'No stack trace',
-        timestamp: new Date().toISOString()
-      })
       logger.error('Failed to send order notification email', emailError, {
         orderId: order.id,
         userId: orderData.userId,

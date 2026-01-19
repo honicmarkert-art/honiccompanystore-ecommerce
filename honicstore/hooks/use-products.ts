@@ -69,7 +69,7 @@ interface UseProductsReturn {
   getProductsByCategory: (category: string) => Product[]
   getProductsByBrand: (brand: string) => Product[]
   fetchFullProductDetails: (productId: number) => Promise<Product | null>
-  fetchFullProducts: () => Promise<Product[] | null>
+  fetchFullProducts: (limit?: number, offset?: number) => Promise<{ products: Product[], pagination?: any } | null>
   addProduct: (productData: Omit<Product, 'id'>) => Promise<void>
   updateProduct: (id: number, productData: Partial<Product>) => Promise<void>
   deleteProduct: (id: number) => Promise<void>
@@ -556,9 +556,23 @@ export function useProducts(): UseProductsReturn {
   }, [lastFetchTime, isRateLimited])
 
   // Fetch products with full data (including variants) for admin pages
-  const fetchFullProducts = useCallback(async () => {
+  const fetchFullProducts = useCallback(async (limit?: number, offset?: number) => {
     try {
-      const response = await fetch(`/api/products?t=${Date.now()}`, {
+      const params = new URLSearchParams()
+      if (limit !== undefined) {
+        params.append('limit', limit.toString())
+      } else {
+        // Default to 500 for admin pages if not specified
+        params.append('limit', '500')
+      }
+      if (offset !== undefined) {
+        params.append('offset', offset.toString())
+      } else {
+        params.append('offset', '0')
+      }
+      params.append('t', Date.now().toString())
+      
+      const response = await fetch(`/api/products?${params.toString()}`, {
         headers: {
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache'
@@ -570,10 +584,11 @@ export function useProducts(): UseProductsReturn {
       const data = await response.json()
       // Handle both old (array) and new (object with products array) API response formats
       const productsArray = Array.isArray(data) ? data : (data?.products || [])
+      const pagination = !Array.isArray(data) ? data.pagination : null
       setProducts(productsArray)
       productsCache = productsArray
       cacheTimestamp = Date.now()
-      return productsArray
+      return { products: productsArray, pagination }
     } catch (error) {
       return null
     }

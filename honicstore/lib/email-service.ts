@@ -200,20 +200,12 @@ class EmailService {
     const resendApiKey = process.env.RESEND_API_KEY
 
     if (!resendApiKey) {
-      console.error('📧 [RESEND-API] Status: FAILED - RESEND_API_KEY not configured')
       return {
         success: false,
         error: 'RESEND_API_KEY not configured'
       }
     }
     
-    console.log('📧 [RESEND-API] Status: INITIALIZING - Preparing Resend API request', {
-      to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
-      from: options.from || 'Not specified',
-      subject: options.subject,
-      hasHtml: !!options.html,
-      hasText: !!options.text
-    })
 
     // Get sender email for Resend fallback
     const senderConfig = this.getSenderEmail('noreply')
@@ -255,12 +247,6 @@ class EmailService {
       const resendApiUrl = process.env.RESEND_API_URL || 'https://api.resend.com'
       const apiEndpoint = `${resendApiUrl}/emails`
       
-      console.log('📧 [RESEND-API] Status: SENDING - Making API request', {
-        endpoint: apiEndpoint,
-        method: 'POST',
-        hasApiKey: !!resendApiKey,
-        apiKeyLength: resendApiKey?.length || 0
-      })
       
       const requestStartTime = Date.now()
       const resendResponse = await fetch(apiEndpoint, {
@@ -280,45 +266,21 @@ class EmailService {
       })
       const requestDuration = Date.now() - requestStartTime
 
-      console.log('📧 [RESEND-API] Status: RESPONSE_RECEIVED', {
-        status: resendResponse.status,
-        statusText: resendResponse.statusText,
-        ok: resendResponse.ok,
-        duration: `${requestDuration}ms`,
-        timestamp: new Date().toISOString()
-      })
 
       if (resendResponse.ok) {
         const data = await resendResponse.json()
-        console.log('📧 [RESEND-API] Status: SUCCESS', {
-          messageId: data.id,
-          responseData: data,
-          duration: `${requestDuration}ms`
-        })
         return {
           success: true,
           messageId: data.id
         }
       } else {
         const errorData = await resendResponse.json().catch(() => ({ message: 'Failed to parse error response' }))
-        console.error('📧 [RESEND-API] Status: FAILED', {
-          status: resendResponse.status,
-          statusText: resendResponse.statusText,
-          errorMessage: errorData.message || 'Resend API error',
-          errorData: errorData,
-          duration: `${requestDuration}ms`
-        })
         return {
           success: false,
           error: errorData.message || 'Resend API error'
         }
       }
     } catch (error: any) {
-      console.error('📧 [RESEND-API] Status: EXCEPTION', {
-        error: error?.message || String(error),
-        errorName: error?.name || 'Unknown',
-        stack: error?.stack || 'No stack trace'
-      })
       return {
         success: false,
         error: error.message || 'Failed to send email via Resend'

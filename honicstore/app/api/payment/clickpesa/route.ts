@@ -83,15 +83,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "create-checkout-link") {
-      console.log('💳 [CLICKPESA] Starting checkout link creation', { 
-        orderId, 
-        amount, 
-        currency 
-      })
       
       // Validate required fields
       if (!amount || !orderId) {
-        console.error('❌ [CLICKPESA] Missing required fields', { amount, orderId })
         return NextResponse.json(
           { 
             success: false, 
@@ -141,13 +135,8 @@ export async function POST(request: NextRequest) {
 
       // SECURITY: Validate order exists and amount matches (prevent tampering)
       // Optimized: Use normalized reference directly for faster lookup
-      console.log('🔍 [CLICKPESA] Step 1: Looking up order in database...', { orderId })
       const adminSupabase = createAdminSupabaseClient()
       const normalizedOrderRef = normalizeOrderReference(orderId)
-      console.log('🔍 [CLICKPESA] Step 1: Normalized reference', { 
-        original: orderId, 
-        normalized: normalizedOrderRef 
-      })
       
       // Optimized: Single query with normalized reference (most common case)
       // Fallback to original if normalized doesn't match (handles edge cases)
@@ -157,30 +146,19 @@ export async function POST(request: NextRequest) {
         .eq('reference_id', normalizedOrderRef)
         .maybeSingle()
 
-      console.log('🔍 [CLICKPESA] Step 1: Primary query result', { 
-        found: !!order, 
-        error: orderError?.message 
-      })
 
       // Fallback: Try original orderId if normalized didn't match
       let finalOrder = order
       if ((orderError || !order) && normalizedOrderRef !== orderId) {
-        console.log('🔄 [CLICKPESA] Step 1: Trying fallback query with original orderId...')
         const { data: fallbackOrder } = await adminSupabase
           .from('orders')
           .select('id, reference_id, total_amount, currency, payment_status, status')
           .eq('reference_id', orderId)
           .maybeSingle()
         finalOrder = fallbackOrder
-        console.log('🔄 [CLICKPESA] Step 1: Fallback query result', { found: !!fallbackOrder })
       }
 
       if (!finalOrder) {
-        console.error('❌ [CLICKPESA] Step 1: Order not found', { 
-          orderId, 
-          normalizedRef: normalizedOrderRef,
-          error: orderError?.message 
-        })
         logSecurityEvent('ORDER_NOT_FOUND', {
           endpoint: '/api/payment/clickpesa',
           orderId: orderId,
@@ -196,28 +174,13 @@ export async function POST(request: NextRequest) {
         )
       }
       
-      console.log('✅ [CLICKPESA] Step 1: Order found', { 
-        orderId: finalOrder.id,
-        referenceId: finalOrder.reference_id,
-        totalAmount: finalOrder.total_amount,
-        paymentStatus: finalOrder.payment_status 
-      })
 
       // SECURITY: Verify payment amount matches order total (prevent tampering)
-      console.log('🔒 [CLICKPESA] Step 2: Validating amount...', { 
-        providedAmount: numAmount, 
-        orderTotal: finalOrder.total_amount 
-      })
       const orderTotal = parseFloat(finalOrder.total_amount?.toString() || '0')
       const amountDifference = Math.abs(numAmount - orderTotal)
       const tolerance = 0.01 // Allow 0.01 difference for floating point precision
 
       if (amountDifference > tolerance) {
-        console.error('❌ [CLICKPESA] Step 2: Amount mismatch detected', { 
-          orderTotal, 
-          providedAmount: numAmount, 
-          difference: amountDifference 
-        })
         logSecurityEvent('AMOUNT_MISMATCH', {
           endpoint: '/api/payment/clickpesa',
           orderId: finalOrder.id,
@@ -235,16 +198,9 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
-      console.log('✅ [CLICKPESA] Step 2: Amount validation passed')
 
       // SECURITY: Verify order is in pending status (prevent double payment)
-      console.log('🔒 [CLICKPESA] Step 3: Checking payment status...', { 
-        paymentStatus: finalOrder.payment_status 
-      })
       if (finalOrder.payment_status === 'paid' || finalOrder.payment_status === 'success') {
-        console.error('❌ [CLICKPESA] Step 3: Duplicate payment attempt', { 
-          currentStatus: finalOrder.payment_status 
-        })
         logSecurityEvent('DUPLICATE_PAYMENT_ATTEMPT', {
           endpoint: '/api/payment/clickpesa',
           orderId: finalOrder.id,
@@ -260,7 +216,6 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
-      console.log('✅ [CLICKPESA] Step 3: Payment status check passed')
 
       // Use order currency if available, otherwise use provided currency
       const finalCurrency = (finalOrder.currency || currency) as 'TZS' | 'USD'
@@ -314,17 +269,8 @@ export async function POST(request: NextRequest) {
         // Checksum will be generated automatically in createCheckoutLink function
 
         // Create checkout link
-        console.log('🔗 [CLICKPESA] Step 4: Creating checkout link with ClickPesa API...', {
-          orderReference: checkoutRequest.orderReference,
-          totalPrice: checkoutRequest.totalPrice,
-          currency: checkoutRequest.orderCurrency
-        })
         // Create checkout link using regular credentials (not supplier)
         const checkoutResult = await createCheckoutLink(checkoutRequest, false)
-        console.log('✅ [CLICKPESA] Step 4: Checkout link created successfully', {
-          hasCheckoutLink: !!checkoutResult.checkoutLink,
-          clientId: checkoutResult.clientId
-        })
 
         return NextResponse.json({
           success: true,

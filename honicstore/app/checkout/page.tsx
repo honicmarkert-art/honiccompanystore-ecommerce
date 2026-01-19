@@ -214,7 +214,6 @@ function CheckoutPageContent() {
     if (isProcessingPayment) {
       setHasTimedOut(false)
       const timeoutId = setTimeout(() => {
-        console.warn('⏱️ [CHECKOUT] Payment processing timeout (60s) - this should not happen if flow completes')
         setHasTimedOut(true)
         setIsProcessingPayment(false) // Clear processing state on timeout
       }, 60000) // Increased to 60 seconds timeout (was 30s)
@@ -470,12 +469,6 @@ function CheckoutPageContent() {
       // Start payment flow timing after orderData is created
       const paymentFlowStartTime = performance.now()
       const paymentFlowStartTimestamp = Date.now()
-      console.log('🚀 [CHECKOUT] Payment flow started', {
-        timestamp: new Date(paymentFlowStartTimestamp).toISOString(),
-        orderId,
-        totalAmount: orderData.totalAmount,
-        itemCount: orderData.items?.length || 0
-      })
 
       // Check if we already have an order (from previous failed payment link generation)
       // If order exists, reuse it instead of creating a new one
@@ -484,11 +477,6 @@ function CheckoutPageContent() {
       
       if (orderReferenceId && orderId) {
         // Reuse existing order - don't create a new one
-        console.log('♻️ [CHECKOUT] Step 1: Reusing existing order (payment link generation failed previously)', {
-          orderId,
-          referenceId: orderReferenceId,
-          timestamp: new Date().toISOString()
-        })
         
         // Fetch order details to get current payment status
         try {
@@ -505,14 +493,8 @@ function CheckoutPageContent() {
                 status: orderData.status || 'pending'
               }
             }
-            console.log('✅ [CHECKOUT] Step 1: Existing order retrieved', {
-              orderId: result.order?.id,
-              referenceId: result.order?.referenceId,
-              paymentStatus: result.order?.paymentStatus
-            })
           } else {
             // Order not found, create new one
-            console.log('⚠️ [CHECKOUT] Step 1: Existing order not found, creating new order')
             const orderSubmissionStartTime = performance.now()
             result = await submitOrder(orderData)
             const orderSubmissionEndTime = performance.now()
@@ -524,7 +506,6 @@ function CheckoutPageContent() {
           }
         } catch (error) {
           // Error fetching order, create new one
-          console.error('❌ [CHECKOUT] Step 1: Error fetching existing order, creating new one', error)
           const orderSubmissionStartTime = performance.now()
           result = await submitOrder(orderData)
           const orderSubmissionEndTime = performance.now()
@@ -537,22 +518,9 @@ function CheckoutPageContent() {
       } else {
         // No existing order, create new one
         const orderSubmissionStartTime = performance.now()
-        console.log('🛒 [CHECKOUT] Step 1: Starting order submission...', { 
-          orderId, 
-          totalAmount: orderData.totalAmount,
-          timestamp: new Date().toISOString()
-        })
         result = await submitOrder(orderData)
         const orderSubmissionEndTime = performance.now()
         orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
-        console.log('✅ [CHECKOUT] Step 1: Order submission successful', { 
-          orderId: result.order?.id, 
-          referenceId: result.order?.referenceId,
-          status: result.order?.status,
-          duration: `${orderSubmissionDuration.toFixed(2)}ms`,
-          durationSeconds: `${(orderSubmissionDuration / 1000).toFixed(2)}s`,
-          timestamp: new Date().toISOString()
-        })
         
         setOrderId(result.order.id)
         setOrderReferenceId(result.order.referenceId)
@@ -570,12 +538,6 @@ function CheckoutPageContent() {
       const orderTotalAmount = result.order.totalAmount || orderData.totalAmount
       const checkoutLinkStartTime = performance.now()
       const checkoutLinkStartTimestamp = Date.now()
-      console.log('💳 [CHECKOUT] Step 2: Starting checkout link creation...', { 
-        reference, 
-        amount: orderTotalAmount,
-        isReusingOrder: !!(orderReferenceId && orderId && result.order.referenceId === orderReferenceId),
-        timestamp: new Date(checkoutLinkStartTimestamp).toISOString()
-      })
       
       // Optimized: Use fetchWithRetry with faster retries (2 retries, shorter delays)
       // Retries on: network errors, 5xx server errors, 429 rate limits, 408 timeouts
@@ -607,41 +569,21 @@ function CheckoutPageContent() {
       )
 
       // Optimized: Parse JSON directly instead of text() then parse
-      console.log('📡 [CHECKOUT] Step 2: Received response from payment API', { 
-        ok: response.ok, 
-        status: response.status 
-      })
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Failed' }))
-        console.error('❌ [CHECKOUT] Step 2: Payment API error', { 
-          status: response.status, 
-          error: errorData.error 
-        })
         throw new Error(errorData.error || 'Failed')
       }
 
       const data = await response.json()
-      console.log('📦 [CHECKOUT] Step 2: Parsed response data', { 
-        hasCheckoutLink: !!data.checkoutLink,
-        success: data.success 
-      })
 
       if (!data.checkoutLink) {
-        console.error('❌ [CHECKOUT] Step 2: Missing checkout link in response', { data })
         throw new Error('Failed')
       }
 
       const checkoutLinkEndTime = performance.now()
       const checkoutLinkDuration = checkoutLinkEndTime - checkoutLinkStartTime
       const checkoutLinkEndTimestamp = Date.now()
-      console.log('✅ [CHECKOUT] Step 2: Checkout link created successfully', { 
-        checkoutLink: data.checkoutLink.substring(0, 50) + '...',
-        duration: `${checkoutLinkDuration.toFixed(2)}ms`,
-        durationSeconds: `${(checkoutLinkDuration / 1000).toFixed(2)}s`,
-        startTime: new Date(checkoutLinkStartTimestamp).toISOString(),
-        endTime: new Date(checkoutLinkEndTimestamp).toISOString()
-      })
 
       // Store reference for later use
       safeSessionStorage.setItem('last_order_reference', reference)
@@ -652,15 +594,10 @@ function CheckoutPageContent() {
       // Mark payment link as generated (for UI message update)
       setPaymentLinkGenerated(true)
  // Reset popup blocked state
-      console.log('✅ [CHECKOUT] Payment flow completed - checkout link ready')
 
       // Track redirect timing
       const redirectStartTime = performance.now()
       const redirectStartTimestamp = Date.now()
-      console.log('🔀 [CHECKOUT] Step 3: Initiating redirect to ClickPesa...', {
-        checkoutLink: data.checkoutLink.substring(0, 50) + '...',
-        timestamp: new Date(redirectStartTimestamp).toISOString()
-      })
 
       // Immediately open ClickPesa checkout in new window/tab
       // Since this is called from a user click event, window.open should work
@@ -684,7 +621,6 @@ function CheckoutPageContent() {
         }
       } catch (error) {
         // Popup failed to open
-        console.error('❌ [CHECKOUT] Failed to open popup:', error)
       }
       
       const redirectEndTime = performance.now()
@@ -694,30 +630,6 @@ function CheckoutPageContent() {
       if (popupOpened) {
         // Successfully opened in new tab
         const totalFlowDuration = performance.now() - paymentFlowStartTime
-        console.log('✅ [CHECKOUT] Step 3: Payment page opened in new window successfully', {
-          redirectDuration: `${redirectDuration.toFixed(2)}ms`,
-          redirectDurationSeconds: `${(redirectDuration / 1000).toFixed(2)}s`,
-          redirectInitiatedAt: new Date(redirectStartTimestamp).toISOString(),
-          redirectCompletedAt: new Date(redirectCompleteTimestamp).toISOString(),
-          checkoutLinkUrl: data.checkoutLink.substring(0, 80) + '...'
-        })
-        
-        console.log('⏱️ [CHECKOUT] Complete timing breakdown:', {
-          totalFlowDuration: `${totalFlowDuration.toFixed(2)}ms`,
-          totalFlowDurationSeconds: `${(totalFlowDuration / 1000).toFixed(2)}s`,
-          breakdown: {
-            orderSubmission: `${orderSubmissionDuration.toFixed(2)}ms (${(orderSubmissionDuration / 1000).toFixed(2)}s)`,
-            checkoutLinkCreation: `${checkoutLinkDuration.toFixed(2)}ms (${(checkoutLinkDuration / 1000).toFixed(2)}s)`,
-            redirect: `${redirectDuration.toFixed(2)}ms (${(redirectDuration / 1000).toFixed(2)}s)`
-          },
-          timestamps: {
-            flowStart: new Date(paymentFlowStartTimestamp).toISOString(),
-            orderSubmitted: new Date(paymentFlowStartTimestamp + orderSubmissionDuration).toISOString(),
-            checkoutLinkCreated: new Date(checkoutLinkEndTimestamp).toISOString(),
-            redirectInitiated: new Date(redirectStartTimestamp).toISOString(),
-            redirectCompleted: new Date(redirectCompleteTimestamp).toISOString()
-          }
-        })
         
         toast({
           title: 'Payment Page Opened',
@@ -742,30 +654,9 @@ function CheckoutPageContent() {
 
       // Log total payment flow duration
       const totalPaymentFlowDuration = performance.now() - paymentFlowStartTime
-      console.log('🎉 [CHECKOUT] Complete payment flow finished', {
-        totalDuration: `${totalPaymentFlowDuration.toFixed(2)}ms`,
-        totalDurationSeconds: `${(totalPaymentFlowDuration / 1000).toFixed(2)}s`,
-        startTime: new Date(paymentFlowStartTimestamp).toISOString(),
-        endTime: new Date().toISOString(),
-        breakdown: {
-          orderSubmission: `${orderSubmissionDuration.toFixed(2)}ms`,
-          checkoutLinkCreation: `${checkoutLinkDuration.toFixed(2)}ms`,
-          redirect: `${redirectDuration.toFixed(2)}ms`
-        }
-      })
 
     } catch (error: any) {
       const totalPaymentFlowDuration = performance.now() - paymentFlowStartTime
-      console.error('❌ [CHECKOUT] Payment flow failed:', {
-        error: error?.message,
-        stack: error?.stack,
-        name: error?.name,
-        step: error?.step || 'unknown',
-        totalDuration: `${totalPaymentFlowDuration.toFixed(2)}ms`,
-        totalDurationSeconds: `${(totalPaymentFlowDuration / 1000).toFixed(2)}s`,
-        startTime: new Date(paymentFlowStartTimestamp).toISOString(),
-        failureTime: new Date().toISOString()
-      })
       
       logger.error('Payment initiation error:', {
         error: error,
@@ -794,11 +685,6 @@ function CheckoutPageContent() {
   const submitOrder = async (orderData: any) => {
     const apiCallStartTime = performance.now()
     try {
-      console.log('📤 [ORDER] Submitting order to API...', { 
-        orderNumber: orderData.orderNumber,
-        itemCount: orderData.items?.length || 0,
-        timestamp: new Date().toISOString()
-      })
       
       // Submit order to public API with retry logic
       const response = await fetchWithRetry(
@@ -813,17 +699,9 @@ function CheckoutPageContent() {
         2 // Max 2 retries with exponential backoff
       )
 
-      console.log('📥 [ORDER] Received order API response', { 
-        ok: response.ok, 
-        status: response.status 
-      })
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        console.error('❌ [ORDER] Order submission failed', { 
-          status: response.status, 
-          error: errorData.error 
-        })
         const errorMessage = getSecureErrorMessage(
           errorData.error || new Error('Order submission failed'),
           'Failed to submit order. Please try again.'
@@ -833,12 +711,6 @@ function CheckoutPageContent() {
 
       const result = await response.json()
       const apiCallDuration = performance.now() - apiCallStartTime
-      console.log('✅ [ORDER] Order created successfully', { 
-        orderId: result.order?.id,
-        referenceId: result.order?.referenceId,
-        apiCallDuration: `${apiCallDuration.toFixed(2)}ms`,
-        timestamp: new Date().toISOString()
-      })
       
       // Store order IDs and payment URL for later use
       if (result.order.paymentUrl) {
@@ -847,12 +719,6 @@ function CheckoutPageContent() {
       
       return result
     } catch (error) {
-      const apiCallDuration = performance.now() - apiCallStartTime
-      console.error('❌ [ORDER] Order submission error:', {
-        error,
-        apiCallDuration: `${apiCallDuration.toFixed(2)}ms`,
-        timestamp: new Date().toISOString()
-      })
       throw error
     }
   }

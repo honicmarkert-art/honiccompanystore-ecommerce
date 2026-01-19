@@ -72,11 +72,28 @@ function AdminProductsContent() {
   const [selectedBrand, setSelectedBrand] = useState<string>("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
+  
+  // Pagination state
+  const PRODUCTS_PER_PAGE = 500
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
 
-  // Fetch full products with variants when admin page loads
+  // Fetch full products with variants when admin page loads or page changes
   useEffect(() => {
-    fetchFullProducts()
-  }, [fetchFullProducts])
+    const offset = (currentPage - 1) * PRODUCTS_PER_PAGE
+    fetchFullProducts(PRODUCTS_PER_PAGE, offset).then((result) => {
+      if (result) {
+        if (result.pagination) {
+          setTotalCount(result.pagination.total || result.products.length)
+          setHasMore(result.pagination.hasMore !== undefined ? result.pagination.hasMore : result.products.length >= PRODUCTS_PER_PAGE)
+        } else {
+          // Fallback: if no pagination info, assume hasMore if we got full page
+          setHasMore(result.products.length >= PRODUCTS_PER_PAGE)
+        }
+      }
+    })
+  }, [fetchFullProducts, currentPage])
 
   // Initialize filters from URL (persist across refresh)
   useEffect(() => {
@@ -190,7 +207,10 @@ function AdminProductsContent() {
         </div>
         <div className="flex items-center gap-4">
           <AuthStatusIndicator />
-          <MaterializedViewRefreshButton onRefresh={fetchFullProducts} />
+          <MaterializedViewRefreshButton onRefresh={() => {
+            const offset = (currentPage - 1) * PRODUCTS_PER_PAGE
+            return fetchFullProducts(PRODUCTS_PER_PAGE, offset)
+          }} />
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <Button 
               className="flex items-center gap-2"
@@ -243,7 +263,8 @@ function AdminProductsContent() {
                     }
                     
                     // Force refresh the products list to ensure UI is up to date
-                    await fetchFullProducts()
+                    const offset = (currentPage - 1) * PRODUCTS_PER_PAGE
+                    await fetchFullProducts(PRODUCTS_PER_PAGE, offset)
                   } catch (error) {
                     
                     // Show user-friendly error message
@@ -470,9 +491,34 @@ function AdminProductsContent() {
       {/* Products Table */}
       <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
         <CardHeader>
-          <CardTitle className={themeClasses.mainText}>
-            Products ({filteredProducts.length})
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className={themeClasses.mainText}>
+              Products ({filteredProducts.length} {totalCount > 0 ? `of ${totalCount}` : ''})
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              {currentPage > 1 && (
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={isLoading}
+                >
+                  Previous
+                </Button>
+              )}
+              {hasMore && (
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentPage(prev => prev + 1)}
+                  disabled={isLoading}
+                >
+                  Next Page
+                </Button>
+              )}
+              <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                Page {currentPage}
+              </span>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -491,9 +537,11 @@ function AdminProductsContent() {
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((product, idx) => (
-                  <tr key={product.id} className={cn("border-b", themeClasses.cardBorder)}>
-                    <td className="py-3 px-4 align-top">{idx + 1}</td>
+                {filteredProducts.map((product, idx) => {
+                  const productNumber = (currentPage - 1) * PRODUCTS_PER_PAGE + idx + 1
+                  return (
+                    <tr key={product.id} className={cn("border-b", themeClasses.cardBorder)}>
+                    <td className="py-3 px-4 align-top">{productNumber}</td>
                     <td className="py-3 px-4">
                       <div className="flex items-center space-x-3">
                         {product.image ? (
@@ -590,7 +638,8 @@ function AdminProductsContent() {
                       </DropdownMenu>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

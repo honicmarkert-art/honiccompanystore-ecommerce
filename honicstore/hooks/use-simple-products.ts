@@ -288,9 +288,16 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     return `products_cache_${btoa(filterSig).replace(/[^a-zA-Z0-9]/g, '_')}`
   }, [category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina])
 
-  // Restore products from cache on mount if available
+  // Restore products from cache on mount if available (only if no search/filters)
   useEffect(() => {
     if (!enabled || hasRestoredFromCacheRef.current) return
+    
+    // Don't use cache if there are active filters/search
+    const hasActiveFilters = search || category || brand || minPrice !== undefined || maxPrice !== undefined || (categories && categories.length > 0)
+    if (hasActiveFilters) {
+      hasRestoredFromCacheRef.current = true
+      return
+    }
     
     try {
       const cacheKey = getCacheKey()
@@ -312,26 +319,39 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     } catch (e) {
       // Ignore cache errors
     }
-  }, [enabled, getCacheKey])
+  }, [enabled, getCacheKey, search, category, brand, minPrice, maxPrice, categories])
 
-  // Save products to cache whenever they change
+  // Save products to cache whenever they change (with delay after filter changes)
   useEffect(() => {
     if (!enabled || products.length === 0) return
     
-    try {
-      const cacheKey = getCacheKey()
-      const cacheData = {
-        products,
-        offset,
-        hasMore,
-        totalCount,
-        timestamp: Date.now()
+    // Check if we have active filters/search
+    const hasActiveFilters = search || category || brand || minPrice !== undefined || maxPrice !== undefined || (categories && categories.length > 0)
+    
+    // If no filters, cache immediately
+    // If filters exist, wait 3 seconds before caching (to ensure API results are stable)
+    const cacheDelay = hasActiveFilters ? 3000 : 0
+    
+    const cacheTimer = setTimeout(() => {
+      try {
+        const cacheKey = getCacheKey()
+        const cacheData = {
+          products,
+          offset,
+          hasMore,
+          totalCount,
+          timestamp: Date.now()
+        }
+        sessionStorage.setItem(cacheKey, JSON.stringify(cacheData))
+      } catch (e) {
+        // Ignore cache errors (e.g., quota exceeded)
       }
-      sessionStorage.setItem(cacheKey, JSON.stringify(cacheData))
-    } catch (e) {
-      // Ignore cache errors (e.g., quota exceeded)
+    }, cacheDelay)
+    
+    return () => {
+      clearTimeout(cacheTimer)
     }
-  }, [enabled, products, offset, hasMore, totalCount, getCacheKey])
+  }, [enabled, products, offset, hasMore, totalCount, getCacheKey, search, category, brand, minPrice, maxPrice, categories])
 
   // Initial fetch and refetch on filter changes with debouncing
   // Products load immediately on initial load, debounced on filter changes
@@ -365,29 +385,16 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     if (filtersChanged) {
       // Reset cache restoration flag when filters change
       hasRestoredFromCacheRef.current = false
-      reset()
       
-      // Try to restore from cache first
+      // Clear cache when filters/search change
       try {
         const cacheKey = getCacheKey()
-        const cached = sessionStorage.getItem(cacheKey)
-        if (cached) {
-          const cachedData = JSON.parse(cached)
-          const cacheAge = Date.now() - (cachedData.timestamp || 0)
-          // Use cache if less than 5 minutes old
-          if (cacheAge < 5 * 60 * 1000 && Array.isArray(cachedData.products)) {
-            setProducts(cachedData.products)
-            setOffset(cachedData.offset || 0)
-            setHasMore(cachedData.hasMore !== undefined ? cachedData.hasMore : true)
-            setTotalCount(cachedData.totalCount || 0)
-            hasRestoredFromCacheRef.current = true
-            isInitialLoadRef.current = false
-            return // Don't fetch if cache is valid
-          }
-        }
+        sessionStorage.removeItem(cacheKey)
       } catch (e) {
-        // Ignore cache errors, proceed with fetch
+        // Ignore cache errors
       }
+      
+      reset()
       
       // Initial load: fetch immediately (no debounce)
       if (isInitialLoadRef.current && products.length === 0) {

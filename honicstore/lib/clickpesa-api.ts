@@ -124,11 +124,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     const clientId = useSupplierCredentials ? CLICKPESA_CLIENT_SUPPLIER_ID : CLICKPESA_CLIENT_ID
     const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
     
-    console.log(`🔑 [TOKEN] Generating access token (${credentialType})...`, {
-      baseUrl: CLICKPESA_CONFIG.baseUrl,
-      hasApiKey: Boolean(apiKey),
-      hasClientId: Boolean(clientId)
-    })
     logger.log(`ClickPesa: Generating access token (${credentialType})...`, {
       baseUrl: CLICKPESA_CONFIG.baseUrl,
       hasApiKey: Boolean(apiKey),
@@ -137,11 +132,9 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     })
 
     if (!apiKey || !clientId) {
-      console.error(`❌ [TOKEN] Missing credentials for ${credentialType} checkout`)
       throw new Error(`Missing ClickPesa credentials for ${credentialType} checkout. Please configure ${useSupplierCredentials ? 'CLICKPESA_API_SUPPLIER_KEY and CLICKPESA_CLIENT_SUPPLIER_ID' : 'CLICKPESA_API_KEY and CLICKPESA_CLIENT_ID'}`)
     }
 
-    console.log('📡 [TOKEN] Calling ClickPesa token API...')
     const response = await fetch(`${CLICKPESA_CONFIG.baseUrl}/third-parties/generate-token`, {
       method: "POST",
       headers: {
@@ -151,10 +144,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
       },
     })
 
-    console.log('📥 [TOKEN] Received token API response', {
-      status: response.status,
-      ok: response.ok
-    })
     logger.log("ClickPesa: Token generation response:", {
       status: response.status,
       statusText: response.statusText,
@@ -162,7 +151,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     })
 
     if (!response.ok) {
-      console.error('❌ [TOKEN] Token generation failed', { status: response.status })
       const responseText = await response.text()
       let errorData
       try {
@@ -203,10 +191,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     }
     
     if (!data.success || !data.token) {
-      console.error('❌ [TOKEN] Invalid token response structure', {
-        success: data.success,
-        hasToken: !!data.token
-      })
       logger.error("ClickPesa: Invalid token response structure:", {
         success: data.success,
         hasToken: !!data.token,
@@ -215,11 +199,9 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
       throw new Error("Invalid response from ClickPesa token generation API")
     }
 
-    console.log('✅ [TOKEN] Access token generated successfully')
     logger.log("ClickPesa: Access token generated successfully")
     return data.token
   } catch (error) {
-    console.error('❌ [TOKEN] Token generation error:', error instanceof Error ? error.message : String(error))
     // Log detailed error server-side but throw generic error for client
     logger.error("Failed to generate access token:", error instanceof Error ? error.message : String(error))
     throw new Error("Failed")
@@ -296,16 +278,12 @@ export const createCheckoutLink = async (
   try {
     // Step 1: Generate access token with appropriate credentials
     const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
-    console.log(`🔑 [CLICKPESA-API] Step 1: Generating access token (${credentialType})...`)
     const accessToken = await generateAccessToken(useSupplierCredentials)
-    console.log(`✅ [CLICKPESA-API] Step 1: Access token generated`)
 
     // Step 2: Generate checksum if not provided
-    console.log('🔐 [CLICKPESA-API] Step 2: Generating checksum...')
     if (!request.checksum) {
       request.checksum = generateChecksum(request)
     }
-    console.log('✅ [CLICKPESA-API] Step 2: Checksum generated')
 
     // Step 3: Create checkout link
     const requestPayload = {
@@ -323,11 +301,6 @@ export const createCheckoutLink = async (
     
     const authHeader = accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`
     
-    console.log('📡 [CLICKPESA-API] Step 3: Calling ClickPesa API to create checkout link...', {
-      endpoint: `${CLICKPESA_CONFIG.baseUrl}/third-parties/checkout-link/generate-checkout-url`,
-      orderReference: requestPayload.orderReference,
-      totalPrice: requestPayload.totalPrice
-    })
     const response = await fetch(`${CLICKPESA_CONFIG.baseUrl}/third-parties/checkout-link/generate-checkout-url`, {
       method: "POST",
       headers: {
@@ -337,10 +310,6 @@ export const createCheckoutLink = async (
       body: JSON.stringify(requestPayload),
     })
 
-    console.log('📥 [CLICKPESA-API] Step 3: Received response from ClickPesa API', {
-      status: response.status,
-      ok: response.ok
-    })
 
     if (!response.ok) {
       const responseText = await response.text()
@@ -351,9 +320,6 @@ export const createCheckoutLink = async (
         errorData = { message: responseText }
       }
       
-      console.error('❌ [CLICKPESA-API] Step 3: ClickPesa API error', {
-        status: response.status,
-        statusText: response.statusText,
         errorData: errorData
       })
       // Log detailed error server-side but throw generic error for client
@@ -373,18 +339,12 @@ export const createCheckoutLink = async (
     }
 
     const data = await response.json()
-    console.log('📦 [CLICKPESA-API] Step 3: Parsed response', {
-      hasCheckoutLink: !!data.checkoutLink,
-      hasClientId: !!data.clientId
-    })
     
     if (!data.checkoutLink) {
-      console.error('❌ [CLICKPESA-API] Step 3: Missing checkout link in response', { data })
       logger.error("Invalid response from ClickPesa API - missing checkout link")
       throw new Error("Failed")
     }
 
-    console.log('✅ [CLICKPESA-API] Step 3: Checkout link created successfully')
     return {
       checkoutLink: data.checkoutLink,
       clientId: data.clientId
