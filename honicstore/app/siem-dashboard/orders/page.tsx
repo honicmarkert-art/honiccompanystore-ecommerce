@@ -554,6 +554,12 @@ export default function AdminOrdersPage() {
   }
 
   const confirmOrder = async (order: Order) => {
+    // Prevent confirming already confirmed orders
+    if (order.status === 'confirmed' || order.status === 'ready_for_pickup') {
+      logger.log(`Order ${order.orderNumber} is already confirmed`)
+      return
+    }
+    
     // Only allow confirmation of paid orders
     if (order.paymentStatus !== 'paid') {
       logger.log(`Cannot confirm order ${order.orderNumber}: Payment status is ${order.paymentStatus}`)
@@ -1155,13 +1161,15 @@ export default function AdminOrdersPage() {
                           size="sm" 
                           className="bg-green-600 hover:bg-green-700" 
                           onClick={() => confirmOrder(order)}
-                          disabled={order.isConfirming}
+                          disabled={order.isConfirming || order.status === 'confirmed' || order.status === 'ready_for_pickup'}
                         >
                           {order.isConfirming ? (
                             <>
                               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                               Confirming...
                             </>
+                          ) : order.status === 'confirmed' || order.status === 'ready_for_pickup' ? (
+                            'Already Confirmed'
                           ) : (
                             'Confirm Order'
                           )}

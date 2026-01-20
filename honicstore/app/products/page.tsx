@@ -896,8 +896,8 @@ function ProductsPageContent() {
   // Pagination state - URL-based page number
   const [currentPage, setCurrentPage] = useState(1)
   // Simple Products System - Amazon/AliExpress Style
-  // 200 products per page with CDN caching
-  const PRODUCTS_PER_PAGE = 200 // Large page size like Amazon/AliExpress
+  // 150 products per page with CDN caching
+  const PRODUCTS_PER_PAGE = 150 // 150 products per page
 
   // Convert category slugs to IDs for API filtering
   const { mainCategoryId, subCategoryIds, allCategoryIds } = useCategoryFiltering({
@@ -962,13 +962,15 @@ function ProductsPageContent() {
     enabled: true
   })
   
-  // Get page from URL on mount
+  // Get page from URL on mount and when URL changes
   useEffect(() => {
     const page = parseInt(urlSearchParams?.get('page') || '1')
-    if (page > 0) {
+    if (page > 0 && page !== currentPage) {
       setCurrentPage(page)
+      // Reset displayedCount when page changes (pagination handles display)
+      setDisplayedCount(PRODUCTS_PER_PAGE)
     }
-  }, [urlSearchParams])
+  }, [urlSearchParams, currentPage, PRODUCTS_PER_PAGE])
 
   // Infinite scroll products hook for enhanced performance
 
@@ -1245,10 +1247,12 @@ function ProductsPageContent() {
     })
   }, [primaryProducts])
   
-  // Display only the current batch
+  // Display products for current page (150 products per page)
   const displayedProducts = useMemo(() => {
-    return allFilteredProducts.slice(0, displayedCount)
-  }, [allFilteredProducts, displayedCount])
+    const startIndex = (currentPage - 1) * PRODUCTS_PER_PAGE
+    const endIndex = startIndex + PRODUCTS_PER_PAGE
+    return allFilteredProducts.slice(startIndex, endIndex)
+  }, [allFilteredProducts, currentPage, PRODUCTS_PER_PAGE])
   
   // Restore scroll position when navigating back from product detail page
   const hasRestoredScrollRef = useRef(false)
@@ -1710,7 +1714,7 @@ function ProductsPageContent() {
   const hasMoreInBatch = displayedCount < allFilteredProducts.length
   // Check if we need to fetch more from API
   const hasMoreProducts = primaryHasMore || (primaryTotalCount > 0 && allFilteredProducts.length < primaryTotalCount)
-  const hasNextPage = primaryTotalCount > allFilteredProducts.length || primaryHasMore
+  const hasNextPage = (primaryTotalCount > currentPage * PRODUCTS_PER_PAGE) || (allFilteredProducts.length > currentPage * PRODUCTS_PER_PAGE) || primaryHasMore
   const currentPageProductCount = displayedProducts.length
   
   // Combined load more: show more from batch OR fetch from API
@@ -1732,12 +1736,33 @@ function ProductsPageContent() {
     if (activeBrand) params.set('brand', activeBrand)
     // Use actualSearchQuery (from URL) instead of searchTerm (input state) to preserve actual search
     if (actualSearchQuery) params.set('search', actualSearchQuery)
-    // Sort parameter removed - use default sorting
+    if (selectedMainCategory) params.set('mainCategory', selectedMainCategory)
+    if (selectedSubCategories.length > 0) {
+      params.set('subCategories', selectedSubCategories.join(','))
+    }
     if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
     if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
     
     return `/products?${params.toString()}`
-  }, [currentPage, activeBrand, actualSearchQuery, priceRange])
+  }, [currentPage, activeBrand, actualSearchQuery, selectedMainCategory, selectedSubCategories, priceRange])
+
+  const buildPreviousPageUrl = useCallback(() => {
+    const params = new URLSearchParams()
+    if (currentPage > 2) {
+      params.set('page', (currentPage - 1).toString())
+    }
+    
+    if (activeBrand) params.set('brand', activeBrand)
+    if (actualSearchQuery) params.set('search', actualSearchQuery)
+    if (selectedMainCategory) params.set('mainCategory', selectedMainCategory)
+    if (selectedSubCategories.length > 0) {
+      params.set('subCategories', selectedSubCategories.join(','))
+    }
+    if (priceRange[0] > 0) params.set('minPrice', priceRange[0].toString())
+    if (priceRange[1] < 100000) params.set('maxPrice', priceRange[1].toString())
+    
+    return `/products?${params.toString()}`
+  }, [currentPage, activeBrand, actualSearchQuery, selectedMainCategory, selectedSubCategories, priceRange])
 
   // Track prefetched products to avoid duplicate requests
   const prefetchedProductsRef = useRef<Set<number>>(new Set())
@@ -4201,16 +4226,29 @@ function ProductsPageContent() {
         ) : null}
         </div>
 
-        {/* Next Page Navigation */}
-        {!hasMoreProducts && currentPageProductCount >= PRODUCTS_PER_PAGE && hasNextPage && (
-          <div className="flex flex-col items-center justify-center py-2 px-4 gap-2" suppressHydrationWarning>
-            <div className="text-center">
-              <p className={cn("text-sm mb-2", themeClasses.textNeutralSecondary)}>
-                {primaryTotalCount > PRODUCTS_PER_PAGE 
-                  ? `${primaryTotalCount - displayedProducts.length} more products available` 
-                  : 'More products available'}
-              </p>
-            </div>
+        {/* Pagination Navigation */}
+        <div className="flex flex-col items-center justify-center py-4 px-4 gap-4" suppressHydrationWarning>
+          {/* Previous Page Button */}
+          {currentPage > 1 && (
+            <Link href={buildPreviousPageUrl()} target="_blank" rel="noopener noreferrer">
+              <Button
+                size="lg"
+                className="bg-blue-500 text-white hover:bg-blue-600 px-8 py-4 text-base font-semibold"
+              >
+                ← Previous Page ({currentPage - 1})
+              </Button>
+            </Link>
+          )}
+          
+          {/* Current Page Info */}
+          <div className="text-center">
+            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+              Page {currentPage} - Showing {displayedProducts.length} of {primaryTotalCount || allFilteredProducts.length} products
+            </p>
+          </div>
+          
+          {/* Next Page Button */}
+          {hasNextPage && displayedProducts.length >= PRODUCTS_PER_PAGE && (
             <Link href={buildNextPageUrl()} target="_blank" rel="noopener noreferrer">
               <Button
                 size="lg"
@@ -4219,8 +4257,8 @@ function ProductsPageContent() {
                 Next Page ({currentPage + 1}) →
               </Button>
             </Link>
-          </div>
-        )}
+          )}
+        </div>
         
         {/* End of all products */}
         {!hasMoreProducts && !hasNextPage && displayedProducts.length > 0 && (

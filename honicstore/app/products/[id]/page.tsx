@@ -242,27 +242,48 @@ function ProductDetailPageContent() {
   const [isLoadingProduct, setIsLoadingProduct] = useState(false)
   
   // Check cache first, then fetch - enables immediate display from cache
+  // But prioritize API data over cached data to ensure full details are shown
   const product = useMemo(() => {
     // Priority 1: Use fetched product data (has full details from API)
     if (productData && typeof productData === 'object' && 'id' in productData && productData.id) {
       return productData
     }
     // Priority 2: Check shared cache (may have limited fields from list page)
-    if (Array.isArray(products) && products.length > 0 && productIdNumber) {
+    // Only use cached product if we're not currently loading (to avoid showing stale data)
+    if (!isLoadingProduct && Array.isArray(products) && products.length > 0 && productIdNumber) {
       const foundProduct = products.find((p) => p.id === productIdNumber)
       if (foundProduct) {
         return foundProduct
       }
     }
     return undefined
-  }, [products, productIdNumber, productData])
+  }, [products, productIdNumber, productData, isLoadingProduct])
 
   // Request deduplication - prevent duplicate API calls
   const fetchRequestRef = useRef<Map<string, Promise<any>>>(new Map())
+  const lastFetchedProductIdRef = useRef<number | null>(null)
+  
+  // Reset productData when product ID changes (separate effect to avoid race conditions)
+  useEffect(() => {
+    if (productIdNumber && isValidProductId) {
+      // Reset if navigating to a different product
+      if (lastFetchedProductIdRef.current !== null && lastFetchedProductIdRef.current !== productIdNumber) {
+        setProductData(null)
+        lastFetchedProductIdRef.current = null
+      }
+    }
+  }, [productIdNumber, isValidProductId])
   
   // Single parallel fetch with CDN caching - ALL data in parallel, no delays
+  // Always fetch from API to get full details (description, specifications, variant images)
+  // Cached product from list page may not have all fields
   useEffect(() => {
-    if (!productIdNumber || !isValidProductId || product) return
+    if (!productIdNumber || !isValidProductId) return
+    
+    // Only skip fetch if we already have full data for THIS product
+    if (productData && productData.id === productIdNumber && lastFetchedProductIdRef.current === productIdNumber) {
+      return
+    }
 
     setIsLoadingProduct(true)
     
@@ -287,10 +308,11 @@ function ProductDetailPageContent() {
     const performanceMetrics: FetchMetrics[] = []
     
     // Helper function for safe fetch with retry, timeout, and metrics
-    const safeFetch = async <T = any>(url: string, options: RequestInit = {}): Promise<T | null> => {
+    const safeFetch = async <T = any>(url: string, fetchOptions: { cache?: RequestCache } & RequestInit = {}): Promise<T | null> => {
       try {
+        const { cache: cacheOption, ...restOptions } = fetchOptions
         const { response, metrics } = await fetchWithMetrics(url, {
-          ...options,
+          ...restOptions,
           signal,
           timeout: 10000, // 10 second timeout
           retries: 2, // Retry twice on failure
@@ -298,9 +320,9 @@ function ProductDetailPageContent() {
           exponentialBackoff: true, // Use exponential backoff
           headers: {
             'Content-Type': 'application/json',
-            ...options.headers
+            ...restOptions.headers
           },
-          cache: 'default' // Use CDN cache
+          cache: cacheOption || 'default' // Use provided cache option or default
         })
         
         // Track performance metrics
@@ -329,14 +351,19 @@ function ProductDetailPageContent() {
     }
     
     // Parallel fetch: ALL requests simultaneously (CDN cached)
+    // Add cache-busting timestamp for first load to ensure fresh data
+    const cacheBuster = lastFetchedProductIdRef.current === null ? `?t=${Date.now()}` : ''
     const fetchPromise = Promise.all([
-      // Main product fetch (CDN cache enabled)
-      safeFetch(`/api/products/${productIdNumber}`, {
-        priority: 'high' as RequestPriority
+      // Main product fetch (CDN cache enabled, but bust cache on first load)
+      safeFetch(`/api/products/${productIdNumber}${cacheBuster}`, {
+        priority: 'high' as RequestPriority,
+        cache: lastFetchedProductIdRef.current === null ? 'no-cache' : 'default'
       }),
       
-      // Variant images (parallel, CDN cached)
-      safeFetch(`/api/products/${productIdNumber}/variant-images?limit=5`),
+      // Variant images (parallel, CDN cached, but bust cache on first load)
+      safeFetch(`/api/products/${productIdNumber}/variant-images?limit=5${cacheBuster}`, {
+        cache: lastFetchedProductIdRef.current === null ? 'no-cache' : 'default'
+      }),
       
       // Reviews (parallel, CDN cached)
       safeFetch(`/api/products/${productIdNumber}/reviews`),
@@ -369,6 +396,7 @@ function ProductDetailPageContent() {
         }
         
         setProductData(mergedProduct)
+        lastFetchedProductIdRef.current = productIdNumber // Track that we've fetched this product
         
         // Update variant images state (validate structure and normalize)
         if (variantImagesData?.variantImages && Array.isArray(variantImagesData.variantImages)) {
@@ -467,7 +495,64 @@ function ProductDetailPageContent() {
         fetchRequestRef.current.delete(requestKey)
       }, 5000)
     }
-  }, [productIdNumber, isValidProductId, product])
+  }, [productIdNumber, isValidProductId, productData]) // Use productData instead of product to ensure we always fetch full details
+
+  // Fetch fresh variant images/thumbnails from database after 3 seconds
+  // This ensures thumbnails are loaded even if initial fetch didn't include them
+  useEffect(() => {
+    if (!productIdNumber || !isValidProductId) return
+    
+    const refreshTimer = setTimeout(async () => {
+      try {
+        // Fetch variant images with cache-busting to ensure fresh data from DB
+        const response = await fetch(`/api/products/${productIdNumber}/variant-images?limit=5&t=${Date.now()}`, {
+          cache: 'no-cache',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          
+          // Update variant images state if we got new data
+          if (data?.variantImages && Array.isArray(data.variantImages)) {
+            const normalizedVariantImages: Array<{
+              variantId?: number
+              imageUrl: string
+              attribute?: {name: string, value: string}
+              attributes?: Array<{name: string, value: string}>
+            }> = []
+            
+            data.variantImages.forEach((img: any) => {
+              if (typeof img === 'string' && img.trim() !== '') {
+                normalizedVariantImages.push({ imageUrl: img.trim() })
+              } else if (img && typeof img === 'object') {
+                const imageUrl = (img.imageUrl || img.image || img.url || '').trim()
+                if (imageUrl) {
+                  normalizedVariantImages.push({
+                    imageUrl,
+                    variantId: img.variantId || img.variant_id,
+                    attribute: img.attribute,
+                    attributes: img.attributes
+                  })
+                }
+              }
+            })
+            
+            // Only update if we have new variant images
+            if (normalizedVariantImages.length > 0) {
+              setVariantImages(normalizedVariantImages)
+            }
+          }
+        }
+      } catch (error) {
+        // Silently fail - initial fetch already handled this
+      }
+    }, 3000) // 3 second delay
+    
+    return () => clearTimeout(refreshTimer)
+  }, [productIdNumber, isValidProductId])
 
   // Helpers for video rendering
   const isDirectVideoFile = (url?: string | null) => !!url && /\.(mp4|webm|ogg|mov|m4v)(\?|$)/i.test(url)
@@ -702,43 +787,39 @@ function ProductDetailPageContent() {
   const currentVideo = product?.video
   const currentView360 = product?.view360
   
-  // Calculate rotated related products (memoized for performance)
+  // Calculate randomly selected related products (memoized for performance)
+  // Uses rotation index as seed for consistent random selection per rotation
   const rotatedRelatedProducts = useMemo(() => {
     // Use different count based on screen size
     const productsToShow = isMobile ? RELATED_PRODUCTS_COUNT_MOBILE : RELATED_PRODUCTS_COUNT_DESKTOP
     
-    // Get products from same category
-    const sameCategoryProducts = products
-      .filter(p => p.id !== product?.id && p.category === product?.category)
+    // Get all available products (excluding current product)
+    const allAvailableProducts = products.filter(p => p.id !== product?.id)
     
-    // Get products from other categories
-    const otherCategoryProducts = products
-      .filter(p => p.id !== product?.id && p.category !== product?.category)
-    
-    // Combine all available products (same category first, then others)
-    const allAvailableProducts = [...sameCategoryProducts, ...otherCategoryProducts]
-    
-    // Calculate which slice to show based on rotation index
-    const startIndex = (relatedProductsRotation * productsToShow) % Math.max(1, allAvailableProducts.length)
-    let relatedProducts = []
-    
-    // If we have enough products, slice normally
-    if (allAvailableProducts.length >= productsToShow) {
-      // Wrap around if needed
-      if (startIndex + productsToShow <= allAvailableProducts.length) {
-        relatedProducts = allAvailableProducts.slice(startIndex, startIndex + productsToShow)
-      } else {
-        // Wrap around to beginning
-        const remainingFromEnd = allAvailableProducts.slice(startIndex)
-        const neededFromStart = productsToShow - remainingFromEnd.length
-        relatedProducts = [...remainingFromEnd, ...allAvailableProducts.slice(0, neededFromStart)]
-      }
-    } else {
-      // Show all available products if less than limit
-      relatedProducts = allAvailableProducts
+    if (allAvailableProducts.length === 0) {
+      return []
     }
     
-    return relatedProducts
+    // Shuffle array randomly using Fisher-Yates algorithm with rotation as seed
+    // This ensures different random selection on each rotation while maintaining consistency
+    const shuffled = [...allAvailableProducts]
+    
+    // Use rotation index as seed for pseudo-random shuffling
+    // This ensures different products are shown on each rotation
+    let seed = relatedProductsRotation
+    const random = () => {
+      seed = (seed * 9301 + 49297) % 233280
+      return seed / 233280
+    }
+    
+    // Fisher-Yates shuffle with seeded random
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    
+    // Return first N products after shuffling
+    return shuffled.slice(0, Math.min(productsToShow, shuffled.length))
   }, [products, product, relatedProductsRotation, isMobile, RELATED_PRODUCTS_COUNT_MOBILE, RELATED_PRODUCTS_COUNT_DESKTOP])
 
   // Variant images are now loaded in parallel with product data (see main useEffect above)
@@ -982,23 +1063,59 @@ function ProductDetailPageContent() {
 
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
 
-  // Simplified variant image matching - use selected variant image if available
-  // Also check variantImages array for matching images
+  // Enhanced variant image matching - use selected variant image if available
+  // Also check variantImages array for matching images by ID or attributes
   const findMatchingVariantImage = useCallback(() => {
+    if (!selectedVariant) return null
+    
     // First check if selected variant has an image
-    if (selectedVariant?.image && selectedVariant.image.trim() !== '') {
+    if (selectedVariant.image && selectedVariant.image.trim() !== '') {
       return selectedVariant.image
     }
     
-    // If variant has an ID, try to find matching image in variantImages array
-    if (selectedVariant?.id && variantImages.length > 0) {
-      const matchingImage = variantImages.find((img: any) => 
+    if (variantImages.length === 0) return null
+    
+    // Try to find matching image by variant ID
+    if (selectedVariant.id) {
+      const matchingById = variantImages.find((img: any) => 
         img.variantId === selectedVariant.id || 
         img.variantId === Number(selectedVariant.id)
       )
-      if (matchingImage?.imageUrl) {
-        return matchingImage.imageUrl
+      if (matchingById?.imageUrl) {
+        return matchingById.imageUrl
       }
+    }
+    
+    // Try to match by attributes if variantId is not available
+    if (selectedVariant.attributes && typeof selectedVariant.attributes === 'object') {
+      const variantAttributes = selectedVariant.attributes
+      
+      // Check if any variant image matches the variant's attributes
+      const matchingByAttributes = variantImages.find((img: any) => {
+        // Check if image has matching attributes
+        if (img.attributes && Array.isArray(img.attributes)) {
+          return img.attributes.some((attr: any) => {
+            const attrName = attr?.name || attr?.attribute
+            const attrValue = attr?.value || attr?.value
+            return variantAttributes[attrName] === attrValue
+          })
+        }
+        // Check single attribute match
+        if (img.attribute && img.attribute.name && img.attribute.value) {
+          return variantAttributes[img.attribute.name] === img.attribute.value
+        }
+        return false
+      })
+      
+      if (matchingByAttributes?.imageUrl) {
+        return matchingByAttributes.imageUrl
+      }
+    }
+    
+    // If no specific match found but variant images exist, return the first one
+    // This ensures variant images are displayed even without explicit matching
+    if (variantImages.length > 0 && variantImages[0]?.imageUrl) {
+      return variantImages[0].imageUrl
     }
     
     return null
@@ -1532,9 +1649,15 @@ function ProductDetailPageContent() {
       return mainImage
     }
     
-    // If variant is selected, use its image
+    // If variant is selected, use its matching image
     if (matchingVariantImage) {
       return matchingVariantImage
+    }
+    
+    // If variant images exist, prioritize showing them (even if no variant is selected)
+    // This ensures variant images are displayed when available
+    if (variantImages.length > 0 && variantImages[0]?.imageUrl) {
+      return variantImages[0].imageUrl
     }
     
     // Prefer the first thumbnail if available (prioritize variant images over main image)
@@ -1557,7 +1680,7 @@ function ProductDetailPageContent() {
     }
     
     return null
-  }, [mainImage, matchingVariantImage, thumbnailImages, variantImages.length, product?.image])
+  }, [mainImage, matchingVariantImage, thumbnailImages, variantImages, product?.image])
   
   // (helper declared once above)
   
@@ -1568,29 +1691,63 @@ function ProductDetailPageContent() {
   }, [selectedVariant])
 
   // Initialize mainImage on first load - prevents showing main image then switching to thumbnail
+  // Also retry after 3 seconds if variant images aren't loaded yet
   useEffect(() => {
     // Only initialize once when product loads
     if (!product?.image || mainImage) return
     
-    // Wait a bit for variant images to load, then decide
+    let retryTimer: NodeJS.Timeout | null = null
+    
+    const checkAndSetImage = (): boolean => {
+      // ALWAYS check thumbnail images FIRST before using product main image
+      // Thumbnails include variant images, so they should be prioritized
+      if (thumbnailImages.length > 0) {
+        // Prioritize variant images if available
+        if (variantImages.length > 0 && variantImages[0]?.imageUrl) {
+          // Use first variant image
+          setMainImage(variantImages[0].imageUrl)
+          const matchingIndex = thumbnailImages.findIndex(img => img === variantImages[0].imageUrl)
+          setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : 0)
+          return true // Successfully set image
+        } else if (thumbnailImages[0] !== product.image) {
+          // If variant images array is empty but thumbnails exist, use first thumbnail
+          setMainImage(thumbnailImages[0])
+          setSelectedThumbnailIndex(0)
+          return true // Successfully set image
+        } else if (thumbnailImages.length > 0) {
+          // Even if thumbnail is same as main image, use it for consistency
+          setMainImage(thumbnailImages[0])
+          setSelectedThumbnailIndex(0)
+          return true // Successfully set image
+        }
+      }
+      
+      // If thumbnails not available yet, return false to retry
+      return false
+    }
+    
+    // Initial check after 100ms
     const initTimer = setTimeout(() => {
-      // If variant images have loaded and thumbnails are available, use first thumbnail
-      if (thumbnailImages.length > 0 && thumbnailImages[0] !== product.image) {
-        setMainImage(thumbnailImages[0])
-        setSelectedThumbnailIndex(0)
-      } else if (thumbnailImages.length > 0) {
-        // Even if thumbnail is same as main image, use it for consistency
-        setMainImage(thumbnailImages[0])
-        setSelectedThumbnailIndex(0)
-      } else {
-        // Otherwise use main product image
-        setMainImage(product.image)
-        setSelectedThumbnailIndex(null)
+      if (!checkAndSetImage()) {
+        // If thumbnails not loaded, retry after 3 seconds
+        retryTimer = setTimeout(() => {
+          if (!checkAndSetImage()) {
+            // Still no thumbnails after retry, use main product image as fallback
+            // This ensures we always show something, even if variant images fail to load
+            setMainImage(product.image)
+            setSelectedThumbnailIndex(null)
+          }
+        }, 3000) // 3 second retry
       }
     }, 100) // Small delay to allow variant images to load
     
-    return () => clearTimeout(initTimer)
-  }, [product?.image, thumbnailImages, variantImages.length, mainImage]) // Include thumbnailImages to react when they load
+    return () => {
+      clearTimeout(initTimer)
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+      }
+    }
+  }, [product?.image, thumbnailImages, variantImages, mainImage]) // Include variantImages to react when they load
 
   // Auto-update main image when variant changes (but not when user manually selects a thumbnail)
   useEffect(() => {
@@ -1599,11 +1756,18 @@ function ProductDetailPageContent() {
       return
     }
 
-    // If variant is selected, use its image
-      if (matchingVariantImage) {
-        setMainImage(matchingVariantImage)
-        const matchingIndex = thumbnailImages.findIndex(img => img === matchingVariantImage)
-        setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : null)
+    // If variant is selected, use its matching image
+    if (matchingVariantImage) {
+      setMainImage(matchingVariantImage)
+      const matchingIndex = thumbnailImages.findIndex(img => img === matchingVariantImage)
+      setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : null)
+    } else if (variantImages.length > 0 && variantImages[0]?.imageUrl) {
+      // If no variant selected but variant images exist, show first variant image
+      if (mainImage !== variantImages[0].imageUrl) {
+        setMainImage(variantImages[0].imageUrl)
+        const matchingIndex = thumbnailImages.findIndex(img => img === variantImages[0].imageUrl)
+        setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : 0)
+      }
     } else if (thumbnailImages.length > 0 && !matchingVariantImage) {
       // Only update if thumbnails are available and no variant is selected
       // Check if current mainImage is the main product image (to avoid unnecessary updates)
@@ -1612,7 +1776,7 @@ function ProductDetailPageContent() {
         setSelectedThumbnailIndex(0)
       }
     }
-  }, [matchingVariantImage, thumbnailImages, isManualImageSelection, selectedVariant, mainImage, product?.image])
+  }, [matchingVariantImage, thumbnailImages, isManualImageSelection, selectedVariant, mainImage, product?.image, variantImages])
   
   const currentSKU = selectedVariant?.sku || product?.sku || ""
   const currentModel = selectedVariant?.model || product?.model || ""

@@ -304,6 +304,16 @@ function AdminProductsContent() {
         <div className="flex items-center gap-4">
           <AuthStatusIndicator />
           <MaterializedViewRefreshButton onRefresh={handleRefresh} />
+          {hasMore && (
+            <Button
+              variant="outline"
+              onClick={loadMoreProducts}
+              disabled={isLoadingMore || isInitialLoading}
+              className="min-w-[120px]"
+            >
+              {isLoadingMore ? "Loading..." : "See More"}
+            </Button>
+          )}
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <Button 
               className="flex items-center gap-2"
