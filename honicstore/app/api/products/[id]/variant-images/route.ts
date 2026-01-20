@@ -70,10 +70,26 @@ export async function GET(
     }
     const allVariantImages = product?.variant_images || []
 
-    // Limit to first N images for better performance
-    const variantImages = allVariantImages.slice(0, limit)
+    // Normalize variant images to ensure consistent format
+    // Handle both string arrays and object arrays from database
+    const normalizedVariantImages = allVariantImages.map((img: any, index: number) => {
+      if (typeof img === 'string') {
+        return { imageUrl: img }
+      } else if (img && typeof img === 'object') {
+        return {
+          imageUrl: img.imageUrl || img.image || img.url || String(img),
+          variantId: img.variantId || img.variant_id,
+          attribute: img.attribute,
+          attributes: img.attributes
+        }
+      }
+      return { imageUrl: String(img || '') }
+    }).filter((img: any) => img.imageUrl && img.imageUrl.trim() !== '')
 
-    logger.log(`📊 Found ${allVariantImages.length} total variant images, returning first ${variantImages.length}`)
+    // Limit to first N images for better performance
+    const variantImages = normalizedVariantImages.slice(0, limit)
+
+    logger.log(`📊 Found ${allVariantImages.length} total variant images, normalized to ${normalizedVariantImages.length}, returning first ${variantImages.length}`)
 
     // Set appropriate cache headers
     const cacheHeaders = cacheBust ? {
@@ -86,7 +102,7 @@ export async function GET(
     return NextResponse.json({
       success: true,
       variantImages,
-      total: allVariantImages.length,
+      total: normalizedVariantImages.length,
       returned: variantImages.length
     }, {
       headers: cacheHeaders

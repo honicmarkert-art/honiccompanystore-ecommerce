@@ -370,9 +370,60 @@ function ProductDetailPageContent() {
         
         setProductData(mergedProduct)
         
-        // Update variant images state (validate structure)
+        // Update variant images state (validate structure and normalize)
         if (variantImagesData?.variantImages && Array.isArray(variantImagesData.variantImages)) {
-          setVariantImages(variantImagesData.variantImages)
+          // Normalize variant images to ensure consistent structure
+          const normalizedVariantImages: Array<{
+            variantId?: number
+            imageUrl: string
+            attribute?: {name: string, value: string}
+            attributes?: Array<{name: string, value: string}>
+          }> = []
+          
+          variantImagesData.variantImages.forEach((img: any) => {
+            // Handle different formats: string, object with imageUrl, or object with image
+            if (typeof img === 'string' && img.trim() !== '') {
+              normalizedVariantImages.push({ imageUrl: img.trim() })
+            } else if (img && typeof img === 'object') {
+              const imageUrl = (img.imageUrl || img.image || img.url || '').trim()
+              if (imageUrl) {
+                normalizedVariantImages.push({
+                  imageUrl,
+                  variantId: img.variantId || img.variant_id,
+                  attribute: img.attribute,
+                  attributes: img.attributes
+                })
+              }
+            }
+          })
+          
+          setVariantImages(normalizedVariantImages)
+        } else if (variantImagesData && Array.isArray(variantImagesData)) {
+          // Handle case where API returns array directly
+          const normalizedVariantImages: Array<{
+            variantId?: number
+            imageUrl: string
+            attribute?: {name: string, value: string}
+            attributes?: Array<{name: string, value: string}>
+          }> = []
+          
+          variantImagesData.forEach((img: any) => {
+            if (typeof img === 'string' && img.trim() !== '') {
+              normalizedVariantImages.push({ imageUrl: img.trim() })
+            } else if (img && typeof img === 'object') {
+              const imageUrl = (img.imageUrl || img.image || img.url || '').trim()
+              if (imageUrl) {
+                normalizedVariantImages.push({
+                  imageUrl,
+                  variantId: img.variantId || img.variant_id,
+                  attribute: img.attribute,
+                  attributes: img.attributes
+                })
+              }
+            }
+          })
+          
+          setVariantImages(normalizedVariantImages)
         }
         
         // Security: Validate and sanitize reviews before setting
@@ -805,6 +856,7 @@ function ProductDetailPageContent() {
 
     return {
       ...base,
+      description: base.description || '', // Ensure description is always present
       specifications: parsedSpecifications,
       variants: normalizedVariants,
       variantConfig: normalizedVariantConfig,
@@ -931,12 +983,26 @@ function ProductDetailPageContent() {
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null)
 
   // Simplified variant image matching - use selected variant image if available
+  // Also check variantImages array for matching images
   const findMatchingVariantImage = useCallback(() => {
-    if (selectedVariant?.image) {
+    // First check if selected variant has an image
+    if (selectedVariant?.image && selectedVariant.image.trim() !== '') {
       return selectedVariant.image
     }
+    
+    // If variant has an ID, try to find matching image in variantImages array
+    if (selectedVariant?.id && variantImages.length > 0) {
+      const matchingImage = variantImages.find((img: any) => 
+        img.variantId === selectedVariant.id || 
+        img.variantId === Number(selectedVariant.id)
+      )
+      if (matchingImage?.imageUrl) {
+        return matchingImage.imageUrl
+      }
+    }
+    
     return null
-  }, [selectedVariant])
+  }, [selectedVariant, variantImages])
 
   // New states for video and 360° view dialogs
   const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false)
@@ -1409,12 +1475,28 @@ function ProductDetailPageContent() {
     const images: string[] = []
     const mainProductImage = product?.image?.trim() || ''
     
-    // Collect variant images
-    variantImages.forEach((variantImg) => {
-      if (variantImg.imageUrl && variantImg.imageUrl.trim() !== '') {
-        images.push(variantImg.imageUrl)
+    // Collect variant images - handle different formats
+    variantImages.forEach((variantImg: any) => {
+      let imageUrl = ''
+      if (typeof variantImg === 'string') {
+        imageUrl = variantImg.trim()
+      } else if (variantImg && typeof variantImg === 'object') {
+        imageUrl = (variantImg.imageUrl || variantImg.image || variantImg.url || '').trim()
+      }
+      
+      if (imageUrl && imageUrl !== '') {
+        images.push(imageUrl)
       }
     })
+    
+    // Also check if variants have images
+    if (displayProduct?.variants && Array.isArray(displayProduct.variants)) {
+      displayProduct.variants.forEach((variant: any) => {
+        if (variant.image && typeof variant.image === 'string' && variant.image.trim() !== '') {
+          images.push(variant.image.trim())
+        }
+      })
+    }
     
     // Remove duplicates
     const uniqueVariantImages = [...new Set(images)]
@@ -1436,7 +1518,7 @@ function ProductDetailPageContent() {
     
     // If we have more than 8 variant images, limit to 8
     return uniqueVariantImages.slice(0, targetThumbnailCount)
-  }, [variantImages, product?.image])
+  }, [variantImages, product?.image, displayProduct?.variants])
 
   const thumbnailImages = useMemo(() => getAllThumbnailImages(), [getAllThumbnailImages])
   
@@ -1455,13 +1537,21 @@ function ProductDetailPageContent() {
       return matchingVariantImage
     }
     
-    // Prefer the first thumbnail if available (but only if variant images have loaded)
+    // Prefer the first thumbnail if available (prioritize variant images over main image)
     // This prevents showing main image first, then switching to thumbnail
-    if (thumbnailImages.length > 0 && variantImages.length > 0) {
-      return thumbnailImages[0]
+    if (thumbnailImages.length > 0) {
+      // Check if first thumbnail is different from main product image
+      const firstThumbnail = thumbnailImages[0]
+      if (firstThumbnail && firstThumbnail !== product?.image) {
+        return firstThumbnail
+      }
+      // If thumbnails exist but first one is main image, still use it
+      if (firstThumbnail) {
+        return firstThumbnail
+      }
     }
     
-    // When no thumbnails exist or variant images haven't loaded yet, show main product image
+    // When no thumbnails exist, show main product image
     if (product?.image && product.image.trim() !== '') {
       return product.image
     }
@@ -1479,19 +1569,28 @@ function ProductDetailPageContent() {
 
   // Initialize mainImage on first load - prevents showing main image then switching to thumbnail
   useEffect(() => {
-    // Only initialize once when product loads and variant images are available
+    // Only initialize once when product loads
     if (!product?.image || mainImage) return
     
-    // If variant images have loaded, use first thumbnail
-    if (variantImages.length > 0 && thumbnailImages.length > 0) {
-      setMainImage(thumbnailImages[0])
-      setSelectedThumbnailIndex(0)
-    } else {
-      // Otherwise use main product image
-      setMainImage(product.image)
-      setSelectedThumbnailIndex(null)
-    }
-  }, [product?.image, variantImages.length]) // Only run when product or variant images load
+    // Wait a bit for variant images to load, then decide
+    const initTimer = setTimeout(() => {
+      // If variant images have loaded and thumbnails are available, use first thumbnail
+      if (thumbnailImages.length > 0 && thumbnailImages[0] !== product.image) {
+        setMainImage(thumbnailImages[0])
+        setSelectedThumbnailIndex(0)
+      } else if (thumbnailImages.length > 0) {
+        // Even if thumbnail is same as main image, use it for consistency
+        setMainImage(thumbnailImages[0])
+        setSelectedThumbnailIndex(0)
+      } else {
+        // Otherwise use main product image
+        setMainImage(product.image)
+        setSelectedThumbnailIndex(null)
+      }
+    }, 100) // Small delay to allow variant images to load
+    
+    return () => clearTimeout(initTimer)
+  }, [product?.image, thumbnailImages, variantImages.length, mainImage]) // Include thumbnailImages to react when they load
 
   // Auto-update main image when variant changes (but not when user manually selects a thumbnail)
   useEffect(() => {
@@ -1505,15 +1604,15 @@ function ProductDetailPageContent() {
         setMainImage(matchingVariantImage)
         const matchingIndex = thumbnailImages.findIndex(img => img === matchingVariantImage)
         setSelectedThumbnailIndex(matchingIndex >= 0 ? matchingIndex : null)
-    } else if (thumbnailImages.length > 0 && variantImages.length > 0 && !matchingVariantImage) {
-      // Only update if variant images have loaded and no variant is selected
+    } else if (thumbnailImages.length > 0 && !matchingVariantImage) {
+      // Only update if thumbnails are available and no variant is selected
       // Check if current mainImage is the main product image (to avoid unnecessary updates)
-      if (mainImage === product?.image) {
+      if (mainImage === product?.image && thumbnailImages[0] !== product?.image) {
         setMainImage(thumbnailImages[0])
         setSelectedThumbnailIndex(0)
       }
     }
-  }, [matchingVariantImage, thumbnailImages, variantImages.length, isManualImageSelection, selectedVariant, mainImage, product?.image])
+  }, [matchingVariantImage, thumbnailImages, isManualImageSelection, selectedVariant, mainImage, product?.image])
   
   const currentSKU = selectedVariant?.sku || product?.sku || ""
   const currentModel = selectedVariant?.model || product?.model || ""
