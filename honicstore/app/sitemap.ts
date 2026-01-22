@@ -1,6 +1,10 @@
 import { MetadataRoute } from 'next'
 import { getSupabaseClient } from '@/lib/supabase-server'
 
+// Make sitemap dynamic to avoid memory issues during build
+export const dynamic = 'force-dynamic'
+export const revalidate = 3600 // Revalidate every hour
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'
   
@@ -30,18 +34,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'daily',
       priority: 0.9,
     },
-    {
-      url: `${baseUrl}/featured`,
-      lastModified: new Date(),
-      changeFrequency: 'daily',
-      priority: 0.9,
-    },
-    {
-      url: `${baseUrl}/discover`,
-      lastModified: new Date(),
-      changeFrequency: 'daily',
-      priority: 0.8,
-    },
+    // Removed featured and discover pages as they redirect to /products
     {
       url: `${baseUrl}/contact`,
       lastModified: new Date(),
@@ -56,18 +49,25 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ]
 
-  // Dynamic product pages
+  // Dynamic product pages - limit to reduce memory usage during build
   let productPages: MetadataRoute.Sitemap = []
   
   try {
     const supabase = getSupabaseClient()
-    const { data: products } = await supabase
+    // Use is_hidden instead of status, and limit to 500 to reduce memory usage
+    const { data: products, error } = await supabase
       .from('products')
       .select('id, slug, updated_at')
-      .eq('status', 'active')
-      .limit(1000) // Limit to 1000 products for sitemap
+      .eq('is_hidden', false)
+      .order('updated_at', { ascending: false })
+      .limit(500) // Reduced from 1000 to 500 to save memory during build
     
-    if (products) {
+    if (error) {
+      // Silently fail - don't break build if sitemap generation fails
+      return staticPages
+    }
+    
+    if (products && products.length > 0) {
       productPages = products.map((product) => ({
         url: `${baseUrl}/products/${product.slug || product.id}`,
         lastModified: product.updated_at ? new Date(product.updated_at) : new Date(),
@@ -76,7 +76,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       }))
     }
   } catch (error) {
-    }
+    // Silently fail - return only static pages if product fetch fails
+    return staticPages
+  }
 
   return [...staticPages, ...productPages]
 }
