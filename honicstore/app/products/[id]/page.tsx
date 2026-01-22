@@ -119,8 +119,9 @@ import {
 
 
 // Component for navigation links that hide on screens below 13 inches
-function NavigationLinks13InchProductDetail({ darkHeaderFooterClasses }: { darkHeaderFooterClasses: any }) {
+function NavigationLinks13InchProductDetail({ darkHeaderFooterClasses, toast }: { darkHeaderFooterClasses: any, toast: any }) {
   const [isBelow13Inch, setIsBelow13Inch] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
     const checkScreenSize = () => {
@@ -139,52 +140,58 @@ function NavigationLinks13InchProductDetail({ darkHeaderFooterClasses }: { darkH
     }
   }, [])
 
+  const handleComingSoon = (e: React.MouseEvent) => {
+    e.preventDefault()
+    toast({
+      title: "Coming Soon",
+      description: "This feature will be available soon!",
+      duration: 3000,
+    })
+  }
+
+  const handleDiscoverClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    router.push('/products')
+  }
+
   if (isBelow13Inch) {
     return null
   }
 
   return (
     <>
-      <OptimizedLink 
-        href="/"
-        prefetch="hover"
-        priority="low"
+      <button
+        onClick={handleComingSoon}
         className={cn(
-          "hidden sm:flex items-center gap-1",
+          "hidden sm:flex items-center gap-1 cursor-pointer",
           darkHeaderFooterClasses.buttonGhostText,
         )}
       >
         <Sparkles className="w-5 h-5" />
         <span className="hidden sm:inline hover:opacity-80 transition-opacity">AI Sourcing</span>
-      </OptimizedLink>
+      </button>
       
-      <OptimizedLink 
-        href="/discover"
-        prefetch="hover"
-        priority="low"
+      <button
+        onClick={handleDiscoverClick}
         className={cn(
-          "hidden sm:flex items-center gap-1",
+          "hidden sm:flex items-center gap-1 cursor-pointer",
           darkHeaderFooterClasses.buttonGhostText,
         )}
       >
         <Compass className="w-5 h-5" />
         <span className="hidden sm:inline hover:opacity-80 transition-opacity">Discovery</span>
-      </OptimizedLink>
+      </button>
       
-      <OptimizedLink 
-        href="/become-supplier"
-        target="_blank"
-        rel="noopener noreferrer"
-        prefetch="hover"
-        priority="low"
+      <button
+        onClick={handleComingSoon}
         className={cn(
-          "hidden sm:flex items-center gap-1",
+          "hidden sm:flex items-center gap-1 cursor-pointer",
           darkHeaderFooterClasses.buttonGhostText,
         )}
       >
         <UserPlus className="w-5 h-5" />
         <span className="hidden sm:inline hover:opacity-80 transition-opacity">Become Seller</span>
-      </OptimizedLink>
+      </button>
     </>
   )
 }
@@ -2490,7 +2497,7 @@ function ProductDetailPageContent() {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0 ml-auto text-[13px] leading-5">
-            <NavigationLinks13InchProductDetail darkHeaderFooterClasses={darkHeaderFooterClasses} />
+            <NavigationLinks13InchProductDetail darkHeaderFooterClasses={darkHeaderFooterClasses} toast={toast} />
             {/* Service Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -2685,11 +2692,16 @@ function ProductDetailPageContent() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  asChild
+                  onClick={(e) => {
+                    e.preventDefault()
+                    toast({
+                      title: "Coming Soon",
+                      description: "Become Seller feature will be available soon!",
+                      duration: 3000,
+                    })
+                  }}
                 >
-                  <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                    <UserPlus className="w-4 h-4 mr-2" /> Become Seller
-                  </Link>
+                  <UserPlus className="w-4 h-4 mr-2" /> Become Seller
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

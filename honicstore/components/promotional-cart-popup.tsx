@@ -102,84 +102,50 @@ export function PromotionalCartPopup({ isOpen, onClose, products }: PromotionalC
         </DialogHeader>
         
         <div className="space-y-3">
-          {/* Small Image Container */}
-          <div className="text-center">
-            <div className="relative w-full h-24 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg overflow-hidden mx-auto">
-              {currentProduct && (
-                <LazyImage
-                  src={currentProduct.image || '/placeholder.png'}
-                  alt={currentProduct.name}
-                  fill
-                  className="object-contain p-2"
-                  priority
-                  sizes="(max-width: 768px) 100vw, 400px"
-                />
-              )}
-            </div>
-            {currentProduct && (
-              <div className="mt-2">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                  {currentProduct.name}
-                </h3>
-                <p className="text-xs text-blue-600 font-semibold">
-                  TZS {currentProduct.price.toLocaleString()}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Compact Product Grid */}
+          {/* Two Images Side by Side */}
           <div className="space-y-2">
-            <h4 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
-              Featured Products
+            <h4 className="font-semibold text-gray-900 dark:text-gray-100 text-sm text-center">
+              Special Offer!
             </h4>
-            <div className="grid grid-cols-1 gap-2">
-              {products.map((product, index) => (
+            <div className="grid grid-cols-2 gap-3">
+              {products.slice(0, 2).map((product, index) => (
                 <Card 
                   key={product.id}
-                  className="cursor-pointer transition-all hover:shadow-md border border-gray-200"
+                  className="cursor-pointer transition-all hover:shadow-md border border-gray-200 dark:border-gray-700"
                   onClick={() => handleProductClick(product)}
                 >
-                  <CardContent className="p-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden flex-shrink-0">
-                        <LazyImage
-                          src={product.image || '/placeholder.png'}
-                          alt={product.name}
-                          width={48}
-                          height={48}
-                          className="w-full h-full object-contain"
-                          sizes="48px"
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h5 className="font-medium text-xs text-gray-900 dark:text-gray-100 truncate">
-                          {product.name}
-                        </h5>
-                        <div className="flex items-center gap-1 mt-1">
-                          <p className="text-xs font-semibold text-blue-600">
-                            TZS {product.price.toLocaleString()}
+                  <CardContent className="p-3">
+                    {/* Image Container - Fixed size, no zoom */}
+                    <div className="relative w-full aspect-square bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg overflow-hidden mb-2">
+                      <LazyImage
+                        src={product.image || '/placeholder.png'}
+                        alt={product.name}
+                        fill
+                        className="object-contain p-2"
+                        priority={index === 0}
+                        sizes="(max-width: 768px) 50vw, 200px"
+                      />
+                    </div>
+                    {/* Product Info */}
+                    <div className="text-center">
+                      <h5 className="font-medium text-xs text-gray-900 dark:text-gray-100 truncate mb-1">
+                        {product.name}
+                      </h5>
+                      <div className="flex items-center justify-center gap-1 flex-wrap">
+                        <p className="text-xs font-semibold text-blue-600">
+                          TZS {product.price.toLocaleString()}
+                        </p>
+                        {product.original_price && product.original_price > product.price && (
+                          <p className="text-xs text-gray-500 line-through">
+                            TZS {product.original_price.toLocaleString()}
                           </p>
-                          {product.original_price && product.original_price > product.price && (
-                            <p className="text-xs text-gray-500 line-through">
-                              TZS {product.original_price.toLocaleString()}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          {product.rating && (
-                            <div className="flex items-center gap-1 text-xs text-gray-600">
-                              <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
-                              <span>{product.rating}</span>
-                            </div>
-                          )}
-                          {product.brand && (
-                            <p className="text-xs text-gray-500 truncate">{product.brand}</p>
-                          )}
-                        </div>
+                        )}
                       </div>
-                      {(product.inStock || (product.stock_quantity && product.stock_quantity > 0)) && (
-                        <div className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0"></div>
+                      {product.rating && (
+                        <div className="flex items-center justify-center gap-1 mt-1 text-xs text-gray-600">
+                          <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                          <span>{product.rating}</span>
+                        </div>
                       )}
                     </div>
                   </CardContent>

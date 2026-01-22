@@ -321,6 +321,15 @@ function ProductsPageContent() {
     }
     params.delete('returnTo')
     const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
+    
+    // Close keyboard on mobile by blurring the input
+    if (typeof window !== 'undefined') {
+      const activeElement = document.activeElement as HTMLElement
+      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+        activeElement.blur()
+      }
+    }
+    
     // Use replace instead of push to avoid adding to history stack
     // This prevents full page refresh and maintains client-side routing
     // scroll: false prevents automatic scroll to top
@@ -3553,7 +3562,8 @@ function ProductsPageContent() {
       </header>
 
       {/* Ads Container - Right after category nav (Mobile) */}
-      {currentPage < 2 && (
+      {/* Hide ads when search is active */}
+      {currentPage < 2 && !actualSearchQuery && (
       <div className="lg:hidden w-full overflow-x-hidden" style={{ minHeight: '1px', marginTop: '114px', position: 'relative' }}>
         <div 
           className="relative overflow-hidden rounded-none"
@@ -3673,7 +3683,8 @@ function ProductsPageContent() {
       )}
 
       {/* Ads Container - Right after category nav (Desktop) */}
-      {currentPage < 2 && (
+      {/* Hide ads when search is active */}
+      {currentPage < 2 && !actualSearchQuery && (
       <div className="hidden lg:block w-full overflow-x-hidden" style={{ minHeight: '1px', marginTop: '125px' }}>
             <div 
               className="relative overflow-hidden rounded-none"
@@ -3793,9 +3804,12 @@ function ProductsPageContent() {
 
       <main className={cn(
         "flex-1", 
-        currentPage >= 2 
-          ? "pt-[114px] sm:pt-[114px] lg:pt-[125px]" // Start right after category nav (matches ad section positioning)
-          : "pt-24 xs:pt-24 sm:pt-24 -mt-12 lg:-mt-16", 
+        // When search is active, reduce padding since ads/categories are hidden
+        actualSearchQuery
+          ? "pt-[114px] sm:pt-[114px] lg:pt-[125px]" // Start right after header (no ads/categories)
+          : currentPage >= 2 
+            ? "pt-[114px] sm:pt-[114px] lg:pt-[125px]" // Start right after category nav (matches ad section positioning)
+            : "pt-24 xs:pt-24 sm:pt-24 -mt-12 lg:-mt-16", 
         themeClasses.mainBg
       )} suppressHydrationWarning>
         <div className="container mx-auto px-4 pt-0 pb-0">
@@ -3964,7 +3978,8 @@ function ProductsPageContent() {
             </div>
 
         {/* Main Categories Thumbnails (images only) */}
-        {categoriesData.mainCategories.length > 0 && currentPage < 2 && (
+        {/* Hide categories when search is active */}
+        {categoriesData.mainCategories.length > 0 && currentPage < 2 && !actualSearchQuery && (
           <div className="px-1 sm:px-2 lg:px-3 mt-2 mb-4 relative">
             <div className={cn("text-lg sm:text-xl font-bold mb-2 text-center", themeClasses.mainText)}>
               Shop by Categories

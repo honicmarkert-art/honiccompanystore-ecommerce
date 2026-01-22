@@ -291,24 +291,6 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white" suppressHydrationWarning>
-      {/* Welcome Message Bar */}
-      <div className="fixed top-0 z-50 w-full bg-stone-100/90 dark:bg-gray-900/95 backdrop-blur-sm border-b border-stone-200 dark:border-gray-700">
-        <div className="flex items-center justify-center h-6 px-4">
-          {user ? (
-            <div className="text-xs text-green-600 dark:text-green-400 font-medium">
-              Hi! {(user as any).user_metadata?.full_name || user.email?.split('@')[0] || 'User'} - Welcome again <span className="text-blue-600 dark:text-blue-400">{companyName}</span>
-            </div>
-          ) : (
-            <button 
-              onClick={() => openAuthModal('login')}
-              className="text-xs text-gray-700 dark:text-gray-300 hover:text-yellow-600 dark:hover:text-yellow-400 transition-colors font-medium"
-            >
-              Welcome to {companyName} <span className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300">login here</span> for better search
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* Header */}
       <header className="bg-black/50 backdrop-blur-sm fixed top-0 left-0 right-0 z-40">
         <div className="bg-gradient-to-b from-black/70 via-black/50 to-black/30">
@@ -473,11 +455,11 @@ export default function LandingPage() {
             {/* Second Row - Navigation Links */}
             <div className="flex items-center justify-between mt-2">
               <div className="flex items-center gap-2 lg:gap-3">
-                <span className="text-white text-xs sm:text-sm hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/featured')}>Featured selections</span>
+                {/* Featured selections removed */}
               </div>
               <div className="flex items-center gap-2 lg:gap-3 text-xs sm:text-sm">
                 <span className="text-white cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/support')}>Help</span>
-                <span className="text-white hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/buyer-central')}>Buyer Central</span>
+                {/* Buyer Central removed */}
                 <span className="text-white hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/app')}>App & extension</span>
             </div>
             </div>
@@ -486,8 +468,8 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* Add top padding to account for fixed header and welcome bar */}
-      <div className="pt-28 sm:pt-32">
+      {/* Add top padding to account for fixed header */}
+      <div className="pt-24 sm:pt-28">
 
       {/* Hero Section */}
       <section className="relative min-h-[360px] sm:min-h-[460px] md:min-h-[560px] flex items-center">

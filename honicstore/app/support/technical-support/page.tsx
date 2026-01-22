@@ -285,7 +285,7 @@ export default function TechnicalSupportPage() {
               <h3 className="font-semibold mb-2">Call Support</h3>
               <p className="text-sm text-muted-foreground mb-4">Speak directly with our tech team</p>
               <Button variant="outline" size="sm">
-                +255 12 737 7461
+                +255 763818138
               </Button>
             </CardContent>
           </Card>

@@ -1879,7 +1879,7 @@ function ChinaPageContent() {
               >
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/buyer-central'}
+                  onClick={() => window.location.href = '/products'}
                 >
                   <Settings className="w-4 h-4 mr-2" /> Our Services
                 </DropdownMenuItem>

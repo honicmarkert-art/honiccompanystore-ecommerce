@@ -122,7 +122,7 @@ export default function ContactPage() {
     {
       icon: <Phone className="w-5 h-5" />,
       title: "Phone",
-      details: ["+255 12 737 7461", "+255 69 311 9708"],
+      details: ["+255 763818138", "+255 69 311 9708"],
       description: "Call us for immediate assistance"
     },
     {

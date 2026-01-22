@@ -20,6 +20,7 @@ import {
   FileImage,
   Building2,
   Wallet,
+  AlertTriangle,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -38,6 +39,7 @@ import { AdminNotificationCenter } from "@/components/admin-notification-center"
 const navigation = [
   { name: "Dashboard", href: "/siem-dashboard", icon: LayoutDashboard },
   { name: "Products", href: "/siem-dashboard/products", icon: Package },
+  { name: "Out of Stock", href: "/siem-dashboard/products/out-of-stock", icon: AlertTriangle },
   { name: "Orders", href: "/siem-dashboard/orders", icon: ShoppingCart },
   { name: "Confirmed Orders", href: "/siem-dashboard/confirmed-orders", icon: ShoppingCart },
   { name: "Suppliers", href: "/siem-dashboard/suppliers", icon: Building2 },
