@@ -271,17 +271,23 @@ export default function RegisterPage() {
                   <p className="text-xs text-muted-foreground">Want to sell?</p>
                   <p className="text-xs text-muted-foreground">Join as seller</p>
                 </div>
-                <Link href="/become-supplier" target="_blank" rel="noopener noreferrer">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black whitespace-nowrap"
-                  >
-                    <Store className="mr-1.5 h-3.5 w-3.5" />
-                    Become Seller
-                  </Button>
-                </Link>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    toast({
+                      title: "Coming Soon",
+                      description: "Become Seller feature will be available soon!",
+                      duration: 3000,
+                    })
+                  }}
+                  className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black whitespace-nowrap"
+                >
+                  <Store className="mr-1.5 h-3.5 w-3.5" />
+                  Become Seller
+                </Button>
               </div>
             </div>
           </CardHeader>

@@ -246,7 +246,12 @@ export function UserProfile() {
                       className="h-6 px-2 text-xs bg-yellow-500 hover:bg-yellow-600 text-black"
                       onClick={(e) => {
                         e.stopPropagation()
-                        window.open('/become-supplier', '_blank', 'noopener,noreferrer')
+                        e.preventDefault()
+                        toast({
+                          title: "Coming Soon",
+                          description: "Become Seller feature will be available soon!",
+                          duration: 3000,
+                        })
                       }}
                     >
                       <ArrowUp className="h-3 w-3 mr-1" />

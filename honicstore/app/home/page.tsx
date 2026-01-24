@@ -63,6 +63,7 @@ import { useCart } from '@/hooks/use-cart'
 import { useTheme } from '@/hooks/use-theme'
 import { Switch } from '@/components/ui/switch'
 import { Moon, Sun } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
 
 // Helper function to detect if a file is a video
 const isVideoFile = (url: string): boolean => {
@@ -72,6 +73,7 @@ const isVideoFile = (url: string): boolean => {
 
 export default function LandingPage() {
   const router = useRouter()
+  const { toast } = useToast()
   const { 
     companyName, 
     companyColor, 
@@ -658,7 +660,11 @@ export default function LandingPage() {
                   if (feature.title === 'Logistics Solutions') {
                     router.push('/logistics')
                   } else if (feature.title === 'Become Seller') {
-                    window.open('/become-supplier', '_blank', 'noopener,noreferrer')
+                    toast({
+                      title: "Coming Soon",
+                      description: "Become Seller feature will be available soon!",
+                      duration: 3000,
+                    })
                   }
                 }}
               >

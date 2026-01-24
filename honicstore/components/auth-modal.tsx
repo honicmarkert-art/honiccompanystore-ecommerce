@@ -598,7 +598,11 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                                 sessionStorage.removeItem('pending_verification_email')
                               }
                               onClose()
-                              router.push('/become-supplier')
+                              toast({
+                                title: "Coming Soon",
+                                description: "Become Seller feature will be available soon!",
+                                duration: 3000,
+                              })
                             }}
                             className="text-xs text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300 underline"
                           >
@@ -782,17 +786,23 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">Want to sell?</p>
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-tight">Join as seller</p>
                   </div>
-                  <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" onClick={onClose}>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black h-7 text-[10px] px-2 whitespace-nowrap"
-                    >
-                      <Store className="mr-1 h-2.5 w-2.5" />
-                      Seller
-                    </Button>
-                  </Link>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      toast({
+                        title: "Coming Soon",
+                        description: "Become Seller feature will be available soon!",
+                        duration: 3000,
+                      })
+                    }}
+                    className="border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white dark:border-yellow-400 dark:text-yellow-400 dark:hover:bg-yellow-500 dark:hover:text-black h-7 text-[10px] px-2 whitespace-nowrap"
+                  >
+                    <Store className="mr-1 h-2.5 w-2.5" />
+                    Seller
+                  </Button>
                 </div>
               </div>
             </CardHeader>

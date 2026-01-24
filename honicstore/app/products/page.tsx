@@ -140,6 +140,7 @@ import { UserProfile } from "@/components/user-profile"
 // Component for navigation links that hide on screens below 13 inches
 function NavigationLinks13Inch() {
   const { themeClasses } = useTheme()
+  const { toast } = useToast()
   const [isBelow13Inch, setIsBelow13Inch] = useState(false)
 
   useEffect(() => {
@@ -163,6 +164,15 @@ function NavigationLinks13Inch() {
     return null
   }
 
+  const handleComingSoon = (e: React.MouseEvent) => {
+    e.preventDefault()
+    toast({
+      title: "Coming Soon",
+      description: "Become Seller feature will be available soon!",
+      duration: 3000,
+    })
+  }
+
   return (
     <>
       <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
@@ -171,9 +181,12 @@ function NavigationLinks13Inch() {
       <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
         Discovery
       </Link>
-      <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm")}>
+      <button 
+        onClick={handleComingSoon}
+        className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm cursor-pointer")}
+      >
         Become Seller
-      </Link>
+      </button>
     </>
   )
 }
@@ -2558,11 +2571,16 @@ function ProductsPageContent() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  asChild
+                  onClick={(e) => {
+                    e.preventDefault()
+                    toast({
+                      title: "Coming Soon",
+                      description: "Become Seller feature will be available soon!",
+                      duration: 3000,
+                    })
+                  }}
                 >
-                  <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                    <UserPlus className="w-4 h-4 mr-2" /> Become Seller
-                  </Link>
+                  <UserPlus className="w-4 h-4 mr-2" /> Become Seller
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -3296,11 +3314,16 @@ function ProductsPageContent() {
               <DropdownMenuSeparator />
               <DropdownMenuItem 
                 className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                asChild
+                onClick={(e) => {
+                  e.preventDefault()
+                  toast({
+                    title: "Coming Soon",
+                    description: "Become Seller feature will be available soon!",
+                    duration: 3000,
+                  })
+                }}
               >
-                  <Link href="/become-supplier" className="flex items-center">
-                    <UserPlus className="w-4 h-4 mr-2" /> Become Seller
-                </Link>
+                <UserPlus className="w-4 h-4 mr-2" /> Become Seller
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

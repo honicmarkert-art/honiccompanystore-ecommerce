@@ -316,8 +316,6 @@ export const supabaseAuth = {
       // Attempt sign up with email verification enabled
       // Using Supabase's built-in email sending with custom template
       // Customize email template in: Supabase Dashboard → Authentication → Email Templates → Confirm signup
-      logger.log('Attempting signup for:', sanitizedEmail)
-      
       const { data, error } = await supabase.auth.signUp({
         email: sanitizedEmail,
         password,

@@ -118,7 +118,7 @@ import { UserProfile } from "@/components/user-profile"
 // Category icons mapping - simplified
 
 // Component for navigation links that hide on screens below 13 inches
-function NavigationLinks13InchChina({ themeClasses }: { themeClasses: any }) {
+function NavigationLinks13InchChina({ themeClasses, toast }: { themeClasses: any, toast: any }) {
   const [isBelow13Inch, setIsBelow13Inch] = useState(false)
 
   useEffect(() => {
@@ -142,6 +142,15 @@ function NavigationLinks13InchChina({ themeClasses }: { themeClasses: any }) {
     return null
   }
 
+  const handleComingSoon = (e: React.MouseEvent) => {
+    e.preventDefault()
+    toast({
+      title: "Coming Soon",
+      description: "Become Seller feature will be available soon!",
+      duration: 3000,
+    })
+  }
+
   return (
     <>
       <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
@@ -150,9 +159,12 @@ function NavigationLinks13InchChina({ themeClasses }: { themeClasses: any }) {
       <Link href="/" className={cn(themeClasses.mainText, "hover:text-orange-400 transition-colors text-sm")}>
         Discovery
       </Link>
-      <Link href="/become-supplier" target="_blank" rel="noopener noreferrer" className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm")}>
+      <button 
+        onClick={handleComingSoon}
+        className={cn("text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors text-sm cursor-pointer")}
+      >
         Become Seller
-      </Link>
+      </button>
     </>
   )
 }
@@ -1853,7 +1865,7 @@ function ChinaPageContent() {
 
           {/* Navigation Links - Near Search Bar */}
           <div className="hidden lg:flex items-center gap-2 xl:gap-3 ml-2 xl:ml-3">
-            <NavigationLinks13InchChina themeClasses={themeClasses} />
+            <NavigationLinks13InchChina themeClasses={themeClasses} toast={toast} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
