@@ -42,7 +42,9 @@ export async function POST(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_send_confirmation_email_post',
-          endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
+          }
         })
         return authError
       }
@@ -76,10 +78,12 @@ export async function POST(
 
       if (!emailResult.success) {
         logError(new Error(emailResult.error || 'Failed to send email'), {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_send_confirmation_email_post',
-          endpoint: '/api/admin/orders/[orderId]/send-confirmation-email',
-          metadata: { orderId }
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]/send-confirmation-email',
+            orderId
+          }
         })
         return NextResponse.json(
           { 
@@ -92,11 +96,12 @@ export async function POST(
       }
 
       // Log admin action
-      logSecurityEvent('CONFIRMATION_EMAIL_SENT', user.id, {
+      logSecurityEvent('CONFIRMATION_EMAIL_SENT', {
+        userId: user?.id,
         orderId: order.id,
         orderNumber: order.order_number,
         endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -107,7 +112,9 @@ export async function POST(
     } catch (error: any) {
       logError(error, {
         action: 'admin_orders_send_confirmation_email_post',
-        endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
+        metadata: {
+          endpoint: '/api/admin/orders/[orderId]/send-confirmation-email'
+        }
       })
       return createErrorResponse(error, 500)
     }

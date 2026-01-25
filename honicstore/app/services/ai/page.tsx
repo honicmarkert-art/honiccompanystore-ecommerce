@@ -1,11 +1,16 @@
-'use client'
-
 import { Bot } from 'lucide-react'
-import { ComingSoonPage } from '@/components/coming-soon-page'
+import { ComingSoonPageClient } from '@/components/coming-soon-page-client'
+import { getCompanySettings } from '@/lib/company-settings-server'
 
-export default function AiPage() {
+// Force static generation with ISR (revalidate every 24 hours)
+export const dynamic = 'force-static'
+export const revalidate = 86400
+
+export default async function AiPage() {
+  const companySettings = await getCompanySettings()
+  
   return (
-    <ComingSoonPage
+    <ComingSoonPageClient
       title="AI Consultancy"
       description="AI-powered project guidance and support. Get expert advice on integrating artificial intelligence into your projects and business solutions."
       icon={<Bot className="w-10 h-10 text-white" />}
@@ -19,6 +24,8 @@ export default function AiPage() {
         "Custom AI solutions",
         "Training and support"
       ]}
+      companyName={companySettings.companyName}
+      companyColor={companySettings.companyColor}
     />
   )
 }

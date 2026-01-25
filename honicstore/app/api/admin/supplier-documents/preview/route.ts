@@ -36,7 +36,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_supplier_documents_preview_get',
-          endpoint: '/api/admin/supplier-documents/preview'
+          metadata: {
+            endpoint: '/api/admin/supplier-documents/preview'
+          }
         })
         return authError
       }
@@ -74,10 +76,12 @@ export async function GET(request: NextRequest) {
 
       if (!upstreamResponse.ok) {
         logError(new Error(`Failed to fetch document: ${upstreamResponse.status}`), {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_supplier_documents_preview_get',
-          endpoint: '/api/admin/supplier-documents/preview',
-          metadata: { url: sanitizedUrl.substring(0, 50) + '...' }
+          metadata: {
+            endpoint: '/api/admin/supplier-documents/preview',
+            url: sanitizedUrl.substring(0, 50) + '...'
+          }
         })
         return NextResponse.json(
           { error: 'Failed to fetch document', status: upstreamResponse.status },
@@ -101,11 +105,12 @@ export async function GET(request: NextRequest) {
       const buffer = await upstreamResponse.arrayBuffer()
 
       // Log access
-      logSecurityEvent('SUPPLIER_DOCUMENT_VIEWED', user.id, {
+      logSecurityEvent('SUPPLIER_DOCUMENT_VIEWED', {
+        userId: user?.id,
         url: sanitizedUrl.substring(0, 50) + '...',
         contentType,
         endpoint: '/api/admin/supplier-documents/preview'
-      })
+      }, request)
 
       return new NextResponse(buffer, {
         status: 200,
@@ -119,7 +124,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_supplier_documents_preview_get',
-        endpoint: '/api/admin/supplier-documents/preview'
+        metadata: {
+          endpoint: '/api/admin/supplier-documents/preview'
+        }
       })
       return createErrorResponse(error, 500)
     }

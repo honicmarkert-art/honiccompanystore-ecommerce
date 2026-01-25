@@ -36,7 +36,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_cleanup_post',
-          endpoint: '/api/admin/orders/cleanup'
+          metadata: {
+            endpoint: '/api/admin/orders/cleanup'
+          }
         })
         return authError
       }
@@ -67,9 +69,11 @@ export async function POST(request: NextRequest) {
 
       if (pendingError) {
         logError(pendingError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_cleanup_post',
-          endpoint: '/api/admin/orders/cleanup'
+          metadata: {
+            endpoint: '/api/admin/orders/cleanup'
+          }
         })
       } else {
         logger.log(`Found ${pendingOrders?.length || 0} pending orders older than 1 hour`)
@@ -87,9 +91,11 @@ export async function POST(request: NextRequest) {
 
           if (updateError) {
             logError(updateError, {
-              userId: user.id,
+              userId: user?.id,
               action: 'admin_orders_cleanup_post',
-              endpoint: '/api/admin/orders/cleanup'
+              metadata: {
+                endpoint: '/api/admin/orders/cleanup'
+              }
             })
           } else {
             failedCount = pendingOrders.length
@@ -109,9 +115,11 @@ export async function POST(request: NextRequest) {
 
       if (failedError) {
         logError(failedError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_cleanup_post',
-          endpoint: '/api/admin/orders/cleanup'
+          metadata: {
+            endpoint: '/api/admin/orders/cleanup'
+          }
         })
       } else {
         logger.log(`Found ${failedOrders?.length || 0} failed orders older than 24 hours`)
@@ -127,9 +135,11 @@ export async function POST(request: NextRequest) {
 
           if (deleteItemsError) {
             logError(deleteItemsError, {
-              userId: user.id,
+              userId: user?.id,
               action: 'admin_orders_cleanup_post',
-              endpoint: '/api/admin/orders/cleanup'
+              metadata: {
+                endpoint: '/api/admin/orders/cleanup'
+              }
             })
           } else {
             logger.log(`✅ Deleted order items for ${failedOrders.length} orders`)
@@ -143,9 +153,11 @@ export async function POST(request: NextRequest) {
 
           if (deleteOrdersError) {
             logError(deleteOrdersError, {
-              userId: user.id,
+              userId: user?.id,
               action: 'admin_orders_cleanup_post',
-              endpoint: '/api/admin/orders/cleanup'
+              metadata: {
+                endpoint: '/api/admin/orders/cleanup'
+              }
             })
           } else {
             deletedCount = failedOrders.length
@@ -162,12 +174,13 @@ export async function POST(request: NextRequest) {
       logger.log(`- Total processed: ${totalProcessed}`)
 
       // Log admin action
-      logSecurityEvent('ORDERS_CLEANUP_EXECUTED', user.id, {
+      logSecurityEvent('ORDERS_CLEANUP_EXECUTED', {
+              userId: user?.id,
         failedCount,
         deletedCount,
         totalProcessed,
         endpoint: '/api/admin/orders/cleanup'
-      })
+      }, request)
 
       // Clear cache
       const { setCachedData } = await import('@/lib/database-optimization')
@@ -185,7 +198,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_orders_cleanup_post',
-        endpoint: '/api/admin/orders/cleanup'
+        metadata: {
+          endpoint: '/api/admin/orders/cleanup'
+        }
       })
       return createErrorResponse(error, 500)
     }

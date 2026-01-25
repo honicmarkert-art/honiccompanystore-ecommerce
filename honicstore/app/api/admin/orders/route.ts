@@ -167,7 +167,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     logError(error, {
       action: 'admin_orders_post',
-      endpoint: '/api/admin/orders'
+      metadata: {
+        endpoint: '/api/admin/orders'
+      }
     })
     return NextResponse.json(
       { error: 'Internal server error' },
@@ -226,9 +228,11 @@ export async function GET(request: NextRequest) {
           logError(new Error(errorMessage), {
             userId: user?.id,
             action: 'admin_orders_get',
-            endpoint: '/api/admin/orders',
-            authErrorStatus: authError.status,
-            authErrorStatusText: authError.statusText
+            metadata: {
+              endpoint: '/api/admin/orders',
+              authErrorStatus: authError.status,
+              authErrorStatusText: authError.statusText
+            }
           })
         }
         return authError
@@ -260,9 +264,11 @@ export async function GET(request: NextRequest) {
 
       if (ordersError) {
         logError(ordersError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_get',
-          endpoint: '/api/admin/orders'
+          metadata: {
+            endpoint: '/api/admin/orders'
+          }
         })
         return createErrorResponse(ordersError, 500)
       }
@@ -295,7 +301,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_orders_get',
-        endpoint: '/api/admin/orders'
+        metadata: {
+          endpoint: '/api/admin/orders'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -340,7 +348,9 @@ export async function PATCH(request: NextRequest) {
   } catch (error) {
     logError(error, {
       action: 'admin_orders_put',
-      endpoint: '/api/admin/orders'
+      metadata: {
+        endpoint: '/api/admin/orders'
+      }
     })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
@@ -442,7 +452,9 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     logError(error, {
       action: 'admin_orders_delete',
-      endpoint: '/api/admin/orders'
+      metadata: {
+        endpoint: '/api/admin/orders'
+      }
     })
     return NextResponse.json(
       { error: 'Internal server error' },

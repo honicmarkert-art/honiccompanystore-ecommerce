@@ -66,7 +66,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_advertisements_get',
-          endpoint: '/api/admin/advertisements'
+          metadata: {
+            endpoint: '/api/admin/advertisements'
+          }
         })
         return authError
       }
@@ -80,9 +82,11 @@ export async function GET(request: NextRequest) {
       
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_advertisements_get',
-          endpoint: '/api/admin/advertisements'
+          metadata: {
+            endpoint: '/api/admin/advertisements'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -133,7 +137,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_advertisements_get',
-        endpoint: '/api/admin/advertisements'
+        metadata: {
+          endpoint: '/api/admin/advertisements'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -168,7 +174,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_advertisements_post',
-          endpoint: '/api/admin/advertisements'
+          metadata: {
+            endpoint: '/api/admin/advertisements'
+          }
         })
         return authError
       }
@@ -236,10 +244,12 @@ export async function POST(request: NextRequest) {
       
       if (uploadError) {
         logError(uploadError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_advertisements_post',
-          endpoint: '/api/admin/advertisements',
-          metadata: { fileName }
+          metadata: {
+            endpoint: '/api/admin/advertisements',
+            fileName
+          }
         })
         return NextResponse.json(
           { error: 'Failed to upload file: ' + uploadError.message },
@@ -270,9 +280,11 @@ export async function POST(request: NextRequest) {
       
       if (insertError) {
         logError(insertError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_advertisements_post',
-          endpoint: '/api/admin/advertisements'
+          metadata: {
+            endpoint: '/api/admin/advertisements'
+          }
         })
         return createErrorResponse(insertError, 500)
       }
@@ -281,17 +293,20 @@ export async function POST(request: NextRequest) {
       setCachedData('admin_advertisements_all', null, 0)
 
       // Log admin action
-      logSecurityEvent('ADVERTISEMENT_CREATED', user.id, {
+      logSecurityEvent('ADVERTISEMENT_CREATED', {
+        userId: user?.id,
         advertisementId: advertisement.id,
         title: sanitizedTitle,
         endpoint: '/api/admin/advertisements'
-      })
+      }, request)
       
       return NextResponse.json({ advertisement })
     } catch (error) {
       logError(error, {
         action: 'admin_advertisements_post',
-        endpoint: '/api/admin/advertisements'
+        metadata: {
+          endpoint: '/api/admin/advertisements'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -326,7 +341,9 @@ export async function PUT(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_advertisements_put',
-          endpoint: '/api/admin/advertisements'
+          metadata: {
+            endpoint: '/api/admin/advertisements'
+          }
         })
         return authError
       }
@@ -376,10 +393,12 @@ export async function PUT(request: NextRequest) {
       
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_advertisements_put',
-          endpoint: '/api/admin/advertisements',
-          metadata: { advertisementId: validatedData.id }
+          metadata: {
+            endpoint: '/api/admin/advertisements',
+            advertisementId: validatedData.id
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -388,16 +407,19 @@ export async function PUT(request: NextRequest) {
       setCachedData('admin_advertisements_all', null, 0)
 
       // Log admin action
-      logSecurityEvent('ADVERTISEMENT_UPDATED', user.id, {
+      logSecurityEvent('ADVERTISEMENT_UPDATED', {
+        userId: user?.id,
         advertisementId: validatedData.id,
         endpoint: '/api/admin/advertisements'
-      })
+      }, request)
       
       return NextResponse.json({ advertisement: data })
     } catch (error) {
       logError(error, {
         action: 'admin_advertisements_put',
-        endpoint: '/api/admin/advertisements'
+        metadata: {
+          endpoint: '/api/admin/advertisements'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -432,7 +454,9 @@ export async function PATCH(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_advertisements_patch',
-          endpoint: '/api/admin/advertisements'
+          metadata: {
+            endpoint: '/api/admin/advertisements'
+          }
         })
         return authError
       }
@@ -467,10 +491,12 @@ export async function PATCH(request: NextRequest) {
       
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_advertisements_patch',
-          endpoint: '/api/admin/advertisements',
-          metadata: { advertisementId: validatedData.id }
+          metadata: {
+            endpoint: '/api/admin/advertisements',
+            advertisementId: validatedData.id
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -479,17 +505,20 @@ export async function PATCH(request: NextRequest) {
       setCachedData('admin_advertisements_all', null, 0)
 
       // Log admin action
-      logSecurityEvent('ADVERTISEMENT_TOGGLED', user.id, {
+      logSecurityEvent('ADVERTISEMENT_TOGGLED', {
+        userId: user?.id,
         advertisementId: validatedData.id,
         isActive: validatedData.is_active,
         endpoint: '/api/admin/advertisements'
-      })
+      }, request)
       
       return NextResponse.json({ advertisement: data })
     } catch (error) {
       logError(error, {
         action: 'admin_advertisements_patch',
-        endpoint: '/api/admin/advertisements'
+        metadata: {
+          endpoint: '/api/admin/advertisements'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -524,7 +553,9 @@ export async function DELETE(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_advertisements_delete',
-          endpoint: '/api/admin/advertisements'
+          metadata: {
+            endpoint: '/api/admin/advertisements'
+          }
         })
         return authError
       }
@@ -580,10 +611,12 @@ export async function DELETE(request: NextRequest) {
       
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_advertisements_delete',
-          endpoint: '/api/admin/advertisements',
-          metadata: { advertisementId: id }
+          metadata: {
+            endpoint: '/api/admin/advertisements',
+            advertisementId: id
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -592,17 +625,20 @@ export async function DELETE(request: NextRequest) {
       setCachedData('admin_advertisements_all', null, 0)
 
       // Log admin action
-      logSecurityEvent('ADVERTISEMENT_DELETED', user.id, {
+      logSecurityEvent('ADVERTISEMENT_DELETED', {
+        userId: user?.id,
         advertisementId: id,
         title: ad.title,
         endpoint: '/api/admin/advertisements'
-      })
+      }, request)
       
       return NextResponse.json({ success: true })
     } catch (error) {
       logError(error, {
         action: 'admin_advertisements_delete',
-        endpoint: '/api/admin/advertisements'
+        metadata: {
+          endpoint: '/api/admin/advertisements'
+        }
       })
       return createErrorResponse(error, 500)
     }

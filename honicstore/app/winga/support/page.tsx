@@ -1,5 +1,8 @@
 'use client'
 
+// Note: ISR (revalidate) cannot be used in client components
+// CPU optimization is handled via API route caching and CDN caching instead
+
 import { useState } from 'react'
 import { useTheme } from '@/hooks/use-theme'
 import { useAuth } from '@/contexts/auth-context'

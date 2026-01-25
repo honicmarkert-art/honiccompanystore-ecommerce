@@ -53,7 +53,9 @@ export async function PUT(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_supplier_plans_put',
-          endpoint: '/api/admin/supplier-plans/[planId]'
+          metadata: {
+            endpoint: '/api/admin/supplier-plans/[planId]'
+          }
         })
         return authError
       }
@@ -128,20 +130,23 @@ export async function PUT(
 
       if (updateError) {
         logError(updateError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_supplier_plans_put',
-          endpoint: '/api/admin/supplier-plans/[planId]',
-          metadata: { planId }
+          metadata: {
+            endpoint: '/api/admin/supplier-plans/[planId]',
+            planId
+          }
         })
         return createErrorResponse(updateError, 500)
       }
 
       // Log admin action
-      logSecurityEvent('SUPPLIER_PLAN_UPDATED', user.id, {
+      logSecurityEvent('SUPPLIER_PLAN_UPDATED', {
+        userId: user?.id,
         planId,
         planName: updatedPlan.name,
         endpoint: '/api/admin/supplier-plans/[planId]'
-      })
+      }, request)
 
       // Clear caches
       clearSupplierPlansCache()
@@ -161,7 +166,9 @@ export async function PUT(
       }
       logError(error, {
         action: 'admin_supplier_plans_put',
-        endpoint: '/api/admin/supplier-plans/[planId]'
+        metadata: {
+          endpoint: '/api/admin/supplier-plans/[planId]'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -198,7 +205,9 @@ export async function DELETE(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_supplier_plans_delete',
-          endpoint: '/api/admin/supplier-plans/[planId]'
+          metadata: {
+            endpoint: '/api/admin/supplier-plans/[planId]'
+          }
         })
         return authError
       }
@@ -236,10 +245,12 @@ export async function DELETE(
 
       if (suppliersError) {
         logError(suppliersError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_supplier_plans_delete',
-          endpoint: '/api/admin/supplier-plans/[planId]',
-          metadata: { planId }
+          metadata: {
+            endpoint: '/api/admin/supplier-plans/[planId]',
+            planId
+          }
         })
       }
 
@@ -264,20 +275,23 @@ export async function DELETE(
 
       if (deleteError) {
         logError(deleteError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_supplier_plans_delete',
-          endpoint: '/api/admin/supplier-plans/[planId]',
-          metadata: { planId }
+          metadata: {
+            endpoint: '/api/admin/supplier-plans/[planId]',
+            planId
+          }
         })
         return createErrorResponse(deleteError, 500)
       }
 
       // Log admin action
-      logSecurityEvent('SUPPLIER_PLAN_DELETED', user.id, {
+      logSecurityEvent('SUPPLIER_PLAN_DELETED', {
+        userId: user?.id,
         planId,
         planName: plan.name,
         endpoint: '/api/admin/supplier-plans/[planId]'
-      })
+      }, request)
 
       // Clear caches
       clearSupplierPlansCache()
@@ -291,7 +305,9 @@ export async function DELETE(
     } catch (error: any) {
       logError(error, {
         action: 'admin_supplier_plans_delete',
-        endpoint: '/api/admin/supplier-plans/[planId]'
+        metadata: {
+          endpoint: '/api/admin/supplier-plans/[planId]'
+        }
       })
       return createErrorResponse(error, 500)
     }

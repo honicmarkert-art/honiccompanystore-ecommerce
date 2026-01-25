@@ -57,7 +57,9 @@ export async function PATCH(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_patch',
-          endpoint: '/api/admin/orders/[orderId]'
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]'
+          }
         })
         return authError
       }
@@ -120,10 +122,12 @@ export async function PATCH(
 
       if (updateError) {
         logError(updateError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_patch',
-          endpoint: '/api/admin/orders/[orderId]',
-          metadata: { orderId }
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]',
+            orderId
+          }
         })
         return createErrorResponse(updateError, 500)
       }
@@ -131,12 +135,13 @@ export async function PATCH(
       logger.log('🔧 Order updated successfully:', updatedOrder)
 
       // Log admin action
-      logSecurityEvent('ORDER_UPDATED', user.id, {
+      logSecurityEvent('ORDER_UPDATED', {
+        userId: user?.id,
         orderId,
         status,
         confirmationStatus,
         endpoint: '/api/admin/orders/[orderId]'
-      })
+      }, request)
 
       // Clear cache
       const { setCachedData } = await import('@/lib/database-optimization')
@@ -151,7 +156,9 @@ export async function PATCH(
     } catch (error) {
       logError(error, {
         action: 'admin_orders_patch',
-        endpoint: '/api/admin/orders/[orderId]'
+        metadata: {
+          endpoint: '/api/admin/orders/[orderId]'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -197,7 +204,9 @@ export async function DELETE(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_delete',
-          endpoint: '/api/admin/orders/[orderId]'
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]'
+          }
         })
         return authError
       }
@@ -239,10 +248,12 @@ export async function DELETE(
 
       if (itemsError) {
         logError(itemsError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_delete',
-          endpoint: '/api/admin/orders/[orderId]',
-          metadata: { orderId }
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]',
+            orderId
+          }
         })
         return createErrorResponse(itemsError, 500)
       }
@@ -255,21 +266,24 @@ export async function DELETE(
 
       if (deleteError) {
         logError(deleteError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_delete',
-          endpoint: '/api/admin/orders/[orderId]',
-          metadata: { orderId }
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]',
+            orderId
+          }
         })
         return createErrorResponse(deleteError, 500)
       }
 
       // Log admin action
-      logSecurityEvent('ORDER_DELETED', user.id, {
+      logSecurityEvent('ORDER_DELETED', {
+        userId: user?.id,
         orderId,
         paymentStatus: order.payment_status,
         orderStatus: order.status,
         endpoint: '/api/admin/orders/[orderId]'
-      })
+      }, request)
 
       // Clear cache
       const { setCachedData } = await import('@/lib/database-optimization')
@@ -285,7 +299,9 @@ export async function DELETE(
     } catch (error) {
       logError(error, {
         action: 'admin_orders_delete',
-        endpoint: '/api/admin/orders/[orderId]'
+        metadata: {
+          endpoint: '/api/admin/orders/[orderId]'
+        }
       })
       return createErrorResponse(error, 500)
     }

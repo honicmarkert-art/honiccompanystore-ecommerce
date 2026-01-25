@@ -206,7 +206,9 @@ export function withAdminApi<T = any>(
       } catch (error) {
         logError(error, {
           action: actionName,
-          endpoint: request.nextUrl.pathname
+          metadata: {
+            endpoint: request.nextUrl.pathname
+          }
         })
         return createErrorResponse(error, 500)
       }

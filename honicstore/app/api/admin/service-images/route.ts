@@ -67,7 +67,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_service_images_get',
-          endpoint: '/api/admin/service-images'
+          metadata: {
+            endpoint: '/api/admin/service-images'
+          }
         })
         return authError
       }
@@ -85,10 +87,12 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_service_images_get',
-          endpoint: '/api/admin/service-images',
-          metadata: { serviceId }
+          metadata: {
+            endpoint: '/api/admin/service-images',
+            serviceId
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -126,7 +130,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_service_images_get',
-        endpoint: '/api/admin/service-images'
+        metadata: {
+          endpoint: '/api/admin/service-images'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -160,7 +166,9 @@ export async function DELETE(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_service_images_delete',
-          endpoint: '/api/admin/service-images'
+          metadata: {
+            endpoint: '/api/admin/service-images'
+          }
         })
         return authError
       }
@@ -186,10 +194,13 @@ export async function DELETE(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_service_images_delete',
-          endpoint: '/api/admin/service-images',
-          metadata: { serviceId, fileName }
+          metadata: {
+            endpoint: '/api/admin/service-images',
+            serviceId,
+            fileName
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -198,11 +209,12 @@ export async function DELETE(request: NextRequest) {
       setCachedData(`admin_service_images_${serviceId}`, null, 0)
 
       // Log admin action
-      logSecurityEvent('SERVICE_IMAGE_DELETED', user.id, {
+      logSecurityEvent('SERVICE_IMAGE_DELETED', {
+        userId: user?.id,
         serviceId,
         fileName,
         endpoint: '/api/admin/service-images'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -212,7 +224,9 @@ export async function DELETE(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_service_images_delete',
-        endpoint: '/api/admin/service-images'
+        metadata: {
+          endpoint: '/api/admin/service-images'
+        }
       })
       return createErrorResponse(error, 500)
     }

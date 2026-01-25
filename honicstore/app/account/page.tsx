@@ -40,6 +40,7 @@ import { ProtectedRoute } from '@/components/protected-route'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { getAuthToken } from '@/lib/auth-utils'
+import { supabaseClient } from '@/lib/supabase-client'
 
 // Remove local Order mock interface; we use real orders from useOrders
 
@@ -158,7 +159,7 @@ function AccountPageContent() {
     }
     try {
       setIsChangingPassword(true)
-      const { error } = await supabase.auth.updateUser({ password: password1 })
+      const { error } = await supabaseClient.auth.updateUser({ password: password1 })
       if (error) throw error
       setPassword1(''); setPassword2('')
       toast({ title: 'Password updated' })

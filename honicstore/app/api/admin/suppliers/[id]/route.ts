@@ -49,7 +49,9 @@ export async function PATCH(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_suppliers_patch',
-          endpoint: '/api/admin/suppliers/[id]'
+          metadata: {
+            endpoint: '/api/admin/suppliers/[id]'
+          }
         })
         return authError
       }
@@ -508,10 +510,11 @@ export async function DELETE(
     }
 
     // Log admin action
-    logSecurityEvent('SUPPLIER_DELETED', user.id, {
+    logSecurityEvent('SUPPLIER_DELETED', {
+      userId: user?.id,
       supplierId: id,
       endpoint: '/api/admin/suppliers/[id]'
-    })
+    }, request)
 
     // Clear cache
     const { setCachedData } = await import('@/lib/database-optimization')
@@ -525,7 +528,9 @@ export async function DELETE(
   } catch (error: any) {
     logError(error, {
       action: 'admin_suppliers_delete',
-      endpoint: '/api/admin/suppliers/[id]'
+      metadata: {
+        endpoint: '/api/admin/suppliers/[id]'
+      }
     })
     return createErrorResponse(error, 500)
   }

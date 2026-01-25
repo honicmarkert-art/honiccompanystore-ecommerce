@@ -56,7 +56,9 @@ export async function POST(request: NextRequest) {
         } else {
           logError(updateError, {
             action: 'admin_orders_scheduled_cleanup_post',
-            endpoint: '/api/admin/orders/scheduled-cleanup'
+            metadata: {
+              endpoint: '/api/admin/orders/scheduled-cleanup'
+            }
           })
         }
       }
@@ -89,7 +91,9 @@ export async function POST(request: NextRequest) {
         } else {
           logError(deleteOrdersError, {
             action: 'admin_orders_scheduled_cleanup_post',
-            endpoint: '/api/admin/orders/scheduled-cleanup'
+            metadata: {
+              endpoint: '/api/admin/orders/scheduled-cleanup'
+            }
           })
         }
       }
@@ -108,7 +112,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_orders_scheduled_cleanup_post',
-        endpoint: '/api/admin/orders/scheduled-cleanup'
+        metadata: {
+          endpoint: '/api/admin/orders/scheduled-cleanup'
+        }
       })
       return createErrorResponse(error, 500)
     }

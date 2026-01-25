@@ -56,7 +56,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_emails_back_in_stock_get',
-          endpoint: '/api/admin/emails/back-in-stock'
+          metadata: {
+            endpoint: '/api/admin/emails/back-in-stock'
+          }
         })
         return authError
       }
@@ -99,9 +101,11 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_emails_back_in_stock_get',
-          endpoint: '/api/admin/emails/back-in-stock'
+          metadata: {
+            endpoint: '/api/admin/emails/back-in-stock'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -128,7 +132,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_emails_back_in_stock_get',
-        endpoint: '/api/admin/emails/back-in-stock'
+        metadata: {
+          endpoint: '/api/admin/emails/back-in-stock'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -162,7 +168,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_emails_back_in_stock_post',
-          endpoint: '/api/admin/emails/back-in-stock'
+          metadata: {
+            endpoint: '/api/admin/emails/back-in-stock'
+          }
         })
         return authError
       }
@@ -212,9 +220,11 @@ export async function POST(request: NextRequest) {
 
       if (fetchError) {
         logError(fetchError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_emails_back_in_stock_post',
-          endpoint: '/api/admin/emails/back-in-stock'
+          metadata: {
+            endpoint: '/api/admin/emails/back-in-stock'
+          }
         })
         return createErrorResponse(fetchError, 500)
       }
@@ -308,12 +318,13 @@ export async function POST(request: NextRequest) {
       }
 
       // Log admin action
-      logSecurityEvent('BACK_IN_STOCK_EMAILS_SENT', user.id, {
+      logSecurityEvent('BACK_IN_STOCK_EMAILS_SENT', {
+        userId: user?.id,
         notificationCount: notifications.length,
         sent: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
         endpoint: '/api/admin/emails/back-in-stock'
-      })
+      }, request)
 
       // Clear cache
       setCachedData(`admin_back_in_stock_*`, null, 0) // Invalidate all back-in-stock caches
@@ -328,7 +339,9 @@ export async function POST(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_emails_back_in_stock_post',
-        endpoint: '/api/admin/emails/back-in-stock'
+        metadata: {
+          endpoint: '/api/admin/emails/back-in-stock'
+        }
       })
       return createErrorResponse(error, 500)
     }

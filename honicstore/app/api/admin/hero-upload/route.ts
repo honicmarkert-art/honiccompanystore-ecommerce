@@ -35,7 +35,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_hero_upload_post',
-          endpoint: '/api/admin/hero-upload'
+          metadata: {
+            endpoint: '/api/admin/hero-upload'
+          }
         })
         return authError
       }
@@ -96,10 +98,12 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_hero_upload_post',
-          endpoint: '/api/admin/hero-upload',
-          metadata: { fileName }
+          metadata: {
+            endpoint: '/api/admin/hero-upload',
+            fileName
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -114,12 +118,13 @@ export async function POST(request: NextRequest) {
       logger.log('✅ Public URL generated:', urlData.publicUrl)
 
       // Log admin action
-      logSecurityEvent('HERO_IMAGE_UPLOADED', user.id, {
+      logSecurityEvent('HERO_IMAGE_UPLOADED', {
+        userId: user?.id,
         fileName,
         fileSize: file.size,
         fileType: file.type,
         endpoint: '/api/admin/hero-upload'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -132,7 +137,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_hero_upload_post',
-        endpoint: '/api/admin/hero-upload'
+        metadata: {
+          endpoint: '/api/admin/hero-upload'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -166,7 +173,9 @@ export async function DELETE(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_hero_upload_delete',
-          endpoint: '/api/admin/hero-upload'
+          metadata: {
+            endpoint: '/api/admin/hero-upload'
+          }
         })
         return authError
       }
@@ -190,10 +199,12 @@ export async function DELETE(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_hero_upload_delete',
-          endpoint: '/api/admin/hero-upload',
-          metadata: { fileName }
+          metadata: {
+            endpoint: '/api/admin/hero-upload',
+            fileName
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -201,10 +212,11 @@ export async function DELETE(request: NextRequest) {
       logger.log('✅ File deleted successfully')
 
       // Log admin action
-      logSecurityEvent('HERO_IMAGE_DELETED', user.id, {
+      logSecurityEvent('HERO_IMAGE_DELETED', {
+        userId: user?.id,
         fileName,
         endpoint: '/api/admin/hero-upload'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -214,7 +226,9 @@ export async function DELETE(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_hero_upload_delete',
-        endpoint: '/api/admin/hero-upload'
+        metadata: {
+          endpoint: '/api/admin/hero-upload'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -248,7 +262,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_hero_upload_get',
-          endpoint: '/api/admin/hero-upload'
+          metadata: {
+            endpoint: '/api/admin/hero-upload'
+          }
         })
         return authError
       }
@@ -264,9 +280,11 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_hero_upload_get',
-          endpoint: '/api/admin/hero-upload'
+          metadata: {
+            endpoint: '/api/admin/hero-upload'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -295,7 +313,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_hero_upload_get',
-        endpoint: '/api/admin/hero-upload'
+        metadata: {
+          endpoint: '/api/admin/hero-upload'
+        }
       })
       return createErrorResponse(error, 500)
     }

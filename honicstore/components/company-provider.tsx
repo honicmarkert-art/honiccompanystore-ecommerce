@@ -7,6 +7,7 @@ interface CompanyContextType {
   companyName: string
   companyColor: string
   companyLogo: string
+  companyTagline: string
   mainHeadline: string
   heroBackgroundImage: string
   heroTaglineAlignment: string
@@ -109,6 +110,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     companyName: adminSettings.companyName,
     companyColor: adminSettings.companyColor,
     companyLogo: adminSettings.companyLogo,
+    companyTagline: adminSettings.companyTagline || "",
     mainHeadline: adminSettings.mainHeadline,
     heroBackgroundImage: adminSettings.heroBackgroundImage,
     heroTaglineAlignment: adminSettings.heroTaglineAlignment,

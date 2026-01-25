@@ -45,7 +45,9 @@ export async function PATCH(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_users_patch',
-          endpoint: '/api/admin/users/[id]'
+          metadata: {
+            endpoint: '/api/admin/users/[id]'
+          }
         })
         return authError
       }
@@ -93,7 +95,7 @@ export async function PATCH(
       }
 
       // Prevent self-deactivation
-      if (user.id === id && !validatedData.is_active) {
+      if (user?.id === id && !validatedData.is_active) {
         return NextResponse.json(
           { error: 'You cannot deactivate your own account' },
           { status: 403 }
@@ -113,22 +115,26 @@ export async function PATCH(
 
       if (updateError) {
         logError(updateError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_users_patch',
-          endpoint: '/api/admin/users/[id]',
-          metadata: { targetUserId: id, isActive: validatedData.is_active }
+          metadata: {
+            endpoint: '/api/admin/users/[id]',
+            targetUserId: id,
+            isActive: validatedData.is_active
+          }
         })
         return createErrorResponse(updateError, 500)
       }
 
       // Log admin action
-      logSecurityEvent('USER_STATUS_UPDATED', user.id, {
+      logSecurityEvent('USER_STATUS_UPDATED', {
+        userId: user?.id,
         targetUserId: id,
         targetUserEmail: existingUser.email,
         isActive: validatedData.is_active,
         previousStatus: existingUser.is_active,
         endpoint: '/api/admin/users/[id]'
-      })
+      }, request)
 
       // Clear user list cache
       const { getCachedData, setCachedData } = await import('@/lib/database-optimization')
@@ -148,7 +154,9 @@ export async function PATCH(
     } catch (error: any) {
       logError(error, {
         action: 'admin_users_patch',
-        endpoint: '/api/admin/users/[id]'
+        metadata: {
+          endpoint: '/api/admin/users/[id]'
+        }
       })
       return createErrorResponse(error, 500)
     }

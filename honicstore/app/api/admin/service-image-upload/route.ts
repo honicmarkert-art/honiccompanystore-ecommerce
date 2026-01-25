@@ -41,7 +41,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_service_image_upload_post',
-          endpoint: '/api/admin/service-image-upload'
+          metadata: {
+            endpoint: '/api/admin/service-image-upload'
+          }
         })
         return authError
       }
@@ -107,10 +109,13 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_service_image_upload_post',
-          endpoint: '/api/admin/service-image-upload',
-          metadata: { serviceId, fileName }
+          metadata: {
+            endpoint: '/api/admin/service-image-upload',
+            serviceId,
+            fileName
+          }
         })
         
         // Check if it's a bucket not found error
@@ -133,13 +138,14 @@ export async function POST(request: NextRequest) {
         .getPublicUrl(fileName)
 
       // Log admin action
-      logSecurityEvent('SERVICE_IMAGE_UPLOADED', user.id, {
+      logSecurityEvent('SERVICE_IMAGE_UPLOADED', {
+        userId: user?.id,
         serviceId,
         fileName,
         fileSize: file.size,
         fileType: file.type,
         endpoint: '/api/admin/service-image-upload'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -150,7 +156,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_service_image_upload_post',
-        endpoint: '/api/admin/service-image-upload'
+        metadata: {
+          endpoint: '/api/admin/service-image-upload'
+        }
       })
       return createErrorResponse(error, 500)
     }

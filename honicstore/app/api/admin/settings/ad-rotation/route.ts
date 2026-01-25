@@ -55,7 +55,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_ad_rotation_get',
-          endpoint: '/api/admin/settings/ad-rotation'
+          metadata: {
+            endpoint: '/api/admin/settings/ad-rotation'
+          }
         })
         return authError
       }
@@ -93,9 +95,11 @@ export async function GET(request: NextRequest) {
       
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_ad_rotation_get',
-          endpoint: '/api/admin/settings/ad-rotation'
+          metadata: {
+            endpoint: '/api/admin/settings/ad-rotation'
+          }
         })
         return NextResponse.json({ rotationTime: 10 })
       }
@@ -115,7 +119,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_ad_rotation_get',
-        endpoint: '/api/admin/settings/ad-rotation'
+        metadata: {
+          endpoint: '/api/admin/settings/ad-rotation'
+        }
       })
       return NextResponse.json({ rotationTime: 10 }) // Default to 10 seconds
     }
@@ -150,7 +156,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_ad_rotation_post',
-          endpoint: '/api/admin/settings/ad-rotation'
+          metadata: {
+            endpoint: '/api/admin/settings/ad-rotation'
+          }
         })
         return authError
       }
@@ -186,10 +194,11 @@ export async function POST(request: NextRequest) {
         setCachedData('admin_ad_rotation_time', null, 0)
 
         // Log admin action
-        logSecurityEvent('AD_ROTATION_TIME_UPDATED', user.id, {
+        logSecurityEvent('AD_ROTATION_TIME_UPDATED', {
+          userId: user?.id,
           rotationTime: validatedData.rotationTime,
           endpoint: '/api/admin/settings/ad-rotation'
-        })
+        }, request)
 
         return NextResponse.json({ success: true, rotationTime: validatedData.rotationTime })
       }
@@ -207,9 +216,11 @@ export async function POST(request: NextRequest) {
       
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_ad_rotation_post',
-          endpoint: '/api/admin/settings/ad-rotation'
+          metadata: {
+            endpoint: '/api/admin/settings/ad-rotation'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -218,16 +229,19 @@ export async function POST(request: NextRequest) {
       setCachedData('admin_ad_rotation_time', null, 0)
 
       // Log admin action
-      logSecurityEvent('AD_ROTATION_TIME_UPDATED', user.id, {
+      logSecurityEvent('AD_ROTATION_TIME_UPDATED', {
+        userId: user?.id,
         rotationTime: validatedData.rotationTime,
         endpoint: '/api/admin/settings/ad-rotation'
-      })
+      }, request)
       
       return NextResponse.json({ success: true, rotationTime: validatedData.rotationTime })
     } catch (error) {
       logError(error, {
         action: 'admin_ad_rotation_post',
-        endpoint: '/api/admin/settings/ad-rotation'
+        metadata: {
+          endpoint: '/api/admin/settings/ad-rotation'
+        }
       })
       return createErrorResponse(error, 500)
     }

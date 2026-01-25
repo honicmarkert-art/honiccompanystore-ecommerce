@@ -49,7 +49,9 @@ export async function PATCH(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_tracking_patch',
-          endpoint: '/api/admin/orders/items/tracking'
+          metadata: {
+            endpoint: '/api/admin/orders/items/tracking'
+          }
         })
         return authError
       }
@@ -128,10 +130,12 @@ export async function PATCH(request: NextRequest) {
 
       if (itemsError) {
         logError(itemsError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_tracking_patch',
-          endpoint: '/api/admin/orders/items/tracking',
-          metadata: { orderId: order.id }
+          metadata: {
+            endpoint: '/api/admin/orders/items/tracking',
+            orderId: order.id
+          }
         })
         return createErrorResponse(itemsError, 500)
       }
@@ -158,10 +162,14 @@ export async function PATCH(request: NextRequest) {
 
       if (updateError) {
         logError(updateError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_tracking_patch',
-          endpoint: '/api/admin/orders/items/tracking',
-          metadata: { orderId: order.id, supplierId, trackingNumber }
+          metadata: {
+            endpoint: '/api/admin/orders/items/tracking',
+            orderId: order.id,
+            supplierId,
+            trackingNumber
+          }
         })
         return createErrorResponse(updateError, 500)
       }
@@ -187,13 +195,14 @@ export async function PATCH(request: NextRequest) {
       logger.log(`✅ Tracking number assigned: ${trackingNumber} for supplier ${supplierId}`)
 
       // Log admin action
-      logSecurityEvent('TRACKING_NUMBER_ASSIGNED', user.id, {
+      logSecurityEvent('TRACKING_NUMBER_ASSIGNED', {
+        userId: user?.id,
         orderId: order.id,
         supplierId,
         trackingNumber,
         itemCount: supplierItems.length,
         endpoint: '/api/admin/orders/items/tracking'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -205,7 +214,9 @@ export async function PATCH(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_orders_tracking_patch',
-        endpoint: '/api/admin/orders/items/tracking'
+        metadata: {
+          endpoint: '/api/admin/orders/items/tracking'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -243,7 +254,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_tracking_get',
-          endpoint: '/api/admin/orders/items/tracking'
+          metadata: {
+            endpoint: '/api/admin/orders/items/tracking'
+          }
         })
         return authError
       }
@@ -306,10 +319,12 @@ export async function GET(request: NextRequest) {
 
       if (itemsError) {
         logError(itemsError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_tracking_get',
-          endpoint: '/api/admin/orders/items/tracking',
-          metadata: { orderId: order.id }
+          metadata: {
+            endpoint: '/api/admin/orders/items/tracking',
+            orderId: order.id
+          }
         })
         return createErrorResponse(itemsError, 500)
       }
@@ -355,7 +370,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_orders_tracking_get',
-        endpoint: '/api/admin/orders/items/tracking'
+        metadata: {
+          endpoint: '/api/admin/orders/items/tracking'
+        }
       })
       return createErrorResponse(error, 500)
     }

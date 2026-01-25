@@ -1,5 +1,8 @@
 "use client"
 
+// Note: ISR (revalidate) cannot be used in client components
+// CPU optimization is handled via API route caching and CDN caching instead
+
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'

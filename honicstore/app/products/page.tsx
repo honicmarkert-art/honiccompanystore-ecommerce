@@ -1,5 +1,9 @@
 "use client"
 
+// Note: ISR (revalidate) cannot be used in client components
+// CPU optimization is handled via API route caching and CDN caching instead
+// Client-side flows (sessionStorage, scroll position, cache) remain unaffected
+
 import React, { useState, useMemo, useEffect, useRef, useCallback, Suspense } from "react"
 import { createPortal } from 'react-dom'
 import { useSearchParams, useRouter, usePathname } from "next/navigation"

@@ -49,7 +49,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_users_get',
-          endpoint: '/api/admin/users'
+          metadata: {
+            endpoint: '/api/admin/users'
+          }
         })
         return authError
       }
@@ -64,9 +66,11 @@ export async function GET(request: NextRequest) {
 
       if (profilesError) {
         logError(profilesError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_users_get',
-          endpoint: '/api/admin/users'
+          metadata: {
+            endpoint: '/api/admin/users'
+          }
         })
         return createErrorResponse(profilesError, 500)
       }
@@ -141,7 +145,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_users_get',
-        endpoint: '/api/admin/users'
+        metadata: {
+          endpoint: '/api/admin/users'
+        }
       })
       return createErrorResponse(error, 500)
     }

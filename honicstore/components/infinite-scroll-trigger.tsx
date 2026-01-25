@@ -23,6 +23,22 @@ export function InfiniteScrollTrigger({
 }: InfiniteScrollTriggerProps) {
   const observerRef = useRef<IntersectionObserver | null>(null)
   const elementRef = useRef<HTMLDivElement | null>(null)
+  const hasScrolledRef = useRef(false)
+  const initialMountRef = useRef(true)
+
+  // Track user scroll to prevent immediate trigger on page load
+  useEffect(() => {
+    const handleScroll = () => {
+      if (typeof window !== 'undefined' && window.scrollY > 300) {
+        hasScrolledRef.current = true
+      }
+    }
+    
+    if (typeof window !== 'undefined') {
+      window.addEventListener('scroll', handleScroll, { passive: true })
+      return () => window.removeEventListener('scroll', handleScroll)
+    }
+  }, [])
 
   useEffect(() => {
     // Cleanup previous observer
@@ -33,18 +49,27 @@ export function InfiniteScrollTrigger({
     const element = elementRef.current
     if (!element || !hasMore || loading) return
 
-    // Create observer with aggressive early detection - triggers after ~3 scrolls (2000px)
-    // This ensures products are fetched and displayed well before user reaches them
+    // Mark initial mount as complete after first render
+    if (initialMountRef.current) {
+      // Delay to allow page to render and prevent immediate trigger
+      const timer = setTimeout(() => {
+        initialMountRef.current = false
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+
+    // Create observer with moderate early detection - triggers when user scrolls near bottom
+    // This ensures products are fetched before user reaches the end, but not immediately on page load
     observerRef.current = new IntersectionObserver(
       (entries) => {
         const [entry] = entries
-        // Trigger immediately when element enters detection zone - no delays
-        if (entry.isIntersecting && hasMore && !loading) {
+        // Trigger when element enters detection zone - only if user has scrolled (prevents immediate trigger on page load)
+        if (entry.isIntersecting && hasMore && !loading && hasScrolledRef.current) {
           onLoadMore()
         }
       },
       {
-        rootMargin: '2000px', // Aggressive: Triggers 2000px (~3 viewport heights) before bottom
+        rootMargin: '500px', // Moderate: Triggers 500px before bottom (reduced from 2000px to prevent immediate load)
         threshold: 0.01 // Triggers when just 1% of trigger element enters detection zone
       }
     )

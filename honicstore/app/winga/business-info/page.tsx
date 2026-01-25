@@ -1,5 +1,8 @@
 'use client'
 
+// Note: ISR (revalidate) cannot be used in client components
+// CPU optimization is handled via API route caching and CDN caching instead
+
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '@/hooks/use-theme'
 import { useAuth } from '@/contexts/auth-context'
@@ -551,7 +554,7 @@ function WingaBusinessInfoContent() {
                             <Button
                               type="button"
                               variant="outline"
-                              size="xs"
+                              size="sm"
                               className="mt-1 text-[10px] px-2 h-6"
                               onClick={() => window.open(nidaCardPhoto, '_blank', 'noopener,noreferrer')}
                             >
@@ -638,7 +641,7 @@ function WingaBusinessInfoContent() {
                             <Button
                               type="button"
                               variant="outline"
-                              size="xs"
+                              size="sm"
                               className="mt-1 text-[10px] px-2 h-6"
                               onClick={() => window.open(selfFacePhoto, '_blank', 'noopener,noreferrer')}
                             >

@@ -44,7 +44,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_variant_images_get',
-          endpoint: '/api/admin/variant-images'
+          metadata: {
+            endpoint: '/api/admin/variant-images'
+          }
         })
         return authError
       }
@@ -59,7 +61,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_variant_images_get',
-        endpoint: '/api/admin/variant-images'
+        metadata: {
+          endpoint: '/api/admin/variant-images'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -94,7 +98,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_variant_images_post',
-          endpoint: '/api/admin/variant-images'
+          metadata: {
+            endpoint: '/api/admin/variant-images'
+          }
         })
         return authError
       }
@@ -120,11 +126,12 @@ export async function POST(request: NextRequest) {
 
       // In a real app, you would save to a variant_images table
       // For now, we'll just return success
-      logSecurityEvent('VARIANT_IMAGE_CREATED', user.id, {
+      logSecurityEvent('VARIANT_IMAGE_CREATED', {
+        userId: user?.id,
         productId: validatedData.productId,
         variantId: validatedData.variantId,
         endpoint: '/api/admin/variant-images'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -139,7 +146,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_variant_images_post',
-        endpoint: '/api/admin/variant-images'
+        metadata: {
+          endpoint: '/api/admin/variant-images'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -174,7 +183,9 @@ export async function DELETE(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_variant_images_delete',
-          endpoint: '/api/admin/variant-images'
+          metadata: {
+            endpoint: '/api/admin/variant-images'
+          }
         })
         return authError
       }
@@ -187,10 +198,11 @@ export async function DELETE(request: NextRequest) {
       }
 
       // In a real app, you would delete from the variant_images table
-      logSecurityEvent('VARIANT_IMAGE_DELETED', user.id, {
+      logSecurityEvent('VARIANT_IMAGE_DELETED', {
+        userId: user?.id,
         id,
         endpoint: '/api/admin/variant-images'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -200,7 +212,9 @@ export async function DELETE(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_variant_images_delete',
-        endpoint: '/api/admin/variant-images'
+        metadata: {
+          endpoint: '/api/admin/variant-images'
+        }
       })
       return createErrorResponse(error, 500)
     }

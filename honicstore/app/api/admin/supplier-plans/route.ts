@@ -64,7 +64,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_supplier_plans_get',
-          endpoint: '/api/admin/supplier-plans'
+          metadata: {
+            endpoint: '/api/admin/supplier-plans'
+          }
         })
         return authError
       }
@@ -87,9 +89,11 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_supplier_plans_get',
-          endpoint: '/api/admin/supplier-plans'
+          metadata: {
+            endpoint: '/api/admin/supplier-plans'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -129,7 +133,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_supplier_plans_get',
-        endpoint: '/api/admin/supplier-plans'
+        metadata: {
+          endpoint: '/api/admin/supplier-plans'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -163,7 +169,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_supplier_plans_post',
-          endpoint: '/api/admin/supplier-plans'
+          metadata: {
+            endpoint: '/api/admin/supplier-plans'
+          }
         })
         return authError
       }
@@ -200,19 +208,22 @@ export async function POST(request: NextRequest) {
 
       if (planError) {
         logError(planError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_supplier_plans_post',
-          endpoint: '/api/admin/supplier-plans'
+          metadata: {
+            endpoint: '/api/admin/supplier-plans'
+          }
         })
         return createErrorResponse(planError, 500)
       }
 
       // Log admin action
-      logSecurityEvent('SUPPLIER_PLAN_CREATED', user.id, {
+      logSecurityEvent('SUPPLIER_PLAN_CREATED', {
+        userId: user?.id,
         planId: plan.id,
         planName: plan.name,
         endpoint: '/api/admin/supplier-plans'
-      })
+      }, request)
 
       // Clear caches
       clearSupplierPlansCache()
@@ -231,7 +242,9 @@ export async function POST(request: NextRequest) {
       }
       logError(error, {
         action: 'admin_supplier_plans_post',
-        endpoint: '/api/admin/supplier-plans'
+        metadata: {
+          endpoint: '/api/admin/supplier-plans'
+        }
       })
       return createErrorResponse(error, 500)
     }

@@ -55,7 +55,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_emails_abandoned_carts_get',
-          endpoint: '/api/admin/emails/abandoned-carts'
+          metadata: {
+            endpoint: '/api/admin/emails/abandoned-carts'
+          }
         })
         return authError
       }
@@ -76,9 +78,11 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_emails_abandoned_carts_get',
-          endpoint: '/api/admin/emails/abandoned-carts'
+          metadata: {
+            endpoint: '/api/admin/emails/abandoned-carts'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -125,7 +129,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_emails_abandoned_carts_get',
-        endpoint: '/api/admin/emails/abandoned-carts'
+        metadata: {
+          endpoint: '/api/admin/emails/abandoned-carts'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -159,7 +165,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_emails_abandoned_carts_post',
-          endpoint: '/api/admin/emails/abandoned-carts'
+          metadata: {
+            endpoint: '/api/admin/emails/abandoned-carts'
+          }
         })
         return authError
       }
@@ -182,9 +190,11 @@ export async function POST(request: NextRequest) {
 
       if (fetchError) {
         logError(fetchError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_emails_abandoned_carts_post',
-          endpoint: '/api/admin/emails/abandoned-carts'
+          metadata: {
+            endpoint: '/api/admin/emails/abandoned-carts'
+          }
         })
         return createErrorResponse(fetchError, 500)
       }
@@ -276,12 +286,13 @@ export async function POST(request: NextRequest) {
     }
 
       // Log admin action
-      logSecurityEvent('ABANDONED_CART_EMAILS_SENT', user.id, {
+      logSecurityEvent('ABANDONED_CART_EMAILS_SENT', {
+        userId: user?.id,
         cartCount: cartIdsToProcess.length,
         sent: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
         endpoint: '/api/admin/emails/abandoned-carts'
-      })
+      }, request)
 
       // Clear cache
       setCachedData(`admin_abandoned_carts_*`, null, 0) // Invalidate all abandoned cart caches
@@ -296,7 +307,9 @@ export async function POST(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_emails_abandoned_carts_post',
-        endpoint: '/api/admin/emails/abandoned-carts'
+        metadata: {
+          endpoint: '/api/admin/emails/abandoned-carts'
+        }
       })
       return createErrorResponse(error, 500)
     }

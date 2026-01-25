@@ -30,7 +30,9 @@ export async function POST(request: NextRequest) {
       if (error) {
         logError(error, {
           action: 'admin_scheduled_cleanup_post',
-          endpoint: '/api/admin/scheduled-cleanup'
+          metadata: {
+            endpoint: '/api/admin/scheduled-cleanup'
+          }
         })
         return NextResponse.json(
           { error: 'Failed to run scheduled cleanup', details: error.message },
@@ -50,7 +52,9 @@ export async function POST(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_scheduled_cleanup_post',
-        endpoint: '/api/admin/scheduled-cleanup'
+        metadata: {
+          endpoint: '/api/admin/scheduled-cleanup'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -79,7 +83,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_scheduled_cleanup_get',
-        endpoint: '/api/admin/scheduled-cleanup'
+        metadata: {
+          endpoint: '/api/admin/scheduled-cleanup'
+        }
       })
       return createErrorResponse(error, 500)
     }

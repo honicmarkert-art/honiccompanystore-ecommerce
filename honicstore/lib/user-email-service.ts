@@ -629,7 +629,7 @@ export async function sendAbandonedCartEmail(
     cartUrl: string
     discountCode?: string
   }
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
     if (!validateEmail(userEmail)) {
       return { success: false, error: 'Invalid email address' }

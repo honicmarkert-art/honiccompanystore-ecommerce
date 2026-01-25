@@ -63,7 +63,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_confirmed_orders_get',
-          endpoint: '/api/admin/confirmed-orders'
+          metadata: {
+            endpoint: '/api/admin/confirmed-orders'
+          }
         })
         return authError
       }
@@ -95,9 +97,11 @@ export async function GET(request: NextRequest) {
 
       if (ordersError) {
         logError(ordersError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_confirmed_orders_get',
-          endpoint: '/api/admin/confirmed-orders'
+          metadata: {
+            endpoint: '/api/admin/confirmed-orders'
+          }
         })
         return createErrorResponse(ordersError, 500)
       }
@@ -191,7 +195,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_confirmed_orders_get',
-        endpoint: '/api/admin/confirmed-orders'
+        metadata: {
+          endpoint: '/api/admin/confirmed-orders'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -226,7 +232,9 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_confirmed_orders_post',
-          endpoint: '/api/admin/confirmed-orders'
+          metadata: {
+            endpoint: '/api/admin/confirmed-orders'
+          }
         })
         return authError
       }
@@ -288,10 +296,12 @@ export async function POST(request: NextRequest) {
 
       if (orderError) {
         logError(orderError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_confirmed_orders_post',
-          endpoint: '/api/admin/confirmed-orders',
-          metadata: { orderNumber: orderData.orderNumber }
+          metadata: {
+            endpoint: '/api/admin/confirmed-orders',
+            orderNumber: orderData.orderNumber
+          }
         })
         return createErrorResponse(orderError, 500)
       }
@@ -344,11 +354,12 @@ export async function POST(request: NextRequest) {
       setCachedData('admin_confirmed_orders_all', null, 0)
 
       // Log admin action
-      logSecurityEvent('CONFIRMED_ORDER_CREATED', user.id, {
+      logSecurityEvent('CONFIRMED_ORDER_CREATED', {
+        userId: user?.id,
         orderId: confirmedOrder.id,
         orderNumber: confirmedOrder.order_number,
         endpoint: '/api/admin/confirmed-orders'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -363,7 +374,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_confirmed_orders_post',
-        endpoint: '/api/admin/confirmed-orders'
+        metadata: {
+          endpoint: '/api/admin/confirmed-orders'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -398,7 +411,9 @@ export async function PATCH(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_confirmed_orders_patch',
-          endpoint: '/api/admin/confirmed-orders'
+          metadata: {
+            endpoint: '/api/admin/confirmed-orders'
+          }
         })
         return authError
       }
@@ -584,17 +599,20 @@ export async function PATCH(request: NextRequest) {
       setCachedData('admin_confirmed_orders_all', null, 0)
 
       // Log admin action
-      logSecurityEvent('CONFIRMED_ORDER_UPDATED', user.id, {
+      logSecurityEvent('CONFIRMED_ORDER_UPDATED', {
+        userId: user?.id,
         orderId: id,
         status,
         endpoint: '/api/admin/confirmed-orders'
-      })
+      }, request)
 
       return NextResponse.json({ success: true })
     } catch (error) {
       logError(error, {
         action: 'admin_confirmed_orders_patch',
-        endpoint: '/api/admin/confirmed-orders'
+        metadata: {
+          endpoint: '/api/admin/confirmed-orders'
+        }
       })
       return createErrorResponse(error, 500)
     }

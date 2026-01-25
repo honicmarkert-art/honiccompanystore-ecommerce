@@ -209,9 +209,11 @@ export async function GET(request: NextRequest) {
           logError(new Error(errorMessage), {
             userId: user?.id,
             action: 'admin_settings_get',
-            endpoint: '/api/admin/settings',
-            authErrorStatus: authError.status,
-            authErrorStatusText: authError.statusText
+            metadata: {
+              endpoint: '/api/admin/settings',
+              authErrorStatus: authError.status,
+              authErrorStatusText: authError.statusText
+            }
           })
         }
         return authError
@@ -246,9 +248,11 @@ export async function GET(request: NextRequest) {
 
       if (settingsError) {
         logError(settingsError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_settings_get',
-          endpoint: '/api/admin/settings'
+          metadata: {
+            endpoint: '/api/admin/settings'
+          }
         })
         // Return default settings if no settings exist or table doesn't exist
         const defaultSettings = {
@@ -480,7 +484,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_settings_get',
-        endpoint: '/api/admin/settings'
+        metadata: {
+          endpoint: '/api/admin/settings'
+        }
       })
       
       const message = String((error as any)?.message || '')
@@ -628,9 +634,11 @@ export async function POST(request: NextRequest) {
           logError(new Error(errorMessage), {
             userId: user?.id,
             action: 'admin_settings_post',
-            endpoint: '/api/admin/settings',
-            authErrorStatus: authError.status,
-            authErrorStatusText: authError.statusText
+            metadata: {
+              endpoint: '/api/admin/settings',
+              authErrorStatus: authError.status,
+              authErrorStatusText: authError.statusText
+            }
           })
         }
         return authError
@@ -832,9 +840,11 @@ export async function POST(request: NextRequest) {
 
       if (updateError) {
         logError(updateError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_settings_post',
-          endpoint: '/api/admin/settings'
+          metadata: {
+            endpoint: '/api/admin/settings'
+          }
         })
         return createErrorResponse(updateError, 500)
       }
@@ -864,9 +874,10 @@ export async function POST(request: NextRequest) {
       setCachedData('admin_settings_all', null, 0)
 
       // Log admin action
-      logSecurityEvent('ADMIN_SETTINGS_UPDATED', user.id, {
+      logSecurityEvent('ADMIN_SETTINGS_UPDATED', {
+        userId: user?.id,
         endpoint: '/api/admin/settings'
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -884,7 +895,9 @@ export async function POST(request: NextRequest) {
 
       logError(error, {
         action: 'admin_settings_post',
-        endpoint: '/api/admin/settings'
+        metadata: {
+          endpoint: '/api/admin/settings'
+        }
       })
       return createErrorResponse(error, 500)
     }

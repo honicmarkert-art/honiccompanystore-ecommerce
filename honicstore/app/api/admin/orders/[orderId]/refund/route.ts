@@ -58,7 +58,9 @@ export async function POST(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_refund_post',
-          endpoint: '/api/admin/orders/[orderId]/refund'
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]/refund'
+          }
         })
         return authError
       }
@@ -121,10 +123,12 @@ export async function POST(
 
       if (updateError) {
         logError(updateError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_refund_post',
-          endpoint: '/api/admin/orders/[orderId]/refund',
-          metadata: { orderId }
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]/refund',
+            orderId
+          }
         })
         return createErrorResponse(updateError, 500)
       }
@@ -189,12 +193,13 @@ export async function POST(
       }
 
       // Log admin action
-      logSecurityEvent('ORDER_REFUND_PROCESSED', user.id, {
+      logSecurityEvent('ORDER_REFUND_PROCESSED', {
+        userId: user?.id,
         orderId,
         refundAmount,
         refundMethod,
         endpoint: '/api/admin/orders/[orderId]/refund'
-      })
+      }, request)
 
       // Clear cache
       const { setCachedData } = await import('@/lib/database-optimization')
@@ -213,7 +218,9 @@ export async function POST(
     } catch (error: any) {
       logError(error, {
         action: 'admin_orders_refund_post',
-        endpoint: '/api/admin/orders/[orderId]/refund'
+        metadata: {
+          endpoint: '/api/admin/orders/[orderId]/refund'
+        }
       })
       return createErrorResponse(error, 500)
     }

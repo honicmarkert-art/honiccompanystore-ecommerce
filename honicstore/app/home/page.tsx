@@ -1,5 +1,8 @@
 "use client"
 
+// Note: ISR (revalidate) cannot be used in client components
+// CPU optimization is handled via API route caching and CDN caching instead
+
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'

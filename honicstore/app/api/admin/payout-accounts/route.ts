@@ -54,7 +54,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_payout_accounts_get',
-          endpoint: '/api/admin/payout-accounts'
+          metadata: {
+            endpoint: '/api/admin/payout-accounts'
+          }
         })
         return authError
       }
@@ -94,9 +96,11 @@ export async function GET(request: NextRequest) {
 
       if (accountsError) {
         logError(accountsError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_payout_accounts_get',
-          endpoint: '/api/admin/payout-accounts'
+          metadata: {
+            endpoint: '/api/admin/payout-accounts'
+          }
         })
         return createErrorResponse(accountsError, 500)
       }
@@ -129,7 +133,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_payout_accounts_get',
-        endpoint: '/api/admin/payout-accounts'
+        metadata: {
+          endpoint: '/api/admin/payout-accounts'
+        }
       })
       return createErrorResponse(error, 500)
     }

@@ -828,7 +828,7 @@ function CompanyInfoPageContent() {
                                         <Button
                                           type="button"
                                           variant="outline"
-                                          size="xs"
+                                          size="sm"
                                           className="mt-1 text-[10px] px-2 h-6"
                                           onClick={() => window.open(businessTinCertificate, '_blank', 'noopener,noreferrer')}
                                         >
@@ -916,7 +916,7 @@ function CompanyInfoPageContent() {
                                         <Button
                                           type="button"
                                           variant="outline"
-                                          size="xs"
+                                          size="sm"
                                           className="mt-1 text-[10px] px-2 h-6"
                                           onClick={() => window.open(companyCertificate, '_blank', 'noopener,noreferrer')}
                                         >

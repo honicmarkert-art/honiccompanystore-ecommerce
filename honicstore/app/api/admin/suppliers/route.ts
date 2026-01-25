@@ -49,7 +49,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_suppliers_get',
-          endpoint: '/api/admin/suppliers'
+          metadata: {
+            endpoint: '/api/admin/suppliers'
+          }
         })
         return authError
       }
@@ -93,9 +95,11 @@ export async function GET(request: NextRequest) {
 
       if (suppliersError) {
         logError(suppliersError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_suppliers_get',
-          endpoint: '/api/admin/suppliers'
+          metadata: {
+            endpoint: '/api/admin/suppliers'
+          }
         })
         return createErrorResponse(suppliersError, 500)
       }
@@ -182,7 +186,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_suppliers_get',
-        endpoint: '/api/admin/suppliers'
+        metadata: {
+          endpoint: '/api/admin/suppliers'
+        }
       })
       return createErrorResponse(error, 500)
     }

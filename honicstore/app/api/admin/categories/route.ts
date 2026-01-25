@@ -72,9 +72,11 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_categories_get',
-          endpoint: '/api/admin/categories'
+          metadata: {
+            endpoint: '/api/admin/categories'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -93,7 +95,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       logError(error, {
         action: 'admin_categories_get',
-        endpoint: '/api/admin/categories'
+        metadata: {
+          endpoint: '/api/admin/categories'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -188,10 +192,12 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_categories_post',
-          endpoint: '/api/admin/categories',
-          metadata: { categoryName: sanitizedName }
+          metadata: {
+            endpoint: '/api/admin/categories',
+            categoryName: sanitizedName
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -200,17 +206,20 @@ export async function POST(request: NextRequest) {
       setCachedData('admin_categories_all', null, 0) // Invalidate cache
 
       // Log admin action
-      logSecurityEvent('CATEGORY_CREATED', user.id, {
+      logSecurityEvent('CATEGORY_CREATED', {
+        userId: user?.id,
         categoryId: category.id,
         categoryName: sanitizedName,
         endpoint: '/api/admin/categories'
-      })
+      }, request)
 
       return NextResponse.json(category, { status: 201 })
     } catch (error) {
       logError(error, {
         action: 'admin_categories_post',
-        endpoint: '/api/admin/categories'
+        metadata: {
+          endpoint: '/api/admin/categories'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -335,10 +344,12 @@ export async function PUT(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_categories_put',
-          endpoint: '/api/admin/categories',
-          metadata: { categoryId: id }
+          metadata: {
+            endpoint: '/api/admin/categories',
+            categoryId: id
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -347,16 +358,19 @@ export async function PUT(request: NextRequest) {
       setCachedData('admin_categories_all', null, 0) // Invalidate cache
 
       // Log admin action
-      logSecurityEvent('CATEGORY_UPDATED', user.id, {
+      logSecurityEvent('CATEGORY_UPDATED', {
+        userId: user?.id,
         categoryId: categoryId,
         endpoint: '/api/admin/categories'
-      })
+      }, request)
 
       return NextResponse.json(category)
     } catch (error) {
       logError(error, {
         action: 'admin_categories_put',
-        endpoint: '/api/admin/categories'
+        metadata: {
+          endpoint: '/api/admin/categories'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -439,10 +453,13 @@ export async function DELETE(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_categories_delete',
-          endpoint: '/api/admin/categories',
-          metadata: { categoryId: id, categoryName: existingCategory.name }
+          metadata: {
+            endpoint: '/api/admin/categories',
+            categoryId: id,
+            categoryName: existingCategory.name
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -451,17 +468,20 @@ export async function DELETE(request: NextRequest) {
       setCachedData('admin_categories_all', null, 0) // Invalidate cache
 
       // Log admin action
-      logSecurityEvent('CATEGORY_DELETED', user.id, {
+      logSecurityEvent('CATEGORY_DELETED', {
+        userId: user?.id,
         categoryId: id,
         categoryName: existingCategory.name,
         endpoint: '/api/admin/categories'
-      })
+      }, request)
 
       return NextResponse.json({ message: 'Category deleted successfully' })
     } catch (error) {
       logError(error, {
         action: 'admin_categories_delete',
-        endpoint: '/api/admin/categories'
+        metadata: {
+          endpoint: '/api/admin/categories'
+        }
       })
       return createErrorResponse(error, 500)
     }

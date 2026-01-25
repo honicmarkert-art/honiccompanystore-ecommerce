@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   return performanceMonitor.measure('admin_cleanup_failed_orders_post', async () => {
     try {
       // Rate limiting (stricter for cleanup operations)
-      const rateLimitResult = enhancedRateLimit(request, { max: 10, window: 60000 }) // 10 per minute
+      const rateLimitResult = enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/admin/cleanup-failed-orders',
@@ -36,12 +36,14 @@ export async function POST(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_cleanup_failed_orders_post',
-          endpoint: '/api/admin/cleanup-failed-orders'
+          metadata: {
+            endpoint: '/api/admin/cleanup-failed-orders'
+          }
         })
         return authError
       }
 
-      logger.log('🧹 Manual cleanup of failed orders triggered by admin:', user.id)
+      logger.log('🧹 Manual cleanup of failed orders triggered by admin:', user?.id)
 
       // Use admin client to run cleanup function
       const adminClient = createAdminSupabaseClient()
@@ -51,9 +53,11 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_cleanup_failed_orders_post',
-          endpoint: '/api/admin/cleanup-failed-orders'
+          metadata: {
+            endpoint: '/api/admin/cleanup-failed-orders'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -61,10 +65,11 @@ export async function POST(request: NextRequest) {
       logger.log('✅ Cleanup completed successfully:', data)
 
       // Log admin action
-      logSecurityEvent('FAILED_ORDERS_CLEANUP_EXECUTED', user.id, {
+      logSecurityEvent('FAILED_ORDERS_CLEANUP_EXECUTED', {
+        userId: user?.id,
         endpoint: '/api/admin/cleanup-failed-orders',
         result: data
-      })
+      }, request)
 
       return NextResponse.json({
         success: true,
@@ -75,7 +80,9 @@ export async function POST(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_cleanup_failed_orders_post',
-        endpoint: '/api/admin/cleanup-failed-orders'
+        metadata: {
+          endpoint: '/api/admin/cleanup-failed-orders'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -110,7 +117,9 @@ export async function GET(request: NextRequest) {
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_cleanup_failed_orders_get',
-          endpoint: '/api/admin/cleanup-failed-orders'
+          metadata: {
+            endpoint: '/api/admin/cleanup-failed-orders'
+          }
         })
         return authError
       }
@@ -127,9 +136,11 @@ export async function GET(request: NextRequest) {
 
       if (error) {
         logError(error, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_cleanup_failed_orders_get',
-          endpoint: '/api/admin/cleanup-failed-orders'
+          metadata: {
+            endpoint: '/api/admin/cleanup-failed-orders'
+          }
         })
         return createErrorResponse(error, 500)
       }
@@ -145,7 +156,9 @@ export async function GET(request: NextRequest) {
     } catch (error: any) {
       logError(error, {
         action: 'admin_cleanup_failed_orders_get',
-        endpoint: '/api/admin/cleanup-failed-orders'
+        metadata: {
+          endpoint: '/api/admin/cleanup-failed-orders'
+        }
       })
       return createErrorResponse(error, 500)
     }

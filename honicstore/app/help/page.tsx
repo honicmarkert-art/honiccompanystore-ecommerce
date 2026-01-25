@@ -1,11 +1,16 @@
-'use client'
-
 import { HelpCircle } from 'lucide-react'
-import { ComingSoonPage } from '@/components/coming-soon-page'
+import { ComingSoonPageClient } from '@/components/coming-soon-page-client'
+import { getCompanySettings } from '@/lib/company-settings-server'
 
-export default function HelpPage() {
+// Force static generation with ISR (revalidate every 24 hours)
+export const dynamic = 'force-static'
+export const revalidate = 86400
+
+export default async function HelpPage() {
+  const companySettings = await getCompanySettings()
+  
   return (
-    <ComingSoonPage
+    <ComingSoonPageClient
       title="Help Center"
       description="Comprehensive help and support resources. Find answers to your questions and get the assistance you need to make the most of our platform."
       icon={<HelpCircle className="w-10 h-10 text-white" />}
@@ -19,6 +24,8 @@ export default function HelpPage() {
         "Technical documentation",
         "24/7 customer support"
       ]}
+      companyName={companySettings.companyName}
+      companyColor={companySettings.companyColor}
     />
   )
 }

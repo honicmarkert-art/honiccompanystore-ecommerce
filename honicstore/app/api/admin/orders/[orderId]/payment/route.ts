@@ -49,7 +49,9 @@ export async function PATCH(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_payment_patch',
-          endpoint: '/api/admin/orders/[orderId]/payment'
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]/payment'
+          }
         })
         return authError
       }
@@ -92,10 +94,12 @@ export async function PATCH(
 
       if (orderError) {
         logError(orderError, {
-          userId: user.id,
+          userId: user?.id,
           action: 'admin_orders_payment_patch',
-          endpoint: '/api/admin/orders/[orderId]/payment',
-          metadata: { orderId }
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]/payment',
+            orderId
+          }
         })
         return createErrorResponse(orderError, 500)
       }
@@ -145,12 +149,13 @@ export async function PATCH(
     }
 
       // Log admin action
-      logSecurityEvent('ORDER_PAYMENT_UPDATED', user.id, {
+      logSecurityEvent('ORDER_PAYMENT_UPDATED', {
+        userId: user?.id,
         orderId: order.id,
         referenceId: order.reference_id,
         paymentStatus,
         endpoint: '/api/admin/orders/[orderId]/payment'
-      })
+      }, request)
 
       // Clear cache
       const { setCachedData } = await import('@/lib/database-optimization')
@@ -169,7 +174,9 @@ export async function PATCH(
     } catch (error) {
       logError(error, {
         action: 'admin_orders_payment_patch',
-        endpoint: '/api/admin/orders/[orderId]/payment'
+        metadata: {
+          endpoint: '/api/admin/orders/[orderId]/payment'
+        }
       })
       return createErrorResponse(error, 500)
     }
@@ -207,7 +214,9 @@ export async function GET(
         logError(new Error('Admin authentication failed'), {
           userId: user?.id,
           action: 'admin_orders_payment_get',
-          endpoint: '/api/admin/orders/[orderId]/payment'
+          metadata: {
+            endpoint: '/api/admin/orders/[orderId]/payment'
+          }
         })
         return authError
       }
