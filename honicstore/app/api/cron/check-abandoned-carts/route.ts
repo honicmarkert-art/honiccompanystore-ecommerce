@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
               email_type: 'abandoned_cart',
               subject: "Don't Forget Your Cart!",
               status: 'sent',
-              message_id: emailResult.messageId,
+              ...(emailResult.messageId && { message_id: emailResult.messageId }),
               metadata: { cart_id: cart.id }
             })
 
