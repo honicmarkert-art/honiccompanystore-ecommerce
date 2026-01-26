@@ -478,7 +478,7 @@ export async function POST(request: NextRequest) {
         })
         
         // Update profile payment status
-        const { getSupabaseClient } = await import('@/lib/admin-auth')
+        const { getSupabaseClient } = await import('@/lib/supabase-server')
         const adminSupabase = getSupabaseClient()
         
         const updateData: any = {
