@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { ProductForm } from '../product-form'
+import { ProductForm } from '../../product-form'
 import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
