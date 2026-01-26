@@ -545,22 +545,9 @@ export async function POST(request: NextRequest) {
     // Use secure order creation with reference_id validation
     const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
     
-    console.log('📦 Creating order with data:', {
-      orderNumber: basicOrderData.order_number,
-      referenceId: basicOrderData.reference_id,
-      userId: basicOrderData.user_id,
-      totalAmount: basicOrderData.total_amount,
-      itemsCount: validatedItems.length
-    })
-    
     const creationResult = await secureOrderCreation(basicOrderData, null, clientIP)
     
     if (!creationResult.success) {
-      console.error('❌ Order creation failed:', {
-        error: creationResult.error,
-        details: (creationResult as any).details,
-        code: (creationResult as any).code
-      })
       logger.log('❌ Order creation failed:', {
         error: creationResult.error,
         details: (creationResult as any).details,
@@ -579,15 +566,12 @@ export async function POST(request: NextRequest) {
     const order = creationResult.data
     
     if (!order || !order.id) {
-      console.error('❌ Order creation returned invalid data:', { order })
       logger.log('❌ Order creation returned invalid data:', { order })
       return NextResponse.json(
         { error: 'Order creation failed: invalid response' },
         { status: 500 }
       )
     }
-    
-    console.log('✅ Order created successfully:', { orderId: order.id, referenceId: order.reference_id })
 
     // Set order_id for all items
     const orderItemsData = validatedItems.map(item => ({
@@ -804,14 +788,6 @@ Order ID: ${order.id}
     return NextResponse.json(responseData)
 
   } catch (error: any) {
-    // Log detailed error to server console for debugging
-    console.error('❌ POST /api/orders error:', {
-      message: error?.message,
-      stack: error?.stack,
-      name: error?.name,
-      cause: error?.cause,
-      error: error
-    })
     logger.error('Error in POST /api/orders:', error, {
       message: error?.message,
       stack: error?.stack,

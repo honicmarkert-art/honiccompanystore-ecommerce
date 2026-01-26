@@ -2450,14 +2450,28 @@ function CheckoutPageContent() {
               {/* Show Place Order button on order review step, Continue button on other steps */}
               {((deliveryOption === 'pickup' && currentStep === 2) || ((deliveryOption as string) === 'shipping' && currentStep === 3)) ? (
                 <div className="flex flex-col items-end">
-                  <Button
-                    onClick={handlePlaceOrder}
-                    disabled={isProcessingPayment}
-                    className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                  >
-                    {isProcessingPayment ? "Processing..." : paymentError ? "Try Again" : "Place Order"}
-                  </Button>
-                  {paymentError && !isProcessingPayment && (
+                  {paymentLinkGenerated && checkoutLinkUrl ? (
+                    <Button
+                      onClick={() => {
+                        if (checkoutLinkUrl) {
+                          window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')
+                        }
+                      }}
+                      className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                    >
+                      <Navigation className="mr-2 h-4 w-4" />
+                      Open Payment Page
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handlePlaceOrder}
+                      disabled={isProcessingPayment || paymentLinkGenerated}
+                      className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isProcessingPayment ? "Processing..." : paymentError ? "Try Again" : "Place Order"}
+                    </Button>
+                  )}
+                  {paymentError && !isProcessingPayment && !paymentLinkGenerated && (
                     <p className="mt-3 text-sm text-red-600 dark:text-red-400 text-right max-w-md">
                       {paymentError}
                     </p>
