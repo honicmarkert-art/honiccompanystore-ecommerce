@@ -387,6 +387,10 @@ function CheckoutPageContent() {
     setPaymentLinkGenerated(false) // Reset payment link state
     setCheckoutLinkUrl(null)
 
+    // Declare paymentFlowStartTime outside try block so it's accessible in catch block
+    let paymentFlowStartTime: number | undefined
+    let paymentFlowStartTimestamp: number | undefined
+
     try {
       // For pickup orders, validate billing address; for shipping, validate shipping address
       const customerInfo = deliveryOption === 'pickup' ? formData.billingAddress : formData.shippingAddress
@@ -467,34 +471,46 @@ function CheckoutPageContent() {
       }
 
       // Start payment flow timing after orderData is created
-      const paymentFlowStartTime = performance.now()
-      const paymentFlowStartTimestamp = Date.now()
+      paymentFlowStartTime = performance.now()
+      paymentFlowStartTimestamp = Date.now()
 
       // Check if we already have an order (from previous failed payment link generation)
       // If order exists, reuse it instead of creating a new one
       let result
       let orderSubmissionDuration = 0
       
-      if (orderReferenceId && orderId) {
-        // Reuse existing order - don't create a new one
-        
-        // Fetch order details to get current payment status
-        try {
-          const orderResponse = await fetch(`/api/orders/${orderReferenceId}`)
-          if (orderResponse.ok) {
-            const orderData = await orderResponse.json()
-            result = {
-              success: true,
-              order: {
-                id: orderId,
-                referenceId: orderReferenceId,
-                pickupId: orderPickupId,
-                paymentStatus: orderData.paymentStatus || 'pending',
-                status: orderData.status || 'pending'
+      try {
+        if (orderReferenceId && orderId) {
+          // Reuse existing order - don't create a new one
+          
+          // Fetch order details to get current payment status
+          try {
+            const orderResponse = await fetch(`/api/orders/${orderReferenceId}`)
+            if (orderResponse.ok) {
+              const orderData = await orderResponse.json()
+              result = {
+                success: true,
+                order: {
+                  id: orderId,
+                  referenceId: orderReferenceId,
+                  pickupId: orderPickupId,
+                  paymentStatus: orderData.paymentStatus || 'pending',
+                  status: orderData.status || 'pending'
+                }
               }
+            } else {
+              // Order not found, create new one
+              const orderSubmissionStartTime = performance.now()
+              result = await submitOrder(orderData)
+              const orderSubmissionEndTime = performance.now()
+              orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
+              setOrderId(result.order.id)
+              setOrderReferenceId(result.order.referenceId)
+              setOrderPickupId(result.order.pickupId)
+              setPaymentStatus(result.order.paymentStatus)
             }
-          } else {
-            // Order not found, create new one
+          } catch (error) {
+            // Error fetching order, create new one
             const orderSubmissionStartTime = performance.now()
             result = await submitOrder(orderData)
             const orderSubmissionEndTime = performance.now()
@@ -504,28 +520,22 @@ function CheckoutPageContent() {
             setOrderPickupId(result.order.pickupId)
             setPaymentStatus(result.order.paymentStatus)
           }
-        } catch (error) {
-          // Error fetching order, create new one
+        } else {
+          // No existing order, create new one
           const orderSubmissionStartTime = performance.now()
           result = await submitOrder(orderData)
           const orderSubmissionEndTime = performance.now()
           orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
+          
           setOrderId(result.order.id)
           setOrderReferenceId(result.order.referenceId)
           setOrderPickupId(result.order.pickupId)
           setPaymentStatus(result.order.paymentStatus)
         }
-      } else {
-        // No existing order, create new one
-        const orderSubmissionStartTime = performance.now()
-        result = await submitOrder(orderData)
-        const orderSubmissionEndTime = performance.now()
-        orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
-        
-        setOrderId(result.order.id)
-        setOrderReferenceId(result.order.referenceId)
-        setOrderPickupId(result.order.pickupId)
-        setPaymentStatus(result.order.paymentStatus)
+      } catch (orderError: any) {
+        // If order submission fails, clear loading state and throw error
+        setIsProcessingPayment(false)
+        throw orderError
       }
       
       // DON'T remove items from cart yet - wait until payment is confirmed
@@ -629,7 +639,7 @@ function CheckoutPageContent() {
       
       if (popupOpened) {
         // Successfully opened in new tab
-        const totalFlowDuration = performance.now() - paymentFlowStartTime
+        const totalFlowDuration = paymentFlowStartTime ? performance.now() - paymentFlowStartTime : 0
         
         toast({
           title: 'Payment Page Opened',
@@ -653,10 +663,10 @@ function CheckoutPageContent() {
       }, 500) // Brief delay to show success message
 
       // Log total payment flow duration
-      const totalPaymentFlowDuration = performance.now() - paymentFlowStartTime
+      const totalPaymentFlowDuration = paymentFlowStartTime ? performance.now() - paymentFlowStartTime : 0
 
     } catch (error: any) {
-      const totalPaymentFlowDuration = performance.now() - paymentFlowStartTime
+      const totalPaymentFlowDuration = paymentFlowStartTime ? performance.now() - paymentFlowStartTime : 0
       
       logger.error('Payment initiation error:', {
         error: error,
@@ -665,19 +675,27 @@ function CheckoutPageContent() {
         name: error?.name
       })
       
-      // Show generic error message to client
-      const errorMessage = 'Failed'
-      
-      setPaymentError(errorMessage)
+      // Always clear loading state on error
       setIsProcessingPayment(false)
       setPaymentLinkGenerated(false) // Reset on error
       setCheckoutLinkUrl(null)
+      
+      // Show user-friendly error message
+      const errorMessage = error?.message || 'Failed to process order. Please try again.'
+      
+      setPaymentError(errorMessage)
       toast({
-        title: 'Payment Error',
+        title: 'Order Error',
         description: errorMessage,
         variant: 'destructive',
         duration: 5000
       })
+    } finally {
+      // Ensure loading state is always cleared, even if something unexpected happens
+      // This is a safety net to prevent stuck loading states
+      setTimeout(() => {
+        setIsProcessingPayment(false)
+      }, 100)
     }
   }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { v4 as uuidv4 } from 'uuid'
 import { notifyAllAdmins } from '@/lib/notification-helpers'
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use admin client for the update to bypass RLS
-    const adminSupabase = createAdminSupabaseClient()
+    const adminSupabase = getSupabaseClient()
 
     const body = await request.json()
     // Force currency to TZS for supplier plans (default)
@@ -229,7 +229,7 @@ export async function POST(request: NextRequest) {
           amount: parseFloat(amount),
           currency: currency,
           reference_id: referenceId,
-          action_url: `/siem-dashboard/suppliers?highlight=${user.id}`
+          action_url: `/supplier/dashboard`
         }
       )
     } catch (notifError) {

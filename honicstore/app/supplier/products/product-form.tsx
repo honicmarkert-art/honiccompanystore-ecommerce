@@ -2101,4 +2101,4 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
     </Dialog>
     </>
   )
-} 
+}

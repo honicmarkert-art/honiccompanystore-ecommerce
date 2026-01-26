@@ -71,7 +71,7 @@ export function ImageUpload({
       }
 
       // Upload to Supabase storage
-      const response = await fetch('/api/admin/service-image-upload', {
+      const response = await fetch('/api/media/upload', {
         method: 'POST',
         body: formData
       })

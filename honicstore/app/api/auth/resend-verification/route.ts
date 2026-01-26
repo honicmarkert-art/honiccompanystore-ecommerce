@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAuth } from '@/lib/supabase-auth'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
 
     // Check if email is already verified before attempting to resend
     try {
-      const adminSupabase = createAdminSupabaseClient()
+      const adminSupabase = getSupabaseClient()
       
       // Try to get user by email to check verification status
       // First check profiles table

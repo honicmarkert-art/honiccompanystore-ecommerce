@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, ReactNode, useEffect } from "react"
-import { useAdminSettings } from "@/hooks/use-admin-settings"
+import { useCompanySettings } from "@/hooks/use-company-settings"
 
 interface CompanyContextType {
   companyName: string
@@ -47,86 +47,78 @@ interface CompanyContextType {
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined)
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
-  const adminSettings = useAdminSettings()
+  const companySettings = useCompanySettings()
   
-  // Debug logging for hero background image and service images (development only)
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-    }
-  }, [adminSettings.isLoaded])
-
   // Create wrapper functions for backward compatibility
   const updateCompanyName = async (name: string) => {
-    return await adminSettings.updateSetting('companyName', name)
+    return await companySettings.updateSetting('companyName', name)
   }
 
   const updateCompanyColor = async (color: string) => {
-    return await adminSettings.updateSetting('companyColor', color)
+    return await companySettings.updateSetting('companyColor', color)
   }
 
-
   const updateCompanyLogo = async (logo: string) => {
-    return await adminSettings.updateSetting('companyLogo', logo)
+    return await companySettings.updateSetting('companyLogo', logo)
   }
 
   const updateMainHeadline = async (headline: string) => {
-    return await adminSettings.updateSetting('mainHeadline', headline)
+    return await companySettings.updateSetting('mainHeadline', headline)
   }
 
   const updateHeroBackgroundImage = async (image: string) => {
-    return await adminSettings.updateSetting('heroBackgroundImage', image)
+    return await companySettings.updateSetting('heroBackgroundImage', image)
   }
 
   const updateHeroTaglineAlignment = async (alignment: string) => {
-    return await adminSettings.updateSetting('heroTaglineAlignment', alignment)
+    return await companySettings.updateSetting('heroTaglineAlignment', alignment)
   }
 
   const resetCompanyName = async () => {
-    await adminSettings.updateSetting('companyName', 'Honic')
+    await companySettings.updateSetting('companyName', 'Honic')
   }
 
   const resetCompanyColor = async () => {
-    await adminSettings.updateSetting('companyColor', '#3B82F6')
+    await companySettings.updateSetting('companyColor', '#3B82F6')
   }
 
-
   const resetCompanyLogo = async () => {
-    await adminSettings.updateSetting('companyLogo', '/android-chrome-512x512.png')
+    await companySettings.updateSetting('companyLogo', '/android-chrome-512x512.png')
   }
 
   const resetMainHeadline = async () => {
-    await adminSettings.updateSetting('mainHeadline', 'The leading B2B ecommerce platform for global trade')
+    await companySettings.updateSetting('mainHeadline', 'The leading B2B ecommerce platform for global trade')
   }
 
   const resetHeroBackgroundImage = async () => {
-    await adminSettings.updateSetting('heroBackgroundImage', '')
+    await companySettings.updateSetting('heroBackgroundImage', '')
   }
 
   const resetHeroTaglineAlignment = async () => {
-    await adminSettings.updateSetting('heroTaglineAlignment', 'left')
+    await companySettings.updateSetting('heroTaglineAlignment', 'left')
   }
 
   const companyContextValue = {
-    companyName: adminSettings.companyName,
-    companyColor: adminSettings.companyColor,
-    companyLogo: adminSettings.companyLogo,
-    companyTagline: adminSettings.companyTagline || "",
-    mainHeadline: adminSettings.mainHeadline,
-    heroBackgroundImage: adminSettings.heroBackgroundImage,
-    heroTaglineAlignment: adminSettings.heroTaglineAlignment,
-    serviceRetailImages: adminSettings?.serviceRetailImages || [],
-    servicePrototypingImages: adminSettings?.servicePrototypingImages || [],
-    servicePcbImages: adminSettings?.servicePcbImages || [],
-    serviceAiImages: adminSettings?.serviceAiImages || [],
-    serviceStemImages: adminSettings?.serviceStemImages || [],
-    serviceHomeImages: adminSettings?.serviceHomeImages || [],
-    serviceImageRotationTime: adminSettings?.serviceImageRotationTime || 5,
+    companyName: companySettings.companyName,
+    companyColor: companySettings.companyColor,
+    companyLogo: companySettings.companyLogo,
+    companyTagline: companySettings.companyTagline || "",
+    mainHeadline: companySettings.mainHeadline,
+    heroBackgroundImage: companySettings.heroBackgroundImage,
+    heroTaglineAlignment: companySettings.heroTaglineAlignment,
+    serviceRetailImages: companySettings?.serviceRetailImages || [],
+    servicePrototypingImages: companySettings?.servicePrototypingImages || [],
+    servicePcbImages: companySettings?.servicePcbImages || [],
+    serviceAiImages: companySettings?.serviceAiImages || [],
+    serviceStemImages: companySettings?.serviceStemImages || [],
+    serviceHomeImages: companySettings?.serviceHomeImages || [],
+    serviceImageRotationTime: companySettings?.serviceImageRotationTime || 5,
     // Legacy single image support
-    serviceRetailImage: adminSettings?.serviceRetailImage || "",
-    servicePrototypingImage: adminSettings?.servicePrototypingImage || "",
-    servicePcbImage: adminSettings?.servicePcbImage || "",
-    serviceAiImage: adminSettings?.serviceAiImage || "",
-    serviceStemImage: adminSettings?.serviceStemImage || "",
+    serviceRetailImage: companySettings?.serviceRetailImage || "",
+    servicePrototypingImage: companySettings?.servicePrototypingImage || "",
+    servicePcbImage: companySettings?.servicePcbImage || "",
+    serviceAiImage: companySettings?.serviceAiImage || "",
+    serviceStemImage: companySettings?.serviceStemImage || "",
     updateCompanyName,
     updateCompanyColor,
     updateCompanyLogo,
@@ -139,11 +131,11 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     resetMainHeadline,
     resetHeroBackgroundImage,
     resetHeroTaglineAlignment,
-    isLoaded: adminSettings.isLoaded,
-    settings: adminSettings.settings,
-    updateSetting: adminSettings.updateSetting,
-    updateSettings: adminSettings.updateSettings,
-    resetSettings: adminSettings.resetSettings
+    isLoaded: companySettings.isLoaded,
+    settings: companySettings.settings,
+    updateSetting: companySettings.updateSetting,
+    updateSettings: companySettings.updateSettings,
+    resetSettings: companySettings.resetSettings
   }
 
   return (

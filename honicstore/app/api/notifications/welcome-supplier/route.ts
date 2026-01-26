@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createNotification } from '@/lib/notification-helpers'
 import { validateAuth } from '@/lib/auth-server'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const userId = supplierId || user.id
 
     // Get supplier plan name
-    const supabase = createAdminSupabaseClient()
+    const supabase = getSupabaseClient()
     let planName = 'supplier'
     if (planSlug) {
       const { data: plan } = await supabase

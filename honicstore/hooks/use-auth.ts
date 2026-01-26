@@ -121,11 +121,8 @@ export function useAuth() {
         })
 
         // Redirect based on role
-        if (result.user.role === 'admin') {
-          router.push('/admin')
-        } else {
-          router.push('/')
-        }
+        // Admin pages removed - redirect all users to products page
+        router.push('/products')
 
         return { success: true }
       } else {

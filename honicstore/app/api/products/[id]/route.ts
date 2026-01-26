@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { validateServerSession } from '@/lib/security-server'
 import { createSecureResponse, createErrorResponse } from '@/lib/secure-api'
 import { securityUtils } from '@/lib/secure-config'
@@ -342,7 +342,7 @@ export async function PUT(
       in_stock: supabaseUpdates.in_stock
     })
 
-    const adminClient = createAdminSupabaseClient()
+    const adminClient = getSupabaseClient()
     const { data: product, error } = await adminClient
       .from('products')
       .update(supabaseUpdates)
@@ -470,7 +470,7 @@ export async function PUT(
     await new Promise(resolve => setTimeout(resolve, 100))
     
     // Create a fresh admin client to avoid caching issues
-    const freshAdminClient = createAdminSupabaseClient()
+    const freshAdminClient = getSupabaseClient()
     const { data: finalProduct, error: finalError } = await freshAdminClient
       .from('products')
       .select('*')
@@ -611,7 +611,7 @@ export async function DELETE(
       return createErrorResponse('Unauthorized', 401)
     }
 
-    const adminClient = createAdminSupabaseClient()
+    const adminClient = getSupabaseClient()
     
     // First, get the product to delete its images
     const { data: productToDelete, error: fetchError } = await adminClient

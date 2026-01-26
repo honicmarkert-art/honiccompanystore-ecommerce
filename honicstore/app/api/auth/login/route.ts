@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { z } from 'zod'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { logAuthFailure } from '@/lib/security-monitor'
@@ -188,7 +188,7 @@ export async function POST(request: NextRequest) {
       if (isEmailNotVerified || errorMessage.includes('invalid login credentials') || errorMessage.includes('invalid login')) {
         try {
           // Use admin client to check if user exists and email is not verified
-          const adminSupabase = createAdminSupabaseClient()
+          const adminSupabase = getSupabaseClient()
           const { data: authUser } = await adminSupabase.auth.admin.getUserByEmail(validatedData.email.toLowerCase())
           
           if (authUser?.user && !authUser.user.email_confirmed_at && !authUser.user.confirmed_at) {

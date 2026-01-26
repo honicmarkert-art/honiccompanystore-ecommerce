@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { cookies } from 'next/headers'
 
 export const runtime = 'nodejs'
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const adminSupabase = createAdminSupabaseClient()
+    const adminSupabase = getSupabaseClient()
 
     // Get supplier profile - store info before deletion
     const { data: profile, error: profileError } = await adminSupabase

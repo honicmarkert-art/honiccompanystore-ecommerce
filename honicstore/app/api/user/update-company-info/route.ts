@@ -275,7 +275,7 @@ export async function POST(request: NextRequest) {
           supplier_id: user.id,
           company_name: companyName.trim(),
           email: user.email || '',
-          action_url: `/siem-dashboard/suppliers?highlight=${user.id}`
+          action_url: `/supplier/dashboard`
         }
       )
     } catch (adminNotifError) {

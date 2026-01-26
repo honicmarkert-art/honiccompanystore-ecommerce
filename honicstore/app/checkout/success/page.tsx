@@ -151,19 +151,21 @@ function CheckoutSuccessContent() {
       attempts += 1
       try {
         const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
-        let resp = await fetch('/api/admin/orders', { cache: 'no-store' })
+        // Use order reference API instead of admin API
+        const apiPath = reference ? `/api/orders/${reference}` : (orderId ? `/api/orders/${orderId}` : null)
+        if (!apiPath) {
+          clearInterval(interval)
+          setPolling(false)
+          return
+        }
+        
+        let resp = await fetch(apiPath, { cache: 'no-store' })
         if (resp.status === 429) {
           await sleep(400 + Math.floor(Math.random() * 300))
-          resp = await fetch('/api/admin/orders', { cache: 'no-store' })
+          resp = await fetch(apiPath, { cache: 'no-store' })
         }
         if (resp.ok) {
-          const data = await resp.json()
-          const orders: any[] = data.orders || []
-          // Try to match by reference id or order number; otherwise take most recent
-          const matched = orders.find(o => (
-            (reference && (o.reference_id === reference || o.id === reference)) ||
-            (orderId && (o.order_number === orderId || o.id === orderId))
-          )) || orders[0]
+          const matched = await resp.json()
 
           if (matched) {
             setLiveStatus(matched.status)

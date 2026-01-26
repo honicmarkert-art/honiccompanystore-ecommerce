@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
 
     // Check if email is verified
     try {
-      const adminSupabase = createAdminSupabaseClient()
+      const adminSupabase = getSupabaseClient()
       
       // Check auth users list
       const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()

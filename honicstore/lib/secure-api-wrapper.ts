@@ -12,7 +12,6 @@ import { logger } from './logger'
 
 export interface SecureApiOptions {
   requireAuth?: boolean
-  requireAdmin?: boolean
   permission?: string
   resourceType?: 'products' | 'orders' | 'users' | 'cart'
   enableIdorProtection?: boolean
@@ -31,7 +30,6 @@ export function withSecurity<T = any>(
   return async (request: NextRequest, context: T): Promise<NextResponse> => {
     const {
       requireAuth = true,
-      requireAdmin = false,
       permission,
       resourceType,
       enableIdorProtection = true,
@@ -55,23 +53,6 @@ export function withSecurity<T = any>(
             { error: 'Authentication required' },
             { status: 401 }
           )
-        }
-
-        // 2. Admin check
-        if (requireAdmin) {
-          const isAdmin = session.role === 'admin' || session.profile?.is_admin === true
-          if (!isAdmin) {
-            monitorUnauthorizedAccess(
-              session.user?.id || 'unknown',
-              request,
-              'admin_access',
-              'Insufficient admin privileges'
-            )
-            return NextResponse.json(
-              { error: 'Admin access required' },
-              { status: 403 }
-            )
-          }
         }
 
         // 3. Permission check
@@ -199,39 +180,6 @@ export function withUserResourceAccess<T = any>(
   }, options)
 }
 
-/**
- * Secure admin access wrapper
- */
-export function withAdminAccess<T = any>(
-  handler: (request: NextRequest, context: T, adminUser: any) => Promise<NextResponse>,
-  options: SecureApiOptions = {}
-) {
-  return withSecurity(async (request: NextRequest, context: T) => {
-    const session = await validateServerSession(request)
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      )
-    }
-
-    const isAdmin = session.role === 'admin' || session.profile?.is_admin === true
-    if (!isAdmin) {
-      monitorUnauthorizedAccess(
-        session.user.id,
-        request,
-        'admin_access',
-        'Insufficient admin privileges'
-      )
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      )
-    }
-
-    return await handler(request, context, session)
-  }, { ...options, requireAdmin: true })
-}
 
 /**
  * Secure product access wrapper

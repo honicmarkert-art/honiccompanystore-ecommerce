@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { validateServerSession } from '@/lib/security-server'
 import { getCachedData, setCachedData, CACHE_TTL, generateCacheKey } from '@/lib/database-optimization'
 import { performanceMonitor } from '@/lib/performance-monitor'
@@ -1875,7 +1875,7 @@ export async function POST(request: NextRequest) {
       in_stock: supabaseProduct.in_stock
     })
 
-    const adminClient = createAdminSupabaseClient()
+    const adminClient = getSupabaseClient()
     const { data: product, error } = await adminClient
       .from('products')
       .insert(supabaseProduct)
@@ -2077,7 +2077,7 @@ export async function PUT(request: NextRequest) {
       same_day_delivery: supabaseUpdates.same_day_delivery
     })
 
-    const adminClient = createAdminSupabaseClient()
+    const adminClient = getSupabaseClient()
     const { data: product, error } = await adminClient
       .from('products')
       .update(supabaseUpdates)
@@ -2320,7 +2320,7 @@ export async function DELETE(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const id = parseInt(searchParams.get('id') || '0')
     
-    const adminClient = createAdminSupabaseClient()
+    const adminClient = getSupabaseClient()
     
     // First delete variants
     const { error: variantError } = await adminClient

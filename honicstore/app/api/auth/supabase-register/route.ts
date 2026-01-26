@@ -4,7 +4,7 @@ import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { createServerClient } from '@supabase/ssr'
 import { z } from 'zod'
 import { notifyAllAdmins } from '@/lib/notification-helpers'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { validateEmailDomain, EMAIL_DOMAIN_TYPOS } from '@/lib/email-validation'
 import { validateEmailDomainWithTimeout } from '@/lib/email-domain-validator'
@@ -207,7 +207,7 @@ export async function POST(request: NextRequest) {
     // Method 2: Auth users list (fallback if profiles check fails)
     let emailExists = false
     try {
-      const adminSupabase = createAdminSupabaseClient()
+      const adminSupabase = getSupabaseClient()
       
       // Method 1: Check profiles table (primary method - most reliable)
       const { data: profile, error: profileError } = await adminSupabase
@@ -271,7 +271,7 @@ export async function POST(request: NextRequest) {
     // CRITICAL: Double-check after signUp - verify user was actually created
     if (result.success && (result.data as any)?.user) {
       try {
-        const adminSupabase = createAdminSupabaseClient()
+        const adminSupabase = getSupabaseClient()
         const createdUserId = (result.data as any).user.id
         const { data: verifyUser, error: verifyError } = await adminSupabase.auth.admin.getUserById(createdUserId)
         
@@ -353,7 +353,7 @@ export async function POST(request: NextRequest) {
       // Ensure user_id/supplier_id are generated (safety check if trigger failed)
       if (userData) {
         try {
-          const adminSupabase = createAdminSupabaseClient()
+          const adminSupabase = getSupabaseClient()
           const { data: profile, error: profileCheckError } = await adminSupabase
             .from('profiles')
             .select('user_id, supplier_id, is_supplier')
@@ -395,7 +395,7 @@ export async function POST(request: NextRequest) {
       // Assign plan immediately if supplier registration with planId
       if (isSupplier && planId && userData) {
         try {
-          const adminSupabase = createAdminSupabaseClient()
+          const adminSupabase = getSupabaseClient()
           
           // Verify plan exists and is active
           const { data: plan, error: planError } = await adminSupabase
@@ -497,7 +497,7 @@ export async function POST(request: NextRequest) {
       // Notify admins when a supplier registers
       if (isSupplier && userData) {
         try {
-          const adminSupabase = createAdminSupabaseClient()
+          const adminSupabase = getSupabaseClient()
           const { data: profile } = await adminSupabase
             .from('profiles')
             .select('company_name, email, supplier_plan_id')
@@ -526,7 +526,7 @@ export async function POST(request: NextRequest) {
               company_name: companyName,
               email: validatedData.email,
               plan_name: planName,
-              action_url: `/siem-dashboard/suppliers?highlight=${userData.id}`
+              action_url: `/supplier/dashboard`
             }
           )
         } catch (notifError) {

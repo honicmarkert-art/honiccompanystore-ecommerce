@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ProductForm } from '@/app/siem-dashboard/products/product-form'
+import { ProductForm } from './product-form'
 import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'

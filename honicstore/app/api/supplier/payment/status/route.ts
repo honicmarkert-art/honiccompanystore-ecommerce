@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 
 export const runtime = 'nodejs'
 
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get payment information from profile
-    const adminSupabase = createAdminSupabaseClient()
+    const adminSupabase = getSupabaseClient()
     const { data: profile, error: profileError } = await adminSupabase
       .from('profiles')
       .select(`

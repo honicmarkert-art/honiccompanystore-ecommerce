@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
 
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       throw error
     }
 
-    const adminSupabase = createAdminSupabaseClient()
+    const adminSupabase = getSupabaseClient()
 
     // Method 1: Check profiles table (primary method)
     const { data: profile, error: profileError } = await adminSupabase

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { generateToken, hashPassword, validatePassword } from '@/lib/auth'
 import { findUserByEmail, createUser, validateUserData } from '@/lib/users'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 
 
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     let emailExists = false
     
     try {
-      const adminSupabase = createAdminSupabaseClient()
+      const adminSupabase = getSupabaseClient()
       
       // Method 1: Check profiles table (primary method - most reliable)
       const { data: profile, error: profileError } = await adminSupabase

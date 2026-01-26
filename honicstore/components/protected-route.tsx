@@ -7,17 +7,15 @@ import { useEffect } from 'react'
 interface ProtectedRouteProps {
   children: React.ReactNode
   redirectTo?: string
-  requireAdmin?: boolean
   fallback?: React.ReactNode
 }
 
 export function ProtectedRoute({ 
   children, 
   redirectTo = '/', 
-  requireAdmin = false,
   fallback
 }: ProtectedRouteProps) {
-  const { user, loading, isAuthenticated, isAdmin } = useAuth()
+  const { user, loading, isAuthenticated } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -38,13 +36,8 @@ export function ProtectedRoute({
         return
       }
       
-      // If admin access required but user is not admin
-      if (requireAdmin && !isAdmin) {
-        router.push(redirectTo)
-        return
-      }
     }
-  }, [user, loading, isAuthenticated, isAdmin, requireAdmin, redirectTo, router])
+  }, [user, loading, isAuthenticated, redirectTo, router])
 
   // Show loading state
   if (loading) {
@@ -71,21 +64,7 @@ export function ProtectedRoute({
     return null
   }
 
-  // If admin access required but user is not admin, show nothing (will redirect)
-  if (requireAdmin && !isAdmin) {
-    return null
-  }
-
   return <>{children}</>
-}
-
-// Convenience component for admin-only routes
-export function AdminRoute({ children, fallback }: { children: React.ReactNode, fallback?: React.ReactNode }) {
-  return (
-    <ProtectedRoute requireAdmin={true} redirectTo="/" fallback={fallback}>
-      {children}
-    </ProtectedRoute>
-  )
 }
 
 // Convenience component for authenticated user routes

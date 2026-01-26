@@ -111,50 +111,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/stock - Update stock for products (admin only)
+// POST /api/stock - Update stock for products (admin functionality removed)
 export async function POST(request: NextRequest) {
-  try {
-    // SECURITY: Require admin authentication
-    const { validateServerSession } = await import('@/lib/security-server')
-    const { requireAdmin } = await import('@/lib/admin-auth')
-    
-    const session = await validateServerSession(request)
-    if (!requireAdmin(session)) {
-      return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 401 })
-    }
-    
-    // Import admin client for admin operations
-    const { createClient } = await import('@supabase/supabase-js')
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-    const adminClient = createClient(supabaseUrl, supabaseServiceKey)
-    
-    const { productId, stockQuantity, inStock } = await request.json()
-    
-    if (!productId || stockQuantity === undefined || inStock === undefined) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
-    }
-
-    // Update stock in database using admin client
-    const { error } = await adminClient
-      .from('products')
-      .update({ 
-        stock_quantity: stockQuantity,
-        in_stock: inStock
-      })
-      .eq('id', productId)
-
-    if (error) {
-      return NextResponse.json({ error: 'Failed to update stock' }, { status: 500 })
-    }
-
-    // Invalidate cache for this product
-    stockCache.delete(productId)
-
-    return NextResponse.json({ success: true })
-
-  } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
+  // Admin functionality removed - this endpoint is disabled
+  return NextResponse.json({ 
+    error: 'Admin functionality has been removed. Stock updates are not available.' 
+  }, { status: 403 })
 }
 
 

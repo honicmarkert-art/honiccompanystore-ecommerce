@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateAuth } from '@/lib/auth-server'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const adminSupabase = createAdminSupabaseClient()
+    const adminSupabase = getSupabaseClient()
 
     // Check if user has any welcome notifications
     const { data: existingWelcome, error: welcomeError } = await adminSupabase

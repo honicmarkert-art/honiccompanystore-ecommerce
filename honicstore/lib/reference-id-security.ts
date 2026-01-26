@@ -258,6 +258,13 @@ export async function secureOrderCreation(
     }
     
     // Create the order
+    console.log('📝 Inserting order into database:', {
+      orderNumber: orderData.order_number,
+      referenceId: orderData.reference_id,
+      userId: orderData.user_id,
+      totalAmount: orderData.total_amount
+    })
+    
     const { data: newOrder, error: createError } = await supabase
       .from('orders')
       .insert(orderData)
@@ -265,8 +272,35 @@ export async function secureOrderCreation(
       .single()
     
     if (createError) {
-      return { success: false, error: 'Failed to create order' }
+      console.error('❌ Order creation database error:', {
+        error: createError,
+        message: createError.message,
+        code: createError.code,
+        details: createError.details,
+        hint: createError.hint
+      })
+      logger.log('❌ Order creation database error:', {
+        error: createError,
+        message: createError.message,
+        code: createError.code,
+        details: createError.details,
+        hint: createError.hint
+      })
+      return { 
+        success: false, 
+        error: createError.message || 'Failed to create order',
+        details: createError.details,
+        code: createError.code
+      }
     }
+    
+    if (!newOrder) {
+      console.error('❌ Order creation returned no data')
+      logger.log('❌ Order creation returned no data')
+      return { success: false, error: 'Order creation returned no data' }
+    }
+    
+    console.log('✅ Order inserted successfully:', { orderId: newOrder.id })
     
     // Log successful creation
     await ReferenceIdSecurity.logSecurityEvent(

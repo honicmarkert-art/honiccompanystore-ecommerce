@@ -672,6 +672,44 @@ export function useCart() {
       )
 
       if (existingVariant) {
+        // Check stock before incrementing - prevent adding more if stock is limited
+        const currentQuantity = existingVariant.quantity
+        const newQuantity = currentQuantity + quantity
+        
+        // Check stock from product data if available
+        let stockQuantity = existingItem.product?.stockQuantity
+        
+        // If stock not available in product data, fetch it quickly
+        if (stockQuantity === undefined || stockQuantity === null) {
+          // Fetch stock synchronously before incrementing (only if not available)
+          try {
+            const stockResponse = await fetch(`/api/stock?id=${productId}`)
+            if (stockResponse.ok) {
+              const stockData = await stockResponse.json()
+              if (stockData.stock && stockData.stock.length > 0) {
+                stockQuantity = stockData.stock[0].stockQuantity
+              }
+            }
+          } catch (error) {
+            // If stock fetch fails, proceed with increment (server will validate)
+            safeError('Failed to fetch stock:', error)
+          }
+        }
+        
+        // Check if stock is limited and we're trying to add more than available
+        if (stockQuantity !== undefined && stockQuantity !== null && stockQuantity !== Infinity) {
+          // Stock is limited - check if we can add more
+          if (newQuantity > stockQuantity) {
+            // Already at or over stock limit - don't increment
+            toast({
+              title: "Stock Limit Reached",
+              description: `Only ${stockQuantity} item(s) available. You already have ${currentQuantity} in your cart.`,
+              variant: "destructive",
+            })
+            return // Don't increment, just return
+          }
+        }
+        
         // Update existing variant quantity
         const updatedCart = cart.map(item => {
           if (item.productId === productId) {

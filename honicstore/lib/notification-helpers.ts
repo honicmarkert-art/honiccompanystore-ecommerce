@@ -3,7 +3,7 @@
  * Utility functions for creating and managing notifications
  */
 
-import { createAdminSupabaseClient } from './admin-auth'
+import { getSupabaseClient } from './supabase-server'
 
 export type NotificationType = 
   | 'account_activated' 
@@ -41,7 +41,7 @@ export interface NotificationMetadata {
  */
 export async function getAllAdminUserIds(): Promise<string[]> {
   try {
-    const supabase = createAdminSupabaseClient()
+    const supabase = getSupabaseClient()
     const { data: admins, error } = await supabase
       .from('profiles')
       .select('id')
@@ -68,7 +68,7 @@ export async function createNotification(
   metadata?: NotificationMetadata
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const supabase = createAdminSupabaseClient()
+    const supabase = getSupabaseClient()
     
     const { error } = await supabase
       .from('notifications')
@@ -107,7 +107,7 @@ export async function notifyAllAdmins(
       return { success: false, notified: 0, errors: 0 }
     }
 
-    const supabase = createAdminSupabaseClient()
+    const supabase = getSupabaseClient()
     
     // Create notifications for all admins in batch
     const notifications = adminIds.map(adminId => ({

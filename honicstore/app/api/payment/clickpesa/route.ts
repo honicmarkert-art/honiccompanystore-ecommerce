@@ -18,7 +18,7 @@ import {
   type CheckoutLinkRequest 
 } from "@/lib/clickpesa-api"
 import { createClient } from '@supabase/supabase-js'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 export async function POST(request: NextRequest) {
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
 
       // SECURITY: Validate order exists and amount matches (prevent tampering)
       // Optimized: Use normalized reference directly for faster lookup
-      const adminSupabase = createAdminSupabaseClient()
+      const adminSupabase = getSupabaseClient()
       const normalizedOrderRef = normalizeOrderReference(orderId)
       
       // Optimized: Single query with normalized reference (most common case)

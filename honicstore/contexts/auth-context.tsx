@@ -39,7 +39,6 @@ interface AuthContextType {
   isLoading: boolean // Add this for compatibility
   isAuthenticated: boolean
   isLoggingIn: boolean
-  isAdmin: boolean
   signIn: (email: string, password: string, remember?: boolean, preventRedirect?: boolean, redirectTo?: string) => Promise<{ success: boolean; error?: string; type?: string }>
   signUp: (name: string, email: string, password: string, confirmPassword: string, phone?: string, isSupplier?: boolean, skipModal?: boolean, planId?: string) => Promise<{ success: boolean; error?: string; type?: string }>
   signInWithGoogle: (redirectTo?: string) => Promise<{ success: boolean; error?: string }>
@@ -170,15 +169,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           setUser(userInfo)
           setIsAuthenticated(true)
-          setIsAdmin(userRole === 'admin')
             
           // Handle role-based routing
           const currentPath = pathnameRef.current || (typeof window !== 'undefined' ? window.location.pathname : '/')
           
-          // Redirect non-admin users away from admin pages
-          if (userRole === 'user' && currentPath.startsWith('/admin')) {
-            routerRef.current.replace('/products')
-          }
+          // Admin pages removed - no redirect needed (admin page shows "Page Not Found")
           
           // Redirect suppliers to dashboard if they're on home page or buyer pages (but not already on supplier pages)
           if (isSupplier && userRole !== 'admin') {
@@ -214,7 +209,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // No valid session found
         setUser(null)
         setIsAuthenticated(false)
-        setIsAdmin(false)
         }
       } catch (fetchError) {
         clearTimeout(timeoutId)
@@ -241,12 +235,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Handle role-based routing
   const handleRoleBasedRouting = useCallback((role: 'user' | 'admin', currentPath: string) => {
-    // Only redirect if user is trying to access admin pages without admin privileges
-    if (role === 'user' && (currentPath.startsWith('/admin') || currentPath.startsWith('/siem-dashboard'))) {
-    startTransition(() => {
-          router.replace('/')
-      })
-        }
+    // Admin routes removed - admin page shows "Page Not Found"
+    // No redirect needed
     // Admin users can access all pages, no redirects needed
   }, [router])
 
@@ -284,7 +274,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setLoading(false)
             setUser(null)
             setIsAuthenticated(false)
-            setIsAdmin(false)
           } else {
             // Device is verified - safe to check auth
             checkAuth()
@@ -681,7 +670,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Always clear local state regardless of API response
         setUser(null)
         setIsAuthenticated(false)
-        setIsAdmin(false)
         
       // Clear all local storage and session storage
       if (typeof window !== 'undefined') {
@@ -798,7 +786,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: loading, // Add this for compatibility
     isAuthenticated,
     isLoggingIn,
-    isAdmin,
     signIn,
     signUp,
     signInWithGoogle,

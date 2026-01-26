@@ -2,7 +2,7 @@
  * Auto-generate and assign tracking numbers for order items by supplier
  */
 
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 
 /**
@@ -37,7 +37,7 @@ export async function autoAssignTrackingNumbers(orderId: string): Promise<{
   errors: string[]
 }> {
   // Use admin client to bypass RLS policies
-  const supabase = createAdminSupabaseClient()
+  const supabase = getSupabaseClient()
   const errors: string[] = []
   let assigned = 0
 

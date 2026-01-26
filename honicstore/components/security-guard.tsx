@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 interface SecurityGuardProps {
   children: React.ReactNode
   requireAuth?: boolean
-  requireAdmin?: boolean
   redirectTo?: string
   fallback?: React.ReactNode
 }
@@ -19,7 +18,6 @@ interface SecurityGuardProps {
 export function SecurityGuard({ 
   children, 
   requireAuth = false, 
-  requireAdmin = false, 
   redirectTo = '/auth/login',
   fallback 
 }: SecurityGuardProps) {
@@ -54,13 +52,8 @@ export function SecurityGuard({
         return
       }
       
-      // Check admin requirement
-      if (requireAdmin && (!isAuthenticated || user?.role !== 'admin')) {
-        router.push('/unauthorized')
-        return
-      }
     }
-  }, [isAuthenticated, isLoading, requireAuth, requireAdmin, user?.role, router, redirectTo])
+  }, [isAuthenticated, isLoading, requireAuth, router, redirectTo])
 
   // Give more time for session restoration, especially after browser restart
   useEffect(() => {
@@ -90,42 +83,6 @@ export function SecurityGuard({
             </div>
             <p className="text-gray-600">Verifying your access...</p>
             <p className="text-sm text-gray-500 mt-2">This will only take a moment</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  // Show unauthorized message
-  if (requireAdmin && (!isAuthenticated || user?.role !== 'admin')) {
-    return fallback || (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Card className="w-96">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4">
-              <AlertTriangle className="w-12 h-12 text-red-600" />
-            </div>
-            <CardTitle>Access Denied</CardTitle>
-          </CardHeader>
-          <CardContent className="text-center">
-            <p className="text-gray-600 mb-4">
-              You don't have permission to access this page.
-            </p>
-            <div className="space-y-2">
-              <Button 
-                onClick={() => router.push('/')}
-                className="w-full"
-              >
-                Go Home
-              </Button>
-              <Button 
-                variant="outline"
-                onClick={() => router.push('/auth/login')}
-                className="w-full"
-              >
-                Sign In
-              </Button>
-            </div>
           </CardContent>
         </Card>
       </div>

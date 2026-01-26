@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { generateOrderIds, formatPickupId } from '@/lib/order-ids'
 import { logger } from '@/lib/logger'
 import { secureOrderCreation, ReferenceIdSecurity } from '@/lib/reference-id-security'
@@ -7,6 +6,7 @@ import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { securityUtils } from '@/lib/secure-config'
 import { validateAuth } from '@/lib/auth-server'
 import { emailService } from '@/lib/email-service'
+import { getSupabaseClient } from '@/lib/supabase-server'
 
 
 
@@ -15,22 +15,6 @@ import { emailService } from '@/lib/email-service'
 export const dynamic = 'force-dynamic'
 
 export const runtime = 'nodejs'
-function getSupabaseClient() {
-  try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    
-    if (!url || !serviceKey) {
-      throw new Error('Missing Supabase environment variables')
-    }
-    
-    return createClient(url, serviceKey, { 
-      auth: { autoRefreshToken: false, persistSession: false } 
-    })
-  } catch (error: any) {
-    throw new Error(error.message)
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -511,35 +495,99 @@ export async function POST(request: NextRequest) {
     // Remove hyphens from UUID for consistent format
     const cleanReferenceId = referenceId.replace(/-/g, '')
     
+    // Validate required fields before creating order
+    if (!orderData.orderNumber) {
+      return NextResponse.json(
+        { error: 'Order number is required' },
+        { status: 400 }
+      )
+    }
+    
+    if (!cleanReferenceId || cleanReferenceId.length !== 32) {
+      return NextResponse.json(
+        { error: 'Invalid reference ID format' },
+        { status: 400 }
+      )
+    }
+    
+    if (!pickupId) {
+      return NextResponse.json(
+        { error: 'Pickup ID is required' },
+        { status: 400 }
+      )
+    }
+    
     // Create order record with server-calculated total
     const basicOrderData = {
       order_number: orderData.orderNumber,
       reference_id: cleanReferenceId,
       pickup_id: pickupId,
       user_id: orderData.userId || null,
-      shipping_address: orderData.shippingAddress,
-      billing_address: orderData.sameAsShipping ? orderData.shippingAddress : orderData.billingAddress,
-      delivery_option: orderData.deliveryOption,
+      shipping_address: orderData.shippingAddress || {},
+      billing_address: orderData.sameAsShipping ? orderData.shippingAddress : (orderData.billingAddress || {}),
+      delivery_option: orderData.deliveryOption || 'shipping',
       total_amount: serverCalculatedTotal, // Use server-calculated total
       payment_method: 'clickpesa',
       payment_status: 'pending',
       status: 'pending',
-      created_at: orderData.timestamp,
+      created_at: orderData.timestamp || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     } as any
+    
+    // Validate order data before insertion
+    if (typeof basicOrderData.total_amount !== 'number' || isNaN(basicOrderData.total_amount)) {
+      return NextResponse.json(
+        { error: 'Invalid total amount' },
+        { status: 400 }
+      )
+    }
 
     // Use secure order creation with reference_id validation
     const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
+    
+    console.log('📦 Creating order with data:', {
+      orderNumber: basicOrderData.order_number,
+      referenceId: basicOrderData.reference_id,
+      userId: basicOrderData.user_id,
+      totalAmount: basicOrderData.total_amount,
+      itemsCount: validatedItems.length
+    })
+    
     const creationResult = await secureOrderCreation(basicOrderData, null, clientIP)
     
     if (!creationResult.success) {
+      console.error('❌ Order creation failed:', {
+        error: creationResult.error,
+        details: (creationResult as any).details,
+        code: (creationResult as any).code
+      })
+      logger.log('❌ Order creation failed:', {
+        error: creationResult.error,
+        details: (creationResult as any).details,
+        code: (creationResult as any).code
+      })
       return NextResponse.json(
-        { error: 'Order creation failed', details: creationResult.error },
+        { 
+          error: 'Order creation failed', 
+          details: creationResult.error,
+          code: (creationResult as any).code
+        },
         { status: 500 }
       )
     }
     
     const order = creationResult.data
+    
+    if (!order || !order.id) {
+      console.error('❌ Order creation returned invalid data:', { order })
+      logger.log('❌ Order creation returned invalid data:', { order })
+      return NextResponse.json(
+        { error: 'Order creation failed: invalid response' },
+        { status: 500 }
+      )
+    }
+    
+    console.log('✅ Order created successfully:', { orderId: order.id, referenceId: order.reference_id })
 
     // Set order_id for all items
     const orderItemsData = validatedItems.map(item => ({
@@ -756,8 +804,21 @@ Order ID: ${order.id}
     return NextResponse.json(responseData)
 
   } catch (error: any) {
+    // Log detailed error to server console for debugging
+    console.error('❌ POST /api/orders error:', {
+      message: error?.message,
+      stack: error?.stack,
+      name: error?.name,
+      cause: error?.cause,
+      error: error
+    })
+    logger.error('Error in POST /api/orders:', error, {
+      message: error?.message,
+      stack: error?.stack,
+      name: error?.name
+    })
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { error: 'Internal server error', details: error?.message || 'Unknown error' },
       { status: 500 }
     )
   }

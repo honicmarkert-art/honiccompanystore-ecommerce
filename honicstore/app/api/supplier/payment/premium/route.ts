@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { v4 as uuidv4 } from 'uuid'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user is a supplier
-    const adminSupabase = createAdminSupabaseClient()
+    const adminSupabase = getSupabaseClient()
     const { data: profile, error: profileError } = await adminSupabase
       .from('profiles')
       .select('id, is_supplier, email, full_name, phone, pending_plan_id')

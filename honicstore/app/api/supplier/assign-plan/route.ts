@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use admin client to bypass RLS
-    const adminSupabase = createAdminSupabaseClient()
+    const adminSupabase = getSupabaseClient()
 
     // Get current supplier plan
     const { data: currentProfile } = await adminSupabase

@@ -37,8 +37,6 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   '/api/categories': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
   '/api/advertisements': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
   
-  // Admin endpoints - moderate limits
-  '/api/admin': { windowMs: 60 * 1000, maxRequests: 30, blockDurationMs: 10 * 60 * 1000 },
   
   // Supplier endpoints - moderate limits
   '/api/supplier/products': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },

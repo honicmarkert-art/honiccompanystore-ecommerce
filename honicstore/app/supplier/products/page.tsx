@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
 import Image from 'next/image'
-import { ProductForm } from '@/app/siem-dashboard/products/product-form'
+import { ProductForm } from './product-form'
 
 interface Product {
   id: number

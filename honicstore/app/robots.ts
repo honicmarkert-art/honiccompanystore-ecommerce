@@ -10,7 +10,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: '/',
-      disallow: ['/api/', '/auth/', '/siem-dashboard/', '/admin/', '/checkout/return'],
+      disallow: ['/api/', '/auth/', '/admin/', '/checkout/return'],
     },
     sitemap: `${baseUrl}/sitemap.xml`,
   }

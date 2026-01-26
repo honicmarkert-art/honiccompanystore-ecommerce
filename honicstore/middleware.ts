@@ -102,10 +102,6 @@ function validateCSRFToken(request: NextRequest): boolean {
   return result === 0
 }
 
-// Admin route protection - Hidden path for security
-function isAdminRoute(pathname: string): boolean {
-  return pathname.startsWith('/siem-dashboard')
-}
 
 // API route protection
 function isApiRoute(pathname: string): boolean {
@@ -145,39 +141,8 @@ export function middleware(request: NextRequest) {
   // Add CSP header
   response.headers.set('Content-Security-Policy', CSP_HEADER)
   
-  // Block old /admin path - redirect to home
-  if (pathname.startsWith('/admin')) {
-    const homeUrl = new URL('/', request.url)
-    return NextResponse.redirect(homeUrl)
-  }
-
-  // Admin route protection - Only protect /siem-dashboard routes
-  if (isAdminRoute(pathname)) {
-    // Debug: trace auth state for admin routes
-    try {
-      const rawCookieHeader = request.headers.get('cookie') || ''
-      } catch {}
-
-    // Check for Supabase session cookies (derive cookie name from env)
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-    const projectRef = supabaseUrl.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1]
-    const fullAuthCookieName = projectRef ? `sb-${projectRef}-auth-token` : undefined
-    
-    const accessToken = request.cookies.get('sb-access-token')
-    const fullAuthToken = fullAuthCookieName ? request.cookies.get(fullAuthCookieName) : undefined
-    
-    // If no session indicators found, redirect to login
-    if (!accessToken && !fullAuthToken) {
-      const loginUrl = new URL('/auth/login', request.url)
-      loginUrl.searchParams.set('redirect', pathname)
-      return NextResponse.redirect(loginUrl)
-    }
-
-    // CSRF protection for state-changing operations
-    if (request.method !== 'GET' && !validateCSRFToken(request)) {
-      return new NextResponse('CSRF token validation failed', { status: 403 })
-    }
-  }
+  // Block old /admin path - let it show 404 page
+  // Admin pages are handled by app/admin/page.tsx which calls notFound()
   
   // API route protection
   if (isApiRoute(pathname)) {

@@ -54,7 +54,8 @@ export function MultiImageUpload({ label, currentImages, onImagesChange, service
       formData.append('file', file)
       formData.append('serviceId', serviceId)
 
-      const response = await fetch('/api/admin/service-image-upload', {
+      // Upload to media API (admin API removed)
+      const response = await fetch('/api/media/upload', {
         method: 'POST',
         body: formData,
       })

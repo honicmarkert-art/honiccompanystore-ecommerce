@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/admin-auth'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { notifyAllAdmins, createNotification } from '@/lib/notification-helpers'
 import { validateWebhook, parseWebhookPayload, verifyTransactionWithClickPesa } from '@/lib/clickpesa-api'
@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    const supabase = createAdminSupabaseClient()
+    const supabase = getSupabaseClient()
 
     // Find payment transaction by reference ID in profiles table
     // Try exact match first, then try without hyphens
@@ -497,7 +497,7 @@ export async function POST(request: NextRequest) {
               email: supplierProfile?.email || '',
               transaction_id: transactionId || orderReference,
               plan_slug: 'premium',
-              action_url: `/siem-dashboard/suppliers?highlight=${profile.id}`
+              action_url: `/supplier/dashboard`
             }
           )
         }

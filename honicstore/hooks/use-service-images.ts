@@ -20,46 +20,16 @@ export function useServiceImages(serviceId: string) {
   const [error, setError] = useState<string | null>(null)
 
   const fetchImages = async () => {
-    if (!serviceId) return
-
+    // Admin API removed - service images not available without admin access
     setLoading(true)
     setError(null)
-
-    try {
-      const response = await fetch(`/api/admin/service-images?serviceId=${serviceId}`)
-      const data: ServiceImagesResponse = await response.json()
-
-      if (data.success) {
-        setImages(data.images)
-      } else {
-        setError(data.error || 'Failed to fetch images')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
-    } finally {
-      setLoading(false)
-    }
+    setImages([])
+    setLoading(false)
   }
 
   const deleteImage = async (fileName: string) => {
-    try {
-      const response = await fetch(`/api/admin/service-images?serviceId=${serviceId}&fileName=${fileName}`, {
-        method: 'DELETE'
-      })
-      const data = await response.json()
-
-      if (data.success) {
-        // Remove the deleted image from state
-        setImages(prev => prev.filter(img => img.name !== fileName))
-        return true
-      } else {
-        setError(data.error || 'Failed to delete image')
-        return false
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
-      return false
-    }
+    // Admin API removed - service images not available without admin access
+    return false
   }
 
   useEffect(() => {
