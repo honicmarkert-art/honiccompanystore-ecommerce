@@ -8,6 +8,12 @@ import { validateAuth, copyCookies } from '@/lib/auth-server'
 export const dynamic = 'force-dynamic'
 
 export const runtime = 'nodejs'
+
+/**
+ * POST /api/cart/merge - Merge guest cart into auth user cart (server-side only).
+ * Each guest item is validated: product/variant fetched from DB, price and stock from DB.
+ * Client-provided prices are never used; merged cart items get server-authoritative price.
+ */
 // POST /api/cart/merge - Merge guest cart with server cart
 export async function POST(request: NextRequest) {
   const { user, error: authError, response, supabase } = await validateAuth(request)

@@ -39,6 +39,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
+import { getFriendlyErrorMessage } from "@/lib/friendly-error"
 import { useTheme } from "@/hooks/use-theme"
 import { useAuth } from "@/contexts/auth-context"
 import { useToast } from "@/hooks/use-toast"
@@ -542,10 +543,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
         if (type === 'company_certificate') setCompanyCertificate(result.url)
         toast({ title: "Success", description: `${type.replace(/_/g, ' ')} uploaded successfully.` })
       } else {
-        toast({ title: "Error", description: "Failed", variant: "destructive" })
+        toast({ title: "Error", description: "Something went wrong. Please try again.", variant: "destructive" })
       }
     } catch (error) {
-      toast({ title: "Error", description: "Failed", variant: "destructive" })
+      toast({ title: "Error", description: getFriendlyErrorMessage(error, "Something went wrong. Please try again."), variant: "destructive" })
     } finally {
       setUploadingDocument(null)
       event.target.value = ''
@@ -692,14 +693,14 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       } else {
         toast({
           title: 'Error',
-          description: 'Failed',
+          description: 'Something went wrong. Please try again.',
           variant: 'destructive'
         })
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed',
+        description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
         variant: 'destructive'
       })
     } finally {
@@ -1078,7 +1079,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                                   throw new Error('Your session has expired. Please refresh the page and try again.')
                                 }
                                 const errorData = await initiateResponse.json().catch(() => ({ error: 'Failed to initiate upgrade' }))
-                                throw new Error(errorData.error || `Server error: ${initiateResponse.status}`)
+                                throw new Error(getFriendlyErrorMessage(errorData.error || initiateResponse.status, 'Something went wrong. Please try again.'))
                               }
                               
                               const initiateData = await initiateResponse.json()
@@ -1094,7 +1095,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                             } catch (error: any) {
                               toast({
                                 title: 'Error',
-                                description: 'Failed',
+                                description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
                                 variant: 'destructive'
                               })
                             }

@@ -5,6 +5,7 @@ import { useTheme } from '@/hooks/use-theme'
 import { useCurrency } from '@/contexts/currency-context'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { Package, DollarSign, Calendar, Search, Eye, CheckCircle, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -82,14 +83,13 @@ export default function SupplierOrderHistoryPage() {
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured or unavailable.')
+          throw new Error(getFriendlyErrorMessage(text, 'Something went wrong. Please try again.'))
         }
-        throw new Error(`Invalid response format. Expected JSON but received ${contentType}`)
+        throw new Error(getFriendlyErrorMessage(contentType, 'Something went wrong. Please try again.'))
       }
       
       if (!response.ok) {
-        const errorText = await response.text().catch(() => '')
-        throw new Error(`Failed to fetch orders: ${response.status} ${response.statusText}`)
+        throw new Error(getFriendlyErrorMessage(response.status, 'Unable to load order history. Please try again.'))
       }
       
       const data = await response.json()
@@ -105,15 +105,14 @@ export default function SupplierOrderHistoryPage() {
       } else {
         toast({
           title: 'Error',
-          description: data.error || 'Failed to fetch order history',
+          description: getFriendlyErrorMessage(data.error, 'Unable to load order history. Please try again.'),
           variant: 'destructive'
         })
       }
     } catch (error: any) {
-      const errorMessage = error?.message || 'Failed to fetch order history'
       toast({
         title: 'Error',
-        description: 'Failed',
+        description: getFriendlyErrorMessage(error, 'Unable to load order history. Please try again.'),
         variant: 'destructive'
       })
     } finally {

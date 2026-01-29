@@ -6,6 +6,7 @@ import { ProductForm } from '../../product-form'
 import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -39,18 +40,17 @@ function SupplierEditProductContent() {
         credentials: 'include'
       })
       
-      // Check if response is JSON
       const contentType = response.headers.get('content-type')
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+          throw new Error(getFriendlyErrorMessage(text, 'Something went wrong. Please try again.'))
         }
-        throw new Error('Invalid response format from server')
+        throw new Error(getFriendlyErrorMessage('Invalid response', 'Something went wrong. Please try again.'))
       }
       
       if (!response.ok) {
-        throw new Error(`Failed to fetch product: ${response.status} ${response.statusText}`)
+        throw new Error(getFriendlyErrorMessage(response.status, 'Unable to load product. Please try again.'))
       }
       
       const data = await response.json()
@@ -149,14 +149,13 @@ function SupplierEditProductContent() {
         body: JSON.stringify(supplierProductData)
       })
 
-      // Check if response is JSON
       const contentType = response.headers.get('content-type')
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+          throw new Error(getFriendlyErrorMessage(text, 'Something went wrong. Please try again.'))
         }
-        throw new Error('Invalid response format from server')
+        throw new Error(getFriendlyErrorMessage('Invalid response', 'Something went wrong. Please try again.'))
       }
 
       const result = await response.json()
@@ -226,10 +225,9 @@ function SupplierEditProductContent() {
         throw new Error(result.error || 'Failed to update product')
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to update product'
       toast({
         title: 'Error',
-        description: 'Failed',
+        description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
         variant: 'destructive'
       })
       throw error

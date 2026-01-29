@@ -6,6 +6,7 @@ import { useTheme } from '@/hooks/use-theme'
 import { useCurrency } from '@/contexts/currency-context'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { Plus, Search, Edit, Trash2, Package, DollarSign, Star, Eye, MoreHorizontal, Filter, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,12 +78,12 @@ function SupplierProductsContent() {
         credentials: 'include'
       })
       if (!response.ok) {
-        throw new Error(`Failed to fetch plan: ${response.status}`)
+        throw new Error(getFriendlyErrorMessage(response.status, 'Unable to load plan. Please try again.'))
       }
       const data = await response.json().catch(async (error) => {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+          throw new Error(getFriendlyErrorMessage(text, 'Something went wrong. Please try again.'))
         }
         throw error
       })
@@ -90,12 +91,12 @@ function SupplierProductsContent() {
         // Fetch plan details with max_products
         const plansResponse = await fetch('/api/supplier-plans')
         if (!plansResponse.ok) {
-          throw new Error(`Failed to fetch plans: ${plansResponse.status}`)
+          throw new Error(getFriendlyErrorMessage(plansResponse.status, 'Unable to load plans. Please try again.'))
         }
         const plansData = await plansResponse.json().catch(async (error) => {
           const text = await plansResponse.text()
           if (text.includes('<!DOCTYPE')) {
-            throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+            throw new Error(getFriendlyErrorMessage(text, 'Something went wrong. Please try again.'))
           }
           throw error
         })
@@ -132,12 +133,12 @@ function SupplierProductsContent() {
           credentials: 'include'
         })
         if (!response.ok) {
-          throw new Error(`Failed to fetch products: ${response.status}`)
+          throw new Error(getFriendlyErrorMessage(response.status, 'Unable to load products. Please try again.'))
         }
         const data = await response.json().catch(async (error) => {
           const text = await response.text()
           if (text.includes('<!DOCTYPE')) {
-            throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured.')
+            throw new Error(getFriendlyErrorMessage(text, 'Something went wrong. Please try again.'))
           }
           throw error
         })
@@ -147,14 +148,14 @@ function SupplierProductsContent() {
         } else {
           toast({
             title: 'Error',
-            description: 'Failed',
+            description: 'Something went wrong. Please try again.',
             variant: 'destructive'
           })
         }
       } catch (error) {
         toast({
           title: 'Error',
-          description: 'Failed to fetch products',
+          description: getFriendlyErrorMessage(error, 'Unable to load products. Please try again.'),
           variant: 'destructive'
         })
       } finally {
@@ -471,7 +472,7 @@ function SupplierProductsContent() {
                                     throw new Error('Your session has expired. Please refresh the page and try again.')
                                   }
                                   const errorData = await initiateResponse.json().catch(() => ({ error: 'Failed to initiate upgrade' }))
-                                  throw new Error(errorData.error || `Server error: ${initiateResponse.status}`)
+                                  throw new Error(getFriendlyErrorMessage(errorData.error || initiateResponse.status, 'Something went wrong. Please try again.'))
                                 }
                                 
                                 const initiateData = await initiateResponse.json()
@@ -487,7 +488,7 @@ function SupplierProductsContent() {
                               } catch (error: any) {
                                 toast({
                                   title: 'Error',
-                                  description: 'Failed',
+                                  description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
                                   variant: 'destructive'
                                 })
                               }
@@ -611,7 +612,7 @@ function SupplierProductsContent() {
                                   } catch (error: any) {
                                     toast({
                                       title: 'Error',
-                                      description: 'Failed',
+                                      description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
                                       variant: 'destructive'
                                     })
                                   }
@@ -629,7 +630,7 @@ function SupplierProductsContent() {
                   } catch (error) {
                     toast({
                       title: 'Error',
-                      description: 'Failed',
+                      description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
                       variant: 'destructive'
                     })
                     throw error

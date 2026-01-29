@@ -5,6 +5,7 @@ import { useTheme } from '@/hooks/use-theme'
 import { useCurrency } from '@/contexts/currency-context'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { ShoppingCart, Package, DollarSign, Calendar, Search, Eye, Truck, CheckCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -221,14 +222,13 @@ export default function SupplierOrdersPage() {
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text()
         if (text.includes('<!DOCTYPE')) {
-          throw new Error('Server returned HTML instead of JSON. The API endpoint may be misconfigured or unavailable.')
+          throw new Error(getFriendlyErrorMessage(text, 'Something went wrong. Please try again.'))
         }
-        throw new Error(`Invalid response format. Expected JSON but received ${contentType}`)
+        throw new Error(getFriendlyErrorMessage(contentType, 'Something went wrong. Please try again.'))
       }
       
       if (!response.ok) {
-        const errorText = await response.text().catch(() => '')
-        throw new Error(`Failed to fetch orders: ${response.status} ${response.statusText}`)
+        throw new Error(getFriendlyErrorMessage(response.status, 'Unable to load orders. Please try again.'))
       }
       
       const data = await response.json()
@@ -254,7 +254,7 @@ export default function SupplierOrdersPage() {
         if (!isRealTimeUpdate) {
           toast({
             title: 'Error',
-            description: data.error || 'Failed to fetch orders',
+            description: getFriendlyErrorMessage(data.error, 'Unable to load orders. Please try again.'),
             variant: 'destructive'
           })
         }
@@ -262,10 +262,9 @@ export default function SupplierOrdersPage() {
       }
     } catch (error: any) {
       if (!isRealTimeUpdate) {
-        const errorMessage = error?.message || 'Failed to fetch orders'
         toast({
           title: 'Error',
-          description: 'Failed',
+          description: getFriendlyErrorMessage(error, 'Unable to load orders. Please try again.'),
           variant: 'destructive'
         })
       }
@@ -366,7 +365,7 @@ export default function SupplierOrdersPage() {
       const data = await response.json()
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update order status')
+        throw new Error(getFriendlyErrorMessage(data.error, 'Unable to update order status. Please try again.'))
       }
 
       // Refresh orders to get updated status

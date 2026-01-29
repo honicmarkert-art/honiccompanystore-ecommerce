@@ -107,38 +107,10 @@ export function clearCheckoutSessionStorage(): void {
   })
 }
 
-/**
- * Secure error message handler
- * Prevents leaking sensitive information to users
- */
-export function getSecureErrorMessage(error: unknown, defaultMessage: string): string {
-  // Always return generic error messages to users
-  // Detailed errors should only be logged server-side
-  if (error instanceof Error) {
-    // Only show user-friendly error messages
-    const message = error.message.toLowerCase()
-    
-    // Network errors
-    if (message.includes('network') || message.includes('fetch')) {
-      return 'Network error. Please check your connection and try again.'
-    }
-    
-    // Timeout errors
-    if (message.includes('timeout')) {
-      return 'Request timed out. Please try again.'
-    }
-    
-    // Rate limit errors
-    if (message.includes('rate limit') || message.includes('429')) {
-      return 'Too many requests. Please wait a moment and try again.'
-    }
-    
-    // Generic error
-    return defaultMessage
-  }
-  
-  return defaultMessage
-}
+import { getFriendlyErrorMessage, FRIENDLY } from '@/lib/friendly-error'
+
+/** @deprecated Use getFriendlyErrorMessage from '@/lib/friendly-error' */
+export const getSecureErrorMessage = getFriendlyErrorMessage
 
 /**
  * Exponential backoff retry helper
@@ -180,11 +152,10 @@ export async function retryWithBackoff<T>(
 }
 
 /**
- * Rate limit aware fetch with retry
- * Retries on network errors, 5xx server errors, rate limits, and timeouts
- * Also retries on 404 (order not found) to handle database replication lag
+ * Rate limit aware fetch with retry.
+ * Retries on network errors, 5xx server errors, rate limits, and timeouts.
  */
-export async function fetchWithRetry(
+async function fetchWithRetryImpl(
   url: string,
   options: RequestInit,
   maxRetries: number = 1
@@ -192,58 +163,40 @@ export async function fetchWithRetry(
   return retryWithBackoff(
     async () => {
       let response: Response
-      
       try {
         response = await fetch(url, options)
       } catch (networkError: any) {
-        // Network errors (timeouts, connection failures) should be retried
-        // These are caught here and will trigger retry via retryWithBackoff
         throw networkError
       }
-      
-      // Retry on rate limit (429)
       if (response.status === 429) {
-        const error = new Error('Rate limit exceeded')
-        ;(error as any).status = 429
-        throw error
+        const err = new Error(FRIENDLY.rateLimit)
+        ;(err as any).status = 429
+        throw err
       }
-      
-      // Retry on server errors (5xx) - these are transient
       if (response.status >= 500 && response.status < 600) {
-        const error = new Error(`Server error: ${response.status}`)
-        ;(error as any).status = response.status
-        throw error
+        const err = new Error(FRIENDLY.server)
+        ;(err as any).status = response.status
+        throw err
       }
-      
-      // Retry on timeout (408)
       if (response.status === 408) {
-        const error = new Error('Request timeout')
-        ;(error as any).status = 408
-        throw error
+        const err = new Error(FRIENDLY.timeout)
+        ;(err as any).status = 408
+        throw err
       }
-      
-      // Retry on 404 (order not found) - might be database replication lag
-      // Only retry once for 404 to avoid infinite loops
-      if (response.status === 404 && maxRetries > 0) {
-        // Check if this is a payment/order endpoint that might have replication lag
-        if (url.includes('/api/payment/') || url.includes('/api/orders')) {
-          const error = new Error('Order not found - possible replication lag')
-          ;(error as any).status = 404
-          ;(error as any).retryable = true
-          throw error
-        }
+      if (response.status === 404 && maxRetries > 0 && (url.includes('/api/payment/') || url.includes('/api/orders'))) {
+        const err = new Error('Order not found')
+        ;(err as any).status = 404
+        throw err
       }
-      
-      // Don't retry on other 4xx client errors (except 429, 408, and conditional 404)
-      // These indicate a problem with the request that won't be fixed by retrying
-      
       return response
     },
     maxRetries,
-    300, // Start with 300ms delay (faster)
-    1500  // Max 1.5 seconds delay (faster failure)
+    300,
+    1500
   )
 }
+
+export { fetchWithRetryImpl as fetchWithRetry }
 
 
 

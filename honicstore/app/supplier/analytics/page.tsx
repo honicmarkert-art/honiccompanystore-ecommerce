@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTheme } from '@/hooks/use-theme'
 import { useCurrency } from '@/contexts/currency-context'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { TrendingUp, DollarSign, Package, ShoppingCart, Eye, Star, ArrowUp, ArrowDown, BarChart3, Users, Lightbulb, Calendar, Filter, AlertTriangle, FileText, TrendingUp as LineChartIcon, Target, Sparkles } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -695,7 +696,7 @@ export default function SupplierAnalyticsPage() {
                         throw new Error('Your session has expired. Please refresh the page and try again.')
                       }
                       const errorData = await initiateResponse.json().catch(() => ({ error: 'Failed to initiate upgrade' }))
-                      throw new Error(errorData.error || `Server error: ${initiateResponse.status}`)
+                      throw new Error(getFriendlyErrorMessage(errorData.error || initiateResponse.status, 'Something went wrong. Please try again.'))
                     }
                     
                     const initiateData = await initiateResponse.json()

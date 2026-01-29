@@ -27,6 +27,7 @@ import {
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
 import { ProtectedRoute } from '@/components/protected-route'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { useOrders } from '@/hooks/use-orders'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -288,7 +289,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       
       // Only show error on initial load, not on background refreshes
       if (!isBackgroundRefresh) {
-        setError(error instanceof Error ? error.message : 'Failed to fetch order details')
+        setError(getFriendlyErrorMessage(error, 'Unable to load order details. Please try again.'))
       }
     } finally {
       // Only update loading state on initial load, not on background refreshes
@@ -314,8 +315,8 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       })
       
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to mark order')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(getFriendlyErrorMessage(errorData.error, 'Something went wrong. Please try again.'))
       }
       
       const data = await response.json()
@@ -333,7 +334,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       // Refresh status history (background refresh, no loading state)
       await fetchOrderDetails(true)
     } catch (error: any) {
-      alert(error.message || 'Failed to mark order. Please try again.')
+      alert(getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'))
     } finally {
       setMarkingDelivered(false)
     }
@@ -353,8 +354,8 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       })
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        throw new Error(errorData.error || errorData.details || 'Failed to mark order as received')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(getFriendlyErrorMessage(errorData.error || errorData.details, 'Something went wrong. Please try again.'))
       }
       
       const data = await response.json()
@@ -371,7 +372,7 @@ function OrderDetailContent({ params }: { params: Promise<{ id: string }> }) {
       
       alert('Order received successfully!')
     } catch (error: any) {
-      const errorMessage = error.message || 'Failed to mark order as received. Please try again.'
+      const errorMessage = getFriendlyErrorMessage(error, 'Something went wrong. Please try again.')
       alert(`Error: ${errorMessage}`)
     } finally {
       setMarkingReceived(false)

@@ -541,9 +541,8 @@ function CheckoutPageContent() {
       // DON'T remove items from cart yet - wait until payment is confirmed
       // Items will be removed after successful payment via webhook or return page
 
-      // Generate ClickPesa checkout link immediately using order data from response
-      // No delay needed - order is already committed and we use the reference from response
-      // Use the order's total amount (in case we're reusing an existing order)
+      // Generate ClickPesa checkout link: use total from server response (never trust client-only state).
+      // Payment API validates amount against order in DB and uses DB total for the link (anti-tampering).
       const reference = result.order.referenceId || orderId
       const orderTotalAmount = result.order.totalAmount || orderData.totalAmount
       const checkoutLinkStartTime = performance.now()
@@ -582,13 +581,13 @@ function CheckoutPageContent() {
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Failed' }))
-        throw new Error(errorData.error || 'Failed')
+        throw new Error(getSecureErrorMessage(errorData.error || 'Failed', 'Unable to open payment page. Please try again.'))
       }
 
       const data = await response.json()
 
       if (!data.checkoutLink) {
-        throw new Error('Failed')
+        throw new Error(getSecureErrorMessage('No checkout link', 'Unable to open payment page. Please try again.'))
       }
 
       const checkoutLinkEndTime = performance.now()
@@ -680,9 +679,7 @@ function CheckoutPageContent() {
       setPaymentLinkGenerated(false) // Reset on error
       setCheckoutLinkUrl(null)
       
-      // Show user-friendly error message
-      const errorMessage = error?.message || 'Failed to process order. Please try again.'
-      
+      const errorMessage = getSecureErrorMessage(error, 'Something went wrong. Please try again.')
       setPaymentError(errorMessage)
       toast({
         title: 'Order Error',

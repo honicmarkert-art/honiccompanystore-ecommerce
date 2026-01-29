@@ -12,6 +12,7 @@ import { Lock, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 import { useTheme } from '@/hooks/use-theme'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 
 function ResetPasswordContent() {
   const [password, setPassword] = useState('')
@@ -124,7 +125,7 @@ function ResetPasswordContent() {
       if (error) {
         toast({
           title: "Error",
-          description: error.message || "Failed to reset password. Please try again.",
+          description: getFriendlyErrorMessage(error, "Something went wrong. Please try again."),
           variant: "destructive"
         })
         setIsLoading(false)

@@ -83,6 +83,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "create-checkout-link") {
+      // SECURITY (guest + auth): Payment link uses only server-authoritative data.
+      // Order is fetched from DB by reference_id; client-sent amount must match order.total_amount.
+      // The amount sent to ClickPesa is order.total_amount from DB (never client-sent amount).
       
       // Validate required fields
       if (!amount || !orderId) {
@@ -241,8 +244,10 @@ export async function POST(request: NextRequest) {
         
         const webhookUrl = `${baseUrl}/api/webhooks/clickpesa`
         
+        // SECURITY: Use order total from database for payment link (never client-sent amount)
+        const amountForPayment = orderTotal
         const checkoutRequest: CheckoutLinkRequest = {
-          totalPrice: formatAmountForClickPesa(numAmount),
+          totalPrice: formatAmountForClickPesa(amountForPayment),
           orderReference: normalizedOrderRef, // Use normalized reference (without hyphens)
           orderCurrency: finalCurrency,
           customerName: customerDetails.fullName || 
@@ -261,7 +266,7 @@ export async function POST(request: NextRequest) {
           endpoint: '/api/payment/clickpesa',
           orderId: finalOrder.id,
           orderReference: checkoutRequest.orderReference,
-          amount: numAmount,
+          amount: amountForPayment,
           currency: finalCurrency,
           ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
         }, request)

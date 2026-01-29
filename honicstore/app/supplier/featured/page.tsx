@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/hooks/use-theme'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { Star, TrendingUp, Eye, CheckCircle, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -210,7 +211,7 @@ export default function SupplierFeaturedPage() {
                           throw new Error('Your session has expired. Please refresh the page and try again.')
                         }
                         const errorData = await initiateResponse.json().catch(() => ({ error: 'Failed to initiate upgrade' }))
-                        throw new Error(errorData.error || `Server error: ${initiateResponse.status}`)
+                        throw new Error(getFriendlyErrorMessage(errorData.error || initiateResponse.status, 'Something went wrong. Please try again.'))
                       }
                       
                       const initiateData = await initiateResponse.json()

@@ -459,6 +459,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/**
+ * POST /api/cart - Add to cart (auth users only; server-side price and stock).
+ * Price and stock are always fetched from DB; client-provided price is never trusted.
+ * Guests use client-side cart; their order is validated in POST /api/orders at checkout.
+ */
 // POST /api/cart - Add product (or increment if exists)
 export async function POST(request: NextRequest) {
   // Security: Rate limiting

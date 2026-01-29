@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTheme } from '@/hooks/use-theme'
 import { useCurrency } from '@/contexts/currency-context'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { Megaphone, TrendingUp, Sparkles, Target, DollarSign, Calendar, Plus, Trash2, Edit, X, Upload, Image as ImageIcon, Video } from 'lucide-react'
 import Image from 'next/image'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -192,13 +193,13 @@ export default function SupplierMarketingPage() {
         if (data.error && !data.error.includes('Premium Plan')) {
           toast({
             title: 'Error',
-            description: data.error || 'Failed to fetch promotions',
+            description: getFriendlyErrorMessage(data.error, 'Unable to load promotions. Please try again.'),
             variant: 'destructive'
           })
         }
       }
     } catch (error: any) {
-      const errorMessage = error?.message || 'Failed to fetch promotions'
+      const errorMessage = getFriendlyErrorMessage(error, 'Unable to load promotions. Please try again.')
       toast({
         title: 'Error',
         description: errorMessage,
@@ -667,7 +668,7 @@ export default function SupplierMarketingPage() {
                           throw new Error('Your session has expired. Please refresh the page and try again.')
                         }
                         const errorData = await initiateResponse.json().catch(() => ({ error: 'Failed to initiate upgrade' }))
-                        throw new Error(errorData.error || `Server error: ${initiateResponse.status}`)
+                        throw new Error(getFriendlyErrorMessage(errorData.error || initiateResponse.status, 'Something went wrong. Please try again.'))
                       }
                       
                       const initiateData = await initiateResponse.json()

@@ -76,6 +76,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { getFriendlyErrorMessage } from "@/lib/friendly-error"
 import { useTheme } from "@/hooks/use-theme"
 import {
   Dialog,
@@ -4890,13 +4891,11 @@ function ProductDetailPageContent() {
                       })
                     } else {
                       const error = await response.json().catch(() => null)
-                      const message =
-                        error?.message ||
-                        `Failed to submit review (status ${response.status}). Please try again.`
+                      const message = getFriendlyErrorMessage(error?.message ?? response.status, 'Unable to submit review. Please try again.')
                       alert(message)
                     }
                   } catch (error) {
-                    alert('Failed to submit review. Please try again.')
+                    alert(getFriendlyErrorMessage(error, 'Unable to submit review. Please try again.'))
                   } finally {
                     setSubmittingReview(false)
                   }

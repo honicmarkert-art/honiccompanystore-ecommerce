@@ -6,6 +6,7 @@ import { ProductForm } from '../product-form'
 import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { ArrowLeft, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -111,13 +112,12 @@ function SupplierAddProductContent() {
         router.push('/supplier/products')
         return result.product
       } else {
-        throw new Error(result.error || 'Failed to create product')
+        throw new Error(getFriendlyErrorMessage(result.error, 'Something went wrong. Please try again.'))
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create product'
       toast({
         title: 'Error',
-        description: 'Failed',
+        description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
         variant: 'destructive'
       })
       throw error

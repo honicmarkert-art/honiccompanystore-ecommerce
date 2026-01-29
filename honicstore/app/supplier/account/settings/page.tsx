@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertTriangle, ArrowLeft, Eye, EyeOff, Lock, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import Link from 'next/link'
 import {
   AlertDialog,
@@ -211,7 +212,7 @@ export default function AccountSettingsPage() {
       } catch (error: any) {
         toast({
           title: 'Error',
-          description: error.message || 'Failed to change password. Please try again.',
+          description: getFriendlyErrorMessage(error, 'Something went wrong. Please try again.'),
           variant: 'destructive'
         })
       } finally {

@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Plus, Edit, Trash2, CreditCard, Building2, Wallet, CheckCircle, X, AlertTriangle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { Badge } from '@/components/ui/badge'
 
 interface PayoutAccount {
@@ -98,7 +99,7 @@ export default function PayoutAccountsPage() {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch accounts')
+        throw new Error(getFriendlyErrorMessage(data.error, 'Unable to load payout accounts. Please try again.'))
       }
 
       setAccounts(data.accounts || [])
@@ -232,7 +233,7 @@ export default function PayoutAccountsPage() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to save account',
+        description: getFriendlyErrorMessage(error, 'Unable to save account. Please try again.'),
         variant: 'destructive'
       })
     } finally {
@@ -280,7 +281,7 @@ export default function PayoutAccountsPage() {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to set default account')
+        throw new Error(getFriendlyErrorMessage(data.error, 'Unable to set default account. Please try again.'))
       }
 
       toast({

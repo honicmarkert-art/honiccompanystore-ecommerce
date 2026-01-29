@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Loader2, CreditCard, CheckCircle, XCircle, AlertCircle, RefreshCw } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 
 interface PremiumPlan {
   id: string
@@ -226,7 +227,7 @@ function SupplierPaymentPageContent() {
       const result = await response.json()
 
       if (!result.success) {
-        throw new Error(result.error || 'Failed to initiate payment')
+        throw new Error(getFriendlyErrorMessage(result.error, 'Unable to open payment page. Please try again.'))
       }
 
       if (result.checkoutUrl) {
@@ -252,11 +253,12 @@ function SupplierPaymentPageContent() {
         throw new Error('Payment gateway did not return a checkout URL')
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to initiate payment. Please try again.')
+      const msg = getFriendlyErrorMessage(err, 'Unable to open payment page. Please try again.')
+      setError(msg)
       setProcessing(false)
       toast({
         title: 'Payment Error',
-        description: err.message || 'Failed to initiate payment. Please try again.',
+        description: msg,
         variant: 'destructive'
       })
     }

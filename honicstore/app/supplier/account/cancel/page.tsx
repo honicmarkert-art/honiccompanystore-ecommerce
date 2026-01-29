@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { AlertTriangle, X, ArrowLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import Link from 'next/link'
 
 export default function DeleteAccountPage() {
@@ -70,7 +71,7 @@ export default function DeleteAccountPage() {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to delete account')
+        throw new Error(getFriendlyErrorMessage(data.error, 'Unable to delete account. Please try again.'))
       }
 
       toast({

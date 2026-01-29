@@ -16,6 +16,14 @@ export const dynamic = 'force-dynamic'
 
 export const runtime = 'nodejs'
 
+/**
+ * POST /api/orders - Create order (server-side only, no client tampering).
+ * Applies to both GUEST and AUTH users:
+ * - All item prices are fetched from DB (products + product_variants) and validated server-side.
+ * - Subtotal, shipping, promotion discount, and total are computed server-side.
+ * - Client-sent totals are compared with server-calculated values; mismatch returns 400.
+ * - Order is written only after full validation. No client-provided prices are trusted.
+ */
 export async function POST(request: NextRequest) {
   try {
     // Rate limiting
@@ -31,10 +39,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = getSupabaseClient()
-    
-    // Parse order data
-    const orderData = await request.json()
+    let supabase
+    try {
+      supabase = getSupabaseClient()
+    } catch (supabaseError: any) {
+      logger.error('Supabase init failed in POST /api/orders:', supabaseError)
+      return NextResponse.json(
+        { error: 'Service unavailable', details: supabaseError?.message || 'Database configuration error' },
+        { status: 500 }
+      )
+    }
+
+    let orderData: any
+    try {
+      orderData = await request.json()
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid request body', details: 'Request body must be valid JSON' },
+        { status: 400 }
+      )
+    }
 
     // Security: If userId is provided (not null), validate authentication
     // Guest checkout: userId can be null, which is allowed without authentication
@@ -88,10 +112,23 @@ export async function POST(request: NextRequest) {
       .map((id: any) => parseInt(id))
       .filter((id: number) => !isNaN(id))
 
+    logger.log('[POST /api/orders] Order items summary:', {
+      itemCount: orderData.items?.length ?? 0,
+      productIds,
+      variantIds,
+      firstItem: orderData.items?.[0] ? {
+        productId: orderData.items[0].productId,
+        variantId: orderData.items[0].variantId,
+        unitPrice: orderData.items[0].unitPrice,
+        totalPrice: orderData.items[0].totalPrice,
+        quantity: orderData.items[0].quantity,
+      } : null,
+    })
+
     // Fetch products from database
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, price, name, in_stock, stock_quantity')
+      .select('id, price, name, in_stock, stock_quantity, free_delivery')
       .in('id', productIds)
 
     if (productsError || !products) {
@@ -105,30 +142,52 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create product map for quick lookup
-    const productMap = new Map(products.map((p: any) => [p.id, p]))
+    // Create product map for quick lookup (key by both number and string id for client compatibility)
+    const productMap = new Map<number | string, any>()
+    products.forEach((p: any) => {
+      productMap.set(p.id, p)
+      if (p.id != null && !productMap.has(String(p.id))) productMap.set(String(p.id), p)
+    })
+    logger.log('[POST /api/orders] Products loaded:', { count: products.length, productIds: products.map((p: any) => p.id) })
 
-    // Fetch variants if any exist
-    let variantMap = new Map()
+    // Fetch variants if any exist. Try with price/primary_values first; if that fails (e.g. column missing), try id+product_id only.
+    let variantMap = new Map<string | number, any>()
     if (variantIds.length > 0) {
-      const { data: variants, error: variantsError } = await supabase
-        .from('product_variants')
-        .select('id, product_id, price, primary_values')
-        .in('id', variantIds)
-
-      if (variantsError) {
-        logSecurityEvent('VARIANTS_FETCH_ERROR', {
-          endpoint: '/api/orders',
-          error: variantsError.message
-        }, request)
-        return NextResponse.json(
-          { error: 'Failed to validate product variants', details: variantsError.message },
-          { status: 500 }
-        )
-      }
-
-      if (variants) {
-        variantMap = new Map(variants.map((v: any) => [v.id, v]))
+      try {
+        let variants: any[] | null = null
+        const { data: d1, error: e1 } = await supabase
+          .from('product_variants')
+          .select('id, product_id, price, primary_values')
+          .in('id', variantIds)
+        if (!e1 && d1 && Array.isArray(d1)) {
+          variants = d1
+        }
+        if (e1) {
+          const { data: d2, error: e2 } = await supabase
+            .from('product_variants')
+            .select('id, product_id, price')
+            .in('id', variantIds)
+          if (!e2 && d2 && Array.isArray(d2)) variants = d2
+          if (e2) {
+            const { data: d3, error: e3 } = await supabase
+              .from('product_variants')
+              .select('id, product_id')
+              .in('id', variantIds)
+            if (!e3 && d3 && Array.isArray(d3)) variants = d3
+          }
+          if (!variants) logger.error('[POST /api/orders] product_variants fetch failed:', e1?.message)
+        }
+        if (variants && variants.length > 0) {
+          variants.forEach((v: any) => {
+            if (v?.id != null) {
+              variantMap.set(v.id, v)
+              variantMap.set(String(v.id), v)
+            }
+          })
+          logger.log('[POST /api/orders] Variants loaded:', { count: variants.length })
+        }
+      } catch (variantErr: any) {
+        logger.error('[POST /api/orders] product_variants error:', variantErr?.message)
       }
     }
 
@@ -186,29 +245,56 @@ export async function POST(request: NextRequest) {
       }
 
       // Determine actual price: use variant price if variant exists, otherwise product price
-      let actualUnitPrice = product.price
-      if (clientItem.variantId) {
-        const variantId = parseInt(String(clientItem.variantId))
-        if (!isNaN(variantId)) {
-          const variant = variantMap.get(variantId)
-          if (variant && variant.product_id === clientItem.productId) {
-            // Check if variant has price in primary_values
-            if (variant.primary_values && Array.isArray(variant.primary_values)) {
-              const primaryValueWithPrice = variant.primary_values.find((pv: any) => pv.price)
-              if (primaryValueWithPrice && primaryValueWithPrice.price) {
-                actualUnitPrice = parseFloat(primaryValueWithPrice.price)
-              } else if (variant.price) {
-                actualUnitPrice = parseFloat(variant.price)
+      let actualUnitPrice = product.price != null ? Number(product.price) : NaN
+      const productIdForMatch = clientItem.productId != null ? Number(clientItem.productId) : clientItem.productId
+      if (clientItem.variantId != null && clientItem.variantId !== '') {
+        const variantIdNum = parseInt(String(clientItem.variantId), 10)
+        const variantIdStr = String(clientItem.variantId)
+        const variant = !isNaN(variantIdNum) ? variantMap.get(variantIdNum) ?? variantMap.get(variantIdStr) : variantMap.get(variantIdStr)
+        logger.log('[POST /api/orders] Variant price lookup:', {
+          productId: clientItem.productId,
+          variantId: clientItem.variantId,
+          variantIdNum,
+          variantFound: !!variant,
+          variantProductId: variant?.product_id,
+          matchProductId: variant && variant.product_id === productIdForMatch,
+          variantPrice: variant?.price,
+          primary_values: variant?.primary_values,
+        })
+        if (variant && (variant.product_id === productIdForMatch || Number(variant.product_id) === productIdForMatch)) {
+          // Prefer top-level price
+          if (variant.price != null && variant.price !== '') {
+            const p = Number(variant.price)
+            if (!Number.isNaN(p) && p > 0) actualUnitPrice = p
+          }
+          // Else check primary_values (array of { value, price?, ... }); handle JSON string from DB
+          if ((Number.isNaN(actualUnitPrice) || actualUnitPrice <= 0) && variant.primary_values) {
+            let pvList = variant.primary_values
+            if (typeof pvList === 'string') {
+              try {
+                pvList = JSON.parse(pvList)
+              } catch {
+                pvList = []
               }
-            } else if (variant.price) {
-              actualUnitPrice = parseFloat(variant.price)
+            }
+            if (Array.isArray(pvList)) {
+              for (const pv of pvList) {
+                const p = pv?.price != null && pv?.price !== '' ? Number(pv.price) : NaN
+                if (!Number.isNaN(p) && p > 0) {
+                  actualUnitPrice = p
+                  break
+                }
+              }
             }
           }
         }
       }
 
       // Validate price is valid number
-      if (isNaN(actualUnitPrice) || actualUnitPrice <= 0) {
+      if (Number.isNaN(actualUnitPrice) || actualUnitPrice <= 0) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[POST /api/orders] 400 INVALID_PRICE:', { productId: clientItem.productId, variantId: clientItem.variantId, actualUnitPrice, productPrice: product.price })
+        }
         logSecurityEvent('INVALID_PRICE', {
           endpoint: '/api/orders',
           productId: clientItem.productId,
@@ -227,12 +313,16 @@ export async function POST(request: NextRequest) {
       // SECURITY: Compare client-provided price with server-calculated price
       const clientUnitPrice = parseFloat(clientItem.unitPrice || clientItem.price || '0')
       const clientTotalPrice = parseFloat(clientItem.totalPrice || '0')
-      const priceTolerance = 0.01 // Allow 0.01 difference for floating point precision
+      // Allow small difference for floating point and rounding (1 TZS per unit/total)
+      const priceTolerance = 1
 
       const unitPriceDifference = Math.abs(clientUnitPrice - actualUnitPrice)
       const totalPriceDifference = Math.abs(clientTotalPrice - serverTotalPrice)
 
       if (unitPriceDifference > priceTolerance || totalPriceDifference > priceTolerance) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[POST /api/orders] 400 PRICE_MISMATCH:', { productId: clientItem.productId, variantId: clientItem.variantId, clientUnitPrice: clientUnitPrice, actualUnitPrice, clientTotalPrice: clientTotalPrice, serverTotalPrice: serverTotalPrice, unitPriceDifference, totalPriceDifference })
+        }
         logSecurityEvent('PRICE_TAMPERING_DETECTED', {
           endpoint: '/api/orders',
           productId: clientItem.productId,
@@ -470,9 +560,12 @@ export async function POST(request: NextRequest) {
     // SECURITY: Compare client-provided total with server-calculated total
     const clientTotal = parseFloat(orderData.totalAmount || '0')
     const totalDifference = Math.abs(clientTotal - serverCalculatedTotal)
-    const totalTolerance = 0.01
+    const totalTolerance = 1 // Allow 1 TZS rounding difference
 
     if (totalDifference > totalTolerance) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[POST /api/orders] 400 TOTAL_MISMATCH:', { clientTotal: clientTotal, serverTotal: serverCalculatedTotal, totalDifference, subtotal: serverCalculatedSubtotal, shipping: serverShippingFee, promotion: serverPromotionDiscount })
+      }
       logSecurityEvent('TOTAL_AMOUNT_TAMPERING_DETECTED', {
         endpoint: '/api/orders',
         clientTotal: clientTotal,
@@ -526,7 +619,8 @@ export async function POST(request: NextRequest) {
       shipping_address: orderData.shippingAddress || {},
       billing_address: orderData.sameAsShipping ? orderData.shippingAddress : (orderData.billingAddress || {}),
       delivery_option: orderData.deliveryOption || 'shipping',
-      total_amount: serverCalculatedTotal, // Use server-calculated total
+      total_amount: serverCalculatedTotal,
+      currency: orderData.currency || 'TZS',
       payment_method: 'clickpesa',
       payment_status: 'pending',
       status: 'pending',
@@ -548,17 +642,14 @@ export async function POST(request: NextRequest) {
     const creationResult = await secureOrderCreation(basicOrderData, null, clientIP)
     
     if (!creationResult.success) {
-      logger.log('❌ Order creation failed:', {
-        error: creationResult.error,
-        details: (creationResult as any).details,
-        code: (creationResult as any).code
-      })
+      const errMsg = creationResult.error || 'Unknown'
+      const errCode = (creationResult as any).code
+      logger.log('❌ Order creation failed:', { error: errMsg, details: (creationResult as any).details, code: errCode })
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[POST /api/orders] Order creation failed:', errMsg, errCode, (creationResult as any).details)
+      }
       return NextResponse.json(
-        { 
-          error: 'Order creation failed', 
-          details: creationResult.error,
-          code: (creationResult as any).code
-        },
+        { error: 'Order creation failed', details: String(errMsg), code: errCode },
         { status: 500 }
       )
     }
@@ -585,8 +676,17 @@ export async function POST(request: NextRequest) {
       .insert(orderItemsData)
 
     if (itemsError) {
+      logger.error('order_items insert failed in POST /api/orders:', itemsError)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[POST /api/orders] order_items insert failed:', itemsError.message, itemsError.code, itemsError.hint, itemsError.details)
+      }
       return NextResponse.json(
-        { error: 'Order items creation failed', details: itemsError.message },
+        {
+          error: 'Order items creation failed',
+          details: itemsError.message,
+          code: itemsError.code,
+          hint: itemsError.hint
+        },
         { status: 500 }
       )
     }
@@ -788,13 +888,19 @@ Order ID: ${order.id}
     return NextResponse.json(responseData)
 
   } catch (error: any) {
+    const message = error?.message || (typeof error === 'string' ? error : 'Unknown error')
+    const code = error?.code
     logger.error('Error in POST /api/orders:', error, {
       message: error?.message,
       stack: error?.stack,
       name: error?.name
     })
+    // Log to console so it appears in dev server terminal
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[POST /api/orders] 500 error:', message, code, error?.stack)
+    }
     return NextResponse.json(
-      { error: 'Internal server error', details: error?.message || 'Unknown error' },
+      { error: 'Internal server error', details: String(message), code: code },
       { status: 500 }
     )
   }
