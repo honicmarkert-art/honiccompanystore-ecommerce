@@ -71,3 +71,4 @@ tmp-*
 *.spec.js
 next-env.d.ts
 .vercel
+# honicstore
