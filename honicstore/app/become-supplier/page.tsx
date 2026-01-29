@@ -335,7 +335,7 @@ export default function BecomeSupplierPage() {
       </header>
 
       {/* Main Content with Top Padding for Fixed Header */}
-      <main className="pt-24 sm:pt-28 pb-8 md:pb-16 px-4 sm:px-6 md:px-12 lg:px-20 xl:px-24 2xl:px-32">
+      <main className="pt-[6.5rem] sm:pt-[7.5rem] pb-8 md:pb-16 px-4 sm:px-6 md:px-12 lg:px-20 xl:px-24 2xl:px-32">
         {/* Enhanced Hero Section */}
         <div className="text-center mb-8 sm:mb-12 md:mb-16 relative overflow-hidden">
           {/* Background Gradient */}

@@ -150,7 +150,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
           </aside>
 
           {/* Content */}
-          <main className="account-content min-h-[60vh] mt-1 lg:mt-0">
+          <main className="account-content min-h-[60vh] mt-3 lg:mt-2">
             {/* Back to Products button */}
             <div className="mb-2 pl-2 sm:pl-0">
               <Link 

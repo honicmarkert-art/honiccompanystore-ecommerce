@@ -112,7 +112,7 @@ export default function AboutPage() {
   return (
     <div className={`min-h-screen ${themeClasses.mainBg} ${themeClasses.mainText}`}>
       {/* Back Button */}
-      <div className="container mx-auto px-4 pt-8">
+      <div className="container mx-auto px-4 pt-10">
         <Button 
           variant="ghost" 
           onClick={() => router.back()}

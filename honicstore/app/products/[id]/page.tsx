@@ -2871,7 +2871,7 @@ function ProductDetailPageContent() {
         </div>
       </header>
 
-      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-3 sm:px-6 lg:px-16 xl:px-24 2xl:px-32", themeClasses.mainBg, "pt-20 sm:pt-24 lg:pt-24")} suppressHydrationWarning>
+      <main className={cn("flex-1 w-full pb-4 sm:pb-6 lg:pb-8 px-3 sm:px-6 lg:px-16 xl:px-24 2xl:px-32", themeClasses.mainBg, "pt-[5.5rem] sm:pt-[6.5rem] lg:pt-[6.5rem]")} suppressHydrationWarning>
         {/* Show product details immediately when product data is available */}
         {/* Priority: Product Details (first) > Ads > Images */}
         {/* Skeleton only shows when data is false/null (not available) */}

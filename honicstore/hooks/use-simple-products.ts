@@ -43,6 +43,8 @@ interface Product {
 
 interface SimpleProductsOptions {
   limit?: number
+  /** When set (e.g. for page 2+), first fetch uses this offset so the list shows that page's products */
+  initialOffset?: number
   category?: string
   brand?: string
   search?: string
@@ -73,6 +75,7 @@ const PRODUCTS_PER_PAGE = 200 // Amazon/AliExpress style: large page size
 export function useSimpleProducts(options: SimpleProductsOptions = {}): SimpleProductsReturn {
   const {
     limit = PRODUCTS_PER_PAGE,
+    initialOffset: initialOffsetOption = 0,
     category,
     brand,
     search,
@@ -92,7 +95,7 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
   const [hasMore, setHasMore] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [totalCount, setTotalCount] = useState(0)
-  const [offset, setOffset] = useState(0)
+  const [offset, setOffset] = useState(initialOffsetOption)
 
   // Refs to prevent duplicate requests and handle debouncing
   const loadingRef = useRef(false)
@@ -271,9 +274,10 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     return 500
   }, [search])
 
-  // Cache key for sessionStorage
+  // Cache key for sessionStorage (include initialOffset so page 2 has its own cache)
   const getCacheKey = useCallback(() => {
     const filterSig = JSON.stringify({
+      initialOffset: initialOffsetOption,
       category,
       brand,
       search,
@@ -286,11 +290,17 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
       isChina
     })
     return `products_cache_${btoa(filterSig).replace(/[^a-zA-Z0-9]/g, '_')}`
-  }, [category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina])
+  }, [initialOffsetOption, category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina])
 
-  // Restore products from cache on mount if available (only if no search/filters)
+  // Restore products from cache on mount if available (only if no search/filters and page 1)
   useEffect(() => {
     if (!enabled || hasRestoredFromCacheRef.current) return
+    
+    // Don't use cache when we're on page 2+ (initialOffset) - we need a fresh fetch for that page
+    if (initialOffsetOption > 0) {
+      hasRestoredFromCacheRef.current = true
+      return
+    }
     
     // Don't use cache if there are active filters/search
     const hasActiveFilters = search || category || brand || minPrice !== undefined || maxPrice !== undefined || (categories && categories.length > 0)
@@ -319,7 +329,7 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     } catch (e) {
       // Ignore cache errors
     }
-  }, [enabled, getCacheKey, search, category, brand, minPrice, maxPrice, categories])
+  }, [enabled, getCacheKey, initialOffsetOption, search, category, brand, minPrice, maxPrice, categories])
 
   // Save products to cache whenever they change (with delay after filter changes)
   useEffect(() => {
@@ -353,13 +363,14 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     }
   }, [enabled, products, offset, hasMore, totalCount, getCacheKey, search, category, brand, minPrice, maxPrice, categories])
 
-  // Initial fetch and refetch on filter changes with debouncing
-  // Products load immediately on initial load, debounced on filter changes
+  // Initial fetch and refetch on filter or initialOffset (page) changes with debouncing
   useEffect(() => {
     if (!enabled) return
 
-    // Build filter signature (exclude categories if undefined to allow immediate loading)
+    const startOffset = initialOffsetOption
+    // Build filter signature (include initialOffset so page change triggers refetch)
     const filterSig = JSON.stringify({
+      initialOffset: startOffset,
       category,
       brand,
       search,
@@ -367,67 +378,51 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
       sortOrder,
       minPrice,
       maxPrice,
-      categories: categories && categories.length > 0 ? categories : undefined, // Only include if actually set
+      categories: categories && categories.length > 0 ? categories : undefined,
       inStock,
       isChina
     })
 
-    // Only reset and fetch if filters changed
     const filtersChanged = filterSig !== prevFiltersRef.current
     prevFiltersRef.current = filterSig
 
-    // Clear any existing debounce timer
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current)
       debounceTimerRef.current = null
     }
 
     if (filtersChanged) {
-      // Reset cache restoration flag when filters change
       hasRestoredFromCacheRef.current = false
-      
-      // Clear cache when filters/search change
       try {
-        const cacheKey = getCacheKey()
-        sessionStorage.removeItem(cacheKey)
-      } catch (e) {
-        // Ignore cache errors
-      }
-      
+        sessionStorage.removeItem(getCacheKey())
+      } catch (e) {}
       reset()
-      
-      // Initial load: fetch immediately (no debounce)
-      if (isInitialLoadRef.current && products.length === 0) {
+      setOffset(startOffset)
+      if (isInitialLoadRef.current || products.length === 0) {
         isInitialLoadRef.current = false
-        fetchProducts(0, false)
+        fetchProducts(startOffset, false)
         return
       }
-
-      // Filter changes: debounce the fetch
       const debounceDelay = getDebounceDelay()
       debounceTimerRef.current = setTimeout(() => {
-        fetchProducts(0, false)
+        fetchProducts(startOffset, false)
         debounceTimerRef.current = null
       }, debounceDelay)
-    } else if (products.length === 0 && !loadingRef.current && isInitialLoadRef.current && !hasRestoredFromCacheRef.current) {
-      // Initial load - start immediately (no debounce) only if not restored from cache
+    } else if (products.length === 0 && !loadingRef.current && (isInitialLoadRef.current || startOffset > 0) && !hasRestoredFromCacheRef.current) {
       isInitialLoadRef.current = false
-      fetchProducts(0, false)
+      fetchProducts(startOffset, false)
     }
 
     return () => {
-      // Cleanup: abort request and clear debounce timer
       if (abortControllerRef.current) {
-        try {
-          abortControllerRef.current.abort()
-        } catch {}
+        try { abortControllerRef.current.abort() } catch {}
       }
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = null
       }
     }
-  }, [enabled, category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina, reset, fetchProducts, products.length, getDebounceDelay, getCacheKey])
+  }, [enabled, initialOffsetOption, category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina, reset, fetchProducts, products.length, getDebounceDelay, getCacheKey])
 
   return {
     products,

@@ -474,7 +474,7 @@ export default function LandingPage() {
       </header>
 
       {/* Add top padding to account for fixed header */}
-      <div className="pt-24 sm:pt-28">
+      <div className="pt-[6.5rem] sm:pt-[7.5rem]">
 
       {/* Hero Section */}
       <section className="relative min-h-[360px] sm:min-h-[460px] md:min-h-[560px] flex items-center">

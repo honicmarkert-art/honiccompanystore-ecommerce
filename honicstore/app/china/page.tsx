@@ -2414,7 +2414,7 @@ function ChinaPageContent() {
       </header>
 
 
-      <main className={cn("flex-1 pt-24 xs:pt-24 sm:pt-24", themeClasses.mainBg)} suppressHydrationWarning>
+      <main className={cn("flex-1 pt-[6.5rem] xs:pt-[6.5rem] sm:pt-[6.5rem]", themeClasses.mainBg)} suppressHydrationWarning>
 
         {/* Small spacing at top */}
         <div className="mt-8"></div>

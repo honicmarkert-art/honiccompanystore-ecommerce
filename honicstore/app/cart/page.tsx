@@ -814,7 +814,7 @@ function CartPageContent() {
         </div>
       </header>
 
-      <main className="flex-1 w-full pt-20 sm:pt-20 pb-4 sm:pb-6 px-2 sm:px-4 lg:px-8" suppressHydrationWarning>
+      <main className="flex-1 w-full pt-[5.5rem] sm:pt-[5.5rem] pb-4 sm:pb-6 px-2 sm:px-4 lg:px-8" suppressHydrationWarning>
         <div className="max-w-7xl mx-auto">
           {/* Progress Indicator */}
           <div className="mb-4 sm:mb-8">

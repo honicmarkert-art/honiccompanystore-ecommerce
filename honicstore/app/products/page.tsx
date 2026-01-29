@@ -976,10 +976,10 @@ function ProductsPageContent() {
     refresh: primaryRefresh
   } = useSimpleProducts({
     limit: PRODUCTS_PER_PAGE,
+    initialOffset: currentPage > 1 ? (currentPage - 1) * PRODUCTS_PER_PAGE : 0,
     brand: activeBrand || undefined,
     search: actualSearchQuery || undefined,
     // Only use category IDs if categories are loaded AND filter is active
-    // Otherwise, load products immediately without waiting for categories
     categories: (isCategoryFilterActive && allCategoryIds.length > 0) ? allCategoryIds : undefined,
     sortBy: sortOrder === 'featured' ? 'featured' : sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
     sortOrder: sortOrder === 'featured' ? 'desc' : sortOrder === 'price-high' ? 'desc' : 'asc',
@@ -1273,10 +1273,14 @@ function ProductsPageContent() {
     })
   }, [primaryProducts])
   
-  // Display products for current page (150 products per page)
+  // Display products for current page. When currentPage > 1 we passed initialOffset so the hook
+  // returns only that page's products; use them as-is. For page 1, slice the first batch.
   const displayedProducts = useMemo(() => {
-    const startIndex = (currentPage - 1) * PRODUCTS_PER_PAGE
-    const endIndex = startIndex + PRODUCTS_PER_PAGE
+    if (currentPage > 1) {
+      return allFilteredProducts
+    }
+    const startIndex = 0
+    const endIndex = PRODUCTS_PER_PAGE
     return allFilteredProducts.slice(startIndex, endIndex)
   }, [allFilteredProducts, currentPage, PRODUCTS_PER_PAGE])
   
@@ -3833,10 +3837,10 @@ function ProductsPageContent() {
         "flex-1", 
         // When search is active, reduce padding since ads/categories are hidden
         actualSearchQuery
-          ? "pt-[114px] sm:pt-[114px] lg:pt-[125px]" // Start right after header (no ads/categories)
+          ? "pt-[122px] sm:pt-[122px] lg:pt-[133px]" // header + small gap
           : currentPage >= 2 
-            ? "pt-[114px] sm:pt-[114px] lg:pt-[125px]" // Start right after category nav (matches ad section positioning)
-            : "pt-24 xs:pt-24 sm:pt-24 -mt-12 lg:-mt-16", 
+            ? "pt-[122px] sm:pt-[122px] lg:pt-[133px]" // header + small gap
+            : "pt-[6.5rem] xs:pt-[6.5rem] sm:pt-[6.5rem] -mt-12 lg:-mt-16", // pt-24 + 0.5rem gap 
         themeClasses.mainBg
       )} suppressHydrationWarning>
         <div className="container mx-auto px-4 pt-0 pb-0">

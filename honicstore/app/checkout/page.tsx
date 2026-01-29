@@ -2349,7 +2349,7 @@ function CheckoutPageContent() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-6 sm:py-8 pt-8 sm:pt-8">
+      <div className="container mx-auto px-4 py-6 sm:py-8 pt-10 sm:pt-10">
         <div className="max-w-4xl mx-auto">
           {/* Progress Steps */}
           <div className="mb-6 sm:mb-8">

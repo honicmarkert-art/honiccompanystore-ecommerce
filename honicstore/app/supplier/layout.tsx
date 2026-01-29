@@ -1890,7 +1890,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
           </Dialog>
 
           {/* Page content */}
-          <main className={cn("flex-1 overflow-y-auto pt-16 sm:pt-20", shouldShowCompanyInfoModal && "pointer-events-none opacity-50")} suppressHydrationWarning>
+          <main className={cn("flex-1 overflow-y-auto pt-[4.5rem] sm:pt-[5.5rem]", shouldShowCompanyInfoModal && "pointer-events-none opacity-50")} suppressHydrationWarning>
             <div className="py-4 sm:py-6" suppressHydrationWarning>
               <div className="mx-auto max-w-7xl px-3 sm:px-4 lg:px-2" suppressHydrationWarning>
                 {children}
