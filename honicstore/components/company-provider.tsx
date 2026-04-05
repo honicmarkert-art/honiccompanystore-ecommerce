@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, ReactNode, useEffect } from "react"
+import { createContext, useContext, ReactNode } from "react"
 import { useCompanySettings } from "@/hooks/use-company-settings"
 
 interface CompanyContextType {
@@ -10,7 +10,6 @@ interface CompanyContextType {
   companyTagline: string
   mainHeadline: string
   heroBackgroundImage: string
-  heroTaglineAlignment: string
   serviceRetailImages: string[]
   servicePrototypingImages: string[]
   servicePcbImages: string[]
@@ -24,18 +23,27 @@ interface CompanyContextType {
   servicePcbImage: string
   serviceAiImage: string
   serviceStemImage: string
+  websiteUrl: string
+  contactEmail: string
+  contactPhone: string
+  address: string
+  currency: string
+  timezone: string
+  language: string
+  theme: string
+  primaryColor: string
+  secondaryColor: string
+  accentColor: string
   updateCompanyName: (name: string) => Promise<boolean>
   updateCompanyColor: (color: string) => Promise<boolean>
   updateCompanyLogo: (logo: string) => Promise<boolean>
   updateMainHeadline: (headline: string) => Promise<boolean>
   updateHeroBackgroundImage: (image: string) => Promise<boolean>
-  updateHeroTaglineAlignment: (alignment: string) => Promise<boolean>
   resetCompanyName: () => Promise<void>
   resetCompanyColor: () => Promise<void>
   resetCompanyLogo: () => Promise<void>
   resetMainHeadline: () => Promise<void>
   resetHeroBackgroundImage: () => Promise<void>
-  resetHeroTaglineAlignment: () => Promise<void>
   isLoaded: boolean
   // Additional admin settings
   settings: any
@@ -70,10 +78,6 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return await companySettings.updateSetting('heroBackgroundImage', image)
   }
 
-  const updateHeroTaglineAlignment = async (alignment: string) => {
-    return await companySettings.updateSetting('heroTaglineAlignment', alignment)
-  }
-
   const resetCompanyName = async () => {
     await companySettings.updateSetting('companyName', 'Honic')
   }
@@ -94,10 +98,6 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     await companySettings.updateSetting('heroBackgroundImage', '')
   }
 
-  const resetHeroTaglineAlignment = async () => {
-    await companySettings.updateSetting('heroTaglineAlignment', 'left')
-  }
-
   const companyContextValue = {
     companyName: companySettings.companyName,
     companyColor: companySettings.companyColor,
@@ -105,7 +105,6 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     companyTagline: companySettings.companyTagline || "",
     mainHeadline: companySettings.mainHeadline,
     heroBackgroundImage: companySettings.heroBackgroundImage,
-    heroTaglineAlignment: companySettings.heroTaglineAlignment,
     serviceRetailImages: companySettings?.serviceRetailImages || [],
     servicePrototypingImages: companySettings?.servicePrototypingImages || [],
     servicePcbImages: companySettings?.servicePcbImages || [],
@@ -119,18 +118,27 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     servicePcbImage: companySettings?.servicePcbImage || "",
     serviceAiImage: companySettings?.serviceAiImage || "",
     serviceStemImage: companySettings?.serviceStemImage || "",
+    websiteUrl: companySettings.websiteUrl,
+    contactEmail: companySettings.contactEmail,
+    contactPhone: companySettings.contactPhone,
+    address: companySettings.address,
+    currency: companySettings.currency,
+    timezone: companySettings.timezone,
+    language: companySettings.language,
+    theme: companySettings.theme,
+    primaryColor: companySettings.primaryColor,
+    secondaryColor: companySettings.secondaryColor,
+    accentColor: companySettings.accentColor,
     updateCompanyName,
     updateCompanyColor,
     updateCompanyLogo,
     updateMainHeadline,
     updateHeroBackgroundImage,
-    updateHeroTaglineAlignment,
     resetCompanyName,
     resetCompanyColor,
     resetCompanyLogo,
     resetMainHeadline,
     resetHeroBackgroundImage,
-    resetHeroTaglineAlignment,
     isLoaded: companySettings.isLoaded,
     settings: companySettings.settings,
     updateSetting: companySettings.updateSetting,

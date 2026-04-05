@@ -3,20 +3,29 @@
 // Note: ISR (revalidate) cannot be used in client components
 // CPU optimization is handled via API route caching and CDN caching instead
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { OptimizedLink } from '@/components/optimized-link'
 import { PromotionalCartPopup } from '@/components/promotional-cart-popup'
+import { StoreDownloadLinksRow } from '@/components/store-download-links'
 import { logger } from '@/lib/logger'
 import { 
   Search, 
   Camera, 
-  Globe, 
+  DollarSign,
+  Landmark,
   ShoppingCart, 
   User, 
   Users,
@@ -52,21 +61,24 @@ import {
   Instagram,
   Linkedin,
   Youtube,
-  Download,
   ArrowRight,
   CheckCircle,
-  Building2
+  Building2,
+  Headphones
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCompanyContext } from '@/components/company-provider'
 import { UserProfile } from '@/components/user-profile'
 import { useAuth } from '@/contexts/auth-context'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
+import { useCurrency } from '@/contexts/currency-context'
+import { useLanguage } from '@/contexts/language-context'
 import { useCart } from '@/hooks/use-cart'
 import { useTheme } from '@/hooks/use-theme'
 import { Switch } from '@/components/ui/switch'
 import { Moon, Sun } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
 
 // Helper function to detect if a file is a video
 const isVideoFile = (url: string): boolean => {
@@ -74,8 +86,17 @@ const isVideoFile = (url: string): boolean => {
   return videoExtensions.some(ext => url.toLowerCase().includes(ext))
 }
 
+function isNavActive(pathname: string | null, href: string): boolean {
+  if (!pathname) return false
+  if (href === '/home') return pathname === '/home' || pathname === '/'
+  return pathname === href || pathname.startsWith(`${href}/`)
+}
+
 export default function LandingPage() {
   const router = useRouter()
+  const pathname = usePathname()
+  const { currency, setCurrency } = useCurrency()
+  const { language, setLanguage } = useLanguage()
   const { toast } = useToast()
   const { 
     companyName, 
@@ -83,7 +104,6 @@ export default function LandingPage() {
     companyLogo, 
     mainHeadline, 
     heroBackgroundImage,
-    heroTaglineAlignment,
     serviceRetailImages,
     servicePrototypingImages,
     servicePcbImages,
@@ -110,8 +130,36 @@ export default function LandingPage() {
   const [isPromotionalCartOpen, setIsPromotionalCartOpen] = useState(false)
   const [promotionalProducts, setPromotionalProducts] = useState<any[]>([])
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
+  const [headerScrolled, setHeaderScrolled] = useState(false)
 
+  useEffect(() => {
+    const onScroll = () => setHeaderScrolled(window.scrollY > 8)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
 
+  /** Stable URL: never use Date.now() per render (scroll/header updates re-render and would reload the image). */
+  const heroBackgroundCssUrl = useMemo(() => {
+    if (!heroBackgroundImage) return ''
+    if (typeof window === 'undefined') return heroBackgroundImage
+    try {
+      const bust = localStorage.getItem('settings_cache_bust')
+      if (bust) {
+        const sep = heroBackgroundImage.includes('?') ? '&' : '?'
+        return `${heroBackgroundImage}${sep}cb=${bust}`
+      }
+    } catch {
+      /* ignore */
+    }
+    return heroBackgroundImage
+  }, [heroBackgroundImage])
+
+  useEffect(() => {
+    if (!heroBackgroundCssUrl) return
+    const img = new window.Image()
+    img.src = heroBackgroundCssUrl
+  }, [heroBackgroundCssUrl])
 
   // Fetch admin-controlled advertisements (same API as product list)
   useEffect(() => {
@@ -259,10 +307,10 @@ export default function LandingPage() {
   const footerLinks = {
     company: [
       { name: 'About Us', href: '/about' },
-      { name: 'Our Story', href: '/story' },
-      { name: 'Careers', href: '/careers' },
-      { name: 'Press & Media', href: '/press' },
-      { name: 'Contact Us', href: '/contact' }
+      { name: 'Our Story', href: '/about#our-story' },
+      { name: 'Careers', href: '/contact' },
+      { name: 'Press & Media', href: '/about' },
+      { name: 'Contact Us', href: '/contact' },
     ],
     services: [
       { name: 'Electronics Supply', href: '/services/electronics' },
@@ -296,273 +344,327 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white" suppressHydrationWarning>
-      {/* Header */}
-      <header className="bg-black/50 backdrop-blur-sm fixed top-0 left-0 right-0 z-40">
-        <div className="bg-gradient-to-b from-black/70 via-black/50 to-black/30">
-        <div className="px-4 py-2">
-          {/* Mobile Navigation */}
-          <div className="block sm:hidden">
-            {/* Mobile Header Row */}
-            <div className="flex items-center justify-between mb-3">
-              {/* Mobile Logo and Company Name */}
-              <div className="flex items-center cursor-pointer" onClick={() => router.push('/')}>
-                <Image 
-                  src={displayLogo} 
-                  alt={`${companyName} Logo`} 
-                  width={32} 
-                  height={32} 
-                  className="w-8 h-8 rounded-md"
-                />
-                <div className="ml-2">
-                  <span className="text-sm font-bold text-white truncate max-w-[120px]" style={{ color: companyColor }}>
-                  {companyName || 'Honic Co.'}
-                  </span>
-                </div>
-              </div>
+      <header
+        className={cn(
+          'fixed top-0 left-0 right-0 z-40 border-b border-white/10 bg-gray-950/65 backdrop-blur-xl backdrop-saturate-150 transition-[box-shadow,border-color,background-color] duration-300',
+          headerScrolled
+            ? 'border-white/15 bg-gray-950/82 shadow-lg shadow-black/35'
+            : 'shadow-sm shadow-black/25'
+        )}
+      >
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/45 to-transparent opacity-90"
+          aria-hidden
+        />
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-2 px-4 sm:h-16 sm:gap-3 sm:px-6 lg:px-8">
+          <button
+            type="button"
+            onClick={() => router.push('/home')}
+            className="flex min-w-0 max-w-[55%] sm:max-w-none items-center gap-2.5 rounded-xl text-left transition-all hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 sm:px-1.5 sm:py-1"
+          >
+            <span className="relative shrink-0 rounded-lg ring-1 ring-white/15 transition-shadow hover:ring-amber-400/40">
+              <Image
+                src={displayLogo}
+                alt={`${companyName || 'Store'} logo`}
+                width={44}
+                height={44}
+                className="h-10 w-10 rounded-lg sm:h-11 sm:w-11"
+              />
+            </span>
+            <span
+              className="truncate text-base font-bold tracking-tight text-white sm:text-lg lg:text-xl"
+              style={{ color: companyColor || undefined }}
+            >
+              {companyName || 'Honic Co.'}
+            </span>
+          </button>
 
-              {/* Mobile Right Actions */}
-              <div className="flex items-center space-x-3">
-                {/* Cart */}
-                <div className="relative cursor-pointer" onClick={() => router.push('/cart')}>
-                  <ShoppingCart className="w-5 h-5 text-white" />
-                  {cartUniqueProducts > 0 && (
-                    <div className="absolute -top-2 -right-2 bg-orange-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                      {cartUniqueProducts > 99 ? '99+' : cartUniqueProducts}
-                    </div>
+          <nav
+            className="hidden items-center gap-0.5 md:flex lg:gap-1"
+            aria-label="Main"
+          >
+            {(
+              [
+                ['/products', 'Products'],
+                ['/categories', 'Categories'],
+                ['/services', 'Services'],
+                ['/support', 'Help'],
+              ] as const
+            ).map(([href, label]) => {
+              const active = isNavActive(pathname, href)
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    'relative rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                    active
+                      ? 'text-white'
+                      : 'text-white/70 hover:bg-white/10 hover:text-white',
+                    active &&
+                      'after:absolute after:bottom-1 after:left-3 after:right-3 after:h-0.5 after:rounded-full after:bg-amber-400'
                   )}
-                </div>
-
-                {/* Hamburger Menu Button */}
-                <button
-                  onClick={() => setIsHamburgerMenuOpen(true)}
-                  className="p-1 text-white hover:text-yellow-400 transition-colors"
+                  aria-current={active ? 'page' : undefined}
                 >
-                  <Menu className="w-6 h-6" />
-                </button>
+                  {label}
+                </Link>
+              )
+            })}
+          </nav>
 
-                {/* Account */}
-                {user ? (
-                  <div className="flex flex-col items-center">
-                    <UserProfile />
-                    <span className="text-xs text-white mt-1">
-                      {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center space-x-1">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-white hover:text-orange-400 hover:bg-gray-800/50 px-2 py-0.5 text-xs h-6"
-                      onClick={() => openAuthModal('login')}
-                    >
-                      Sign in
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      className="bg-orange-500 hover:bg-orange-600 text-white px-2 py-0.5 text-xs h-6"
-                      onClick={() => openAuthModal('register')}
-                    >
-                      Sign up
-                    </Button>
-                  </div>
+          <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 md:gap-2">
+            <span
+              className="hidden items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-xs font-medium text-white/80 lg:inline-flex"
+              title="We deliver in Tanzania"
+            >
+              <Flag className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
+              TZ
+            </span>
+
+            <div
+              className="hidden items-center rounded-lg border border-white/15 bg-black/30 p-0.5 sm:flex"
+              role="group"
+              aria-label="Language"
+            >
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className={cn(
+                  'rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-wide transition-colors',
+                  language === 'en'
+                    ? 'bg-amber-500 text-gray-950'
+                    : 'text-white/65 hover:text-white'
                 )}
-              </div>
+              >
+                EN
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage('sw')}
+                className={cn(
+                  'rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-wide transition-colors',
+                  language === 'sw'
+                    ? 'bg-amber-500 text-gray-950'
+                    : 'text-white/65 hover:text-white'
+                )}
+              >
+                SW
+              </button>
             </div>
 
-            {/* Mobile Navigation Menu - Single Row */}
-            <div className="flex items-center justify-between text-xs mt-2">
-              <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/services')}>
-                <Layers className="w-3 h-3" />
-                <span className="text-[10px]">Our Service</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Desktop Navigation - Two Row Layout */}
-          <div className="hidden sm:block">
-            {/* First Row - Logo, Delivery, Language, Cart, Account */}
-            <div className="flex items-center justify-between">
-              {/* Logo */}
-              <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push('/')}>
-                <div className="flex items-center gap-1 sm:gap-2">
-                  <Image 
-                    src={displayLogo} 
-                    alt={`${companyName} Logo`} 
-                    width={48} 
-                    height={48}
-                    className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-md"
-                  />
-                  <div className="hidden sm:flex flex-col">
-                    <span 
-                      className="lg:text-lg xl:text-xl 2xl:text-2xl truncate font-bold" 
-                      style={{ color: companyColor }}
-                    >
-                      {companyName || 'Honic Co.'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Top Navigation Items */}
-              <div className="flex items-center gap-2 lg:gap-3">
-                {/* Deliver to */}
-                <div className="flex items-center space-x-1 text-xs sm:text-sm cursor-pointer hover:text-orange-400 transition-colors text-white">
-                <Flag className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
-                <span className="hidden sm:inline text-white">Deliver to: TZ</span>
-                <span className="sm:hidden text-white">TZ</span>
-                <span className="text-white">▼</span>
-                </div>
-
-                {/* Language/Currency */}
-                <div className="flex items-center space-x-1 text-xs sm:text-sm cursor-pointer hover:text-orange-400 transition-colors text-white">
-                <Globe className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
-                  <span className="hidden sm:inline text-white">English-TZS</span>
-                <span className="sm:hidden text-white">EN</span>
-                <span className="text-white">▼</span>
-                </div>
-
-                {/* Cart */}
-              <div className="flex items-center space-x-1 cursor-pointer relative text-white" onClick={() => router.push('/cart')}>
-                <div className="relative">
-                  <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                  {cartUniqueProducts > 0 && (
-                    <div className="absolute -top-2.5 left-1/2 transform -translate-x-1/2 bg-transparent text-orange-500 text-xs font-bold">
-                      {cartUniqueProducts > 99 ? '99+' : cartUniqueProducts}
-                    </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="hidden h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-2.5 text-xs font-medium text-white/85 transition-colors hover:bg-white/15 hover:text-white md:inline-flex"
+                  aria-label={`Currency: ${currency}`}
+                >
+                  {currency === 'USD' ? (
+                    <DollarSign className="h-3.5 w-3.5 opacity-90" aria-hidden />
+                  ) : (
+                    <Landmark className="h-3.5 w-3.5 opacity-90" aria-hidden />
                   )}
-                </div>
-                <span className="text-xs sm:text-sm hidden sm:inline text-white">Cart</span>
-              </div>
+                  <span>{currency}</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[9rem]">
+                <DropdownMenuItem
+                  className="cursor-pointer gap-2"
+                  onClick={() => setCurrency('USD')}
+                >
+                  <DollarSign className="h-4 w-4" />
+                  US Dollar (USD)
+                  {currency === 'USD' && (
+                    <CheckCircle className="ml-auto h-4 w-4 text-amber-600" />
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer gap-2"
+                  onClick={() => setCurrency('TZS')}
+                >
+                  <Landmark className="h-4 w-4" />
+                  Tanzanian Shilling (TZS)
+                  {currency === 'TZS' && (
+                    <CheckCircle className="ml-auto h-4 w-4 text-amber-600" />
+                  )}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-                {/* Account/Sign in */}
+            <button
+              type="button"
+              onClick={() => router.push('/cart')}
+              className="relative flex items-center gap-2 rounded-lg p-2 text-white transition-colors hover:bg-white/10 md:px-2.5"
+              aria-label={`Shopping cart${cartUniqueProducts > 0 ? `, ${cartUniqueProducts} items` : ''}`}
+            >
+              <ShoppingCart className="h-5 w-5 shrink-0 sm:h-[22px] sm:w-[22px]" />
+              <span className="hidden text-sm font-medium text-white/90 lg:inline">
+                Cart
+              </span>
+              {cartUniqueProducts > 0 && (
+                <span className="absolute right-0 top-0 flex h-[18px] min-w-[18px] translate-x-0.5 -translate-y-0.5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold leading-none text-gray-950 lg:right-1 lg:top-0.5">
+                  {cartUniqueProducts > 99 ? '99+' : cartUniqueProducts}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsHamburgerMenuOpen(true)}
+              className="rounded-lg p-2 text-white hover:bg-white/10 md:hidden"
+              aria-label="Open menu"
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+
+            <div className="hidden items-center gap-2 border-l border-white/15 pl-3 md:flex">
               {user ? (
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-end gap-0.5">
                   <UserProfile />
-                  <span className="text-xs text-white mt-1">
-                    {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                  <span className="max-w-[140px] truncate text-[11px] text-white/50">
+                    {(user as any)?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Account'}
                   </span>
                 </div>
               ) : (
-                  <div className="flex items-center space-x-2">
-                    <div className="flex items-center space-x-1 cursor-pointer hover:text-orange-400 transition-colors" onClick={() => openAuthModal('login')}>
-                    <User className="w-4 h-4 sm:w-5 sm:h-5" />
-                      <span className="text-xs sm:text-sm">Sign in</span>
-                    </div>
-                    <Button className="bg-orange-500 hover:bg-orange-600 text-xs sm:text-sm px-2 py-1" onClick={() => openAuthModal('register')}>
-                      <span>Create account</span>
-                    </Button>
-                  </div>
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 text-white hover:bg-white/10 hover:text-white"
+                    onClick={() => openAuthModal('login')}
+                  >
+                    Sign in
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-9 bg-amber-500 px-4 font-semibold text-gray-950 hover:bg-amber-400"
+                    onClick={() => openAuthModal('register')}
+                  >
+                    Sign up
+                  </Button>
+                </>
               )}
             </div>
           </div>
-
-            {/* Second Row - Navigation Links */}
-            <div className="flex items-center justify-between mt-2">
-              <div className="flex items-center gap-2 lg:gap-3">
-                {/* Featured selections removed */}
-              </div>
-              <div className="flex items-center gap-2 lg:gap-3 text-xs sm:text-sm">
-                <span className="text-white cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/support')}>Help</span>
-                {/* Buyer Central removed */}
-                <span className="text-white hidden md:inline cursor-pointer hover:text-orange-400 transition-colors" onClick={() => router.push('/app')}>App & extension</span>
-            </div>
-            </div>
-          </div>
-        </div>
         </div>
       </header>
 
-      {/* Add top padding to account for fixed header */}
-      <div className="pt-[6.5rem] sm:pt-[7.5rem]">
+      <div className="pt-14 sm:pt-16">
 
-      {/* Hero Section */}
-      <section className="relative min-h-[360px] sm:min-h-[460px] md:min-h-[560px] flex items-center">
-        {/* Background Image or Color */}
-        <div 
-          className={`absolute inset-0 ${heroBackgroundImage ? 'hero-bg-responsive' : ''}`}
+      {/*
+        Hero background source:
+        - When `heroBackgroundImage` is set: image URL from company settings (API field `hero_background_image`),
+          loaded via `useCompanyContext()` → fetch `/api/company/settings` in `useCompanySettings`. Class `hero-bg-responsive` in globals.css sets cover/center.
+        - When empty: layered CSS gradients only (no image).
+      */}
+      <section className="relative min-h-[min(88dvh,40rem)] overflow-hidden pb-14 pt-8 sm:min-h-0 sm:pb-20 sm:pt-10 md:pt-14">
+        <div
+          className="pointer-events-none absolute -top-24 right-0 h-64 w-64 rounded-full blur-3xl opacity-25 sm:h-80 sm:w-80"
+          style={{ background: companyColor || '#f97316' }}
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute bottom-0 left-0 h-72 w-72 rounded-full bg-amber-500/15 blur-3xl"
+          aria-hidden
+        />
+
+        <div
+          className={cn('absolute inset-0', heroBackgroundImage && 'hero-bg-responsive')}
           style={{
-            backgroundImage: heroBackgroundImage ? (() => {
-              const cacheBust = typeof window !== 'undefined' ? (localStorage.getItem('settings_cache_bust') || Date.now()) : Date.now()
-              const finalUrl = `${heroBackgroundImage}${heroBackgroundImage.includes('?') ? '&' : '?' }cb=${cacheBust}`
-              return `url(${finalUrl})`
-            })() : 'none',
+            backgroundImage: heroBackgroundCssUrl ? `url(${heroBackgroundCssUrl})` : 'none',
             backgroundColor: heroBackgroundImage ? 'transparent' : undefined,
             backgroundPosition: heroBackgroundImage ? 'center center' : undefined,
-            backgroundRepeat: heroBackgroundImage ? 'no-repeat' : undefined
+            backgroundRepeat: heroBackgroundImage ? 'no-repeat' : undefined,
           }}
         >
           {heroBackgroundImage ? (
             <>
-              {/* Image background with overlay */}
-              <div className="absolute inset-0 bg-black bg-opacity-50"></div>
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-900/20 to-purple-900/20"></div>
+              <div className="absolute inset-0 bg-gradient-to-b from-black/65 via-black/50 to-gray-950" />
+              <div className="absolute inset-0 bg-gradient-to-tr from-amber-600/10 via-transparent to-violet-900/20" />
             </>
           ) : (
             <>
-              {/* Color background fallback */}
-              <div className="absolute inset-0 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900"></div>
-          <div className="absolute inset-0 bg-black bg-opacity-50"></div>
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-900/20 to-purple-900/20"></div>
+              <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-gray-900 to-gray-950" />
+              <div
+                className="absolute inset-0 opacity-35"
+                style={{
+                  background: companyColor
+                    ? `radial-gradient(ellipse 90% 70% at 50% 0%, ${companyColor}55, transparent 50%)`
+                    : 'radial-gradient(ellipse 90% 70% at 50% 0%, rgba(249,115,22,0.3), transparent 50%)',
+                }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-gray-950 from-20% via-transparent to-transparent" />
             </>
           )}
         </div>
 
-        {/* Content */}
-        <div className="container mx-auto px-3 sm:px-4 relative z-10">
-          <div className={`max-w-4xl w-full ${heroTaglineAlignment === 'center' ? 'text-center mx-auto' : heroTaglineAlignment === 'right' ? 'text-right ml-auto' : 'text-left'}`}>
-            {/* Video Link */}
-            <div className={`flex items-center space-x-2 mb-4 sm:mb-6 ${heroTaglineAlignment === 'center' ? 'justify-center' : heroTaglineAlignment === 'right' ? 'justify-end' : 'justify-start'}`}>
-              <div className="flex items-center space-x-2 text-orange-400 hover:text-orange-300 cursor-pointer">
-                <Play className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="text-xs sm:text-sm">Learn about {companyName || 'Honic Co.'}</span>
+        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="grid gap-10 lg:grid-cols-12 lg:gap-12 lg:items-start">
+            <div className="lg:col-span-7">
+              <div className="mb-5 flex flex-wrap items-center gap-3 sm:mb-6">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs text-white/90 backdrop-blur-sm sm:text-sm">
+                  <Zap className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden />
+                  <span>Trusted · Delivery across Tanzania</span>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 text-xs text-amber-400/90 transition-colors hover:text-amber-300 sm:text-sm"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
+                    <Play className="h-3 w-3 fill-current" aria-hidden />
+                  </span>
+                  About {companyName || 'us'}
+                </button>
               </div>
-            </div>
 
-            {/* Main Headline */}
-            <h1 className={`text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold mb-4 sm:mb-6 md:mb-8 leading-tight ${heroTaglineAlignment === 'center' ? 'text-center' : heroTaglineAlignment === 'right' ? 'text-right' : 'text-left'}`}>
-              {mainHeadline || 'The leading B2B ecommerce platform for global trade'}
-            </h1>
+              <h1 className="mb-3 text-3xl font-bold leading-[1.12] tracking-tight text-white drop-shadow-md sm:text-4xl md:text-5xl lg:text-[2.75rem] lg:leading-tight xl:text-5xl">
+                {mainHeadline || 'The leading B2B ecommerce platform for global trade'}
+              </h1>
+              <p className="mb-6 max-w-xl text-sm leading-relaxed text-white/65 sm:mb-8 sm:text-base">
+                Search thousands of parts and kits — secure checkout, fast support, built for makers and businesses.
+              </p>
 
-            {/* Search Bar */}
-            <div className={`w-full max-w-2xl mb-4 sm:mb-6 md:mb-8 ${heroTaglineAlignment === 'center' ? 'mx-auto' : heroTaglineAlignment === 'right' ? 'ml-auto' : ''}`}>
-              <div className="relative">
-                <Input
-                  type="text"
-                  placeholder="essentials hoodie"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  className="w-full h-10 sm:h-12 md:h-14 pl-3 sm:pl-4 md:pl-6 pr-14 sm:pr-16 md:pr-20 text-sm sm:text-base md:text-lg bg-white text-gray-900 rounded-full border-0 focus:ring-2 focus:ring-orange-500"
-                />
-                <div className="absolute right-1 sm:right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-1 sm:space-x-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="p-1 sm:p-2 hover:bg-gray-100"
-                  >
-                    <Camera className="w-3 h-3 sm:w-4 sm:h-4 md:w-5 md:h-5 text-gray-600" />
-                  </Button>
-                  <Button
-                    onClick={handleSearch}
-                    className="bg-orange-500 hover:bg-orange-600 text-white px-2 sm:px-3 md:px-6 py-1 sm:py-2 rounded-full text-xs sm:text-sm"
-                  >
-                    <Search className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                    <span className="hidden sm:inline">Search</span>
-                  </Button>
+              <div className="mb-4 w-full max-w-xl sm:mb-5">
+                <div className="rounded-xl border border-white/15 bg-white/10 p-1 shadow-xl backdrop-blur-md sm:rounded-2xl sm:p-1.5">
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      placeholder="Search products, brands, categories…"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onKeyPress={handleKeyPress}
+                      className="h-11 w-full rounded-lg border-0 bg-white pr-[5.5rem] pl-4 text-gray-900 shadow-inner focus-visible:ring-2 focus-visible:ring-amber-500 sm:h-12 sm:rounded-xl sm:pr-28 md:h-14 md:text-lg"
+                    />
+                    <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="hidden h-9 w-9 p-0 hover:bg-gray-100 sm:inline-flex"
+                        aria-label="Image search"
+                      >
+                        <Camera className="h-4 w-4 text-gray-600" />
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={handleSearch}
+                        className="h-9 rounded-lg bg-amber-500 px-3 text-sm font-semibold text-gray-950 hover:bg-amber-400 sm:h-10 sm:px-4 sm:rounded-xl"
+                      >
+                        <Search className="mr-1 inline h-4 w-4 sm:mr-1.5" />
+                        <span className="hidden sm:inline">Search</span>
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Frequently Searched */}
-            <div className={`w-full max-w-2xl mb-4 sm:mb-6 md:mb-8 ${heroTaglineAlignment === 'center' ? 'mx-auto' : heroTaglineAlignment === 'right' ? 'ml-auto' : ''}`}>
-              <div className="flex items-center space-x-1 sm:space-x-2 md:space-x-4 flex-wrap gap-1 sm:gap-2">
-                <span className="text-gray-300 text-xs sm:text-sm whitespace-nowrap">Frequently searched:</span>
+              <div className="flex max-w-xl flex-wrap items-center gap-2">
+                <span className="w-full text-xs font-medium text-white/45 sm:w-auto sm:mr-1">Popular</span>
                 {frequentlySearched.map((term, index) => (
                   <Badge
                     key={index}
                     variant="secondary"
-                    className="bg-gray-800 text-gray-300 hover:bg-gray-700 cursor-pointer text-xs sm:text-xs px-1 sm:px-2 py-0.5 sm:py-1"
+                    className="cursor-pointer rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur-sm transition-colors hover:border-amber-400/35 hover:bg-white/18"
                     onClick={() => {
                       setSearchTerm(term)
                       router.push(`/products?search=${encodeURIComponent(term)}`)
@@ -574,79 +676,147 @@ export default function LandingPage() {
               </div>
             </div>
 
-            {/* Hero Call-to-Action */}
-            <div className="mt-8 sm:mt-12 text-center">
-              <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white mb-4 sm:mb-6">
-                Electronics You Need, Just a Click Away!
-              </h2>
-              <p className="text-base sm:text-lg md:text-xl text-blue-100 mb-6 sm:mb-8 max-w-2xl mx-auto">
-                Discover our extensive collection of high-quality electronic components, tools, and innovative solutions for all your projects.
-              </p>
-              <div className="mb-8 sm:mb-12">
+            <aside className="lg:col-span-5">
+              <div className="rounded-2xl border border-white/10 bg-gray-950/40 p-6 shadow-2xl backdrop-blur-md sm:p-7">
+                <p className="text-xs font-semibold uppercase tracking-wider text-amber-400/90">Get started</p>
+                <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">Shop in a few clicks</h2>
+                <p className="mt-2 text-sm leading-relaxed text-white/65">
+                  Browse categories or jump straight to products — same secure cart and checkout.
+                </p>
+                <div className="mt-6 flex flex-col gap-3">
+                  <Button
+                    size="lg"
+                    className="h-12 w-full bg-amber-500 font-semibold text-gray-950 hover:bg-amber-400 sm:h-11"
+                    onClick={() => router.push('/products')}
+                  >
+                    <ShoppingCart className="mr-2 h-5 w-5" />
+                    Shop now
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="h-12 w-full border-white/25 bg-transparent text-white hover:bg-white/10 sm:h-11"
+                    onClick={() => router.push('/categories')}
+                  >
+                    Browse categories
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                </div>
+                <ul className="mt-6 space-y-3 border-t border-white/10 pt-6 text-sm text-white/75">
+                  <li className="flex items-start gap-3">
+                    <Truck className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                    <span>Nationwide delivery options at checkout</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Shield className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                    <span>Secure payments & order protection</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Zap className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                    <span>Help when you need it</span>
+                  </li>
+                </ul>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      {/* Call to Action — flows into features + footer (no gray “void” band) */}
+      <section className="relative overflow-hidden py-7 sm:py-9 pb-6 sm:pb-7">
+        <div
+          className="pointer-events-none absolute inset-0 bg-gradient-to-br from-gray-950 via-[#0d1117] to-slate-950"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_85%_55%_at_15%_10%,rgba(251,191,36,0.2),transparent_55%)]"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_70%_45%_at_92%_88%,rgba(139,92,246,0.14),transparent_52%)]"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(105deg,transparent_40%,rgba(251,191,36,0.06)_50%,transparent_60%)]"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.04] [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:28px_28px]"
+          aria-hidden
+        />
+        <div className="relative mx-auto max-w-4xl px-4 text-center sm:px-6">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-400/90 sm:text-xs">
+            For teams & makers
+          </p>
+          <h2 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl md:text-4xl">
+            Ready to stock your workspace?
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-white/65 sm:text-base">
+            Join buyers who use {companyName || 'our store'} for reliable parts, fair pricing, and checkout that
+            stays simple from cart to door — no clutter, just what you need to keep projects moving.
+          </p>
+
+          <ul className="mx-auto mt-5 grid max-w-2xl grid-cols-1 gap-2.5 text-left sm:grid-cols-3 sm:gap-3">
+            <li className="flex gap-3 rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-3 backdrop-blur-sm">
+              <Package className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+              <div>
+                <p className="text-sm font-medium text-white">One cart, many categories</p>
+                <p className="text-xs leading-snug text-white/50">Browse electronics, tools, and supplies together.</p>
+              </div>
+            </li>
+            <li className="flex gap-3 rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-3 backdrop-blur-sm">
+              <CreditCard className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+              <div>
+                <p className="text-sm font-medium text-white">Straightforward checkout</p>
+                <p className="text-xs leading-snug text-white/50">Clear totals, shipping choices, and payment options.</p>
+              </div>
+            </li>
+            <li className="flex gap-3 rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-3 backdrop-blur-sm">
+              <Headphones className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+              <div>
+                <p className="text-sm font-medium text-white">Help when you need it</p>
+                <p className="text-xs leading-snug text-white/50">Support and order updates so you are never stuck.</p>
+              </div>
+            </li>
+          </ul>
+
+          <div className="mt-6 flex flex-col items-stretch justify-center gap-2.5 sm:mt-7 sm:flex-row sm:items-center sm:gap-3">
             <Button
               size="lg"
-              className="bg-white text-blue-600 hover:bg-blue-50 text-base sm:text-lg px-6 sm:px-8 py-3 sm:py-4 font-semibold shadow-lg hover:shadow-xl transition-all duration-300"
-              onClick={() => router.push('/')}
+              className="h-11 w-full rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-8 font-semibold text-gray-950 shadow-lg shadow-amber-900/25 hover:from-amber-400 hover:to-orange-400 sm:h-12 sm:w-auto"
+              onClick={() => router.push('/products')}
             >
-              <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-              Shop Now
+              Start shopping
             </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Call to Action */}
-      <section className="bg-gray-900 py-6 sm:py-8 md:py-12 lg:py-16">
-        <div className="container mx-auto px-3 sm:px-4 text-center">
-          
-
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-3 sm:mb-4">
-            Ready to start your global trade journey?
-          </h2>
-          <p className="text-gray-300 mb-4 sm:mb-6 md:mb-8 max-w-2xl mx-auto text-sm sm:text-base px-2">
-            Join thousands of buyers and suppliers who trust our platform for secure, 
-            efficient B2B transactions with comprehensive trade protection.
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center space-y-3 sm:space-y-0 sm:space-x-4">
-            <Button 
-              size="lg" 
-              className="bg-orange-500 hover:bg-orange-600 w-full sm:w-auto"
-              onClick={() => router.push('/')}
-            >
-              Start Shopping
-            </Button>
-            <Button 
-              size="lg" 
+            <Button
+              size="lg"
               variant="outline"
-              className="w-full sm:w-auto text-black"
-              onClick={() => router.push('/auth/register')}
+              className="h-11 w-full rounded-xl border-amber-400/45 bg-zinc-950/50 text-amber-50 shadow-none hover:border-amber-400/65 hover:bg-amber-500/15 hover:text-white sm:h-12 sm:w-auto"
+              onClick={() => openAuthModal('register')}
             >
-              Create Account
+              Create account
             </Button>
           </div>
         </div>
       </section>
 
-      {/* Features Section */}
-      <section className="bg-gray-900 py-8 sm:py-12 lg:py-16">
+      {/* Features — same base as footer, flush under CTA */}
+      <section className="bg-gray-950 pt-3 pb-5 sm:pt-4 sm:pb-6 lg:pb-8">
         <div className="container mx-auto px-4">
           {/* Admin-controlled Advertisements (like product list) */}
           {ads && ads.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
+            <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-3 mb-4 sm:mb-6">
               {ads.slice(0,3).map((ad: any, i: number) => (
-                <OptimizedLink key={i} href={ad.link || '/products'} className="block" target="_blank" rel="noopener noreferrer">
-                  <div className="relative overflow-hidden rounded-lg border border-gray-700 bg-gray-800 group">
+                <OptimizedLink key={i} href={ad.link || '/products'} className="block group" target="_blank" rel="noopener noreferrer">
+                  <div className="relative overflow-hidden rounded-xl border border-white/10 bg-gray-800/80 shadow-lg shadow-black/20 transition-all duration-300 hover:border-amber-500/30 hover:shadow-xl hover:shadow-amber-900/10 hover:-translate-y-0.5">
                     {ad.image ? (
-                      // simple img to avoid heavy next/image CLS on dynamic ads
-                      <img src={ad.image} alt={ad.title || 'Advertisement'} className="w-full h-32 object-cover group-hover:scale-[1.02] transition-transform" />
+                      <img src={ad.image} alt={ad.title || 'Advertisement'} className="w-full h-36 object-cover transition-transform duration-500 group-hover:scale-[1.04]" />
                     ) : (
-                      <div className="h-32 flex items-center justify-center text-sm">Advertisement</div>
+                      <div className="h-36 flex items-center justify-center text-sm text-gray-500 bg-gray-800">Advertisement</div>
                     )}
-                    <div className="p-3">
-                      <h3 className="text-sm font-semibold">{ad.title || 'Promo'}</h3>
-                      {ad.subtitle && <p className="text-xs text-gray-300">{ad.subtitle}</p>}
+                    <div className="p-4 border-t border-white/5">
+                      <h3 className="text-sm font-semibold text-white">{ad.title || 'Promo'}</h3>
+                      {ad.subtitle && <p className="text-xs text-gray-400 mt-1 line-clamp-2">{ad.subtitle}</p>}
                     </div>
                   </div>
                 </OptimizedLink>
@@ -654,7 +824,7 @@ export default function LandingPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6 lg:gap-8">
+          <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-5 lg:gap-6">
             {features.map((feature, index) => (
               <div
                 key={index}
@@ -703,7 +873,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="bg-gray-950 text-gray-300">
         {/* Main Footer Content */}
-        <div className="px-6 py-8 sm:py-12">
+        <div className="px-6 pt-5 pb-8 sm:pt-6 sm:pb-10 lg:pt-7 lg:pb-12">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 sm:gap-8">
             {/* Company Info */}
             <div className="lg:col-span-2">
@@ -766,8 +936,57 @@ export default function LandingPage() {
               </div>
             </div>
 
-            {/* Company Links */}
-            <div>
+            {/* Mobile: Company | Services | Support — one row, three columns */}
+            <div className="col-span-1 grid w-full min-w-0 grid-cols-3 gap-x-2 gap-y-0 md:hidden">
+              <div className="min-w-0">
+                <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-white">Company</h3>
+                <ul className="space-y-1.5">
+                  {footerLinks.company.map((link, index) => (
+                    <li key={index} className="min-w-0">
+                      <a
+                        href={link.href}
+                        className="block break-words text-[11px] leading-snug text-gray-300 hover:text-orange-400 transition-colors"
+                      >
+                        {link.name}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="min-w-0">
+                <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-white">Services</h3>
+                <ul className="space-y-1.5">
+                  {footerLinks.services.map((link, index) => (
+                    <li key={index} className="min-w-0">
+                      <a
+                        href={link.href}
+                        className="block break-words text-[11px] leading-snug text-gray-300 hover:text-orange-400 transition-colors"
+                      >
+                        {link.name}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="min-w-0">
+                <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-white">Support</h3>
+                <ul className="space-y-1.5">
+                  {footerLinks.support.map((link, index) => (
+                    <li key={index} className="min-w-0">
+                      <a
+                        href={link.href}
+                        className="block break-words text-[11px] leading-snug text-gray-300 hover:text-orange-400 transition-colors"
+                      >
+                        {link.name}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            {/* Company Links — tablet/desktop */}
+            <div className="hidden md:block">
               <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-white">Company</h3>
               <ul className="space-y-1 sm:space-y-2">
                 {footerLinks.company.map((link, index) => (
@@ -780,8 +999,8 @@ export default function LandingPage() {
               </ul>
             </div>
 
-            {/* Services Links */}
-            <div>
+            {/* Services Links — tablet/desktop */}
+            <div className="hidden md:block">
               <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-white">Services</h3>
               <ul className="space-y-1 sm:space-y-2">
                 {footerLinks.services.map((link, index) => (
@@ -794,8 +1013,8 @@ export default function LandingPage() {
               </ul>
             </div>
 
-            {/* Support Links */}
-            <div>
+            {/* Support Links — tablet/desktop */}
+            <div className="hidden md:block">
               <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-white">Support</h3>
               <ul className="space-y-1 sm:space-y-2">
                 {footerLinks.support.map((link, index) => (
@@ -818,17 +1037,23 @@ export default function LandingPage() {
                   Subscribe to our newsletter for the latest updates, exclusive offers, and industry insights.
                 </p>
               </div>
-              <form onSubmit={handleNewsletterSubmit} className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+              <form
+                onSubmit={handleNewsletterSubmit}
+                className="flex w-full max-w-xl flex-row items-stretch gap-2 lg:max-w-none"
+              >
                 <Input
                   type="email"
                   placeholder="Enter your email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-400 text-xs sm:text-sm"
+                  className="min-h-10 min-w-0 flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-400 text-xs sm:text-sm"
                   required
                 />
-                <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-xs sm:text-sm">
-                  <ArrowRight className="w-3 h-3 sm:w-4 sm:h-4" />
+                <Button
+                  type="submit"
+                  className="h-auto min-h-10 shrink-0 border-0 bg-orange-500 px-4 text-white hover:bg-orange-600 text-xs sm:text-sm"
+                >
+                  <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4" />
                 </Button>
               </form>
             </div>
@@ -842,16 +1067,7 @@ export default function LandingPage() {
                 <p className="text-xs sm:text-sm text-gray-400 mb-3 sm:mb-4">
                   Download our mobile app for a better shopping experience on the go.
                 </p>
-                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                  <Button variant="outline" className="border-gray-700 hover:bg-gray-800 text-xs sm:text-sm">
-                    <Download className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                    App Store
-                  </Button>
-                  <Button variant="outline" className="border-gray-700 hover:bg-gray-800 text-xs sm:text-sm">
-                    <Download className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                    Google Play
-                  </Button>
-                </div>
+                <StoreDownloadLinksRow />
               </div>
               <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
                 <div className="flex items-center space-x-2">
@@ -965,6 +1181,72 @@ export default function LandingPage() {
                     </div>
                     <span className="text-xs font-medium text-white">Cart</span>
                   </Link>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">
+                  Preferences
+                </h3>
+                <div className="flex flex-col gap-3">
+                  <div
+                    className="flex w-fit items-center rounded-lg border border-white/10 bg-black/30 p-0.5 sm:hidden"
+                    role="group"
+                    aria-label="Language"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setLanguage('en')}
+                      className={cn(
+                        'rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors',
+                        language === 'en'
+                          ? 'bg-amber-500 text-gray-950'
+                          : 'text-white/65 hover:text-white'
+                      )}
+                    >
+                      EN
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLanguage('sw')}
+                      className={cn(
+                        'rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors',
+                        language === 'sw'
+                          ? 'bg-amber-500 text-gray-950'
+                          : 'text-white/65 hover:text-white'
+                      )}
+                    >
+                      SW
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 md:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setCurrency('USD')}
+                      className={cn(
+                        'flex flex-1 min-w-[7rem] items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors',
+                        currency === 'USD'
+                          ? 'border-amber-400/60 bg-amber-500/15 text-white'
+                          : 'border-white/10 bg-white/5 text-white/80 hover:bg-white/10'
+                      )}
+                    >
+                      <DollarSign className="h-4 w-4" />
+                      USD
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrency('TZS')}
+                      className={cn(
+                        'flex flex-1 min-w-[7rem] items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors',
+                        currency === 'TZS'
+                          ? 'border-amber-400/60 bg-amber-500/15 text-white'
+                          : 'border-white/10 bg-white/5 text-white/80 hover:bg-white/10'
+                      )}
+                    >
+                      <Landmark className="h-4 w-4" />
+                      TZS
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1106,9 +1388,9 @@ export default function LandingPage() {
                       >
                         Sign In
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        className="w-full border-white/30 text-white hover:bg-white/10 py-3 rounded-xl"
+                      <Button
+                        variant="outline"
+                        className="w-full border-amber-400/45 bg-zinc-950/70 py-3 text-amber-50 shadow-none hover:border-amber-400/65 hover:bg-amber-500/15 hover:text-white rounded-xl"
                         onClick={() => {
                           setIsHamburgerMenuOpen(false)
                           openAuthModal('register')

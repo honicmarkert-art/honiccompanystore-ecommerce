@@ -67,6 +67,9 @@ import { ValidationModal, useValidationModal } from "@/components/ui/validation-
 import { UserProfile } from "@/components/user-profile"
 import { Footer } from "@/components/footer"
 import { useOptimizedNavigation } from "@/components/optimized-link"
+import { getClientShippingPricing } from "@/lib/shipping-calculator"
+import { useTranslation } from "@/hooks/use-translation"
+import { CheckoutLanguageToggle } from "@/components/checkout-language-toggle"
 
 export default function CartPage() {
   return (
@@ -77,6 +80,7 @@ export default function CartPage() {
 }
 
 function CartPageContent() {
+  const t = useTranslation()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
   const { cart, updateItemQuantity, removeItem, cartUniqueProducts, cartSubtotal, clearCart, isLoading } = useCart() // Use useCart hook
   const { navigateWithPrefetch } = useOptimizedNavigation()
@@ -125,7 +129,8 @@ function CartPageContent() {
   } | null>(null)
   const [promoError, setPromoError] = useState('')
   const [isApplyingPromo, setIsApplyingPromo] = useState(false)
-  
+  // Shipping is calculated on checkout page (shipping address step / summary), not on cart
+
   // Fetch stock data for all cart items (debounced + only when product set changes)
   const stockDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastIdsSignatureRef = useRef<string>("")
@@ -376,11 +381,8 @@ function CartPageContent() {
     return wishlistItems.some(wishlistItem => wishlistItem.productId === productId)
   }, [wishlistItems])
 
-  // Calculate shipping cost: 5,000 TZS if order is less than 100,000 TZS, otherwise free
-  const FREE_SHIPPING_THRESHOLD = 100000 // Back to original threshold
-  const SHIPPING_COST = 5000
-  
-  
+  const { freeThresholdTz: FREE_SHIPPING_THRESHOLD } = getClientShippingPricing()
+
   const selectedItems = cart.filter(i => selected[i.productId])
   const hasSelection = selectedItems.length > 0
   // Count items (variants) not quantities - for mobile display
@@ -392,25 +394,11 @@ function CartPageContent() {
     ? selectedItems.reduce((s,i)=>s+(i.variants?.reduce((sum: number, v: any) => sum + (v.quantity || 0), 0) || i.totalQuantity || 0), 0)
     : totalQuantity
   const selectedSubtotal = hasSelection ? selectedItems.reduce((s,i)=>s+i.totalPrice,0) : cartSubtotal
+  const discountAmount = appliedPromotion ? appliedPromotion.discountAmount : 0
+  const cartTotal = hasSelection ? selectedSubtotal - discountAmount : 0
 
-  const calculateShippingFee = (subtotal: number) => {
-    // If cart total >= 100,000 TZS: Free delivery for all
-    if (subtotal >= FREE_SHIPPING_THRESHOLD) return 0
-    
-    // If cart total < 100,000 TZS: Check if ALL selected products have free delivery
-    const allProductsHaveFreeDelivery = selectedItems.every(item => {
-      const product = products.find(p => p.id === item.productId)
-      return (product as any)?.free_delivery === true || product?.freeDelivery === true
-    })
-    
-    // If ALL products have free delivery: Free delivery
-    // If MIXED products (some free, some paid): Apply delivery fee
-    return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
-  }
-
-  // Function to determine delivery status for each product
+  // Function to determine delivery status for each product (shipping calculated at checkout)
   const getDeliveryStatus = (product: any, itemTotal: number) => {
-    // Check if cart total qualifies for free shipping
     const cartQualifiesForFreeShipping = cartSubtotal >= FREE_SHIPPING_THRESHOLD
     
     // Check if individual product has free delivery (check both camelCase and snake_case)
@@ -426,25 +414,21 @@ function CartPageContent() {
     // Priority: Cart total threshold takes precedence
     // If cart total >= 100,000 TZS: All products get free delivery
     // If cart total < 100,000 TZS: Only products with free_delivery: true get free delivery
+    const dateRange = `${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`
     if (cartQualifiesForFreeShipping || (cartSubtotal < FREE_SHIPPING_THRESHOLD && productHasFreeDelivery)) {
       return {
         isFree: true,
-        text: `Free delivery ${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`,
+        text: `Free shipping ${dateRange}`,
         color: "text-green-600"
       }
     } else {
-      // Show delivery fee with date
       return {
         isFree: false,
-        text: `Delivery: ${formatPrice(SHIPPING_COST)} ${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`,
+        text: `Shipping fee applied ${dateRange}`,
         color: "text-orange-600"
       }
     }
   }
-  
-  const shippingCost = calculateShippingFee(selectedSubtotal)
-  const discountAmount = appliedPromotion ? appliedPromotion.discountAmount : 0
-  const total = selectedSubtotal + shippingCost - discountAmount
 
   const handleApplyPromo = useCallback(async () => {
     if (!promoCode.trim()) return
@@ -630,8 +614,8 @@ function CartPageContent() {
             className="flex items-center gap-1 text-xs font-semibold flex-shrink-0 text-gray-900 dark:text-white p-1"
           >
             <ChevronLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Back to Products</span>
-            <span className="sm:hidden">Back</span>
+            <span className="hidden sm:inline">{t('cart.backToProducts')}</span>
+            <span className="sm:hidden">{t('cart.backShort')}</span>
           </Button>
 
           {/* Logo */}
@@ -686,6 +670,8 @@ function CartPageContent() {
               )}
             </Button>
 
+            <CheckoutLanguageToggle />
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -731,7 +717,7 @@ function CartPageContent() {
                 className="relative bg-white text-neutral-950 hover:bg-neutral-100 rounded-full text-sm w-7 h-7 sm:w-10 sm:h-10"
               >
                 <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="sr-only">Shopping Cart</span>
+                <span className="sr-only">{t('cart.srOnlyCart')}</span>
                 <span className="absolute -top-1 -right-1 flex h-3 w-3 sm:h-4 sm:w-4 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
                   {cartUniqueProducts}
                 </span>
@@ -823,48 +809,46 @@ function CartPageContent() {
                 <div className="w-6 h-6 sm:w-8 sm:h-8 bg-yellow-500 rounded-full flex items-center justify-center">
                   <span className="text-white text-xs sm:text-sm font-bold">1</span>
                 </div>
-                <span className="ml-1 sm:ml-2 text-xs sm:text-sm font-medium">Cart</span>
+                <span className="ml-1 sm:ml-2 text-xs sm:text-sm font-medium">{t('cart.cartLabelProgress')}</span>
               </div>
               <div className="w-8 sm:w-12 h-0.5 bg-gray-300"></div>
               <div className="flex items-center">
                 <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-300 rounded-full flex items-center justify-center">
                   <span className="text-gray-600 text-xs sm:text-sm font-bold">2</span>
                 </div>
-                <span className="ml-1 sm:ml-2 text-xs sm:text-sm text-gray-500">Shipping</span>
+                <span className="ml-1 sm:ml-2 text-xs sm:text-sm text-gray-500">{t('cart.shippingLabelProgress')}</span>
               </div>
               <div className="w-8 sm:w-12 h-0.5 bg-gray-300"></div>
               <div className="flex items-center">
                 <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-300 rounded-full flex items-center justify-center">
                   <span className="text-gray-600 text-xs sm:text-sm font-bold">3</span>
                 </div>
-                <span className="ml-1 sm:ml-2 text-xs sm:text-sm text-gray-500">Payment</span>
+                <span className="ml-1 sm:ml-2 text-xs sm:text-sm text-gray-500">{t('cart.paymentLabelProgress')}</span>
               </div>
             </div>
           </div>
 
-          <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>Shopping Cart</h1>
+          <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>
+            {t('cart.pageTitle')}
+          </h1>
 
         {isLoading ? (
           <div className={cn("text-center py-16 sm:py-20", themeClasses.textNeutralSecondary)} suppressHydrationWarning>
             <div className="max-w-md mx-auto">
               <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
-              <h2 className="text-xl sm:text-2xl font-semibold mb-3">Loading your cart...</h2>
-              <p className="text-sm sm:text-base mb-8 opacity-80">
-                Please wait while we fetch your cart items.
-              </p>
+              <h2 className="text-xl sm:text-2xl font-semibold mb-3">{t('cart.loadingTitle')}</h2>
+              <p className="text-sm sm:text-base mb-8 opacity-80">{t('cart.loadingSubtitle')}</p>
             </div>
           </div>
         ) : cart.length === 0 ? (
             <div className={cn("text-center py-16 sm:py-20", themeClasses.textNeutralSecondary)} suppressHydrationWarning>
               <div className="max-w-md mx-auto">
                 <ShoppingCart className={cn("w-16 h-16 sm:w-24 sm:h-24 mx-auto mb-6", themeClasses.textNeutralSecondary)} />
-                <h2 className="text-xl sm:text-2xl font-semibold mb-3">Your cart is empty</h2>
-                <p className="text-sm sm:text-base mb-8 opacity-80">
-                  Looks like you haven't added anything to your cart yet.
-                </p>
+                <h2 className="text-xl sm:text-2xl font-semibold mb-3">{t('cart.emptyTitle')}</h2>
+                <p className="text-sm sm:text-base mb-8 opacity-80">{t('cart.emptySubtitle')}</p>
             <Link href="/products">
                   <Button className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600 px-8 py-3 text-base">
-                    Start Shopping
+                    {t('cart.startShopping')}
                   </Button>
             </Link>
               </div>
@@ -884,25 +868,25 @@ function CartPageContent() {
                       <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
                       <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
                       <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
-                        Cart Items ({hasSelection ? selectedItems.reduce((sum, item) => sum + (item.variants?.length || 1), 0) : totalCartItems})
+                        {t('cart.cartItemsHeading')} ({hasSelection ? selectedItems.reduce((sum, item) => sum + (item.variants?.length || 1), 0) : totalCartItems})
                       </span>
                     </div>
                     <div className="hidden sm:flex items-center gap-4 text-sm">
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Total Items: {selectedTotalQuantity}
+                        {t('cart.totalItems')} {hasSelection ? selectedTotalQuantity : 0}
                       </span>
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Subtotal: {formatPrice(selectedSubtotal)}
+                        {t('cart.subtotalLabel')} {formatPrice(hasSelection ? selectedSubtotal : 0)}
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center justify-between sm:justify-end gap-2">
                     <div className="flex sm:hidden items-center gap-2 text-xs">
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Items: {selectedItemsCount}
+                        Items: {hasSelection ? selectedItemsCount : 0}
                       </span>
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Total: {formatPrice(selectedSubtotal)}
+                        Total: {formatPrice(cartTotal)}
                       </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1180,7 +1164,7 @@ function CartPageContent() {
                                           minWidth: '1.5rem',
                                           maxWidth: '4rem'
                                         }}
-                                        className="px-1 py-0.5 text-[10px] font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-5 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out"
+                                        className="px-1 py-0.5 text-[10px] font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-5 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                       />
                               <Button
                                 variant="ghost"
@@ -1277,7 +1261,7 @@ function CartPageContent() {
                                         minWidth: '2.5rem',
                                         maxWidth: '6rem'
                                       }}
-                                      className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out"
+                                      className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                     <Button
                                       variant="ghost"
@@ -1356,36 +1340,31 @@ function CartPageContent() {
                   themeClasses.cardBorder,
                 )} suppressHydrationWarning>
                   <CardContent className="p-6 space-y-6">
-                    <h2 className={cn("text-xl font-bold", themeClasses.mainText)}>Order Summary</h2>
+                    <h2 className={cn("text-xl font-bold", themeClasses.mainText)}>{t('cart.orderSummaryTitle')}</h2>
                     
-                    {/* Summary Details */}
+                    {/* Summary — Subtotal and Total only; shipping calculated at checkout */}
                     <div className="space-y-3">
                       <div className="flex justify-between">
-                        <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>Subtotal ({hasSelection ? selectedItems.length : cart.length} items):</span>
-                        <span className={cn("font-medium", themeClasses.mainText)}>{formatPrice(selectedSubtotal)}</span>
+                        <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                          {t('cart.subtotalWord')} ({hasSelection ? selectedItems.length : 0} {t('cart.itemsWord')}):
+                        </span>
+                        <span className={cn("font-medium", themeClasses.mainText)}>{formatPrice(hasSelection ? selectedSubtotal : 0)}</span>
                       </div>
                       
-                      {discountAmount > 0 && (
+                      {hasSelection && discountAmount > 0 && (
                         <div className="flex justify-between">
-                          <span className={cn("text-sm text-green-600 dark:text-green-400", themeClasses.textNeutralSecondary)}>Discount:</span>
+                          <span className={cn("text-sm text-green-600 dark:text-green-400", themeClasses.textNeutralSecondary)}>{t('cart.discountLabel')}</span>
                           <span className={cn("font-medium text-green-600 dark:text-green-400", themeClasses.mainText)}>
                             -{formatPrice(discountAmount)}
                           </span>
                         </div>
                       )}
                       
-                      <div className="flex justify-between">
-                        <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>Shipping:</span>
-                        <span className={cn("font-medium", shippingCost === 0 ? "text-green-500" : themeClasses.mainText)}>
-                          {shippingCost === 0 ? "Free" : formatPrice(shippingCost)}
-                        </span>
-                      </div>
-                      
                       <div className="border-t pt-3">
                         <div className="flex justify-between">
-                          <span className={cn("text-lg font-bold", themeClasses.mainText)}>Total:</span>
+                          <span className={cn("text-lg font-bold", themeClasses.mainText)}>{t('cart.totalHeading')}</span>
                           <span className={cn("text-lg font-bold", themeClasses.mainText)}>
-                            {formatPrice(total)}
+                            {formatPrice(cartTotal)}
                           </span>
                         </div>
                       </div>
@@ -1403,7 +1382,7 @@ function CartPageContent() {
                               </span>
                             </div>
                             <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
-                              {appliedPromotion.name} • {formatPrice(appliedPromotion.discountAmount)} discount applied
+                              {appliedPromotion.name} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
                             </p>
                           </div>
                           <Button
@@ -1424,7 +1403,7 @@ function CartPageContent() {
                           <div className="flex items-center gap-2">
                             <Input
                               type="text"
-                              placeholder="Enter promo code"
+                              placeholder={t('cart.promoPlaceholder')}
                               value={promoCode}
                               onChange={(e) => {
                                 setPromoCode(e.target.value.toUpperCase())
@@ -1448,7 +1427,7 @@ function CartPageContent() {
                               onClick={handleApplyPromo}
                               disabled={isApplyingPromo || !promoCode.trim()}
                             >
-                              {isApplyingPromo ? '...' : 'Apply'}
+                              {isApplyingPromo ? t('cart.applyingShort') : t('cart.apply')}
                             </Button>
                           </div>
                           {promoError && (
@@ -1465,7 +1444,7 @@ function CartPageContent() {
                       {/* Checkout Reminder Text */}
                       <div className="text-center p-2 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
                         <p className="text-xs sm:text-sm text-red-700 dark:text-red-300 font-medium">
-                          Please check all through your products item before checkout
+                          {t('cart.checkoutReminder')}
                         </p>
                       </div>
                       
@@ -1474,7 +1453,7 @@ function CartPageContent() {
                         size="lg"
                         onClick={handleProceedToCheckout}
                       >
-                        Proceed to Checkout
+                        {t('cart.proceedToCheckout')}
                       </Button>
                       
                       <Button 
@@ -1497,7 +1476,7 @@ function CartPageContent() {
                           navigateWithPrefetch('/products', { priority: 'medium', scroll: false })
                         }}
                       >
-                        Continue Shopping
+                        {t('cart.continueShopping')}
                       </Button>
                     </div>
 

@@ -7,6 +7,11 @@ import { securityUtils } from '@/lib/secure-config'
 import { validateAuth } from '@/lib/auth-server'
 import { emailService } from '@/lib/email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
+import {
+  calculateShippingBreakdownTrusted,
+  extractDeliveryLocationFields,
+  shippingAddressToGeocodeInput,
+} from '@/lib/shipping-calculator'
 
 
 
@@ -365,23 +370,23 @@ export async function POST(request: NextRequest) {
       serverCalculatedSubtotal += serverTotalPrice
     }
 
-    // SECURITY: Calculate shipping fee server-side
-    const FREE_SHIPPING_THRESHOLD = 100000
-    const SHIPPING_COST = 5000
-    let serverShippingFee = 0
-
-    if (orderData.deliveryOption !== 'pickup') {
-      if (serverCalculatedSubtotal >= FREE_SHIPPING_THRESHOLD) {
-        serverShippingFee = 0
-      } else {
-        // Check if all products have free delivery
-        const allProductsHaveFreeDelivery = validatedItems.every((item: any) => {
-          const product = productMap.get(item.product_id)
-          return product && (product as any).free_delivery === true
-        })
-        serverShippingFee = allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
-      }
-    }
+    // SECURITY: Shipping = zone base + distance from zone hub; coords from server geocode only (see shipping-calculator)
+    const { region: deliveryRegion, district: deliveryDistrict, ward: deliveryWard } =
+      extractDeliveryLocationFields(orderData)
+    const allProductsHaveFreeDelivery = validatedItems.every((item: any) => {
+      const product = productMap.get(item.product_id)
+      return product && (product as any).free_delivery === true
+    })
+    const shippingBreakdown = await calculateShippingBreakdownTrusted({
+      deliveryOption: orderData.deliveryOption === 'pickup' ? 'pickup' : 'shipping',
+      subtotal: serverCalculatedSubtotal,
+      allProductsFreeDelivery: allProductsHaveFreeDelivery,
+      region: deliveryRegion,
+      district: deliveryDistrict,
+      ward: deliveryWard,
+      addressForGeocode: shippingAddressToGeocodeInput(orderData.shippingAddress),
+    })
+    const serverShippingFee = shippingBreakdown.totalTz
 
     // SECURITY: Validate and recalculate promotion discount server-side
     let serverPromotionDiscount = 0

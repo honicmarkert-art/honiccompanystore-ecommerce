@@ -40,7 +40,7 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
     const numAmount = typeof amount === 'number' ? amount : parseFloat(String(amount || 0))
     
     if (isNaN(numAmount) || numAmount === null || numAmount === undefined) {
-      return currency === "USD" ? "$0.00" : "TSh 0"
+      return currency === "USD" ? "$0.00" : "TSh 0.00"
     }
     
     // NEW APPROACH: All prices are stored in TZS, convert to USD for display if needed
@@ -50,11 +50,11 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
       const usdAmount = numAmount * TZS_TO_USD_RATE
       return `$${usdAmount.toFixed(2)}`
     } else {
-      // Display TZS as-is (no conversion needed)
+      // Display TZS as-is with 2 decimal places for consistency (e.g. TSh 0.00)
       if (isNaN(numAmount) || numAmount === null || numAmount === undefined || typeof numAmount !== 'number') {
-        return "TSh 0"
+        return "TSh 0.00"
       }
-      return `TSh ${numAmount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+      return `TSh ${numAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     }
   }
 

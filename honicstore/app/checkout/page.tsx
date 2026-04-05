@@ -1,7 +1,7 @@
 "use client"
 
 import { BuyerRouteGuard } from '@/components/buyer-route-guard'
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
@@ -20,6 +20,12 @@ import {
   MapPinIcon,
   Bell,
   Lightbulb,
+  RefreshCcw,
+  Shield,
+  CreditCard,
+  Ticket,
+  Plus,
+  Minus,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -37,6 +43,7 @@ import { useCurrency } from "@/contexts/currency-context"
 import { useComingSoonModal } from "@/components/coming-soon-modal"
 import { useToast } from "@/hooks/use-toast"
 import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
+import { TANZANIA_REGIONS, DISTRICTS_BY_REGION, getWardOptions } from "@/lib/tanzania-address"
 import { CheckoutPageSkeleton } from "@/components/ui/skeleton"
 import { 
   getSiteUrl, 
@@ -47,6 +54,9 @@ import {
   getSecureErrorMessage,
   fetchWithRetry
 } from "@/lib/checkout-utils"
+import { getClientShippingPricing } from "@/lib/shipping-calculator"
+import { useTranslation } from "@/hooks/use-translation"
+import { CheckoutLanguageToggle } from "@/components/checkout-language-toggle"
 
 interface ShippingAddress {
   fullName: string
@@ -60,6 +70,12 @@ interface ShippingAddress {
   email: string
   streetName?: string
   tin?: string
+  region?: string
+  district?: string
+  ward?: string
+  /** Set at submit when known; used server-side for distance / flat shipping. */
+  lat?: number
+  lon?: number
 }
 
 interface PaymentDetails {
@@ -91,7 +107,7 @@ export default function CheckoutPage() {
 function CheckoutPageContent() {
   const router = useRouter()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
-  const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem } = useCart()
+  const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem, updateItemQuantity } = useCart()
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
@@ -102,6 +118,7 @@ function CheckoutPageContent() {
   const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { currency, setCurrency, formatPrice } = useCurrency()
   const { showComingSoon, ComingSoonModal } = useComingSoonModal()
+  const t = useTranslation()
 
   // Get selected items for display
   const getSelectedItems = () => {
@@ -146,12 +163,17 @@ function CheckoutPageContent() {
   const selectedItems = getSelectedItems()
   const selectedItemsCount = selectedItems.reduce((sum, item) => sum + item.totalQuantity, 0)
   const selectedSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
+  const orderReviewItemCount = selectedItems.flatMap(i => i.variants || []).length || selectedItems.length
+
+  // Same as cart page - for qty input width
+  const getDesktopQuantityInputWidth = (qty: number) => {
+    const n = String(qty).length
+    return Math.min(6, Math.max(2.5, 2.5 + n * 0.8))
+  }
   
   
-  // Calculate shipping cost: 5,000 TZS if order is less than 100,000 TZS, otherwise free
-  const FREE_SHIPPING_THRESHOLD = 100000
-  const SHIPPING_COST = 5000
-  
+  const { freeThresholdTz: FREE_SHIPPING_THRESHOLD, flatRateTz: SHIPPING_COST } = getClientShippingPricing()
+
   const [currentStep, setCurrentStep] = useState(0)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
@@ -164,25 +186,80 @@ function CheckoutPageContent() {
   const [orderPickupId, setOrderPickupId] = useState<string | null>(null)
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
   const [deliveryOption, setDeliveryOption] = useState<'shipping' | 'pickup'>('shipping')
-  
-  // Calculate shipping fee based on delivery option and order total
+  // Location coords when structured address is forward-geocoded (optional on order payload)
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lon: number } | null>(null)
+
+  const [formData, setFormData] = useState<FormData>({
+    shippingAddress: {
+      fullName: "",
+      address1: "",
+      address2: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "Tanzania",
+      phone: "",
+      email: "",
+      streetName: "",
+      tin: "",
+      region: "",
+      district: "",
+      ward: "",
+    },
+    billingAddress: {
+      fullName: "",
+      address1: "",
+      address2: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "Tanzania",
+      phone: "",
+      email: "",
+      streetName: "",
+      tin: "",
+      region: "",
+      district: "",
+      ward: "",
+    },
+    paymentDetails: {
+      paymentMethod: 'clickpesa',
+      cardNumber: "",
+      expiryDate: "",
+      cvv: "",
+      cardholderName: "",
+      mobileNumber: "",
+      mobileProvider: "",
+    },
+    sameAsBilling: false,
+    sameAsShipping: false,
+  })
+
+  // Server-side shipping estimate (from shipping address / location); used in Order Summary
+  const [shippingEstimate, setShippingEstimate] = useState<{
+    subtotal: number
+    shipping: number
+    total: number
+    shippingBase?: number
+    shippingDistanceAddon?: number
+    shippingGeocoded?: boolean
+  } | null>(null)
+  const [shippingEstimateLoading, setShippingEstimateLoading] = useState(false)
+
+  // Fallback client-side shipping (when server estimate not yet available)
   const calculateShippingFee = () => {
     if (deliveryOption === 'pickup') return 0
-    
-    // If cart total >= 100,000 TZS: Free delivery for all
     if (selectedSubtotal >= FREE_SHIPPING_THRESHOLD) return 0
-    
-    // If cart total < 100,000 TZS: Check if ALL selected products have free delivery
     const allProductsHaveFreeDelivery = selectedItems.every(item => {
       return (item as any)?.free_delivery === true || (item as any)?.freeDelivery === true
     })
-    
-    // If ALL products have free delivery: Free delivery
-    // If MIXED products (some free, some paid): Apply delivery fee
     return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
   }
-  
-  const shippingFee = calculateShippingFee()
+
+  const fallbackShippingFee = calculateShippingFee()
+  const displaySubtotal = shippingEstimate?.subtotal ?? selectedSubtotal
+  const displayShipping = deliveryOption === 'pickup' ? 0 : (shippingEstimate?.shipping ?? fallbackShippingFee)
+  const shippingFee = displayShipping
   
   // Get applied promotion from sessionStorage
   const [appliedPromotion, setAppliedPromotion] = useState<{
@@ -205,9 +282,107 @@ function CheckoutPageContent() {
       }
     } catch {}
   }, [])
-  
+
+  // Stable key for shipping estimate so we only refetch when cart/location/delivery actually change
+  const shippingEstimateKey = (() => {
+    const items = selectedItems.flatMap((item) =>
+      (item.variants || []).map((v: any) => [item.productId, v.variantId ?? null, v.quantity ?? 1])
+    )
+    const a = formData.shippingAddress
+    return JSON.stringify({
+      items,
+      deliveryOption,
+      region: a.region,
+      district: a.district,
+      ward: a.ward,
+      country: a.country,
+      city: a.city,
+      streetName: a.streetName,
+      address1: a.address1,
+      address2: a.address2,
+    })
+  })()
+
+  // Fetch server-side shipping estimate when items, delivery option, or location (shipping address) change
+  useEffect(() => {
+    const items = selectedItems.flatMap((item) =>
+      (item.variants || []).map((v: any) => ({
+        productId: item.productId,
+        variantId: v.variantId ?? null,
+        quantity: v.quantity ?? 1,
+      }))
+    )
+    if (items.length === 0) {
+      setShippingEstimate(null)
+      setShippingEstimateLoading(false)
+      return
+    }
+    let cancelled = false
+    setShippingEstimateLoading(true)
+    fetch('/api/cart/shipping-estimate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items,
+        deliveryOption,
+        country: deliveryOption === 'shipping' ? formData.shippingAddress.country : undefined,
+        region:
+          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+            ? formData.shippingAddress.region
+            : undefined,
+        district:
+          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+            ? formData.shippingAddress.district
+            : undefined,
+        ward:
+          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+            ? formData.shippingAddress.ward
+            : undefined,
+        city: deliveryOption === 'shipping' ? formData.shippingAddress.city : undefined,
+        streetName:
+          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+            ? formData.shippingAddress.streetName
+            : undefined,
+        address1:
+          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+            ? formData.shippingAddress.address1
+            : undefined,
+        address2:
+          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+            ? formData.shippingAddress.address2
+            : undefined,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return
+        if (data.error) {
+          setShippingEstimate(null)
+          return
+        }
+        setShippingEstimate({
+          subtotal: Number(data.subtotal) || 0,
+          shipping: Number(data.shipping) ?? 0,
+          total: Number(data.total) ?? 0,
+          shippingBase: typeof data.shippingBase === 'number' ? data.shippingBase : undefined,
+          shippingDistanceAddon:
+            typeof data.shippingDistanceAddon === 'number' ? data.shippingDistanceAddon : undefined,
+          shippingGeocoded: typeof data.shippingGeocoded === 'boolean' ? data.shippingGeocoded : undefined,
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setShippingEstimate(null)
+      })
+      .finally(() => {
+        if (!cancelled) setShippingEstimateLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [shippingEstimateKey])
+
   const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
-  const orderTotal = selectedSubtotal + shippingFee - promotionDiscount
+  const orderTotal = displaySubtotal + displayShipping - promotionDiscount
 
   // Timeout for payment processing (increased to 60 seconds for slower networks)
   useEffect(() => {
@@ -243,48 +418,44 @@ function CheckoutPageContent() {
     setIsClient(true)
   }, [])
 
-  const [formData, setFormData] = useState<FormData>({
-    shippingAddress: {
-      fullName: "",
-      address1: "",
-      address2: "",
-      city: "",
-      state: "",
-      postalCode: "",
-      country: "Tanzania",
-      phone: "",
-      email: "",
-      streetName: "",
-      tin: "",
-    },
-    billingAddress: {
-      fullName: "",
-      address1: "",
-      address2: "",
-      city: "",
-      state: "",
-      postalCode: "",
-      country: "Tanzania",
-      phone: "",
-      email: "",
-      streetName: "",
-      tin: "",
-    },
-    paymentDetails: {
-      paymentMethod: 'clickpesa',
-      cardNumber: "",
-      expiryDate: "",
-      cvv: "",
-      cardholderName: "",
-      mobileNumber: "",
-      mobileProvider: "",
-    },
-    sameAsBilling: false,
-    sameAsShipping: false,
-  })
-
   // Track if form has been prefilled to prevent overwriting user edits
   const hasPrefilledRef = useRef(false)
+  const deliveryAutoCalcRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Auto-calculate delivery from structured address (region/district/ward/street) when enough is filled
+  useEffect(() => {
+    if (deliveryOption !== 'shipping') return
+    const a = formData.shippingAddress
+    const isTz = (a.country || 'Tanzania').toLowerCase().includes('tanzania')
+    // Famous place (address2) used only for precision in geocode; if missing, no effect
+    const parts = isTz
+      ? [a.ward?.trim(), a.district?.trim(), a.region?.trim(), a.streetName?.trim(), a.address1?.trim(), a.address2?.trim(), a.country?.trim() || 'Tanzania'].filter(Boolean) as string[]
+      : [a.streetName?.trim(), a.address1?.trim(), a.address2?.trim(), a.city?.trim(), a.state?.trim(), a.country?.trim() || 'Tanzania'].filter(Boolean) as string[]
+    const hasEnough = isTz ? (a.region && (a.district || a.ward || (a.streetName?.trim()) || (a.address1?.trim()))) : parts.length >= 2
+    if (!hasEnough || parts.length < 2) return
+    if (deliveryAutoCalcRef.current) clearTimeout(deliveryAutoCalcRef.current)
+    deliveryAutoCalcRef.current = setTimeout(async () => {
+      deliveryAutoCalcRef.current = null
+      const query = parts.reverse().join(', ')
+      try {
+        const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(query)}`)
+        const data = await res.json()
+        if (Array.isArray(data) && data.length > 0 && data[0].lat != null && data[0].lon != null) {
+          const lat = parseFloat(data[0].lat)
+          const lon = parseFloat(data[0].lon)
+          if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+            setLocationCoords({ lat, lon })
+            toast({ title: 'Delivery price updated', description: 'Fee is now based on your address.' })
+          }
+        }
+      } catch {
+        // keep previous coords or default
+      }
+    }, 800)
+    return () => {
+      if (deliveryAutoCalcRef.current) clearTimeout(deliveryAutoCalcRef.current)
+    }
+  }, [deliveryOption, formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward, formData.shippingAddress.streetName, formData.shippingAddress.address1, formData.shippingAddress.address2, formData.shippingAddress.city, formData.shippingAddress.state, formData.shippingAddress.country])
 
   // Prefill form data for authenticated users (only once, and only if fields are empty)
   useEffect(() => {
@@ -353,6 +524,9 @@ function CheckoutPageContent() {
         email: "",
         streetName: "",
         tin: "",
+        region: "",
+        district: "",
+        ward: "",
       }
     }))
   }
@@ -375,8 +549,8 @@ function CheckoutPageContent() {
   const handlePlaceOrder = async () => {
       if (!cart || cart.length === 0) {
         toast({
-          title: "Empty Cart",
-          description: "Your cart is empty. Please add items before placing an order.",
+          title: t('checkout.toastEmptyCartTitle'),
+          description: t('checkout.toastEmptyCartDesc'),
           variant: "destructive"
         })
         return
@@ -400,8 +574,8 @@ function CheckoutPageContent() {
       if (!phoneValidation.valid) {
         setIsProcessingPayment(false)
         toast({
-          title: "Invalid Phone Number",
-          description: phoneValidation.error,
+          title: t('checkout.toastInvalidPhoneTitle'),
+          description: t('checkout.toastInvalidPhoneDesc'),
           variant: "destructive"
         })
         return
@@ -412,8 +586,8 @@ function CheckoutPageContent() {
       if (!emailValidation.valid) {
         setIsProcessingPayment(false)
         toast({
-          title: "Invalid Email Address",
-          description: emailValidation.error,
+          title: t('checkout.toastInvalidEmailTitle'),
+          description: t('checkout.toastInvalidEmailDesc'),
           variant: "destructive"
         })
         return
@@ -440,6 +614,61 @@ function CheckoutPageContent() {
       // Prepare order data (reuse selectedIds from validation above)
       const selectedItems = selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
 
+      // Server-side estimate matches POST /api/orders (zones from address + optional lat/lon)
+      const orderItems = selectedItems.flatMap(item =>
+        item.variants.map(variant => ({
+          productId: item.productId,
+          variantId: variant.variantId ?? null,
+          quantity: variant.quantity ?? 1,
+        }))
+      )
+      let serverShippingFee = deliveryOption === 'pickup' ? 0 : SHIPPING_COST
+      let serverSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
+      try {
+        const estimateRes = await fetch('/api/cart/shipping-estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: orderItems,
+            deliveryOption,
+            country: deliveryOption === 'shipping' ? formData.shippingAddress.country : undefined,
+            region:
+              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+                ? formData.shippingAddress.region
+                : undefined,
+            district:
+              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+                ? formData.shippingAddress.district
+                : undefined,
+            ward:
+              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+                ? formData.shippingAddress.ward
+                : undefined,
+            city: deliveryOption === 'shipping' ? formData.shippingAddress.city : undefined,
+            streetName:
+              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+                ? formData.shippingAddress.streetName
+                : undefined,
+            address1:
+              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+                ? formData.shippingAddress.address1
+                : undefined,
+            address2:
+              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
+                ? formData.shippingAddress.address2
+                : undefined,
+          }),
+        })
+        const estimate = await estimateRes.json()
+        if (!estimate.error && typeof estimate.subtotal === 'number' && typeof estimate.shipping === 'number') {
+          serverSubtotal = estimate.subtotal
+          serverShippingFee = estimate.shipping
+        }
+      } catch {
+        // use fallbacks above
+      }
+      const serverTotalAmount = Math.round(serverSubtotal + serverShippingFee - promotionDiscount)
+
       const orderData = {
         orderNumber: orderId,
         userId: user?.id || null, // null for guest users
@@ -460,13 +689,18 @@ function CheckoutPageContent() {
           name: item.product?.name || `Product ${item.productId}`,
           }))
         ),
-        shippingAddress: formData.shippingAddress,
+        shippingAddress: {
+          ...formData.shippingAddress,
+          ...(deliveryOption === 'shipping' && locationCoords
+            ? { lat: locationCoords.lat, lon: locationCoords.lon }
+            : {}),
+        },
         billingAddress: formData.sameAsShipping ? formData.shippingAddress : formData.billingAddress,
         deliveryOption,
-        shippingFee: shippingFee,
+        shippingFee: serverShippingFee,
         promotionCode: appliedPromotion?.code || null,
         promotionDiscount: promotionDiscount,
-        totalAmount: orderTotal,
+        totalAmount: serverTotalAmount,
         timestamp: new Date().toISOString(),
       }
 
@@ -741,7 +975,7 @@ function CheckoutPageContent() {
   // Validation functions
   const validateDeliveryOption = () => {
     if (!deliveryOption) {
-      setValidationErrors({ deliveryOption: "Please select a delivery option" })
+      setValidationErrors({ deliveryOption: t('checkout.errSelectDeliveryOption') })
       return false
     }
     return true
@@ -751,28 +985,30 @@ function CheckoutPageContent() {
     const errors: Record<string, string> = {}
 
       if (!formData.shippingAddress.fullName.trim()) {
-      errors.shippingFullName = "Full name is required"
+      errors.shippingFullName = t('checkout.errFullNameRequired')
       }
       if (!formData.shippingAddress.phone.trim()) {
-      errors.shippingPhone = "Phone number is required"
+      errors.shippingPhone = t('checkout.errPhoneRequired')
       }
       if (!formData.shippingAddress.email.trim()) {
-      errors.shippingEmail = "Email address is required"
+      errors.shippingEmail = t('checkout.errEmailRequired')
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.shippingAddress.email)) {
-      errors.shippingEmail = "Please enter a valid email address"
+      errors.shippingEmail = t('checkout.errEmailInvalid')
     }
-    if (!formData.shippingAddress.city.trim()) {
-      errors.shippingCity = "City is required"
+    if (formData.shippingAddress.country === 'Tanzania') {
+      if (!formData.shippingAddress.region?.trim()) errors.shippingRegion = t('checkout.errRegionRequired')
+      if (!formData.shippingAddress.district?.trim()) errors.shippingDistrict = t('checkout.errDistrictRequired')
+      if (!formData.shippingAddress.ward?.trim()) errors.shippingWard = t('checkout.errWardRequired')
+    } else {
+      if (!formData.shippingAddress.city.trim()) errors.shippingCity = t('checkout.errCityRequired')
     }
     if (!formData.shippingAddress.streetName?.trim()) {
-      errors.shippingStreet = "Street name is required"
+      errors.shippingStreet = t('checkout.errStreetRequired')
     }
     if (!formData.shippingAddress.address1.trim()) {
-      errors.shippingAddress1 = "House/building number is required"
+      errors.shippingAddress1 = t('checkout.errHouseRequired')
     }
-    if (!formData.shippingAddress.address2?.trim()) {
-      errors.shippingLandmark = "Nearby landmark is required"
-    }
+    // Landmark is optional — for precision only; if not found, no effect
 
     setValidationErrors(errors)
     return Object.keys(errors).length === 0
@@ -784,21 +1020,21 @@ function CheckoutPageContent() {
       const errors: Record<string, string> = {}
       
       if (!formData.billingAddress.fullName.trim()) {
-        errors.billingFullName = "Full name is required"
+        errors.billingFullName = t('checkout.errFullNameRequired')
       }
       if (!formData.billingAddress.phone.trim()) {
-        errors.billingPhone = "Phone number is required"
+        errors.billingPhone = t('checkout.errPhoneRequired')
       } else {
         // Validate Tanzania phone number format
         const phoneValidation = validateTanzaniaPhone(formData.billingAddress.phone)
         if (!phoneValidation.valid) {
-          errors.billingPhone = phoneValidation.error || "Invalid phone number"
+          errors.billingPhone = t('checkout.errInvalidPhoneFormat')
         }
       }
       if (!formData.billingAddress.email.trim()) {
-        errors.billingEmail = "Email address is required"
+        errors.billingEmail = t('checkout.errEmailRequired')
       } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.billingAddress.email)) {
-        errors.billingEmail = "Please enter a valid email address"
+        errors.billingEmail = t('checkout.errEmailInvalid')
       }
 
       setValidationErrors(errors)
@@ -814,30 +1050,30 @@ function CheckoutPageContent() {
     const errors: Record<string, string> = {}
     
     if (!formData.billingAddress.fullName.trim()) {
-      errors.billingFullName = "Full name is required"
+      errors.billingFullName = t('checkout.errFullNameRequired')
     }
     if (!formData.billingAddress.phone.trim()) {
-      errors.billingPhone = "Phone number is required"
+      errors.billingPhone = t('checkout.errPhoneRequired')
     } else {
       // Validate Tanzania phone number format
       const phoneValidation = validateTanzaniaPhone(formData.billingAddress.phone)
       if (!phoneValidation.valid) {
-        errors.billingPhone = phoneValidation.error || "Invalid phone number"
+        errors.billingPhone = t('checkout.errInvalidPhoneFormat')
       }
     }
     if (!formData.billingAddress.email.trim()) {
-      errors.billingEmail = "Email address is required"
+      errors.billingEmail = t('checkout.errEmailRequired')
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.billingAddress.email)) {
-      errors.billingEmail = "Please enter a valid email address"
+      errors.billingEmail = t('checkout.errEmailInvalid')
     }
     if (!formData.billingAddress.city.trim()) {
-      errors.billingCity = "City is required"
+      errors.billingCity = t('checkout.errCityRequired')
     }
     if (!formData.billingAddress.streetName?.trim()) {
-      errors.billingStreet = "Street name is required"
+      errors.billingStreet = t('checkout.errStreetRequired')
     }
     if (!formData.billingAddress.address1.trim()) {
-      errors.billingAddress1 = "Address is required"
+      errors.billingAddress1 = t('checkout.errBillingAddressRequired')
     }
 
     setValidationErrors(errors)
@@ -898,8 +1134,12 @@ function CheckoutPageContent() {
         return (
           <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
             <CardHeader className="p-3 sm:p-6">
-              <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>Delivery Option</CardTitle>
-              <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Choose how you'd like to receive your order</p>
+              <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>
+                {t('checkout.deliveryOptionTitle')}
+              </CardTitle>
+              <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
+                {t('checkout.deliveryOptionSubtitle')}
+              </p>
             </CardHeader>
             <CardContent className="p-3 sm:p-6">
               {/* Validation Error Display */}
@@ -932,33 +1172,17 @@ function CheckoutPageContent() {
                   <div className="flex items-start space-x-3">
                     <Truck className="w-5 h-5 text-blue-500 mt-1" />
                     <div className="flex-1">
-                      <h3 className={cn("font-medium text-base", themeClasses.mainText)}>Shipping Delivery</h3>
+                      <h3 className={cn("font-medium text-base", themeClasses.mainText)}>
+                        {t('checkout.shippingDeliveryTitle')}
+                      </h3>
                       <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                        We'll deliver your order directly to your doorstep
+                        {t('checkout.shippingDeliveryDesc')}
                       </p>
                       <div className="mt-2 space-y-1">
                         <div className="flex items-center space-x-2">
                           <Package className="w-3 h-3 text-transparent" />
                           <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Delivery Time:</strong> 3-5 business days
-                          </p>
-                       </div>
-                        <div className="flex items-center space-x-2">
-                          <DollarSign className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Delivery Fee:</strong> TZS 5,000 (Free on orders over TZS 100,000)
-                          </p>
-                   </div>
-                        <div className="flex items-center space-x-2">
-                          <Navigation className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Coverage:</strong> Dar es Salaam, Arusha, Mwanza, Dodoma
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Clock className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Delivery Hours:</strong> Monday - Saturday, 8:00 AM - 6:00 PM
+                            <strong>{t('checkout.estDeliveryLabel')}</strong> {t('checkout.estDeliveryValue')}
                           </p>
                         </div>
                       </div>
@@ -988,39 +1212,23 @@ function CheckoutPageContent() {
                   <div className="flex items-start space-x-3">
                     <MapPin className="w-5 h-5 text-green-500 mt-1" />
                     <div className="flex-1">
-                      <h3 className={cn("font-medium text-base", themeClasses.mainText)}>Store Pickup</h3>
+                      <h3 className={cn("font-medium text-base", themeClasses.mainText)}>
+                        {t('checkout.storePickupTitle')}
+                      </h3>
                       <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                        Pick up your order from our store location
+                        {t('checkout.storePickupDesc')}
                       </p>
                       <div className="mt-2 space-y-1">
                         <div className="flex items-center space-x-2">
-                          <Zap className="w-3 h-3 text-transparent" />
+                          <Clock className="w-3 h-3 text-transparent" />
                           <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Ready Time:</strong> Same day or next business day
+                            <strong>{t('checkout.pickupTimeLabel')}</strong> {t('checkout.pickupTimeValue')}
                           </p>
-               </div>
+                        </div>
                         <div className="flex items-center space-x-2">
                           <Gift className="w-3 h-3 text-transparent" />
                           <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Pickup Fee:</strong> FREE - No additional charges
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <MapPinIcon className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Location:</strong> {companyName} Store, Dar es Salaam
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Clock className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Pickup Hours:</strong> Monday - Saturday, 8:00 AM - 8:00 PM
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Bell className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Notification:</strong> SMS/Email when ready for pickup
+                            <strong>{t('checkout.pickupFeeLabel')}</strong> {t('checkout.pickupFeeValue')}
                           </p>
                         </div>
                       </div>
@@ -1036,15 +1244,47 @@ function CheckoutPageContent() {
         if ((deliveryOption as string) === 'shipping') {
           return (
             <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-              <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>Shipping Address</CardTitle>
+              <CardHeader className="p-3 sm:p-6 space-y-0">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                  <div className="min-w-0 flex-1">
+                    <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>
+                      {t('checkout.shippingAddressTitle')}
+                    </CardTitle>
+                    <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
+                      {t('checkout.shippingAddressSubtitle')}
+                    </p>
+                  </div>
+                  <div
+                    className={cn(
+                      'shrink-0 rounded-lg border px-3 py-2 sm:px-4 sm:py-3 sm:min-w-[10rem] text-right',
+                      themeClasses.cardBorder,
+                      themeClasses.cardBg
+                    )}
+                  >
+                    <p className={cn('text-[10px] sm:text-xs font-medium text-neutral-500 dark:text-neutral-400')}>
+                      {t('checkout.totalShippingFee')}
+                    </p>
+                    <p
+                      className={cn(
+                        'text-lg sm:text-2xl font-bold tabular-nums mt-1 leading-tight',
+                        themeClasses.mainText
+                      )}
+                    >
+                      {shippingEstimateLoading
+                        ? '…'
+                        : shippingFee === 0
+                          ? t('checkout.free')
+                          : formatPrice(shippingFee)}
+                    </p>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="grid gap-3 sm:gap-4 p-3 sm:p-6">
-                {/* Row 1: Full Name, Phone, Email */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                {/* Row 1: Contact — Full Name, Phone, Email */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-start">
                   <div className="grid gap-1 sm:gap-2">
                     <Label htmlFor="shippingFullName" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                  Full Name *
+                  {t('checkout.fullNameLabel')}
                 </Label>
                 <Input
                       id="shippingFullName"
@@ -1060,7 +1300,7 @@ function CheckoutPageContent() {
                           })
                         }
                       }}
-                      placeholder="Enter your full name"
+                      placeholder={t('checkout.phFullName')}
                   className={cn(
                     darkHeaderFooterClasses.inputBg,
                     darkHeaderFooterClasses.textNeutralPrimary,
@@ -1077,7 +1317,7 @@ function CheckoutPageContent() {
 
                   <div className="grid gap-1 sm:gap-2">
                     <Label htmlFor="shippingPhone" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Phone Number *
+                      {t('checkout.phoneLabel')}
                 </Label>
                 <Input
                       id="shippingPhone"
@@ -1092,7 +1332,7 @@ function CheckoutPageContent() {
                           })
                         }
                       }}
-                      placeholder="e.g., +255 123 456 789"
+                      placeholder={t('checkout.phPhone')}
                   className={cn(
                         darkHeaderFooterClasses.inputBg,
                         darkHeaderFooterClasses.textNeutralPrimary,
@@ -1109,7 +1349,7 @@ function CheckoutPageContent() {
 
                   <div className="grid gap-1 sm:gap-2">
                     <Label htmlFor="shippingEmail" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Email Address *
+                      {t('checkout.emailLabel')}
                 </Label>
                 <Input
                       id="shippingEmail"
@@ -1125,7 +1365,7 @@ function CheckoutPageContent() {
                           })
                         }
                       }}
-                      placeholder="your.email@example.com"
+                      placeholder={t('checkout.phEmail')}
                   className={cn(
                         darkHeaderFooterClasses.inputBg,
                         darkHeaderFooterClasses.textNeutralPrimary,
@@ -1141,204 +1381,184 @@ function CheckoutPageContent() {
                   </div>
               </div>
 
-                {/* Row 2: Country, Region/City, Street Name */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Country *
-                  </Label>
-                    <select
-                      id="shippingCountry"
-                      value={formData.shippingAddress.country}
-                      onChange={(e) => handleInputChange(e, "shippingAddress", "country")}
-                    className={cn(
-                        "w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500",
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.inputBorder,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                      )}
-                    >
-                      <option value="Tanzania">Tanzania</option>
-                      <option value="Kenya">Kenya</option>
-                      <option value="Uganda">Uganda</option>
-                      <option value="Rwanda">Rwanda</option>
-                    </select>
-                </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingCity" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Region/City *
-                  </Label>
-                  <Input
-                          id="shippingCity"
-                          value={formData.shippingAddress.city}
-                          onChange={(e) => {
-                            handleInputChange(e, "shippingAddress", "city")
-                            if (validationErrors.shippingCity) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.shippingCity
-                                return newErrors
-                              })
+                {/* Row 2: Location — Country, Region, District, Ward (Tanzania) or Country, Region/City, Street (other) */}
+                {formData.shippingAddress.country === 'Tanzania' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 items-start">
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.countryLabel')}</Label>
+                      <select
+                        id="shippingCountry"
+                        value={formData.shippingAddress.country}
+                        onChange={(e) => handleInputChange(e, "shippingAddress", "country")}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary)}
+                      >
+                        <option value="Tanzania">Tanzania</option>
+                        <option value="Kenya">Kenya</option>
+                        <option value="Uganda">Uganda</option>
+                        <option value="Rwanda">Rwanda</option>
+                      </select>
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingRegion" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.regionLabel')}</Label>
+                      <select
+                        id="shippingRegion"
+                        value={formData.shippingAddress.region || ""}
+                        onChange={(e) => {
+                          const newRegion = e.target.value
+                          handleInputChange(e, "shippingAddress", "region")
+                          const districts = (newRegion && (DISTRICTS_BY_REGION[newRegion] ?? [])) || []
+                          const onlyDistrict = districts.length === 1 ? districts[0] : ''
+                          const wards = onlyDistrict ? getWardOptions(onlyDistrict) : []
+                          const onlyWard = wards.length === 1 ? wards[0] : ''
+                          setFormData(prev => ({
+                            ...prev,
+                            shippingAddress: {
+                              ...prev.shippingAddress,
+                              district: onlyDistrict,
+                              ward: onlyWard,
+                              city: newRegion || prev.shippingAddress.city
                             }
-                          }}
-                          placeholder="e.g., Dar es Salaam, Arusha, Mwanza"
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.shippingCity
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                    )}
-                  />
-                        {validationErrors.shippingCity && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingCity}</p>
-                  )}
-              </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingStreet" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Street Name *
-                  </Label>
-                  <Input
-                          id="shippingStreet"
-                          value={formData.shippingAddress.streetName || ""}
-                          onChange={(e) => {
-                            handleInputChange(e, "shippingAddress", "streetName")
-                            if (validationErrors.shippingStreet) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.shippingStreet
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder="e.g., Samora Avenue, Nyerere Road"
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.shippingStreet
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                          )}
-                        />
-                        {validationErrors.shippingStreet && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingStreet}</p>
-                        )}
+                          }))
+                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingRegion; delete n.shippingDistrict; delete n.shippingWard; return n })
+                        }}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingRegion ? "border-red-500" : "")}
+                      >
+                        <option value="">{t('checkout.selectRegion')}</option>
+                        {TANZANIA_REGIONS.map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                      {validationErrors.shippingRegion && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingRegion}</p>}
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingDistrict" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.districtLabel')}</Label>
+                      <select
+                        id="shippingDistrict"
+                        value={formData.shippingAddress.district || ""}
+                        onChange={(e) => {
+                          const newDistrict = e.target.value
+                          handleInputChange(e, "shippingAddress", "district")
+                          const wards = newDistrict ? getWardOptions(newDistrict) : []
+                          const onlyWard = wards.length === 1 ? wards[0] : ''
+                          setFormData(prev => ({
+                            ...prev,
+                            shippingAddress: { ...prev.shippingAddress, ward: onlyWard }
+                          }))
+                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingDistrict; delete n.shippingWard; return n })
+                        }}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingDistrict ? "border-red-500" : "")}
+                      >
+                        <option value="">{t('checkout.selectDistrict')}</option>
+                        {(DISTRICTS_BY_REGION[formData.shippingAddress.region || ""] ?? []).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                      {validationErrors.shippingDistrict && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingDistrict}</p>}
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingWard" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.wardLabel')}</Label>
+                      <select
+                        id="shippingWard"
+                        value={formData.shippingAddress.ward || ""}
+                        onChange={(e) => {
+                          handleInputChange(e, "shippingAddress", "ward")
+                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingWard; return n })
+                        }}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingWard ? "border-red-500" : "")}
+                      >
+                        <option value="">{t('checkout.selectWard')}</option>
+                        {getWardOptions(formData.shippingAddress.district || "").map((w) => (
+                          <option key={w} value={w}>{w}</option>
+                        ))}
+                      </select>
+                      {validationErrors.shippingWard && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingWard}</p>}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 items-start">
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.countryLabel')}</Label>
+                      <select id="shippingCountry" value={formData.shippingAddress.country} onChange={(e) => handleInputChange(e, "shippingAddress", "country")} className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary)}>
+                        <option value="Tanzania">Tanzania</option>
+                        <option value="Kenya">Kenya</option>
+                        <option value="Uganda">Uganda</option>
+                        <option value="Rwanda">Rwanda</option>
+                      </select>
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingCity" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.regionCityLabel')}</Label>
+                      <Input id="shippingCity" value={formData.shippingAddress.city} onChange={(e) => { handleInputChange(e, "shippingAddress", "city"); if (validationErrors.shippingCity) setValidationErrors(prev => { const n = { ...prev }; delete n.shippingCity; return n }) }} placeholder={t('checkout.phRegionCityNonTz')} className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, validationErrors.shippingCity ? "border-red-500" : darkHeaderFooterClasses.inputBorder)} />
+                      {validationErrors.shippingCity && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingCity}</p>}
+                    </div>
+                  </div>
+                )}
 
-                {/* Row 3: House Number, Postal Code (Optional), Additional Details */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                {/* Row 3: Street address — Street Name, House/Building Number, Famous place (optional) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-start">
                   <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingHouseNumber" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      House/Building Number *
-                    </Label>
+                    <Label htmlFor="shippingStreet" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.streetNameLabel')}</Label>
+                    <Input
+                      id="shippingStreet"
+                      value={formData.shippingAddress.streetName || ""}
+                      onChange={(e) => {
+                        handleInputChange(e, "shippingAddress", "streetName")
+                        if (validationErrors.shippingStreet) setValidationErrors(prev => { const n = { ...prev }; delete n.shippingStreet; return n })
+                      }}
+                      placeholder={t('checkout.phStreet')}
+                      className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, validationErrors.shippingStreet ? "border-red-500 focus:border-red-500 focus:ring-red-500" : darkHeaderFooterClasses.inputBorder)}
+                    />
+                    {validationErrors.shippingStreet && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingStreet}</p>}
+                  </div>
+                  <div className="grid gap-1 sm:gap-2">
+                    <Label htmlFor="shippingHouseNumber" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.houseNumberLabel')}</Label>
                     <Input
                       id="shippingHouseNumber"
                       value={formData.shippingAddress.address1}
                       onChange={(e) => {
                         handleInputChange(e, "shippingAddress", "address1")
                         if (validationErrors.shippingAddress1) {
-                          setValidationErrors(prev => {
-                            const newErrors = { ...prev }
-                            delete newErrors.shippingAddress1
-                            return newErrors
-                          })
+                          setValidationErrors(prev => { const newErrors = { ...prev }; delete newErrors.shippingAddress1; return newErrors })
                         }
                       }}
-                      placeholder="e.g., 123, Block A"
+                      placeholder={t('checkout.phHouse')}
                       className={cn(
                         darkHeaderFooterClasses.inputBg,
                         darkHeaderFooterClasses.textNeutralPrimary,
                         darkHeaderFooterClasses.inputPlaceholder,
-                        validationErrors.shippingAddress1
-                          ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                          : darkHeaderFooterClasses.inputBorder
-                  )}
-                />
-                    {validationErrors.shippingAddress1 && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingAddress1}</p>
-                  )}
+                        validationErrors.shippingAddress1 ? "border-red-500 focus:border-red-500 focus:ring-red-500" : darkHeaderFooterClasses.inputBorder
+                      )}
+                    />
+                    {validationErrors.shippingAddress1 && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingAddress1}</p>}
+                  </div>
+                  <div className="grid gap-1 sm:gap-2">
+                    <Label htmlFor="shippingLandmark" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.famousPlaceLabel')}</Label>
+                    <Input
+                      id="shippingLandmark"
+                      value={formData.shippingAddress.address2 || ""}
+                      onChange={(e) => {
+                        handleInputChange(e, "shippingAddress", "address2")
+                        if (validationErrors.shippingLandmark) {
+                          setValidationErrors(prev => { const newErrors = { ...prev }; delete newErrors.shippingLandmark; return newErrors })
+                        }
+                      }}
+                      placeholder={t('checkout.phFamousPlace')}
+                      className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, darkHeaderFooterClasses.inputBorder)}
+                    />
+                    <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>{t('checkout.famousPlaceHint')}</p>
+                  </div>
                 </div>
 
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingPostalCode" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Postal Code <span className="text-gray-500">(Optional)</span>
-                  </Label>
+                {/* Row 4: More details (optional) */}
+                <div className="grid gap-1 sm:gap-2 w-full max-w-full">
+                  <Label htmlFor="shippingMoreDetails" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.moreDetailsLabel')}</Label>
                   <Input
-                      id="shippingPostalCode"
-                      value={formData.shippingAddress.postalCode}
-                      onChange={(e) => handleInputChange(e, "shippingAddress", "postalCode")}
-                      placeholder="e.g., 11101"
-                    className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.inputBorder,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                  )}
-                />
-              </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingAdditional" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Additional Details <span className="text-gray-500">(Optional)</span>
-                  </Label>
-                  <Input
-                      id="shippingAdditional"
-                    value={formData.shippingAddress.state}
+                    id="shippingMoreDetails"
+                    value={formData.shippingAddress.state || ""}
                     onChange={(e) => handleInputChange(e, "shippingAddress", "state")}
-                      placeholder="e.g., Floor 2, Apartment 5"
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.inputBorder,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                    )}
+                    placeholder={t('checkout.phMoreDetails')}
+                    className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder)}
                   />
-              </div>
                 </div>
-
-                {/* Row 4: Nearby Landmark (Full Width) */}
-                <div className="grid gap-1 sm:gap-2">
-                  <Label htmlFor="shippingLandmark" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                    Nearby Famous Place/Landmark *
-                  </Label>
-                  <Input
-                    id="shippingLandmark"
-                    value={formData.shippingAddress.address2 || ""}
-                    onChange={(e) => {
-                      handleInputChange(e, "shippingAddress", "address2")
-                      if (validationErrors.shippingLandmark) {
-                        setValidationErrors(prev => {
-                          const newErrors = { ...prev }
-                          delete newErrors.shippingLandmark
-                          return newErrors
-                        })
-                      }
-                    }}
-                    placeholder="e.g., Near Shoprite, Opposite Post Office, Next to Bank of Tanzania"
-                    className={cn(
-                      darkHeaderFooterClasses.inputBg,
-                      darkHeaderFooterClasses.textNeutralPrimary,
-                      darkHeaderFooterClasses.inputPlaceholder,
-                      validationErrors.shippingLandmark
-                        ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                        : darkHeaderFooterClasses.inputBorder
-                    )}
-                  />
-                  {validationErrors.shippingLandmark && (
-                    <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingLandmark}</p>
-                  )}
-                  <div className="flex items-center space-x-2 mt-1">
-                    <Lightbulb className="w-3 h-3 text-transparent" />
-                    <p className="text-xs text-green-600 dark:text-green-400">
-                      Help us find you easily by mentioning a nearby landmark, shop, or building
-                    </p>
-                </div>
-              </div>
             </CardContent>
           </Card>
         )
@@ -1347,9 +1567,9 @@ function CheckoutPageContent() {
         return (
           <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
               <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>Contact Information</CardTitle>
+                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>{t('checkout.contactInfoTitle')}</CardTitle>
                 <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                  Provide your contact details for order pickup
+                  {t('checkout.contactInfoSubtitle')}
                 </p>
             </CardHeader>
               <CardContent className="grid gap-3 sm:gap-4 p-3 sm:p-6">
@@ -1359,7 +1579,7 @@ function CheckoutPageContent() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingFullNamePickup" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Full Name *
+                      {t('checkout.fullNameLabel')}
                     </Label>
                     <Input
                           id="billingFullNamePickup"
@@ -1374,7 +1594,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                      placeholder="Enter your full name"
+                      placeholder={t('checkout.phFullName')}
                       className={cn(
                         darkHeaderFooterClasses.inputBg,
                         darkHeaderFooterClasses.textNeutralPrimary,
@@ -1391,7 +1611,7 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingEmailPickup" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Email Address *
+                          {t('checkout.emailLabel')}
                         </Label>
                         <Input
                           id="billingEmailPickup"
@@ -1407,7 +1627,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="your.email@example.com"
+                          placeholder={t('checkout.phEmail')}
                           className={cn(
                             darkHeaderFooterClasses.inputBg,
                             darkHeaderFooterClasses.textNeutralPrimary,
@@ -1424,9 +1644,9 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingPhonePickup" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Phone Number *
-                    </Label>
-                    <Input
+                          {t('checkout.phoneLabel')}
+                        </Label>
+                        <Input
                           id="billingPhonePickup"
                           value={formData.billingAddress.phone}
                           onChange={(e) => {
@@ -1439,7 +1659,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="e.g., +255 123 456 789"
+                          placeholder={t('checkout.phPhone')}
                       className={cn(
                             darkHeaderFooterClasses.inputBg,
                             darkHeaderFooterClasses.textNeutralPrimary,
@@ -1466,9 +1686,11 @@ function CheckoutPageContent() {
           return (
             <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
               <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>Billing Information</CardTitle>
+                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>
+                  {t('checkout.billingInformationTitle')}
+                </CardTitle>
                 <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                  Provide billing details for your order
+                  {t('checkout.billingDetailsSubtitle')}
                 </p>
               </CardHeader>
               <CardContent className="grid gap-3 sm:gap-4 p-3 sm:p-6">
@@ -1481,7 +1703,7 @@ function CheckoutPageContent() {
                     className="border-blue-500 data-[state=checked]:bg-blue-500"
                   />
                   <Label htmlFor="sameAsShippingShipping" className={cn("text-sm font-medium cursor-pointer", themeClasses.mainText)}>
-                    Use the same information as shipping address
+                    {t('checkout.sameAsShippingLabel')}
                   </Label>
                     </div>
 
@@ -1492,7 +1714,7 @@ function CheckoutPageContent() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingFullNameShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Full Name *
+                          {t('checkout.fullNameLabel')}
                       </Label>
                       <Input
                           id="billingFullNameShipping"
@@ -1507,7 +1729,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="Enter your full name"
+                          placeholder={t('checkout.phFullName')}
                         className={cn(
                               darkHeaderFooterClasses.inputBg,
                               darkHeaderFooterClasses.textNeutralPrimary,
@@ -1524,7 +1746,7 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingEmailShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Email Address *
+                          {t('checkout.emailLabel')}
                       </Label>
                       <Input
                           id="billingEmailShipping"
@@ -1540,7 +1762,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="your.email@example.com"
+                          placeholder={t('checkout.phEmail')}
                         className={cn(
                               darkHeaderFooterClasses.inputBg,
                               darkHeaderFooterClasses.textNeutralPrimary,
@@ -1557,7 +1779,7 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingPhoneShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        Phone Number *
+                        {t('checkout.phoneLabel')}
                       </Label>
                       <Input
                           id="billingPhoneShipping"
@@ -1572,7 +1794,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="e.g., +255 123 456 789"
+                          placeholder={t('checkout.phPhone')}
                         className={cn(
                           darkHeaderFooterClasses.inputBg,
                           darkHeaderFooterClasses.textNeutralPrimary,
@@ -1592,7 +1814,7 @@ function CheckoutPageContent() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingCountryShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Country *
+                          {t('checkout.countryLabel')}
                       </Label>
                         <select
                           id="billingCountryShipping"
@@ -1614,7 +1836,7 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingCityShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Region/City *
+                          {t('checkout.regionCityLabel')}
                 </Label>
                 <Input
                           id="billingCityShipping"
@@ -1629,7 +1851,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="e.g., Dar es Salaam, Arusha, Mwanza"
+                          placeholder={t('checkout.phRegionCityBilling')}
                   className={cn(
                           darkHeaderFooterClasses.inputBg,
                           darkHeaderFooterClasses.textNeutralPrimary,
@@ -1646,7 +1868,7 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingStreetShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Street Name *
+                          {t('checkout.streetNameLabel')}
                 </Label>
                 <Input
                           id="billingStreetShipping"
@@ -1661,7 +1883,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="e.g., Samora Avenue, Nyerere Road"
+                          placeholder={t('checkout.phStreet')}
                   className={cn(
                         darkHeaderFooterClasses.inputBg,
                         darkHeaderFooterClasses.textNeutralPrimary,
@@ -1681,7 +1903,7 @@ function CheckoutPageContent() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingAddressShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          House/Building Number *
+                          {t('checkout.houseNumberLabel')}
                   </Label>
                   <Input
                           id="billingAddressShipping"
@@ -1696,7 +1918,7 @@ function CheckoutPageContent() {
                               })
                             }
                           }}
-                          placeholder="e.g., 123, Block A"
+                          placeholder={t('checkout.phHouse')}
                     className={cn(
                           darkHeaderFooterClasses.inputBg,
                           darkHeaderFooterClasses.textNeutralPrimary,
@@ -1713,13 +1935,13 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingPostalCodeShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          Postal Code <span className="text-gray-500">(Optional)</span>
+                          {t('checkout.postalCodeOptionalLabel')}
                   </Label>
                   <Input
                           id="billingPostalCodeShipping"
                           value={formData.billingAddress.postalCode}
                           onChange={(e) => handleInputChange(e, "billingAddress", "postalCode")}
-                          placeholder="e.g., 11101"
+                          placeholder={t('checkout.phPostal')}
                     className={cn(
                           darkHeaderFooterClasses.inputBg,
                           darkHeaderFooterClasses.inputBorder,
@@ -1731,13 +1953,13 @@ function CheckoutPageContent() {
 
                       <div className="grid gap-1 sm:gap-2">
                         <Label htmlFor="billingTinShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          TIN Number <span className="text-gray-500">(Optional)</span>
+                          {t('checkout.tinOptionalLabel')}
                     </Label>
                     <Input
                           id="billingTinShipping"
                           value={formData.billingAddress.tin || ""}
                           onChange={(e) => handleInputChange(e, "billingAddress", "tin")}
-                          placeholder="e.g., 123456789"
+                          placeholder={t('checkout.phTin')}
                       className={cn(
                         darkHeaderFooterClasses.inputBg,
                         darkHeaderFooterClasses.inputBorder,
@@ -1756,14 +1978,16 @@ function CheckoutPageContent() {
                     <div className="flex items-center space-x-2 mb-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                       <p className={cn("text-sm font-medium", themeClasses.mainText)}>
-                        Using shipping address for billing
+                        {t('checkout.usingShippingForBillingLabel')}
                     </p>
                   </div>
                     <div className="text-sm space-y-1">
                       <p className={themeClasses.mainText}>{formData.shippingAddress.fullName}</p>
                       <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.address1}</p>
                       <p className={themeClasses.textNeutralSecondary}>
-                        {formData.shippingAddress.city}, {formData.shippingAddress.country}
+                        {formData.shippingAddress.country === 'Tanzania'
+                          ? [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward].filter(Boolean).join(', ') || formData.shippingAddress.city
+                          : formData.shippingAddress.city}, {formData.shippingAddress.country}
                       </p>
                       <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.phone}</p>
                 </div>
@@ -1868,122 +2092,211 @@ function CheckoutPageContent() {
           }
           
         return (
-          <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-            <CardHeader>
-              <CardTitle className={themeClasses.mainText}>Order Review</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:gap-4 md:gap-6 p-3 sm:p-4 md:p-6" style={{ contentVisibility: 'auto' }}>
-              {/* Order Summary */}
-                <div className="space-y-3 sm:space-y-4">
-                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
-                <div className="space-y-3 sm:space-y-4">
+          <>
+            {/* Order Review - outside the box */}
+            <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>
+              {t('checkout.orderReviewTitle')}
+            </h1>
+            {/* Cart-style header bar (no checkbox, no Clear All / Save for Later) */}
+            <div className={cn(
+              "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 rounded-lg border mb-4",
+              "bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200",
+              "dark:bg-gradient-to-r dark:from-gray-800 dark:to-gray-700 dark:border-gray-600",
+            )}>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
+                  <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
+                    {t('cart.cartItemsHeading')} ({orderReviewItemCount})
+                  </span>
+                </div>
+                <div className="hidden sm:flex items-center gap-4 text-sm">
+                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalItems')} {selectedItemsCount}</span>
+                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.subtotalLabel')} {formatPrice(displaySubtotal)}</span>
+                </div>
+              </div>
+              <div className="flex sm:hidden items-center gap-2 text-xs">
+                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.itemsShort')} {selectedItemsCount}</span>
+                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalHeading')} {formatPrice(displaySubtotal)}</span>
+              </div>
+            </div>
+
+            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+              <CardContent className="p-3 sm:p-4 md:p-6 space-y-6" style={{ contentVisibility: 'auto' }}>
+                {/* Items list - same layout as cart page with cart-style qty controls */}
+                <div className="space-y-0">
                   {selectedItems.length === 0 ? (
                     <div className="text-center py-8">
                       <p className={cn("text-gray-500", themeClasses.textNeutralSecondary)}>
-                        No items in cart. Please add items to your cart first.
+                        {t('checkout.orderReviewEmptyCart')}
                       </p>
                     </div>
                   ) : (
-                    selectedItems.flatMap((item, itemIndex) => 
-                      (item.variants || []).map((variant: any, variantIndex: number) => (
-                    <div key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`} className="flex flex-row items-start gap-2 sm:gap-3 md:gap-4 p-2 sm:p-3 md:p-4 rounded-lg border border-gray-200 dark:border-gray-700 w-full">
-                      <div className="flex-shrink-0 self-start">
-                          {item.product?.image ? (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <LazyImage
-                                src={item.product.image}
-                                alt={item.product.name || "Product image"}
-                                width={64}
-                                height={64}
-                                className="rounded-md object-contain w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-50 hover:opacity-80 transition-opacity"
-                                priority={false} // Not priority since it's in a list
-                                quality={80}
-                              />
-                            </Link>
-                          ) : (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
-                                <span className="text-gray-400 text-xs">No Image</span>
-                              </div>
-                            </Link>
-                          )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                          <Link 
-                            href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                            className="hover:underline"
+                    selectedItems.flatMap((item, itemIndex) =>
+                      (item.variants || []).map((variant: any, variantIndex: number) => {
+                        const product = item.product
+                        const variantPrice = variant.price || 0
+                        const variantQuantity = variant.quantity || 1
+                        const variantTotalPrice = variantPrice * variantQuantity
+                        const discountPercentage = (product as any)?.originalPrice && (product as any).originalPrice > variantPrice
+                          ? (((product as any).originalPrice - variantPrice) / (product as any).originalPrice) * 100
+                          : 0
+                        return (
+                          <div
+                            key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
+                            className={cn(
+                              "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
+                            )}
                           >
-                            <h4 className={cn("font-medium text-xs sm:text-sm md:text-base break-words", themeClasses.mainText)}>
-                              {item.product?.name || `Product ${item.productId}`}
-                              {variant.variant_name && (
-                                <span className={cn("font-normal text-blue-600 dark:text-blue-400 block sm:inline")}>
-                                  <span className="hidden sm:inline">{" | "}</span>
-                                  <span className="sm:hidden"> - </span>
-                                  {variant.variant_name}
-                                </span>
-                              )}
-                            </h4>
-                          </Link>
-                          <div className={cn("flex flex-col sm:flex-row items-start sm:items-center justify-between mt-1 sm:mt-0 gap-1 sm:gap-2")}>
-                            <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                              Unit Price: {formatPrice(variant.price || 0)}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <span className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                                Qty: {variant.quantity || 1}
-                              </span>
-                              <span className={cn("text-xs sm:text-sm md:text-base font-medium", themeClasses.mainText)}>
-                                {formatPrice((variant.price || 0) * (variant.quantity || 1))}
-                              </span>
+                            <div className="flex gap-1 sm:gap-2">
+                              <div className="flex items-start gap-2">
+                                <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
+                                  <div className="relative">
+                                    {product?.image ? (
+                                      <LazyImage
+                                        src={product.image}
+                                        alt={product.name || "Product"}
+                                        width={50}
+                                        height={50}
+                                        className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
+                                        priority={false}
+                                        quality={80}
+                                      />
+                                    ) : (
+                                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                                        <span className="text-gray-400 text-xs">No Image</span>
+                                      </div>
+                                    )}
+                                    {discountPercentage > 0 && (
+                                      <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
+                                        -{discountPercentage.toFixed(0)}%
+                                      </div>
+                                    )}
+                                  </div>
+                                </Link>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
+                                  <div className="flex-1 min-w-0">
+                                    <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
+                                      <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
+                                        {product?.name || `Product ${item.productId}`}
+                                        {variant.variant_name && (
+                                          <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
+                                        )}
+                                      </h3>
+                                    </Link>
+                                    <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
+                                      <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
+                                        {formatPrice(variantPrice)}
+                                      </span>
+                                      {(product as any)?.originalPrice && (product as any).originalPrice > variantPrice && (
+                                        <>
+                                          <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
+                                            {formatPrice((product as any).originalPrice)}
+                                          </span>
+                                          <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
+                                            {t('checkout.saveAmountPrefix')} {formatPrice((product as any).originalPrice - variantPrice)}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                    {/* Mobile: qty below product details */}
+                                    <div className="flex items-center gap-2 mt-1.5 sm:hidden">
+                                      <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                          <Minus className="w-3.5 h-3.5" />
+                                        </Button>
+                                        <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                          <Plus className="w-3.5 h-3.5" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
+                                      <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>{t('checkout.itemTotalPriceLabel')}</span>
+                                      <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
+                                    </div>
+                                  </div>
+                                  {/* Desktop: qty on right side like cart */}
+                                  <div className="hidden sm:flex flex-col items-center gap-1">
+                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </Button>
+                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Plus className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
-              </div>
-                    </div>
-                      ))
+                        )
+                      })
                     )
                   )}
-                          </div>
-                    </div>
+                </div>
 
-                {/* Order Total */}
-                  <div className="border-t pt-3 sm:pt-4 space-y-2">
-                    <div className="flex justify-between items-center text-xs sm:text-sm">
-                      <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
-                      <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
-                    </div>
-                    {promotionDiscount > 0 && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
-                        <span className="text-green-600 dark:text-green-400 font-medium">
-                          -{formatPrice(promotionDiscount)}
-                        </span>
-                      </div>
-                    )}
-                    {(deliveryOption as string) === 'shipping' && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
-                        <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
-                          {shippingFee === 0 ? 'Free' : formatPrice(shippingFee)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t">
-                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Total</span>
-                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
-                        {formatPrice(orderTotal)}
+                {/* Summary totals - new style with background */}
+                <div className={cn(
+                  "rounded-xl p-4 sm:p-5 space-y-3",
+                  "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
+                )}>
+                  <div className="flex justify-between items-baseline gap-2">
+                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
+                      {t('cart.subtotalWord')} ({orderReviewItemCount} {t('cart.itemsWord')}):
                     </span>
+                    <span className={cn("text-base font-semibold tabular-nums", themeClasses.mainText)}>{formatPrice(displaySubtotal)}</span>
+                  </div>
+                  {promotionDiscount > 0 && (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                        {t('checkout.discountPrefix')} ({appliedPromotion?.code}):
+                      </span>
+                      <span className="text-base font-semibold text-green-600 dark:text-green-400 tabular-nums">-{formatPrice(promotionDiscount)}</span>
+                    </div>
+                  )}
+                  {(deliveryOption as string) === 'shipping' && (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>{t('checkout.shippingSummaryLabel')}</span>
+                      <span className={cn("text-base font-semibold tabular-nums", shippingFee === 0 ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
+                        {shippingEstimateLoading ? '…' : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee))}
+                      </span>
+                    </div>
+                  )}
+                  <div className="border-t border-neutral-200 dark:border-neutral-600 pt-3 mt-1">
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className={cn("text-base font-bold", themeClasses.mainText)}>{t('cart.totalHeading')}</span>
+                      <span className={cn("text-lg font-bold tabular-nums", themeClasses.mainText)}>{formatPrice(orderTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Applied promotion - same style as cart page (read-only) */}
+                {appliedPromotion && (
+                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Ticket className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                        <span className="text-xs sm:text-sm font-semibold text-green-800 dark:text-green-200">
+                          {appliedPromotion.code}
+                        </span>
                       </div>
-                      </div>
+                      <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
+                        {(appliedPromotion as any).name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
             </CardContent>
           </Card>
+          </>
         )
-        }
+          }
 
       case 3:
         if ((deliveryOption as string) === 'shipping') {
@@ -2082,123 +2395,270 @@ function CheckoutPageContent() {
           }
           
         return (
-          <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-            <CardHeader>
-              <CardTitle className={themeClasses.mainText}>Order Review</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:gap-4 md:gap-6 p-3 sm:p-4 md:p-6">
-              {/* Order Summary */}
-                <div className="space-y-3 sm:space-y-4">
-                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
-                <div className="space-y-3 sm:space-y-4">
-                  {selectedItems.map((item, index) => (
-                    <div key={index} className="flex flex-row items-start gap-2 sm:gap-3 md:gap-4 p-2 sm:p-3 md:p-4 rounded-lg border border-gray-200 dark:border-gray-700 w-full">
-                      <div className="flex-shrink-0 self-start">
-                          {item.product?.image ? (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <LazyImage
-                                src={item.product.image}
-                                alt={item.product.name || "Product image"}
-                                width={80}
-                                height={80}
-                                className="rounded-md object-cover w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 hover:opacity-80 transition-opacity"
-                                priority={false} // Not priority since it's in a list
-                                quality={80}
-                              />
-                            </Link>
-                          ) : (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
-                                <span className="text-gray-400 text-xs">No Image</span>
-                              </div>
-                            </Link>
+          <>
+            {/* Order Review - outside the box */}
+            <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>
+              {t('checkout.orderReviewTitle')}
+            </h1>
+            {/* Cart-style header bar (no checkbox, no Clear All / Save for Later) */}
+            <div className={cn(
+              "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 rounded-lg border mb-4",
+              "bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200",
+              "dark:bg-gradient-to-r dark:from-gray-800 dark:to-gray-700 dark:border-gray-600",
+            )}>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
+                  <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
+                    {t('cart.cartItemsHeading')} ({orderReviewItemCount})
+                  </span>
+                </div>
+                <div className="hidden sm:flex items-center gap-4 text-sm">
+                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalItems')} {selectedItemsCount}</span>
+                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.subtotalLabel')} {formatPrice(displaySubtotal)}</span>
+                </div>
+              </div>
+              <div className="flex sm:hidden items-center gap-2 text-xs">
+                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.itemsShort')} {selectedItemsCount}</span>
+                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalHeading')} {formatPrice(displaySubtotal)}</span>
+              </div>
+            </div>
+
+            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+              <CardContent className="p-3 sm:p-4 md:p-6 space-y-6">
+                {/* Items list - same layout as cart page with cart-style qty controls */}
+                <div className="space-y-0">
+                  {selectedItems.flatMap((item, itemIndex) =>
+                    (item.variants || []).map((variant: any, variantIndex: number) => {
+                      const product = item.product
+                      const variantPrice = variant.price || 0
+                      const variantQuantity = variant.quantity || 1
+                      const variantTotalPrice = variantPrice * variantQuantity
+                      const discountPercentage = (product as any)?.originalPrice && (product as any).originalPrice > variantPrice
+                        ? (((product as any).originalPrice - variantPrice) / (product as any).originalPrice) * 100
+                        : 0
+                      return (
+                        <div
+                          key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
+                          className={cn(
+                            "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
                           )}
-                      </div>
-                        <div className="flex-1 min-w-0">
-                          <Link 
-                            href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                            className="hover:underline"
-                          >
-                            <h4 className={cn("font-medium text-xs sm:text-sm md:text-base break-words", themeClasses.mainText)}>
-                              {item.product?.name || "Product"}
-                            </h4>
-                          </Link>
-                          <div className={cn("flex flex-col sm:flex-row items-start sm:items-center justify-between mt-1 sm:mt-0 gap-1 sm:gap-2")}>
-                            <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                              Unit Price: {formatPrice(item.totalPrice / (item.totalQuantity || 1))}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <span className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                                Qty: {item.totalQuantity}
-                              </span>
-                              <span className={cn("text-xs sm:text-sm md:text-base font-medium", themeClasses.mainText)}>
-                                {formatPrice(item.totalPrice)}
-                              </span>
+                        >
+                          <div className="flex gap-1 sm:gap-2">
+                            <div className="flex items-start gap-2">
+                              <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
+                                <div className="relative">
+                                  {product?.image ? (
+                                    <LazyImage
+                                      src={product.image}
+                                      alt={product.name || "Product"}
+                                      width={50}
+                                      height={50}
+                                      className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
+                                      priority={false}
+                                      quality={80}
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                                      <span className="text-gray-400 text-xs">No Image</span>
+                                    </div>
+                                  )}
+                                  {discountPercentage > 0 && (
+                                    <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
+                                      -{discountPercentage.toFixed(0)}%
+                                    </div>
+                                  )}
+                                </div>
+                              </Link>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
+                                <div className="flex-1 min-w-0">
+                                  <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
+                                    <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
+                                      {product?.name || `Product ${item.productId}`}
+                                      {variant.variant_name && (
+                                        <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
+                                      )}
+                                    </h3>
+                                  </Link>
+                                  <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
+                                    <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
+                                      {formatPrice(variantPrice)}
+                                    </span>
+                                    {(product as any)?.originalPrice && (product as any).originalPrice > variantPrice && (
+                                      <>
+                                        <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
+                                          {formatPrice((product as any).originalPrice)}
+                                        </span>
+                                        <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
+                                          {t('checkout.saveAmountPrefix')} {formatPrice((product as any).originalPrice - variantPrice)}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                  {/* Mobile: qty below product details */}
+                                  <div className="flex items-center gap-2 mt-1.5 sm:hidden">
+                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </Button>
+                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Plus className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
+                                    <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>{t('checkout.itemTotalPriceLabel')}</span>
+                                    <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
+                                  </div>
+                                </div>
+                                {/* Desktop: qty on right side like cart */}
+                                <div className="hidden sm:flex flex-col items-center gap-1">
+                                  <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </Button>
+                                    <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
-                      </div>
-                    </div>
-                  ))}
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
-              </div>
+
+                {/* Summary totals - new style with background */}
+                <div className={cn(
+                  "rounded-xl p-4 sm:p-5 space-y-3",
+                  "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
+                )}>
+                  <div className="flex justify-between items-baseline gap-2">
+                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
+                      {t('cart.subtotalWord')} ({orderReviewItemCount} {t('cart.itemsWord')}):
+                    </span>
+                    <span className={cn("text-base font-semibold tabular-nums", themeClasses.mainText)}>{formatPrice(displaySubtotal)}</span>
+                  </div>
+                  {promotionDiscount > 0 && (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                        {t('checkout.discountPrefix')} ({appliedPromotion?.code}):
+                      </span>
+                      <span className="text-base font-semibold text-green-600 dark:text-green-400 tabular-nums">-{formatPrice(promotionDiscount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-baseline gap-2">
+                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>{t('checkout.shippingSummaryLabel')}</span>
+                    <span className={cn("text-base font-semibold tabular-nums", shippingFee === 0 ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
+                      {shippingEstimateLoading ? '…' : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee))}
+                    </span>
+                  </div>
+                  <div className="border-t border-neutral-200 dark:border-neutral-600 pt-3 mt-1">
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className={cn("text-base font-bold", themeClasses.mainText)}>{t('cart.totalHeading')}</span>
+                      <span className={cn("text-lg font-bold tabular-nums", themeClasses.mainText)}>{formatPrice(orderTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Applied promotion - same style as cart page (read-only) */}
+                {appliedPromotion && (
+                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Ticket className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                        <span className="text-xs sm:text-sm font-semibold text-green-800 dark:text-green-200">
+                          {appliedPromotion.code}
+                        </span>
+                      </div>
+                      <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
+                        {(appliedPromotion as any).name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Shipping Address */}
-              <div className="space-y-3 sm:space-y-4">
-                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Shipping Address</h3>
-                <div className={cn("p-3 sm:p-4 rounded-lg border border-gray-200 dark:border-gray-700", themeClasses.cardBg)}>
-                    <p className={themeClasses.mainText}>{formData.shippingAddress.fullName}</p>
-                    <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.address1}</p>
-                    <p className={themeClasses.textNeutralSecondary}>
-                      {formData.shippingAddress.city}, {formData.shippingAddress.country}
-                    </p>
-                    <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.phone}</p>
-                </div>
-              </div>
-
-              {/* Order Total */}
-                  <div className="border-t pt-3 sm:pt-4 space-y-2">
-                    <div className="flex justify-between items-center text-xs sm:text-sm">
-                      <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
-                      <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
+                <div className="space-y-3 sm:space-y-4">
+                  <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
+                    {t('checkout.reviewShippingTitle')}
+                  </h3>
+                  <div className={cn(
+                    "rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-4",
+                    "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
+                  )}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFullName')}</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.fullName || '—'}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewPhone')}</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.phone || '—'}</p>
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewEmail')}</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.email || '—'}</p>
+                      </div>
+                      {formData.shippingAddress.streetName && (
+                        <div className="space-y-1">
+                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewStreet')}</p>
+                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.streetName}</p>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewHouseBuilding')}</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address1 || '—'}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{formData.shippingAddress.country === 'Tanzania' ? t('checkout.reviewRegionDistrictWard') : t('checkout.reviewCity')}</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
+                          {formData.shippingAddress.country === 'Tanzania'
+                            ? [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward].filter(Boolean).join(', ') || '—'
+                            : (formData.shippingAddress.city || '—')}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewCountry')}</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.country || '—'}</p>
+                      </div>
+                      {(formData.shippingAddress.postalCode || formData.shippingAddress.state) && (
+                        <div className="space-y-1">
+                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewMoreDetails')}</p>
+                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
+                            {[formData.shippingAddress.postalCode, formData.shippingAddress.state].filter(Boolean).join(' · ') || '—'}
+                          </p>
+                        </div>
+                      )}
+                      {formData.shippingAddress.address2 && (
+                        <div className="space-y-1 sm:col-span-2">
+                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFamousPlace')}</p>
+                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address2}</p>
+                        </div>
+                      )}
                     </div>
-                    {promotionDiscount > 0 && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
-                        <span className="text-green-600 dark:text-green-400 font-medium">
-                          -{formatPrice(promotionDiscount)}
-                        </span>
-                      </div>
-                    )}
-                    {(deliveryOption as string) === 'shipping' && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
-                        <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
-                          {shippingFee === 0 ? 'Free' : formatPrice(shippingFee)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t">
-                  <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Total</span>
-                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
-                          {formatPrice(orderTotal)}
-                    </span>
+                  </div>
                 </div>
-              </div>
+
             </CardContent>
           </Card>
+          </>
         )
         } else {
           // For pickup, case 3 is order confirmation
           return (
             <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
               <CardHeader className="text-center">
-                <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>Order Confirmed!</CardTitle>
+                <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>
+                  {t('checkout.orderConfirmedTitle')}
+                </CardTitle>
                 <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
                   Thank you for your order. We'll notify you when it's ready for pickup.
                 </p>
@@ -2246,7 +2706,9 @@ function CheckoutPageContent() {
         return (
           <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
             <CardHeader className="text-center">
-              <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>Order Confirmed!</CardTitle>
+              <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>
+                  {t('checkout.orderConfirmedTitle')}
+                </CardTitle>
               <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
                 Thank you for your order. We'll process it and send you tracking information.
               </p>
@@ -2293,24 +2755,35 @@ function CheckoutPageContent() {
     }
   }
 
-  const stepTitles = deliveryOption === 'pickup' 
-    ? ["Delivery Option", "Billing Information", "Order Review", "Order Confirmed"]
-    : ["Delivery Option", "Shipping Address", "Billing Information", "Order Review", "Order Confirmed"]
+  const stepTitles = useMemo(
+    () =>
+      deliveryOption === 'pickup'
+        ? [
+            t('checkout.stepDelivery'),
+            t('checkout.stepBilling'),
+            t('checkout.stepReview'),
+            t('checkout.stepConfirmed'),
+          ]
+        : [
+            t('checkout.stepDelivery'),
+            t('checkout.stepShipping'),
+            t('checkout.stepBilling'),
+            t('checkout.stepReview'),
+            t('checkout.stepConfirmed'),
+          ],
+    [deliveryOption, t]
+  )
 
   const maxSteps = deliveryOption === 'pickup' ? 4 : 5
 
-  if (!isClient) {
-    return (
-      <div className={cn("min-h-screen", themeClasses.mainBg)}>
+  return (
+    <div className={cn("min-h-screen", themeClasses.mainBg)}>
+      {!isClient ? (
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <CheckoutPageSkeleton />
         </div>
-      </div>
-    )
-  }
-
-    return (
-    <div className={cn("min-h-screen", themeClasses.mainBg)}>
+      ) : (
+    <>
       {/* Welcome Message Bar - Mobile Only */}
       <div className="fixed top-0 z-50 w-full bg-stone-100/90 dark:bg-gray-900/95 backdrop-blur-sm border-b border-stone-200 dark:border-gray-700 sm:hidden">
         <div className="flex items-center justify-center h-8 px-4">
@@ -2335,13 +2808,13 @@ function CheckoutPageContent() {
             <div className="flex items-center justify-between">
             <Link href="/cart" className="flex items-center space-x-2 text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100">
             <ChevronLeft className="w-5 h-5" />
-            <span className="hidden sm:inline">Back to Cart</span>
-            <span className="sm:hidden">Back</span>
+            <span className="hidden sm:inline">{t('checkout.backToCart')}</span>
+            <span className="sm:hidden">{t('checkout.backShort')}</span>
           </Link>
             <h1 className={cn("text-lg sm:text-xl font-semibold", darkHeaderFooterClasses.textNeutralPrimary)}>
-              Checkout
+              {t('checkout.title')}
             </h1>
-            <div className="w-20"></div>
+            <CheckoutLanguageToggle />
           </div>
         </div>
       </header>
@@ -2441,7 +2914,7 @@ function CheckoutPageContent() {
                   darkHeaderFooterClasses.buttonGhostHoverBg
                 )}
               >
-                {currentStep === 0 ? 'Back to Cart' : 'Back'}
+                {currentStep === 0 ? t('checkout.backToCart') : t('checkout.backShort')}
               </Button>
               
               {/* Show Place Order button on order review step, Continue button on other steps */}
@@ -2457,7 +2930,7 @@ function CheckoutPageContent() {
                       className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
                     >
                       <Navigation className="mr-2 h-4 w-4" />
-                      Open Payment Page
+                      {t('checkout.openPaymentPage')}
                     </Button>
                   ) : (
                     <Button
@@ -2465,7 +2938,11 @@ function CheckoutPageContent() {
                       disabled={isProcessingPayment || paymentLinkGenerated}
                       className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isProcessingPayment ? "Processing..." : paymentError ? "Try Again" : "Place Order"}
+                      {isProcessingPayment
+                        ? t('checkout.processing')
+                        : paymentError
+                          ? t('checkout.tryAgain')
+                          : t('checkout.placeOrder')}
                     </Button>
                   )}
                   {paymentError && !isProcessingPayment && !paymentLinkGenerated && (
@@ -2479,7 +2956,7 @@ function CheckoutPageContent() {
                 onClick={handleNext}
                   className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
               >
-                  Continue
+                  {t('checkout.continue')}
               </Button>
               )}
           </div>
@@ -2488,6 +2965,8 @@ function CheckoutPageContent() {
       </div>
 
       <ComingSoonModal />
+    </>
+    )}
     </div>
   )
 }

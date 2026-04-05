@@ -31,6 +31,7 @@ import {
 import { useTheme } from '@/hooks/use-theme'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getClientShippingPricing } from '@/lib/shipping-calculator'
 
 interface ShippingOption {
   id: string
@@ -56,13 +57,14 @@ export default function ShippingInfoPage() {
   const { themeClasses } = useTheme()
   const router = useRouter()
   const [selectedZone, setSelectedZone] = useState('dar-es-salaam')
+  const { freeThresholdTz, flatRateTz } = getClientShippingPricing()
 
   const shippingOptions: ShippingOption[] = [
     {
       id: 'standard',
       name: 'Standard Shipping',
       description: 'Reliable delivery to your doorstep',
-      price: 5000,
+      price: flatRateTz,
       deliveryTime: '3-5 business days',
       coverage: ['Dar es Salaam', 'Arusha', 'Mwanza', 'Dodoma', 'Tanga'],
       features: ['Tracked delivery', 'Signature required', 'Insurance included'],
@@ -110,28 +112,28 @@ export default function ShippingInfoPage() {
       cities: ['Dar es Salaam', 'Kinondoni', 'Ilala', 'Temeke', 'Ubungo'],
       standardDelivery: '1-2 business days',
       expressDelivery: 'Same day',
-      freeShippingThreshold: 100000
+      freeShippingThreshold: freeThresholdTz
     },
     {
       zone: 'major-cities',
       cities: ['Arusha', 'Mwanza', 'Dodoma', 'Tanga', 'Morogoro', 'Moshi'],
       standardDelivery: '2-3 business days',
       expressDelivery: '1-2 business days',
-      freeShippingThreshold: 100000
+      freeShippingThreshold: freeThresholdTz
     },
     {
       zone: 'other-regions',
       cities: ['Iringa', 'Mbeya', 'Tabora', 'Kigoma', 'Mtwara', 'Lindi'],
       standardDelivery: '3-5 business days',
       expressDelivery: '2-3 business days',
-      freeShippingThreshold: 100000
+      freeShippingThreshold: freeThresholdTz
     }
   ]
 
   const faqs = [
     {
       question: 'How much does shipping cost?',
-      answer: 'Shipping costs vary by location and speed. Standard shipping costs TZS 5,000, Express shipping costs TZS 10,000, and Store pickup is free. We offer free shipping on orders over TZS 100,000 in Dar es Salaam.'
+      answer: `Shipping costs vary by location and speed. Standard flat shipping is from TZS ${flatRateTz.toLocaleString()} when distance-based pricing does not apply; Express and international options may differ. Store pickup is free. Free shipping applies when your order meets the site threshold (currently TZS ${freeThresholdTz.toLocaleString()}).`,
     },
     {
       question: 'How long does delivery take?',

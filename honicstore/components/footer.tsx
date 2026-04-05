@@ -14,10 +14,10 @@ import {
   Instagram, 
   Youtube,
   ArrowRight,
-  Download,
   CheckCircle,
   Flag
 } from 'lucide-react'
+import { StoreDownloadLinksRow } from '@/components/store-download-links'
 
 export function Footer() {
   const { 
@@ -84,10 +84,11 @@ export function Footer() {
 
   const footerLinks = {
     company: [
-      { name: 'Home', href: '/home' },
       { name: 'About Us', href: '/about' },
+      { name: 'Our Story', href: '/about#our-story' },
+      { name: 'Careers', href: '/contact' },
+      { name: 'Press & Media', href: '/about' },
       { name: 'Contact Us', href: '/contact' },
-      { name: 'Support', href: '/support' }
     ],
     services: [
       { name: 'Electronics Supply', href: '/services/electronics' },
@@ -122,50 +123,6 @@ export function Footer() {
       {/* Main Footer Content */}
       <div className="px-6 py-8 sm:py-12">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 sm:gap-8">
-          {/* Mobile: Company + Services + Support Row */}
-          <div className="md:hidden grid grid-cols-3 gap-2 col-span-1">
-            {/* Company Links */}
-            <div>
-              <h3 className="text-xs font-semibold mb-2 text-white">Company</h3>
-              <ul className="space-y-1">
-                {footerLinks.company.map((link, index) => (
-                  <li key={index}>
-                    <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs hover:text-orange-400 transition-colors">
-                      {link.name}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Services Links */}
-            <div>
-              <h3 className="text-xs font-semibold mb-2 text-white">Services</h3>
-              <ul className="space-y-1">
-                {footerLinks.services.map((link, index) => (
-                  <li key={index}>
-                    <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs hover:text-orange-400 transition-colors">
-                      {link.name}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Support Links - Mobile */}
-            <div>
-              <h3 className="text-xs font-semibold mb-2 text-white">Support</h3>
-              <ul className="space-y-1">
-                {footerLinks.support.map((link, index) => (
-                  <li key={index}>
-                    <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs hover:text-orange-400 transition-colors">
-                      {link.name}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
           {/* Company Info */}
           <div className="lg:col-span-2">
             <div className="mb-4">
@@ -250,13 +207,62 @@ export function Footer() {
              </div>
           </div>
 
+          {/* Mobile: Company | Services | Support — one row, three equal columns */}
+          <div className="col-span-1 grid w-full min-w-0 grid-cols-3 gap-x-2 gap-y-0 md:hidden">
+            <div className="min-w-0">
+              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-white">Company</h3>
+              <ul className="space-y-1.5">
+                {footerLinks.company.map((link, index) => (
+                  <li key={index} className="min-w-0">
+                    <a
+                      href={link.href}
+                      className="block break-words text-[11px] leading-snug text-gray-300 hover:text-orange-400 transition-colors"
+                    >
+                      {link.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="min-w-0">
+              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-white">Services</h3>
+              <ul className="space-y-1.5">
+                {footerLinks.services.map((link, index) => (
+                  <li key={index} className="min-w-0">
+                    <a
+                      href={link.href}
+                      className="block break-words text-[11px] leading-snug text-gray-300 hover:text-orange-400 transition-colors"
+                    >
+                      {link.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="min-w-0">
+              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-white">Support</h3>
+              <ul className="space-y-1.5">
+                {footerLinks.support.map((link, index) => (
+                  <li key={index} className="min-w-0">
+                    <a
+                      href={link.href}
+                      className="block break-words text-[11px] leading-snug text-gray-300 hover:text-orange-400 transition-colors"
+                    >
+                      {link.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
           {/* Company Links - Desktop/Tablet Only */}
           <div className="hidden md:block">
             <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-white">Company</h3>
             <ul className="space-y-1 sm:space-y-2">
               {footerLinks.company.map((link, index) => (
                 <li key={index}>
-                  <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
+                  <a href={link.href} className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
                     {link.name}
                   </a>
                 </li>
@@ -270,7 +276,7 @@ export function Footer() {
             <ul className="space-y-1 sm:space-y-2">
               {footerLinks.services.map((link, index) => (
                 <li key={index}>
-                  <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
+                  <a href={link.href} className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
                     {link.name}
                   </a>
                 </li>
@@ -284,7 +290,7 @@ export function Footer() {
             <ul className="space-y-1 sm:space-y-2">
               {footerLinks.support.map((link, index) => (
                 <li key={index}>
-                  <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
+                  <a href={link.href} className="text-xs sm:text-sm hover:text-orange-400 transition-colors">
                     {link.name}
                   </a>
                 </li>
@@ -302,19 +308,22 @@ export function Footer() {
                 Subscribe to our newsletter for the latest updates, exclusive offers, and industry insights.
               </p>
             </div>
-            <form onSubmit={handleNewsletterSubmit} className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+            <form
+              onSubmit={handleNewsletterSubmit}
+              className="flex w-full max-w-xl flex-row items-stretch gap-2 lg:max-w-none"
+            >
               <Input
                 type="email"
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-400 text-xs sm:text-sm"
+                className="min-h-10 min-w-0 flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-400 text-xs sm:text-sm"
                 required
                 disabled={isSubmitting}
               />
-              <Button 
-                type="submit" 
-                className="bg-orange-500 hover:bg-orange-600 text-xs sm:text-sm"
+              <Button
+                type="submit"
+                className="h-auto min-h-10 shrink-0 border-0 bg-orange-500 px-4 text-white hover:bg-orange-600 text-xs sm:text-sm"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
@@ -335,26 +344,7 @@ export function Footer() {
               <p className="text-xs sm:text-sm text-gray-400 mb-3 sm:mb-4">
                 Download our mobile app for a better shopping experience on the go.
               </p>
-              <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
-                <a 
-                  href="https://apps.apple.com" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center px-4 py-2 border border-gray-700 hover:bg-gray-800 text-white text-xs sm:text-sm rounded-md transition-colors"
-                >
-                  <Download className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                  App Store
-                </a>
-                <a 
-                  href="https://play.google.com" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center px-4 py-2 border border-gray-700 hover:bg-gray-800 text-white text-xs sm:text-sm rounded-md transition-colors"
-                >
-                  <Download className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                  Google Play
-                </a>
-              </div>
+              <StoreDownloadLinksRow />
             </div>
             <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
               <div className="flex items-center space-x-2">
