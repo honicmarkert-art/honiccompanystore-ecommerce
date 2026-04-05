@@ -193,7 +193,7 @@ export default function LandingPage() {
     return () => { cancelled = true }
   }, [])
 
-  // Fetch promotional products and show popup after 5 seconds
+  // Fetch promotional products and show popup after 10 seconds
   useEffect(() => {
     const fetchPromotionalProducts = async () => {
       try {
@@ -218,10 +218,10 @@ export default function LandingPage() {
 
     fetchPromotionalProducts()
 
-    // Show popup after 5 seconds
+    // Show popup after 10 seconds
     const timer = setTimeout(() => {
       setIsPromotionalCartOpen(true)
-    }, 5000)
+    }, 10000)
 
     return () => clearTimeout(timer)
   }, [])

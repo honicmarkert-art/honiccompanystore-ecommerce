@@ -263,16 +263,11 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
 
   // Track filter changes
   const prevFiltersRef = useRef<string>('')
+  /** Previous committed search (URL-driven). Used so we fetch immediately on new search even when `products.length` is still > 0 in the effect closure after `reset()`. */
+  const prevSearchForFetchRef = useRef<string | undefined>(undefined)
 
-  // Debounce delay: 300ms for search, 500ms for other filters
-  const getDebounceDelay = useCallback(() => {
-    // Search queries need faster response
-    if (search && search.trim().length >= 3) {
-      return 300
-    }
-    // Other filters can wait a bit longer
-    return 500
-  }, [search])
+  // Debounce delay for non-search filter tweaks (e.g. price slider) — not for discrete search submits
+  const getDebounceDelay = useCallback(() => 500, [])
 
   // Cache key for sessionStorage (include initialOffset so page 2 has its own cache)
   const getCacheKey = useCallback(() => {
@@ -392,13 +387,24 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     }
 
     if (filtersChanged) {
+      const normalizedSearch =
+        search && search.trim().length >= 3 ? search.trim() : undefined
+      const searchQueryChanged = normalizedSearch !== prevSearchForFetchRef.current
+      prevSearchForFetchRef.current = normalizedSearch
+
       hasRestoredFromCacheRef.current = false
       try {
         sessionStorage.removeItem(getCacheKey())
       } catch (e) {}
       reset()
       setOffset(startOffset)
-      if (isInitialLoadRef.current || products.length === 0) {
+      // Always fetch immediately on new search (Enter / URL). Debounce only when the user adjusts
+      // other filters while a list is already shown — avoids stale `products.length` delaying fetch by 300–500ms.
+      if (
+        isInitialLoadRef.current ||
+        products.length === 0 ||
+        searchQueryChanged
+      ) {
         isInitialLoadRef.current = false
         fetchProducts(startOffset, false)
         return
