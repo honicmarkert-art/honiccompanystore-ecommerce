@@ -27,6 +27,7 @@ import { VirtualizedProductGrid } from "@/components/virtualized-product-grid"
 import { useOptimizedNavigation } from "@/components/optimized-link"
 import { useRobustApi } from "@/hooks/use-robust-api"
 import { useSimpleProducts } from "@/hooks/use-simple-products"
+import { filterProductsBySearchQuery } from "@/lib/filter-products-by-search"
 import { useCategoryFiltering } from "@/hooks/use-category-filtering"
 import { useGridColumns } from "@/hooks/use-grid-columns"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -803,7 +804,9 @@ function ProductsPageContent() {
 
   const megaMenuSubCategories = useMemo(() => {
     if (!hoveredMegaCategoryData) return []
-    return categoriesData.subCategories.filter((sub: any) => sub.parent_id === hoveredMegaCategoryData.id)
+    return categoriesData.subCategories.filter(
+      (sub: any) => String(sub.parent_id) === String(hoveredMegaCategoryData.id)
+    )
   }, [hoveredMegaCategoryData, categoriesData.subCategories])
 
   const chunkedMegaMenuSubCategories = useMemo(() => {
@@ -924,16 +927,30 @@ function ProductsPageContent() {
   // Simple Products System - Amazon/AliExpress Style
   // 150 products per page with CDN caching
   const PRODUCTS_PER_PAGE = 150 // 150 products per page
+  /** Smaller batch for URL search so the first server response returns faster; load more still works. */
+  const SEARCH_FIRST_PAGE_LIMIT = 72
 
   // Convert category slugs to IDs for API filtering
-  const { mainCategoryId, subCategoryIds, allCategoryIds } = useCategoryFiltering({
+  const { allCategoryIds } = useCategoryFiltering({
     selectedMainCategory,
     selectedSubCategories,
     categoriesData
   })
 
   const isCategoryFilterActive = !!selectedMainCategory || selectedSubCategories.length > 0
-  const noCategoryMatches = isCategoryFilterActive && allCategoryIds.length === 0
+
+  /** API only accepts real UUIDs; fallbacks use slug-as-id and must not be sent (avoids 400). */
+  const CATEGORY_UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const resolvedCategoryIds = useMemo(
+    () => allCategoryIds.filter((id) => id != null && CATEGORY_UUID_RE.test(String(id))),
+    [allCategoryIds]
+  )
+
+  const noCategoryMatches =
+    isCategoryFilterActive &&
+    !categoriesLoading &&
+    resolvedCategoryIds.length === 0
 
   // Build dynamic no-results reason and details
   const selectedMainName = useMemo(() => {
@@ -951,6 +968,11 @@ function ProductsPageContent() {
   // Get actual search query from URL (not from input state) to prevent live search
   const actualSearchQuery = (urlSearchParams?.get('search') || '').trim()
 
+  const listFetchLimit = useMemo(
+    () => (actualSearchQuery.length >= 3 ? SEARCH_FIRST_PAGE_LIMIT : PRODUCTS_PER_PAGE),
+    [actualSearchQuery]
+  )
+
   const noResultsReason = useMemo(() => {
     if (actualSearchQuery) return 'search'
     if (selectedSubCategories.length > 0) return 'sub category'
@@ -967,6 +989,7 @@ function ProductsPageContent() {
   const {
     products: primaryProducts,
     loading: primaryLoading,
+    isFetching: primaryIsFetching,
     loadingMore: primaryLoadingMore,
     hasMore: primaryHasMore,
     error: primaryError,
@@ -975,12 +998,12 @@ function ProductsPageContent() {
     reset: primaryReset,
     refresh: primaryRefresh
   } = useSimpleProducts({
-    limit: PRODUCTS_PER_PAGE,
-    initialOffset: currentPage > 1 ? (currentPage - 1) * PRODUCTS_PER_PAGE : 0,
+    limit: listFetchLimit,
+    initialOffset: currentPage > 1 ? (currentPage - 1) * listFetchLimit : 0,
     brand: activeBrand || undefined,
     search: actualSearchQuery || undefined,
-    // Only use category IDs if categories are loaded AND filter is active
-    categories: (isCategoryFilterActive && allCategoryIds.length > 0) ? allCategoryIds : undefined,
+    // Only send UUIDs the products API accepts (slug fallbacks would cause 400).
+    categories: resolvedCategoryIds.length > 0 ? resolvedCategoryIds : undefined,
     sortBy: sortOrder === 'featured' ? 'featured' : sortOrder === 'price-low' ? 'price' : sortOrder === 'price-high' ? 'price' : 'created_at',
     sortOrder: sortOrder === 'featured' ? 'desc' : sortOrder === 'price-high' ? 'desc' : 'asc',
     minPrice: priceRange[0] > 0 ? priceRange[0] : undefined,
@@ -994,9 +1017,9 @@ function ProductsPageContent() {
     if (page > 0 && page !== currentPage) {
       setCurrentPage(page)
       // Reset displayedCount when page changes (pagination handles display)
-      setDisplayedCount(PRODUCTS_PER_PAGE)
+      setDisplayedCount(listFetchLimit)
     }
-  }, [urlSearchParams, currentPage, PRODUCTS_PER_PAGE])
+  }, [urlSearchParams, currentPage, listFetchLimit])
 
   // Infinite scroll products hook for enhanced performance
 
@@ -1272,17 +1295,34 @@ function ProductsPageContent() {
       return true
     })
   }, [primaryProducts])
+
+  /** Server search is in flight — show instant matches from already-loaded rows, avoid paging more stale catalog. */
+  const inInstantSearchPhase = useMemo(() => {
+    const q = (actualSearchQuery || '').trim()
+    return q.length >= 3 && primaryIsFetching
+  }, [actualSearchQuery, primaryIsFetching])
   
   // Display products for current page. When currentPage > 1 we passed initialOffset so the hook
   // returns only that page's products; use them as-is. For page 1, slice the first batch.
   const displayedProducts = useMemo(() => {
+    if (inInstantSearchPhase) {
+      const q = (actualSearchQuery || '').trim()
+      const instant = filterProductsBySearchQuery(allFilteredProducts, q)
+      // Prefer immediate matches from the current batch; empty until server responds if none match locally.
+      return instant.length > 0 ? instant : []
+    }
     if (currentPage > 1) {
       return allFilteredProducts
     }
     const startIndex = 0
-    const endIndex = PRODUCTS_PER_PAGE
-    return allFilteredProducts.slice(startIndex, endIndex)
-  }, [allFilteredProducts, currentPage, PRODUCTS_PER_PAGE])
+    return allFilteredProducts.slice(startIndex, listFetchLimit)
+  }, [
+    allFilteredProducts,
+    currentPage,
+    listFetchLimit,
+    inInstantSearchPhase,
+    actualSearchQuery,
+  ])
   
   // Restore scroll position when navigating back from product detail page
   const hasRestoredScrollRef = useRef(false)
@@ -1710,8 +1750,9 @@ function ProductsPageContent() {
       noProductsTimeoutRef.current = null
     }
     
-    const shouldShowNoProducts = !primaryLoading && displayedProducts.length === 0
-    
+    const shouldShowNoProducts =
+      !primaryLoading && !primaryIsFetching && displayedProducts.length === 0
+
     if (shouldShowNoProducts) {
       noProductsTimeoutRef.current = setTimeout(() => {
         setShowNoProducts(true)
@@ -1726,10 +1767,11 @@ function ProductsPageContent() {
         noProductsTimeoutRef.current = null
       }
     }
-  }, [primaryLoading, displayedProducts.length])
+  }, [primaryLoading, primaryIsFetching, displayedProducts.length])
   
   // Simple loading and error states - products load independently, don't wait for categories
-  const isLoading = primaryLoading && displayedProducts.length === 0
+  const isLoading =
+    (primaryLoading || primaryIsFetching) && displayedProducts.length === 0
   const error = primaryError
   
   // Product hover handler (no longer needed for shuffling, but kept for potential future use)
@@ -1741,14 +1783,22 @@ function ProductsPageContent() {
   // The API endpoint handles these parameters automatically
 
   // Check if we have more products to display from current batch
-  const hasMoreInBatch = displayedCount < allFilteredProducts.length
+  const hasMoreInBatch = inInstantSearchPhase
+    ? false
+    : displayedCount < allFilteredProducts.length
   // Check if we need to fetch more from API
-  const hasMoreProducts = primaryHasMore || (primaryTotalCount > 0 && allFilteredProducts.length < primaryTotalCount)
-  const hasNextPage = (primaryTotalCount > currentPage * PRODUCTS_PER_PAGE) || (allFilteredProducts.length > currentPage * PRODUCTS_PER_PAGE) || primaryHasMore
+  const hasMoreProducts = inInstantSearchPhase
+    ? false
+    : primaryHasMore || (primaryTotalCount > 0 && allFilteredProducts.length < primaryTotalCount)
+  const hasNextPage =
+    (primaryTotalCount > currentPage * listFetchLimit) ||
+    (allFilteredProducts.length > currentPage * listFetchLimit) ||
+    primaryHasMore
   const currentPageProductCount = displayedProducts.length
   
   // Combined load more: show more from batch OR fetch from API
   const handleLoadMore = useCallback(() => {
+    if (inInstantSearchPhase) return
     if (hasMoreInBatch) {
       // Show more products from current batch
       loadMoreBatch()
@@ -1756,7 +1806,7 @@ function ProductsPageContent() {
       // Fetch more products from API
       primaryLoadMore()
     }
-  }, [hasMoreInBatch, hasMoreProducts, loadMoreBatch, primaryLoadMore])
+  }, [inInstantSearchPhase, hasMoreInBatch, hasMoreProducts, loadMoreBatch, primaryLoadMore])
   
   // Build next page URL with current filters
   const buildNextPageUrl = useCallback(() => {
@@ -1887,6 +1937,22 @@ function ProductsPageContent() {
     setPriceRange(newRange)
   }
 
+  /** One main category in the URL; hook expands to all sub-UUIDs for the API (no huge subCategories= query). */
+  const navigateMainCategoryFilter = useCallback(
+    (categorySlug: string) => {
+      setSelectedMainCategory(categorySlug)
+      setSelectedSubCategories([])
+      const params = new URLSearchParams(urlSearchParams?.toString() || '')
+      params.set('mainCategory', categorySlug)
+      params.delete('subCategories')
+      params.delete('subCategory')
+      router.replace(
+        `/products${params.toString() ? `?${params.toString()}` : ''}`,
+        { scroll: false }
+      )
+    },
+    [router, urlSearchParams]
+  )
 
   const handleClearAllFilters = () => {
     // Clear category state first
@@ -1912,14 +1978,11 @@ function ProductsPageContent() {
 
   // Category navigation handlers
   const handleMainCategorySelect = (categorySlug: string) => {
-    // This function only opens the subcategories view, doesn't select categories
-    // Category selection is handled by the checkbox
-    setSelectedMainCategory(categorySlug)
+    navigateMainCategoryFilter(categorySlug)
   }
 
   const handleOpenSubcategoriesView = (categorySlug: string) => {
-    // This function only opens the subcategories view without changing selection
-    setSelectedMainCategory(categorySlug)
+    navigateMainCategoryFilter(categorySlug)
   }
 
   const handleSubCategoryToggle = (subCategorySlug: string) => {
@@ -1932,6 +1995,9 @@ function ProductsPageContent() {
     // Update URL - clean up both subCategory (singular) and subCategories (plural)
     const params = new URLSearchParams(urlSearchParams?.toString())
     params.delete('subCategory') // Remove singular form
+    if (selectedMainCategory) {
+      params.set('mainCategory', selectedMainCategory)
+    }
     if (newSubCategories.length > 0) {
       params.set('subCategories', newSubCategories.join(','))
     } else {
@@ -3057,13 +3123,6 @@ function ProductsPageContent() {
                 prefetch={true}
                 scroll={true}
                 onClick={() => {
-                  // Update state for immediate UI feedback
-                  // Next.js Link will handle client-side navigation automatically
-                  setSelectedMainCategory(cat.slug)
-                  // Get all subcategories for this main category
-                  const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === cat.id)
-                  const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
-                  setSelectedSubCategories(allSubSlugs)
                   setIsCategoryMegaMenuOpen(false)
                 }}
               >
@@ -3381,50 +3440,18 @@ function ProductsPageContent() {
                           onClick={(e) => {
                             e.preventDefault()
                             e.stopPropagation()
-                            // On mobile, just set the hovered category to show subcategories
-                            // On desktop, navigate and close menu
                             if (window.innerWidth >= 1024) {
-                              // Set category state and update URL
-                              setSelectedMainCategory(category.slug)
-                              const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
-                              const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
-                              setSelectedSubCategories(allSubSlugs)
-                              
-                              const params = new URLSearchParams(urlSearchParams?.toString())
-                              params.set('mainCategory', category.slug)
-                              if (allSubSlugs.length > 0) {
-                                params.set('subCategories', allSubSlugs.join(','))
-                              } else {
-                                params.delete('subCategories')
-                              }
-                              const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                              router.replace(nextUrl, { scroll: false })
+                              navigateMainCategoryFilter(category.slug)
                               setIsCategoryMegaMenuOpen(false)
                             } else {
-                              // Mobile: just select the category to show subcategories
                               setHoveredMegaCategory(category.slug)
                             }
                           }}
                           onDoubleClick={(e) => {
                             e.preventDefault()
                             e.stopPropagation()
-                            // On mobile double-click: filter by category and close menu
                             if (window.innerWidth < 1024) {
-                              // Set category state and update URL
-                              setSelectedMainCategory(category.slug)
-                              const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
-                              const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
-                              setSelectedSubCategories(allSubSlugs)
-                              
-                              const params = new URLSearchParams(urlSearchParams?.toString())
-                              params.set('mainCategory', category.slug)
-                              if (allSubSlugs.length > 0) {
-                                params.set('subCategories', allSubSlugs.join(','))
-                              } else {
-                                params.delete('subCategories')
-                              }
-                              const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                              router.replace(nextUrl, { scroll: false })
+                              navigateMainCategoryFilter(category.slug)
                               setIsCategoryMegaMenuOpen(false)
                             }
                           }}
@@ -3453,21 +3480,7 @@ function ProductsPageContent() {
                           size="sm"
                           className="text-xs text-orange-600 hover:text-orange-700 dark:text-orange-400"
                           onClick={() => {
-                            // Set category state and update URL
-                            setSelectedMainCategory(hoveredMegaCategoryData.slug)
-                            const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === hoveredMegaCategoryData.id)
-                            const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
-                            setSelectedSubCategories(allSubSlugs)
-                            
-                            const params = new URLSearchParams(urlSearchParams?.toString())
-                            params.set('mainCategory', hoveredMegaCategoryData.slug)
-                            if (allSubSlugs.length > 0) {
-                              params.set('subCategories', allSubSlugs.join(','))
-                            } else {
-                              params.delete('subCategories')
-                            }
-                            const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                            router.replace(nextUrl, { scroll: false })
+                            navigateMainCategoryFilter(hoveredMegaCategoryData.slug)
                             setIsCategoryMegaMenuOpen(false)
                           }}
                         >
@@ -3938,7 +3951,9 @@ function ProductsPageContent() {
             {/* Product Count */}
             <span className={cn("text-xs sm:text-sm whitespace-nowrap flex items-center gap-1", themeClasses.textNeutralSecondary)}>
               <Package className={cn("w-3 h-3 sm:w-4 sm:h-4", themeClasses.textNeutralSecondary)} />
-              {primaryLoading && displayedProducts.length === 0 ? (
+              {primaryIsFetching && displayedProducts.length > 0 ? (
+                "Updating results…"
+              ) : primaryLoading && displayedProducts.length === 0 ? (
                 "Loading products..."
               ) : (
                 `${displayedProducts.length}${primaryTotalCount > 0 ? ` of ${primaryTotalCount}` : ''} product${displayedProducts.length !== 1 ? 's' : ''}`
@@ -4189,14 +4204,27 @@ function ProductsPageContent() {
 
 
                 {/* Products Grid */}
-        <div ref={productsSectionRef} id="products-section">
+        <div ref={productsSectionRef} id="products-section" aria-busy={primaryIsFetching}>
+        {primaryIsFetching && displayedProducts.length > 0 ? (
+          <div
+            className="h-0.5 w-full overflow-hidden bg-amber-500/20 -mt-0.5 mb-2"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="h-full w-1/3 animate-pulse bg-amber-500/80 motion-reduce:animate-none" />
+          </div>
+        ) : null}
         {/* Only show skeleton if: loading AND no products AND no cached data loaded - prevent multiple skeletons */}
         {(showSkeleton && primaryLoading && primaryProducts.length === 0 && !hasDataLoaded) ? (
           // Skeleton Loading State - only show when actually loading and no data available
           <div className="px-1 sm:px-2 lg:px-3">
             <ProductGridSkeleton count={24} />
           </div>
-        ) : (noCategoryMatches || (displayedProducts.length === 0 && !primaryLoading && showNoProducts)) ? (
+        ) : (noCategoryMatches ||
+          (displayedProducts.length === 0 &&
+            !primaryLoading &&
+            !primaryIsFetching &&
+            showNoProducts)) ? (
           <div className="px-4 py-10 text-center">
             <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className={cn("text-xl font-semibold mb-2", themeClasses.mainText)}>
@@ -4294,7 +4322,7 @@ function ProductsPageContent() {
           </div>
           
           {/* Next Page Button */}
-          {hasNextPage && displayedProducts.length >= PRODUCTS_PER_PAGE && (
+          {hasNextPage && displayedProducts.length >= listFetchLimit && (
             <Link href={buildNextPageUrl()} target="_blank" rel="noopener noreferrer">
               <Button
                 size="lg"
@@ -4348,14 +4376,26 @@ function ProductsPageContent() {
               </div>
                 <div className="space-y-1">
                   {categoriesData.mainCategories.map((category: any) => {
-                    const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
-                    const subcategoriesForThisMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === category.id)
-                    const isMainCategorySelected = subcategoriesForThisMain.length > 0 && 
-                      subcategoriesForThisMain.every((sub: any) => selectedSubCategories.includes(sub.slug)) &&
-                      selectedSubCategories.every((slug: string) => subcategoriesForThisMain.some((sub: any) => sub.slug === slug))
+                    const subcategoriesUnderMain = categoriesData.subCategories.filter(
+                      (sub: any) => String(sub.parent_id) === String(category.id)
+                    )
+                    const wholeMainSelected =
+                      selectedMainCategory === category.slug && selectedSubCategories.length === 0
+                    const isMainCategorySelected =
+                      wholeMainSelected ||
+                      (subcategoriesUnderMain.length > 0 &&
+                        subcategoriesUnderMain.every((sub: any) =>
+                          selectedSubCategories.includes(sub.slug)
+                        ) &&
+                        selectedSubCategories.every((slug: string) =>
+                          subcategoriesUnderMain.some((sub: any) => sub.slug === slug)
+                        ))
                     
-                    const areAllSubcategoriesSelected = isMainCategorySelected && 
-                      subcategoriesUnderMain.every((sub: any) => selectedSubCategories.includes(sub.slug))
+                    const areAllSubcategoriesSelected =
+                      isMainCategorySelected &&
+                      subcategoriesUnderMain.every((sub: any) =>
+                        selectedSubCategories.includes(sub.slug)
+                      )
                     
                     return (
                       <div key={category.id} className="flex items-center gap-3 p-3 rounded-lg">
@@ -4379,24 +4419,7 @@ function ProductsPageContent() {
                               const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
                               router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
                             } else {
-                              // Select main category and all its subcategories WITHOUT opening subcategories view
-                              // Don't set selectedMainCategory here - that opens the view
-                              // Just set the subcategories and update URL
-                              const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
-                              
-                              
-                              setSelectedSubCategories(allSubSlugs)
-                              
-                              // Update URL
-                              const params = new URLSearchParams(urlSearchParams?.toString())
-                              params.set('mainCategory', category.slug)
-                              if (allSubSlugs.length > 0) {
-                                params.set('subCategories', allSubSlugs.join(','))
-                              } else {
-                                params.delete('subCategories')
-                              }
-                              const nextUrl = `/products${params.toString() ? `?${params.toString()}` : ''}`
-                              router.replace(nextUrl, { scroll: false }) // Use replace with scroll: false to prevent page jumping
+                              navigateMainCategoryFilter(category.slug)
                             }
                           }}
                         >
@@ -4447,7 +4470,9 @@ function ProductsPageContent() {
                   {/* All subcategories option */}
                   {(() => {
                     const currentMainCategory = categoriesData.mainCategories.find((cat: any) => cat.slug === selectedMainCategory)
-                    const subcategoriesUnderMain = categoriesData.subCategories.filter((sub: any) => sub.parent_id === currentMainCategory?.id)
+                    const subcategoriesUnderMain = categoriesData.subCategories.filter(
+                      (sub: any) => String(sub.parent_id) === String(currentMainCategory?.id)
+                    )
                     const allSubSlugs = subcategoriesUnderMain.map((sub: any) => sub.slug)
                     const areAllSelected = allSubSlugs.length > 0 && allSubSlugs.every(slug => selectedSubCategories.includes(slug))
                     
@@ -4494,7 +4519,12 @@ function ProductsPageContent() {
 
                   {/* Individual subcategories */}
                    {categoriesData.subCategories
-                     .filter((sub: any) => sub.parent_id === categoriesData.mainCategories.find((cat: any) => cat.slug === selectedMainCategory)?.id)
+                     .filter((sub: any) => {
+                       const main = categoriesData.mainCategories.find(
+                         (cat: any) => cat.slug === selectedMainCategory
+                       )
+                       return main != null && String(sub.parent_id) === String(main.id)
+                     })
                      .map((subCategory: any) => (
                       <div key={subCategory.id} className="flex items-center gap-3 p-3 rounded-lg">
                         <div 

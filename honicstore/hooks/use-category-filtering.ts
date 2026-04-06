@@ -4,7 +4,7 @@ interface Category {
   id: string
   name: string
   slug: string
-  parent_id?: string
+  parent_id?: string | null
 }
 
 interface CategoryData {
@@ -19,54 +19,61 @@ interface UseCategoryFilteringProps {
   categoriesData: CategoryData
 }
 
+function isSubOf(parentId: string | null | undefined, mainId: string): boolean {
+  return parentId != null && String(parentId) === String(mainId)
+}
+
 export function useCategoryFiltering({
   selectedMainCategory,
   selectedSubCategories,
   categoriesData
 }: UseCategoryFilteringProps) {
   const categoryIds = useMemo(() => {
-
     if (!selectedMainCategory && selectedSubCategories.length === 0) {
-      return { mainCategoryId: null, subCategoryIds: [], allCategoryIds: [] }
+      return { mainCategoryId: null, subCategoryIds: [], allCategoryIds: [] as string[] }
     }
 
-    let mainCategoryId = null
+    let mainCategoryId: string | null = null
     let subCategoryIds: string[] = []
     let allCategoryIds: string[] = []
 
     if (selectedMainCategory) {
-      const mainCategory = categoriesData.mainCategories.find(cat => cat.slug === selectedMainCategory)
-      
+      const mainCategory = categoriesData.mainCategories.find(
+        (cat) => cat.slug === selectedMainCategory
+      )
+
       if (mainCategory) {
         mainCategoryId = mainCategory.id
-        // Get all subcategories under this main category
-        const subcategoriesUnderMain = categoriesData.subCategories.filter(cat => cat.parent_id === mainCategory.id)
-        
-        allCategoryIds = subcategoriesUnderMain.map(cat => cat.id)
-        
-        // If main category has no subcategories, set allCategoryIds to empty array
-        // This will be handled by the API to return 0 products
-        if (subcategoriesUnderMain.length === 0) {
-          allCategoryIds = []
+        const subsUnderMain = categoriesData.subCategories.filter((cat) =>
+          isSubOf(cat.parent_id, mainCategory.id)
+        )
+
+        // No explicit sub-picks: treat as "whole main" — include parent id and every sub id
+        // so products stored on either the main row or a subcategory row match.
+        if (selectedSubCategories.length === 0) {
+          const subIds = subsUnderMain.map((c) => c.id)
+          allCategoryIds =
+            subIds.length > 0 ? [mainCategory.id, ...subIds] : [mainCategory.id]
         }
       }
     }
 
     if (selectedSubCategories.length > 0) {
       subCategoryIds = selectedSubCategories
-        .map(slug => {
-          const subCategory = categoriesData.subCategories.find(cat => cat.slug === slug)
+        .map((slug) => {
+          const subCategory = categoriesData.subCategories.find((cat) => cat.slug === slug)
           return subCategory?.id
         })
         .filter(Boolean) as string[]
-      
-      
-      // If we have specific subcategories selected, use those; otherwise use all subcategories under main
-      allCategoryIds = subCategoryIds.length > 0 ? subCategoryIds : allCategoryIds
+
+      if (subCategoryIds.length > 0) {
+        allCategoryIds = subCategoryIds
+      }
     }
 
-    const result = { mainCategoryId, subCategoryIds, allCategoryIds }
-    return result
+    allCategoryIds = [...new Set(allCategoryIds.filter(Boolean))]
+
+    return { mainCategoryId, subCategoryIds, allCategoryIds }
   }, [selectedMainCategory, selectedSubCategories, categoriesData])
 
   return categoryIds

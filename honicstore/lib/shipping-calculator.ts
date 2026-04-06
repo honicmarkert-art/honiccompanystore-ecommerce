@@ -90,6 +90,28 @@ export function normalizeLocationSegment(v: unknown): string | null {
   return s.length > 0 ? s : null
 }
 
+/**
+ * Checkout UI: show shipping as 0 and skip estimate until the user has selected
+ * more than country alone (TZ needs region; other countries need a line of address or city).
+ */
+export function shouldDeferShippingFeeDisplay(
+  deliveryOption: 'pickup' | 'shipping',
+  address: { country?: string; region?: string; city?: string; state?: string; address1?: string }
+): boolean {
+  if (deliveryOption === 'pickup') return false
+  const country = normalizeLocationSegment(address.country)
+  if (!country) return true
+  if (normalizeLocationKey(country) === 'tanzania') {
+    return !normalizeLocationSegment(address.region)
+  }
+  const hasDetail =
+    normalizeLocationSegment(address.city) ||
+    normalizeLocationSegment(address.address1) ||
+    normalizeLocationSegment(address.state) ||
+    normalizeLocationSegment(address.region)
+  return !hasDetail
+}
+
 function ruleSpecificity(rule: ZoneRule): number {
   let n = 0
   if (rule.ward?.trim()) n++

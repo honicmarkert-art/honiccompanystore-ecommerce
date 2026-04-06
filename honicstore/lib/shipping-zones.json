@@ -6,9 +6,9 @@
     "maxKmFromOrigin": 200,
     "minBillableKmFromHub": 5
   },
-  "rules": [
+  "rules": [  
     { "region": "Arusha", "feeTz": 5500, "originLat": -3.3689, "originLon": 36.6944 },
-    { "region": "Dar es Salaam", "feeTz": 0, "originLat": -6.791, "originLon": 39.217 },
+    { "region": "Dar es Salaam", "feeTz": 0, "originLat": -6.8159999, "originLon": 39.2800874 },
     { "region": "Dodoma", "feeTz": 5500, "originLat": -6.1728, "originLon": 35.7395 },
     { "region": "Geita", "feeTz": 6500, "originLat": -2.8725, "originLon": 32.2297 },
     { "region": "Iringa", "feeTz": 6500, "originLat": -7.7667, "originLon": 35.7 },

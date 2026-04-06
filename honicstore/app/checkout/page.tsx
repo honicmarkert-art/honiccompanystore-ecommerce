@@ -54,7 +54,7 @@ import {
   getSecureErrorMessage,
   fetchWithRetry
 } from "@/lib/checkout-utils"
-import { getClientShippingPricing } from "@/lib/shipping-calculator"
+import { getClientShippingPricing, shouldDeferShippingFeeDisplay } from "@/lib/shipping-calculator"
 import { useTranslation } from "@/hooks/use-translation"
 import { CheckoutLanguageToggle } from "@/components/checkout-language-toggle"
 
@@ -258,8 +258,16 @@ function CheckoutPageContent() {
 
   const fallbackShippingFee = calculateShippingFee()
   const displaySubtotal = shippingEstimate?.subtotal ?? selectedSubtotal
-  const displayShipping = deliveryOption === 'pickup' ? 0 : (shippingEstimate?.shipping ?? fallbackShippingFee)
+  const deferShippingFeeDisplay = shouldDeferShippingFeeDisplay(deliveryOption, formData.shippingAddress)
+  const displayShipping =
+    deliveryOption === 'pickup'
+      ? 0
+      : deferShippingFeeDisplay
+        ? 0
+        : (shippingEstimate?.shipping ?? fallbackShippingFee)
   const shippingFee = displayShipping
+  const shippingFeeLineLoading = deferShippingFeeDisplay ? false : shippingEstimateLoading
+  const shippingFeeIsPromoZero = !deferShippingFeeDisplay && !shippingFeeLineLoading && shippingFee === 0
   
   // Get applied promotion from sessionStorage
   const [appliedPromotion, setAppliedPromotion] = useState<{
@@ -313,6 +321,11 @@ function CheckoutPageContent() {
       }))
     )
     if (items.length === 0) {
+      setShippingEstimate(null)
+      setShippingEstimateLoading(false)
+      return
+    }
+    if (shouldDeferShippingFeeDisplay(deliveryOption, formData.shippingAddress)) {
       setShippingEstimate(null)
       setShippingEstimateLoading(false)
       return
@@ -1270,11 +1283,13 @@ function CheckoutPageContent() {
                         themeClasses.mainText
                       )}
                     >
-                      {shippingEstimateLoading
+                      {shippingFeeLineLoading
                         ? '…'
-                        : shippingFee === 0
-                          ? t('checkout.free')
-                          : formatPrice(shippingFee)}
+                        : deferShippingFeeDisplay
+                          ? formatPrice(0)
+                          : shippingFee === 0
+                            ? t('checkout.free')
+                            : formatPrice(shippingFee)}
                     </p>
                   </div>
                 </div>
@@ -2262,8 +2277,8 @@ function CheckoutPageContent() {
                   {(deliveryOption as string) === 'shipping' && (
                     <div className="flex justify-between items-baseline gap-2">
                       <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>{t('checkout.shippingSummaryLabel')}</span>
-                      <span className={cn("text-base font-semibold tabular-nums", shippingFee === 0 ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
-                        {shippingEstimateLoading ? '…' : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee))}
+                      <span className={cn("text-base font-semibold tabular-nums", shippingFeeIsPromoZero ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
+                        {shippingFeeLineLoading ? '…' : (deferShippingFeeDisplay ? formatPrice(0) : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee)))}
                       </span>
                     </div>
                   )}
@@ -2556,8 +2571,8 @@ function CheckoutPageContent() {
                   )}
                   <div className="flex justify-between items-baseline gap-2">
                     <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>{t('checkout.shippingSummaryLabel')}</span>
-                    <span className={cn("text-base font-semibold tabular-nums", shippingFee === 0 ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
-                      {shippingEstimateLoading ? '…' : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee))}
+                    <span className={cn("text-base font-semibold tabular-nums", shippingFeeIsPromoZero ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
+                      {shippingFeeLineLoading ? '…' : (deferShippingFeeDisplay ? formatPrice(0) : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee)))}
                     </span>
                   </div>
                   <div className="border-t border-neutral-200 dark:border-neutral-600 pt-3 mt-1">
