@@ -1,7 +1,10 @@
 "use client"
 
 import { BuyerRouteGuard } from '@/components/buyer-route-guard'
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useLayoutEffect, useCallback } from "react"
+import { createPortal } from "react-dom"
+import { flushSync } from "react-dom"
+import { Loader } from "@googlemaps/js-api-loader"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
@@ -20,11 +23,18 @@ import {
   MapPinIcon,
   Bell,
   Lightbulb,
+  RefreshCcw,
+  Shield,
+  CreditCard,
+  Ticket,
+  Plus,
+  Minus,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
@@ -37,6 +47,7 @@ import { useCurrency } from "@/contexts/currency-context"
 import { useComingSoonModal } from "@/components/coming-soon-modal"
 import { useToast } from "@/hooks/use-toast"
 import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
+import { TANZANIA_REGIONS, DISTRICTS_BY_REGION, getWardOptions } from "@/lib/tanzania-address"
 import { CheckoutPageSkeleton } from "@/components/ui/skeleton"
 import { 
   getSiteUrl, 
@@ -60,6 +71,9 @@ interface ShippingAddress {
   email: string
   streetName?: string
   tin?: string
+  region?: string
+  district?: string
+  ward?: string
 }
 
 interface PaymentDetails {
@@ -80,6 +94,213 @@ interface FormData {
   sameAsShipping: boolean
 }
 
+function normalizeLocationName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\b(ward|kata|district|manispaa|municipal|city|suburb|area)\b/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim()
+}
+
+function matchLocationName(options: readonly string[], candidates: string[]): string {
+  const normalizedOptions = options
+    .map((raw) => ({ raw, normalized: normalizeLocationName(raw) }))
+    .filter((item) => item.normalized)
+
+  const normalizedCandidates = candidates
+    .map((candidate) => normalizeLocationName(candidate))
+    .filter(Boolean)
+
+  for (const candidate of normalizedCandidates) {
+    const exact = normalizedOptions.find((option) => option.normalized === candidate)
+    if (exact) return exact.raw
+  }
+
+  for (const candidate of normalizedCandidates) {
+    const partial = normalizedOptions.find(
+      (option) => option.normalized.includes(candidate) || candidate.includes(option.normalized)
+    )
+    if (partial) return partial.raw
+  }
+
+  return ""
+}
+
+function resolveTanzaniaAddressFromCandidates(candidates: string[]) {
+  const cleanCandidates = Array.from(
+    new Set(candidates.map((candidate) => candidate.trim()).filter(Boolean))
+  )
+
+  const districtToRegion = new Map<string, string>()
+  for (const [region, districts] of Object.entries(DISTRICTS_BY_REGION)) {
+    for (const district of districts) districtToRegion.set(district, region)
+  }
+
+  let region = matchLocationName(TANZANIA_REGIONS, cleanCandidates)
+
+  let district = ""
+  if (region) {
+    district = matchLocationName(DISTRICTS_BY_REGION[region] || [], cleanCandidates)
+  } else {
+    const allDistricts = Object.values(DISTRICTS_BY_REGION).flat()
+    district = matchLocationName(allDistricts, cleanCandidates)
+    if (district) region = districtToRegion.get(district) || ""
+  }
+
+  let ward = ""
+  if (district) {
+    ward = matchLocationName(getWardOptions(district), cleanCandidates)
+  }
+
+  // If district is still unknown, infer it from a uniquely matched ward within the resolved region.
+  if (!district && region) {
+    const matchedDistricts = (DISTRICTS_BY_REGION[region] || [])
+      .map((candidateDistrict) => {
+        const matchedWard = matchLocationName(getWardOptions(candidateDistrict), cleanCandidates)
+        return matchedWard ? { district: candidateDistrict, ward: matchedWard } : null
+      })
+      .filter((item): item is { district: string; ward: string } => Boolean(item))
+
+    if (matchedDistricts.length === 1) {
+      district = matchedDistricts[0].district
+      ward = matchedDistricts[0].ward
+    }
+  }
+
+  return { region, district, ward }
+}
+
+function looksLikeRouteCode(value: string): boolean {
+  const trimmed = value.trim()
+  return /^[A-Z]\d+[A-Z0-9-]*$/i.test(trimmed)
+}
+
+async function waitForNextPaint(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+}
+
+async function waitAtLeastMs(startedAt: number, minMs: number): Promise<void> {
+  const elapsed = Date.now() - startedAt
+  if (elapsed >= minMs) return
+  await new Promise<void>((resolve) => setTimeout(resolve, minMs - elapsed))
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs: number, pollMs = 25): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs))
+  }
+}
+
+type ReverseGeocodeAddress = {
+  house_number?: string
+  road?: string
+  suburb?: string
+  neighbourhood?: string
+  city?: string
+  town?: string
+  village?: string
+  county?: string
+  state_district?: string
+  state?: string
+  postcode?: string
+  country?: string
+}
+
+type ReverseGeocodePayload = {
+  display_name?: string
+  address?: ReverseGeocodeAddress
+  nearby_place?: {
+    name?: string
+    vicinity?: string
+  } | null
+}
+
+function textMatchesCandidate(haystack: string, needle: string): boolean {
+  const h = normalizeLocationName(haystack || '')
+  const n = normalizeLocationName(needle || '')
+  if (!h || !n) return false
+  return h === n || h.includes(n) || n.includes(h)
+}
+
+function textMatchesAny(haystack: string, needles: string[]): boolean {
+  const cleaned = needles.map((n) => n.trim()).filter(Boolean)
+  if (!haystack.trim() || cleaned.length === 0) return false
+  return cleaned.some((n) => textMatchesCandidate(haystack, n))
+}
+
+function validateTzHierarchySelections(region: string, district: string, ward: string): string | null {
+  const r = region.trim()
+  const d = district.trim()
+  const w = ward.trim()
+  if (!r) return 'Select a region.'
+  if (!matchLocationName(TANZANIA_REGIONS, [r])) return 'Region is not recognized. Please pick a valid region.'
+  if (!d) return 'Select a district.'
+  if (!matchLocationName(DISTRICTS_BY_REGION[r] || [], [d])) return 'District does not match the selected region.'
+  if (w) {
+    const wardOk = matchLocationName(getWardOptions(d), [w])
+    if (!wardOk) return 'Ward does not match the selected district.'
+  }
+  return null
+}
+
+function verifyTzShippingSelectionsAgainstReverseAddress(
+  region: string,
+  district: string,
+  ward: string,
+  address: ReverseGeocodeAddress
+): string | null {
+  const hierarchyErr = validateTzHierarchySelections(region, district, ward)
+  if (hierarchyErr) return hierarchyErr
+
+  const r = region.trim()
+  const d = district.trim()
+  const w = ward.trim()
+
+  const regionCandidates = [address.state, address.country].filter(Boolean) as string[]
+  if (regionCandidates.length > 0 && !textMatchesAny(r, regionCandidates)) {
+    return 'Region does not match the mapped location for this address.'
+  }
+
+  const districtCandidates = [
+    address.county,
+    address.state_district,
+    address.city,
+    address.town,
+    address.village,
+    address.suburb,
+  ].filter(Boolean) as string[]
+
+  if (districtCandidates.length > 0 && !textMatchesAny(d, districtCandidates)) {
+    return 'District does not match the mapped location for this address.'
+  }
+
+  if (w) {
+    const wardCandidates = [
+      address.suburb,
+      address.neighbourhood,
+      address.village,
+      address.city,
+      address.town,
+      address.road,
+    ].filter(Boolean) as string[]
+
+    if (wardCandidates.length > 0 && !textMatchesAny(w, wardCandidates)) {
+      return 'Ward does not match the mapped location for this address.'
+    }
+  }
+
+  return null
+}
+
+const LOCATION_OVERLAY_MIN_MS = 1200
+const LOCATION_OVERLAY_ERROR_MIN_MS = 2200
+const SHIPPING_ADDRESS_MISMATCH_MAX_TRIES = 3
+const DEFAULT_MAP_CENTER = { lat: -6.7924, lon: 39.2083 }
+
 export default function CheckoutPage() {
   return (
     <BuyerRouteGuard>
@@ -91,7 +312,7 @@ export default function CheckoutPage() {
 function CheckoutPageContent() {
   const router = useRouter()
   const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
-  const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem } = useCart()
+  const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem, updateItemQuantity } = useCart()
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
   const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
@@ -146,11 +367,20 @@ function CheckoutPageContent() {
   const selectedItems = getSelectedItems()
   const selectedItemsCount = selectedItems.reduce((sum, item) => sum + item.totalQuantity, 0)
   const selectedSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
+  const orderReviewItemCount = selectedItems.flatMap(i => i.variants || []).length || selectedItems.length
+
+  // Same as cart page - for qty input width
+  const getDesktopQuantityInputWidth = (qty: number) => {
+    const n = String(qty).length
+    return Math.min(6, Math.max(2.5, 2.5 + n * 0.8))
+  }
   
   
   // Calculate shipping cost: 5,000 TZS if order is less than 100,000 TZS, otherwise free
   const FREE_SHIPPING_THRESHOLD = 100000
   const SHIPPING_COST = 5000
+  const SHIPPING_CALCULATION_ENABLED = true
+  const LOCATION_PICKER_ENABLED = false
   
   const [currentStep, setCurrentStep] = useState(0)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
@@ -164,25 +394,56 @@ function CheckoutPageContent() {
   const [orderPickupId, setOrderPickupId] = useState<string | null>(null)
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
   const [deliveryOption, setDeliveryOption] = useState<'shipping' | 'pickup'>('shipping')
-  
-  // Calculate shipping fee based on delivery option and order total
+  const [isFillingLocation, setIsFillingLocation] = useState(false)
+  const [showLocationLoadingOverlay, setShowLocationLoadingOverlay] = useState(false)
+  const [locationOverlayRoot, setLocationOverlayRoot] = useState<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    setLocationOverlayRoot(document.body)
+  }, [])
+
+  useLayoutEffect(() => {
+    setShowLocationLoadingOverlay(isFillingLocation)
+  }, [isFillingLocation])
+
+  // Location coords when user uses "Use my location" or structured address (for server-side shipping estimate)
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lon: number } | null>(null)
+  const [shippingAddressMismatchCount, setShippingAddressMismatchCount] = useState(0)
+  const [shippingPricingLocked, setShippingPricingLocked] = useState(false)
+  // Server-side shipping estimate (from shipping address / location); used in Order Summary
+  const [shippingEstimate, setShippingEstimate] = useState<{ subtotal: number; shipping: number; total: number } | null>(null)
+  const [shippingEstimateLoading, setShippingEstimateLoading] = useState(false)
+  const shippingEstimateLoadingRef = useRef(false)
+  const skipNextShippingEstimateEffectRef = useRef(false)
+  const [shippingCoordsSource, setShippingCoordsSource] = useState<'gps' | 'map' | 'address_geocode' | null>(null)
+  const lastShippingMismatchKeyRef = useRef<string>("")
+
+  useEffect(() => {
+    if (deliveryOption === 'pickup') {
+      setShippingAddressMismatchCount(0)
+      setShippingPricingLocked(false)
+      lastShippingMismatchKeyRef.current = ''
+      setShippingCoordsSource(null)
+      setLocationCoords(null)
+    }
+  }, [deliveryOption])
+
+  useEffect(() => {
+    shippingEstimateLoadingRef.current = shippingEstimateLoading
+  }, [shippingEstimateLoading])
+
+  // Fallback client-side shipping (when server estimate not yet available)
   const calculateShippingFee = () => {
     if (deliveryOption === 'pickup') return 0
-    
-    // If cart total >= 100,000 TZS: Free delivery for all
     if (selectedSubtotal >= FREE_SHIPPING_THRESHOLD) return 0
-    
-    // If cart total < 100,000 TZS: Check if ALL selected products have free delivery
     const allProductsHaveFreeDelivery = selectedItems.every(item => {
       return (item as any)?.free_delivery === true || (item as any)?.freeDelivery === true
     })
-    
-    // If ALL products have free delivery: Free delivery
-    // If MIXED products (some free, some paid): Apply delivery fee
     return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
   }
-  
-  const shippingFee = calculateShippingFee()
+
+  const fallbackShippingFee = calculateShippingFee()
   
   // Get applied promotion from sessionStorage
   const [appliedPromotion, setAppliedPromotion] = useState<{
@@ -205,9 +466,8 @@ function CheckoutPageContent() {
       }
     } catch {}
   }, [])
-  
+
   const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
-  const orderTotal = selectedSubtotal + shippingFee - promotionDiscount
 
   // Timeout for payment processing (increased to 60 seconds for slower networks)
   useEffect(() => {
@@ -237,6 +497,17 @@ function CheckoutPageContent() {
   
   const [isClient, setIsClient] = useState(false)
   const [showMapContainer, setShowMapContainer] = useState(false)
+  const [mapPickerCoords, setMapPickerCoords] = useState<{ lat: number; lon: number } | null>(null)
+  const [mapPickerDisplayName, setMapPickerDisplayName] = useState("")
+  const [mapPickerLoading, setMapPickerLoading] = useState(false)
+  const [mapPickerResolving, setMapPickerResolving] = useState(false)
+  const mapPickerContainerRef = useRef<HTMLDivElement | null>(null)
+  const mapPickerInstanceRef = useRef<google.maps.Map | null>(null)
+  const mapPickerIdleListenerRef = useRef<google.maps.MapsEventListener | null>(null)
+  const mapPickerMarkerRef = useRef<google.maps.Marker | null>(null)
+  const mapPickerRequestSeqRef = useRef(0)
+  const suppressStructuredResetRef = useRef(false)
+  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 
   // Fix hydration mismatch
   useEffect(() => {
@@ -256,6 +527,9 @@ function CheckoutPageContent() {
       email: "",
       streetName: "",
       tin: "",
+      region: "",
+      district: "",
+      ward: "",
     },
     billingAddress: {
       fullName: "",
@@ -269,6 +543,9 @@ function CheckoutPageContent() {
       email: "",
       streetName: "",
       tin: "",
+      region: "",
+      district: "",
+      ward: "",
     },
     paymentDetails: {
       paymentMethod: 'clickpesa',
@@ -283,8 +560,186 @@ function CheckoutPageContent() {
     sameAsShipping: false,
   })
 
+  const hideShippingPrice =
+    deliveryOption === 'shipping' &&
+    shippingPricingLocked
+
+  const displaySubtotal = shippingEstimate?.subtotal ?? selectedSubtotal
+
+  const shippingFee =
+    deliveryOption === 'pickup'
+      ? 0
+      : hideShippingPrice
+        ? null
+        : shippingEstimate?.shipping ?? fallbackShippingFee
+
+  const orderTotal =
+    deliveryOption === 'pickup'
+      ? Math.max(0, displaySubtotal - promotionDiscount)
+      : hideShippingPrice || shippingFee === null
+        ? null
+        : Math.max(0, displaySubtotal + shippingFee - promotionDiscount)
+
   // Track if form has been prefilled to prevent overwriting user edits
   const hasPrefilledRef = useRef(false)
+  // Delay "permission denied" toast so we don't show it if the user is still answering the prompt and success runs next
+  const locationDeniedToastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const deliveryAutoCalcRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Auto-calculate delivery from structured address (region/district/ward/street) when enough is filled
+  useEffect(() => {
+    if (!LOCATION_PICKER_ENABLED) return
+    if (!SHIPPING_CALCULATION_ENABLED) return
+    if (deliveryOption !== 'shipping') return
+    if (locationCoords && (shippingCoordsSource === 'gps' || shippingCoordsSource === 'map')) return
+    const a = formData.shippingAddress
+    const isTz = (a.country || 'Tanzania').toLowerCase().includes('tanzania')
+    // IMPORTANT: Do not include Famous place (address2) in pricing geocode.
+    // Users often type landmarks for couriers; it should not move lat/lon used for shipping distance.
+    const parts = isTz
+      ? [a.ward?.trim(), a.district?.trim(), a.region?.trim(), a.streetName?.trim(), a.address1?.trim(), a.country?.trim() || 'Tanzania'].filter(Boolean) as string[]
+      : [a.streetName?.trim(), a.address1?.trim(), a.city?.trim(), a.state?.trim(), a.country?.trim() || 'Tanzania'].filter(Boolean) as string[]
+    const hasEnough = isTz ? (a.region && (a.district || a.ward || (a.streetName?.trim()) || (a.address1?.trim()))) : parts.length >= 2
+    if (!hasEnough || parts.length < 2) return
+    if (deliveryAutoCalcRef.current) clearTimeout(deliveryAutoCalcRef.current)
+    deliveryAutoCalcRef.current = setTimeout(async () => {
+      deliveryAutoCalcRef.current = null
+      const query = parts.reverse().join(', ')
+      try {
+        if (isTz) {
+          const hierarchyErr = validateTzHierarchySelections(
+            formData.shippingAddress.region || '',
+            formData.shippingAddress.district || '',
+            formData.shippingAddress.ward || ''
+          )
+          if (hierarchyErr) {
+            const key = `hierarchy|${hierarchyErr}|${formData.shippingAddress.region}|${formData.shippingAddress.district}|${formData.shippingAddress.ward}`
+            if (lastShippingMismatchKeyRef.current !== key) {
+              lastShippingMismatchKeyRef.current = key
+              setShippingAddressMismatchCount((c) => {
+                const next = Math.min(SHIPPING_ADDRESS_MISMATCH_MAX_TRIES, c + 1)
+                if (next >= SHIPPING_ADDRESS_MISMATCH_MAX_TRIES) {
+                  setShippingPricingLocked(true)
+                  toast({
+                    title: 'Shipping address not found',
+                    description:
+                      'Please continue with a known address. We will call you to verify the address before delivery.',
+                  })
+                } else {
+                  toast({
+                    title: 'Shipping address not found',
+                    description: hierarchyErr,
+                    variant: 'destructive',
+                  })
+                }
+                return next
+              })
+            }
+
+            skipNextShippingEstimateEffectRef.current = true
+            setShippingEstimate(null)
+            setLocationCoords(null)
+            setShippingCoordsSource(null)
+            return
+          }
+        }
+
+        const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(query)}`)
+        const data = await res.json()
+        if (Array.isArray(data) && data.length > 0 && data[0].lat != null && data[0].lon != null) {
+          const lat = parseFloat(data[0].lat)
+          const lon = parseFloat(data[0].lon)
+          if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+            if (isTz) {
+              const rev = await fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`)
+              const revData = await rev.json()
+              if (!rev.ok || !revData?.address) {
+                const key = `reverse_failed|${lat.toFixed(5)}|${lon.toFixed(5)}|${formData.shippingAddress.region}|${formData.shippingAddress.district}|${formData.shippingAddress.ward}`
+                if (lastShippingMismatchKeyRef.current !== key) {
+                  lastShippingMismatchKeyRef.current = key
+                  setShippingAddressMismatchCount((c) => {
+                    const next = Math.min(SHIPPING_ADDRESS_MISMATCH_MAX_TRIES, c + 1)
+                    if (next >= SHIPPING_ADDRESS_MISMATCH_MAX_TRIES) {
+                      setShippingPricingLocked(true)
+                      toast({
+                        title: 'Shipping address not found',
+                        description:
+                          'Please continue with a known address. We will call you to verify the address before delivery.',
+                      })
+                    } else {
+                      toast({
+                        title: 'Shipping address not found',
+                        description: 'Please correct Region, District, or Ward so we can calculate delivery accurately.',
+                        variant: 'destructive',
+                      })
+                    }
+                    return next
+                  })
+                }
+
+                skipNextShippingEstimateEffectRef.current = true
+                setShippingEstimate(null)
+                setLocationCoords(null)
+                setShippingCoordsSource(null)
+                return
+              }
+
+              const mismatchReason = verifyTzShippingSelectionsAgainstReverseAddress(
+                formData.shippingAddress.region || '',
+                formData.shippingAddress.district || '',
+                formData.shippingAddress.ward || '',
+                revData.address as ReverseGeocodeAddress
+              )
+
+              if (mismatchReason) {
+                const key = `mismatch|${mismatchReason}|${lat.toFixed(5)}|${lon.toFixed(5)}|${formData.shippingAddress.region}|${formData.shippingAddress.district}|${formData.shippingAddress.ward}`
+                if (lastShippingMismatchKeyRef.current !== key) {
+                  lastShippingMismatchKeyRef.current = key
+                  setShippingAddressMismatchCount((c) => {
+                    const next = Math.min(SHIPPING_ADDRESS_MISMATCH_MAX_TRIES, c + 1)
+                    if (next >= SHIPPING_ADDRESS_MISMATCH_MAX_TRIES) {
+                      setShippingPricingLocked(true)
+                      toast({
+                        title: 'Shipping address not found',
+                        description:
+                          'Please continue with a known address. We will call you to verify the address before delivery.',
+                      })
+                    } else {
+                      toast({
+                        title: 'Shipping address not found',
+                        description: mismatchReason,
+                        variant: 'destructive',
+                      })
+                    }
+                    return next
+                  })
+                }
+
+                skipNextShippingEstimateEffectRef.current = true
+                setShippingEstimate(null)
+                setLocationCoords(null)
+                setShippingCoordsSource(null)
+                return
+              }
+
+              setShippingAddressMismatchCount(0)
+              setShippingPricingLocked(false)
+              lastShippingMismatchKeyRef.current = ''
+            }
+
+            setShippingCoordsSource('address_geocode')
+            setLocationCoords({ lat, lon })
+            toast({ title: 'Delivery price updated', description: 'Fee is now based on your address.' })
+          }
+        }
+      } catch {
+        // keep previous coords or default
+      }
+    }, 800)
+    return () => {
+      if (deliveryAutoCalcRef.current) clearTimeout(deliveryAutoCalcRef.current)
+    }
+  }, [LOCATION_PICKER_ENABLED, SHIPPING_CALCULATION_ENABLED, deliveryOption, locationCoords, shippingCoordsSource, formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward, formData.shippingAddress.streetName, formData.shippingAddress.address1, formData.shippingAddress.city, formData.shippingAddress.state, formData.shippingAddress.country])
 
   // Prefill form data for authenticated users (only once, and only if fields are empty)
   useEffect(() => {
@@ -337,6 +792,120 @@ function CheckoutPageContent() {
     }
   }, [user])
 
+  const fetchShippingEstimateNow = useCallback(
+    async (coords?: { lat: number; lon: number } | null) => {
+      const items = getSelectedItems().flatMap((item) =>
+        (item.variants || []).map((v: any) => ({
+          productId: item.productId,
+          variantId: v.variantId ?? null,
+          quantity: v.quantity ?? 1,
+        }))
+      )
+
+      if (items.length === 0) {
+        setShippingEstimate(null)
+        setShippingEstimateLoading(false)
+        return
+      }
+
+      setShippingEstimateLoading(true)
+      try {
+        const res = await fetch('/api/cart/shipping-estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items,
+            deliveryOption,
+            lat: deliveryOption === 'shipping' && coords ? coords.lat : undefined,
+            lon: deliveryOption === 'shipping' && coords ? coords.lon : undefined,
+            region: formData.shippingAddress.region || formData.shippingAddress.state || undefined,
+            ward: formData.shippingAddress.ward || undefined,
+            district: formData.shippingAddress.district || undefined,
+            streetName: formData.shippingAddress.streetName || undefined,
+            address1: formData.shippingAddress.address1 || undefined,
+            city: formData.shippingAddress.city || undefined,
+            state: formData.shippingAddress.state || undefined,
+            country: formData.shippingAddress.country || 'Tanzania',
+          }),
+        })
+        const data = await res.json()
+        if (data.error) {
+          setShippingEstimate(null)
+          return
+        }
+        setShippingEstimate({
+          subtotal: Number(data.subtotal) || 0,
+          shipping: Number(data.shipping) ?? 0,
+          total: Number(data.total) ?? 0,
+        })
+      } catch {
+        setShippingEstimate(null)
+      } finally {
+        setShippingEstimateLoading(false)
+      }
+    },
+    [cart, deliveryOption, formData.shippingAddress.region, formData.shippingAddress.state, formData.shippingAddress.ward, formData.shippingAddress.district, formData.shippingAddress.streetName, formData.shippingAddress.address1, formData.shippingAddress.city, formData.shippingAddress.country]
+  )
+
+  // When Tanzania hierarchy changes, allow a fresh verification attempt.
+  useEffect(() => {
+    if (suppressStructuredResetRef.current) {
+      suppressStructuredResetRef.current = false
+      return
+    }
+    setShippingAddressMismatchCount(0)
+    setShippingPricingLocked(false)
+    lastShippingMismatchKeyRef.current = ''
+    setShippingCoordsSource(null)
+    setLocationCoords(null)
+    setShippingEstimate(null)
+  }, [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward])
+
+  const selectedItemsSignature = getSelectedItems()
+    .map((item) => {
+      const variantPart = (item.variants || [])
+        .map((v: any) => `${String(v.variantId ?? 'default')}:${Number(v.quantity ?? 1)}`)
+        .join('|')
+      return `${item.productId}:${variantPart}`
+    })
+    .join(';')
+
+  // Fetch server-side shipping estimate when items, delivery option, or verified location change
+  useEffect(() => {
+    if (!SHIPPING_CALCULATION_ENABLED) return
+    if (skipNextShippingEstimateEffectRef.current) {
+      skipNextShippingEstimateEffectRef.current = false
+      return
+    }
+
+    if (deliveryOption !== 'shipping') {
+      void fetchShippingEstimateNow(null)
+      return
+    }
+
+    const shouldUseCoords =
+      LOCATION_PICKER_ENABLED &&
+      Boolean(locationCoords) &&
+      !shippingPricingLocked &&
+      shippingCoordsSource !== null
+
+    void fetchShippingEstimateNow(shouldUseCoords ? locationCoords : null)
+  }, [
+    LOCATION_PICKER_ENABLED,
+    SHIPPING_CALCULATION_ENABLED,
+    deliveryOption,
+    selectedItemsSignature,
+    locationCoords?.lat,
+    locationCoords?.lon,
+    shippingPricingLocked,
+    shippingCoordsSource,
+    formData.shippingAddress.country,
+    formData.shippingAddress.region,
+    formData.shippingAddress.district,
+    formData.shippingAddress.ward,
+    fetchShippingEstimateNow,
+  ])
+
   const handleSameAsShipping = (checked: boolean) => {
     setFormData(prev => ({
       ...prev,
@@ -353,6 +922,9 @@ function CheckoutPageContent() {
         email: "",
         streetName: "",
         tin: "",
+        region: "",
+        district: "",
+        ward: "",
       }
     }))
   }
@@ -370,6 +942,343 @@ function CheckoutPageContent() {
         [field]: value
       }
     }))
+  }
+
+  const applyResolvedShippingAddress = useCallback((data: ReverseGeocodePayload) => {
+    if (!data.address) return
+
+    const a = data.address
+    const city = a.city || a.town || a.village || a.county || a.suburb || ''
+    const preferredRoad = looksLikeRouteCode(a.road || '') ? '' : (a.road || '')
+    const streetParts = [preferredRoad, a.suburb, a.neighbourhood, a.village].filter(Boolean)
+    const buildingPart = [a.house_number].filter(Boolean).join(' ').trim()
+    const nearbyPlace = data.nearby_place
+    const nearbyPlaceText = [nearbyPlace?.name, nearbyPlace?.vicinity].filter(Boolean).join(' - ').trim()
+    const streetName = [...new Set(streetParts)].join(', ').trim()
+    const resolvedStreetName =
+      streetName ||
+      preferredRoad ||
+      (a.road || '').trim() ||
+      (a.suburb || '').trim() ||
+      (a.neighbourhood || '').trim() ||
+      (nearbyPlace?.vicinity || '').trim() ||
+      (nearbyPlace?.name || '').trim() ||
+      city ||
+      'Unknown street'
+
+    const famousPlaceFallbackText = (
+      nearbyPlaceText ||
+      [a.neighbourhood, a.suburb, preferredRoad || a.road, a.city, a.town].filter(Boolean).join(' - ').trim()
+    )
+
+    const isTz = (a.country || '').toLowerCase().includes('tanzania')
+    let region = ''
+    let district = ''
+    let ward = ''
+
+    if (isTz) {
+      const resolution = resolveTanzaniaAddressFromCandidates([
+        a.state || '',
+        a.state_district || '',
+        a.county || '',
+        a.city || '',
+        a.town || '',
+        a.village || '',
+        a.suburb || '',
+        a.neighbourhood || '',
+        nearbyPlace?.vicinity || '',
+        nearbyPlace?.name || '',
+        city || '',
+      ])
+      region = resolution.region
+      district = resolution.district
+      ward = resolution.ward
+
+      const wardNorm = normalizeLocationName(ward || '')
+      const districtNorm = normalizeLocationName(district || '')
+      if (districtNorm && wardNorm && wardNorm === districtNorm) {
+        const refined = matchLocationName(
+          getWardOptions(district),
+          [
+            a.suburb || '',
+            a.neighbourhood || '',
+            a.village || '',
+            nearbyPlace?.vicinity || '',
+            nearbyPlace?.name || '',
+          ].filter((c) => Boolean(c) && normalizeLocationName(c) !== districtNorm)
+        )
+        if (refined) ward = refined
+      }
+    }
+
+    flushSync(() => {
+      setFormData(prev => ({
+        ...prev,
+        shippingAddress: {
+          ...prev.shippingAddress,
+          country: a.country || prev.shippingAddress.country,
+          city: city || prev.shippingAddress.city,
+          postalCode: a.postcode || prev.shippingAddress.postalCode,
+          streetName: resolvedStreetName || prev.shippingAddress.streetName || '',
+          address1: buildingPart || prev.shippingAddress.address1,
+          address2: prev.shippingAddress.address2?.trim()
+            ? prev.shippingAddress.address2
+            : (famousPlaceFallbackText || prev.shippingAddress.address2),
+          ...(isTz ? { region: region || prev.shippingAddress.region, district: district || prev.shippingAddress.district, ward: ward || prev.shippingAddress.ward } : {}),
+        },
+      }))
+    })
+
+    setValidationErrors(prev => {
+      const next = { ...prev }
+      const keys = ['shippingCity', 'shippingStreet', 'shippingAddress1', 'shippingLandmark', 'shippingRegion', 'shippingDistrict', 'shippingWard'] as const
+      keys.forEach(k => { if (k in next) delete next[k] })
+      return next
+    })
+  }, [])
+
+  const reverseGeocodeCoords = useCallback(async (lat: number, lon: number) => {
+    const res = await fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`)
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data?.details || data?.error || 'Reverse geocoding failed')
+    }
+    return data as ReverseGeocodePayload
+  }, [])
+
+  // Autofill shipping address from device location (geolocation + reverse geocode)
+  const handleFillFromLocation = () => {
+    if (!navigator.geolocation) {
+      toast({ title: 'Not supported', description: 'Geolocation is not supported in this browser.', variant: 'destructive' })
+      return
+    }
+    if (locationDeniedToastRef.current) {
+      clearTimeout(locationDeniedToastRef.current)
+      locationDeniedToastRef.current = null
+    }
+    const locationRequestStartedAt = Date.now()
+    setIsFillingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        if (locationDeniedToastRef.current) {
+          clearTimeout(locationDeniedToastRef.current)
+          locationDeniedToastRef.current = null
+        }
+        try {
+          const lat = position.coords.latitude
+          const lon = position.coords.longitude
+          if (deliveryOption !== 'shipping') {
+            setLocationCoords({ lat, lon })
+          }
+          const data = await reverseGeocodeCoords(lat, lon)
+          if (data.address) {
+            const nearbyPlaceText = [data?.nearby_place?.name, data?.nearby_place?.vicinity].filter(Boolean).join(' - ').trim()
+            suppressStructuredResetRef.current = true
+            applyResolvedShippingAddress(data)
+            toast({
+              title: 'Address filled',
+              description: nearbyPlaceText
+                ? `Shipping address updated using your location. Nearest place: ${nearbyPlaceText}`
+                : 'Shipping address updated from your location using Google geocoding.'
+            })
+          } else {
+            toast({ title: 'Address not found', description: 'Could not resolve address for this location.', variant: 'destructive' })
+          }
+
+          // Refresh shipping estimate using the freshly resolved coordinates (keeps spinner through fee update).
+          if (deliveryOption === 'shipping') {
+            flushSync(() => {
+              setShippingAddressMismatchCount(0)
+              setShippingPricingLocked(false)
+              lastShippingMismatchKeyRef.current = ''
+              setShippingCoordsSource('gps')
+              setLocationCoords({ lat, lon })
+            })
+          }
+
+          // Keep overlay until the UI has painted the updated form (prevents flicker).
+          await waitForNextPaint()
+          await waitForNextPaint()
+          await waitAtLeastMs(locationRequestStartedAt, LOCATION_OVERLAY_MIN_MS)
+
+          // Also wait until any in-flight shipping estimate refresh settles (prevents "flash then update").
+          if (deliveryOption === 'shipping') {
+            await waitUntil(() => !shippingEstimateLoadingRef.current, 8000)
+            await waitForNextPaint()
+          }
+        } catch (error) {
+          skipNextShippingEstimateEffectRef.current = false
+          toast({
+            title: 'Address failed',
+            description: error instanceof Error ? error.message : 'Could not fetch address. Try again.',
+            variant: 'destructive'
+          })
+          await waitForNextPaint()
+          await waitAtLeastMs(locationRequestStartedAt, LOCATION_OVERLAY_ERROR_MIN_MS)
+        }
+
+        setIsFillingLocation(false)
+      },
+      async (err) => {
+        let msg = 'Request timed out. Try again.'
+        if (err.code === 1) {
+          msg = 'Location access was denied. Enable location for this site in your browser or device settings and try again.'
+        } else if (err.code === 2) {
+          msg = 'Position unavailable. Check that location services are on.'
+        }
+        toast({ title: 'Location failed', description: msg, variant: 'destructive' })
+        await waitForNextPaint()
+        await waitAtLeastMs(locationRequestStartedAt, LOCATION_OVERLAY_ERROR_MIN_MS)
+        setIsFillingLocation(false)
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    )
+  }
+
+  useEffect(() => {
+    if (!showMapContainer || !isClient) return
+
+    const mapsKey = googleMapsApiKey
+    if (!mapsKey) {
+      toast({
+        title: 'Map unavailable',
+        description: 'Missing Google Maps browser key.',
+        variant: 'destructive',
+      })
+      setShowMapContainer(false)
+      return
+    }
+
+    const initialCenter = locationCoords ?? mapPickerCoords ?? DEFAULT_MAP_CENTER
+    setMapPickerLoading(true)
+
+    const loader = new Loader({
+      apiKey: mapsKey,
+      version: 'weekly',
+    })
+
+    loader.load().then(() => {
+      if (!mapPickerContainerRef.current) return
+
+      if (!mapPickerInstanceRef.current) {
+        mapPickerInstanceRef.current = new google.maps.Map(mapPickerContainerRef.current, {
+          center: { lat: initialCenter.lat, lng: initialCenter.lon },
+          zoom: 16,
+          disableDefaultUI: true,
+          zoomControl: true,
+          clickableIcons: false,
+          gestureHandling: 'greedy',
+        })
+
+        mapPickerMarkerRef.current = new google.maps.Marker({
+          map: mapPickerInstanceRef.current,
+          clickable: false,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: '#111827',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 3,
+          },
+        })
+
+        mapPickerIdleListenerRef.current = mapPickerInstanceRef.current.addListener('idle', () => {
+          const center = mapPickerInstanceRef.current?.getCenter()
+          if (!center) return
+          const lat = center.lat()
+          const lon = center.lng()
+          setMapPickerCoords({ lat, lon })
+          mapPickerMarkerRef.current?.setPosition({ lat, lng: lon })
+        })
+      } else {
+        mapPickerInstanceRef.current.setCenter({ lat: initialCenter.lat, lng: initialCenter.lon })
+      }
+
+      setMapPickerCoords(initialCenter)
+      mapPickerMarkerRef.current?.setPosition({ lat: initialCenter.lat, lng: initialCenter.lon })
+    }).catch(() => {
+      toast({
+        title: 'Map unavailable',
+        description: 'Google map could not be loaded right now.',
+        variant: 'destructive',
+      })
+      setShowMapContainer(false)
+    }).finally(() => {
+      setMapPickerLoading(false)
+    })
+  }, [showMapContainer, isClient, locationCoords, mapPickerCoords, toast, googleMapsApiKey])
+
+  useEffect(() => {
+    if (!showMapContainer || !mapPickerCoords) return
+
+    const seq = ++mapPickerRequestSeqRef.current
+    setMapPickerResolving(true)
+    const timeoutId = setTimeout(async () => {
+      try {
+        const data = await reverseGeocodeCoords(mapPickerCoords.lat, mapPickerCoords.lon)
+        if (seq !== mapPickerRequestSeqRef.current) return
+        setMapPickerDisplayName(
+          data.display_name ||
+            [data?.nearby_place?.name, data?.nearby_place?.vicinity].filter(Boolean).join(' - ') ||
+            `${mapPickerCoords.lat.toFixed(6)}, ${mapPickerCoords.lon.toFixed(6)}`
+        )
+      } catch {
+        if (seq !== mapPickerRequestSeqRef.current) return
+        setMapPickerDisplayName(`${mapPickerCoords.lat.toFixed(6)}, ${mapPickerCoords.lon.toFixed(6)}`)
+      } finally {
+        if (seq === mapPickerRequestSeqRef.current) setMapPickerResolving(false)
+      }
+    }, 250)
+
+    return () => clearTimeout(timeoutId)
+  }, [showMapContainer, mapPickerCoords, reverseGeocodeCoords])
+
+  const handleConfirmMapLocation = async () => {
+    if (!mapPickerCoords) return
+
+    setMapPickerResolving(true)
+    try {
+      const data = await reverseGeocodeCoords(mapPickerCoords.lat, mapPickerCoords.lon)
+      suppressStructuredResetRef.current = true
+      applyResolvedShippingAddress(data)
+      flushSync(() => {
+        setShippingAddressMismatchCount(0)
+        setShippingPricingLocked(false)
+        lastShippingMismatchKeyRef.current = ''
+        setShippingCoordsSource('map')
+        setLocationCoords(mapPickerCoords)
+      })
+      setMapPickerDisplayName(data.display_name || mapPickerDisplayName)
+      setShowMapContainer(false)
+      toast({
+        title: 'Map location selected',
+        description: 'Delivery fee is now based on the point you selected on the map.',
+      })
+    } catch (error) {
+      toast({
+        title: 'Map selection failed',
+        description: error instanceof Error ? error.message : 'Could not resolve the selected point.',
+        variant: 'destructive',
+      })
+    } finally {
+      setMapPickerResolving(false)
+    }
+  }
+
+  const handleOpenGoogleMapPicker = () => {
+    if (googleMapsApiKey) {
+      setShowMapContainer(true)
+      return
+    }
+
+    const fallbackCoords = locationCoords ?? DEFAULT_MAP_CENTER
+    const query = `${fallbackCoords.lat},${fallbackCoords.lon}`
+    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`, '_blank', 'noopener,noreferrer')
+    toast({
+      title: 'Opened Google Maps',
+      description: 'Google Maps opened in a new tab because the embedded map key is not configured.',
+    })
   }
 
   const handlePlaceOrder = async () => {
@@ -440,6 +1349,42 @@ function CheckoutPageContent() {
       // Prepare order data (reuse selectedIds from validation above)
       const selectedItems = selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
 
+      // Align final amount with server shipping rules (region base + ward distance from store coordinates).
+      let serverShippingFee = deliveryOption === 'pickup' ? 0 : 5000
+      let serverSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
+      try {
+        const estimateRes = await fetch('/api/cart/shipping-estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: selectedItems.flatMap(item =>
+              item.variants.map(variant => ({
+                productId: item.productId,
+                variantId: variant.variantId ?? null,
+                quantity: variant.quantity ?? 1,
+              }))
+            ),
+            deliveryOption,
+            region: formData.shippingAddress.region || formData.shippingAddress.state || undefined,
+            ward: formData.shippingAddress.ward || undefined,
+            district: formData.shippingAddress.district || undefined,
+            streetName: formData.shippingAddress.streetName || undefined,
+            address1: formData.shippingAddress.address1 || undefined,
+            city: formData.shippingAddress.city || undefined,
+            state: formData.shippingAddress.state || undefined,
+            country: formData.shippingAddress.country || 'Tanzania',
+          }),
+        })
+        const estimate = await estimateRes.json()
+        if (!estimate.error && typeof estimate.subtotal === 'number' && typeof estimate.shipping === 'number') {
+          serverSubtotal = estimate.subtotal
+          serverShippingFee = estimate.shipping
+        }
+      } catch {
+        // Keep fallback totals
+      }
+      const serverTotalAmount = Math.round(serverSubtotal + serverShippingFee - promotionDiscount)
+
       const orderData = {
         orderNumber: orderId,
         userId: user?.id || null, // null for guest users
@@ -463,10 +1408,11 @@ function CheckoutPageContent() {
         shippingAddress: formData.shippingAddress,
         billingAddress: formData.sameAsShipping ? formData.shippingAddress : formData.billingAddress,
         deliveryOption,
-        shippingFee: shippingFee,
+        shippingFee: serverShippingFee,
+        shippingLocation: locationCoords ? { lat: locationCoords.lat, lon: locationCoords.lon } : null,
         promotionCode: appliedPromotion?.code || null,
         promotionDiscount: promotionDiscount,
-        totalAmount: orderTotal,
+        totalAmount: serverTotalAmount,
         timestamp: new Date().toISOString(),
       }
 
@@ -761,8 +1707,12 @@ function CheckoutPageContent() {
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.shippingAddress.email)) {
       errors.shippingEmail = "Please enter a valid email address"
     }
-    if (!formData.shippingAddress.city.trim()) {
-      errors.shippingCity = "City is required"
+    if (formData.shippingAddress.country === 'Tanzania') {
+      if (!formData.shippingAddress.region?.trim()) errors.shippingRegion = "Region is required"
+      if (!formData.shippingAddress.district?.trim()) errors.shippingDistrict = "District is required"
+      if (!formData.shippingAddress.ward?.trim()) errors.shippingWard = "Ward is required"
+    } else {
+      if (!formData.shippingAddress.city.trim()) errors.shippingCity = "City is required"
     }
     if (!formData.shippingAddress.streetName?.trim()) {
       errors.shippingStreet = "Street name is required"
@@ -770,9 +1720,7 @@ function CheckoutPageContent() {
     if (!formData.shippingAddress.address1.trim()) {
       errors.shippingAddress1 = "House/building number is required"
     }
-    if (!formData.shippingAddress.address2?.trim()) {
-      errors.shippingLandmark = "Nearby landmark is required"
-    }
+    // Landmark is optional — for precision only; if not found, no effect
 
     setValidationErrors(errors)
     return Object.keys(errors).length === 0
@@ -934,31 +1882,14 @@ function CheckoutPageContent() {
                     <div className="flex-1">
                       <h3 className={cn("font-medium text-base", themeClasses.mainText)}>Shipping Delivery</h3>
                       <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                        We'll deliver your order directly to your doorstep
+                        We will deliver your order directly to the location you provide.
+                        Enter your address manually to continue checkout.
                       </p>
                       <div className="mt-2 space-y-1">
                         <div className="flex items-center space-x-2">
                           <Package className="w-3 h-3 text-transparent" />
                           <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Delivery Time:</strong> 3-5 business days
-                          </p>
-                       </div>
-                        <div className="flex items-center space-x-2">
-                          <DollarSign className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Delivery Fee:</strong> TZS 5,000 (Free on orders over TZS 100,000)
-                          </p>
-                   </div>
-                        <div className="flex items-center space-x-2">
-                          <Navigation className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Coverage:</strong> Dar es Salaam, Arusha, Mwanza, Dodoma
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Clock className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Delivery Hours:</strong> Monday - Saturday, 8:00 AM - 6:00 PM
+                            <strong>Estimated delivery time:</strong> 1–3 business days
                           </p>
                         </div>
                       </div>
@@ -990,37 +1921,19 @@ function CheckoutPageContent() {
                     <div className="flex-1">
                       <h3 className={cn("font-medium text-base", themeClasses.mainText)}>Store Pickup</h3>
                       <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                        Pick up your order from our store location
+                        Pick up your order from our store location Honic Store, 44 Bibi titi road, DIT CEIIT Tower floor 03, Dar es Salaam
                       </p>
                       <div className="mt-2 space-y-1">
                         <div className="flex items-center space-x-2">
-                          <Zap className="w-3 h-3 text-transparent" />
+                          <Clock className="w-3 h-3 text-transparent" />
                           <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Ready Time:</strong> Same day or next business day
+                            <strong>Pickup Time:</strong> Monday - Saturday, 9:00 AM - 6:00 PM. Same day or next business day
                           </p>
-               </div>
+                        </div>
                         <div className="flex items-center space-x-2">
                           <Gift className="w-3 h-3 text-transparent" />
                           <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
                             <strong>Pickup Fee:</strong> FREE - No additional charges
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <MapPinIcon className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Location:</strong> {companyName} Store, Dar es Salaam
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Clock className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Pickup Hours:</strong> Monday - Saturday, 8:00 AM - 8:00 PM
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Bell className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>Notification:</strong> SMS/Email when ready for pickup
                           </p>
                         </div>
                       </div>
@@ -1037,11 +1950,62 @@ function CheckoutPageContent() {
           return (
             <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
               <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>Shipping Address</CardTitle>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>Shipping Address</CardTitle>
+                    <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
+                      Please make sure you enter the correct address to avoid package loss or delivery delays.
+                    </p>
+                  </div>
+                  <div className="shrink-0 rounded-lg border border-neutral-300 bg-white px-4 py-3 min-w-56 max-w-[16rem] sm:max-w-[18rem]">
+                    <p className="text-sm font-bold text-black">Shipping Fee</p>
+                    <p className="text-xs sm:text-sm font-extrabold text-black text-right leading-snug">
+                      {shippingEstimateLoading
+                        ? 'Calculating...'
+                        : hideShippingPrice
+                          ? shippingPricingLocked
+                            ? 'Shipping address not found. Continue with a known address — we will call to verify.'
+                            : 'Shipping address not found'
+                          : shippingFee === 0
+                            ? 'Free'
+                            : formatPrice(shippingFee)}
+                    </p>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="grid gap-3 sm:gap-4 p-3 sm:p-6">
-                {/* Row 1: Full Name, Phone, Email */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                {SHIPPING_CALCULATION_ENABLED && LOCATION_PICKER_ENABLED && <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleFillFromLocation}
+                    disabled={isFillingLocation}
+                    className={cn(
+                      "gap-2 shrink-0 border-sky-500 text-sky-600 hover:bg-sky-50 hover:text-sky-700 dark:border-sky-400 dark:text-sky-400 dark:hover:bg-sky-950/40 dark:hover:text-sky-300"
+                    )}
+                  >
+                    <MapPin className="h-4 w-4 shrink-0" />
+                    {isFillingLocation ? 'Getting location…' : 'Use my location (Google)'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOpenGoogleMapPicker}
+                    className={cn(
+                      "gap-2 shrink-0 border-neutral-400 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                    )}
+                  >
+                    <Navigation className="h-4 w-4 shrink-0" />
+                    Select on Google Maps
+                  </Button>
+                  <p className="text-xs text-sky-600 dark:text-sky-400">
+                    Use your location or drop a pin like Bolt to calculate the delivery fee from the exact point.
+                  </p>
+                </div>}
+                {/* Row 1: Contact — Full Name, Phone, Email */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-start">
                   <div className="grid gap-1 sm:gap-2">
                     <Label htmlFor="shippingFullName" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
                   Full Name *
@@ -1141,112 +2105,143 @@ function CheckoutPageContent() {
                   </div>
               </div>
 
-                {/* Row 2: Country, Region/City, Street Name */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Country *
-                  </Label>
-                    <select
-                      id="shippingCountry"
-                      value={formData.shippingAddress.country}
-                      onChange={(e) => handleInputChange(e, "shippingAddress", "country")}
-                    className={cn(
-                        "w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500",
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.inputBorder,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                      )}
-                    >
-                      <option value="Tanzania">Tanzania</option>
-                      <option value="Kenya">Kenya</option>
-                      <option value="Uganda">Uganda</option>
-                      <option value="Rwanda">Rwanda</option>
-                    </select>
-                </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingCity" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Region/City *
-                  </Label>
-                  <Input
-                          id="shippingCity"
-                          value={formData.shippingAddress.city}
-                          onChange={(e) => {
-                            handleInputChange(e, "shippingAddress", "city")
-                            if (validationErrors.shippingCity) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.shippingCity
-                                return newErrors
-                              })
+                {/* Row 2: Location — Country, Region, District, Ward (Tanzania) or Country, Region/City, Street (other) */}
+                {formData.shippingAddress.country === 'Tanzania' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 items-start">
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>Country *</Label>
+                      <select
+                        id="shippingCountry"
+                        value={formData.shippingAddress.country}
+                        onChange={(e) => handleInputChange(e, "shippingAddress", "country")}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary)}
+                      >
+                        <option value="Tanzania">Tanzania</option>
+                        <option value="Kenya">Kenya</option>
+                        <option value="Uganda">Uganda</option>
+                        <option value="Rwanda">Rwanda</option>
+                      </select>
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingRegion" className={cn("text-sm sm:text-base", themeClasses.mainText)}>Region *</Label>
+                      <select
+                        id="shippingRegion"
+                        value={formData.shippingAddress.region || ""}
+                        onChange={(e) => {
+                          const newRegion = e.target.value
+                          handleInputChange(e, "shippingAddress", "region")
+                          const districts = (newRegion && (DISTRICTS_BY_REGION[newRegion] ?? [])) || []
+                          const onlyDistrict = districts.length === 1 ? districts[0] : ''
+                          const wards = onlyDistrict ? getWardOptions(onlyDistrict) : []
+                          const onlyWard = wards.length === 1 ? wards[0] : ''
+                          setFormData(prev => ({
+                            ...prev,
+                            shippingAddress: {
+                              ...prev.shippingAddress,
+                              district: onlyDistrict,
+                              ward: onlyWard,
+                              city: newRegion || prev.shippingAddress.city
                             }
-                          }}
-                          placeholder="e.g., Dar es Salaam, Arusha, Mwanza"
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.shippingCity
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                    )}
-                  />
-                        {validationErrors.shippingCity && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingCity}</p>
-                  )}
-              </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingStreet" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Street Name *
-                  </Label>
-                  <Input
-                          id="shippingStreet"
-                          value={formData.shippingAddress.streetName || ""}
-                          onChange={(e) => {
-                            handleInputChange(e, "shippingAddress", "streetName")
-                            if (validationErrors.shippingStreet) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.shippingStreet
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder="e.g., Samora Avenue, Nyerere Road"
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.shippingStreet
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                          )}
-                        />
-                        {validationErrors.shippingStreet && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingStreet}</p>
-                        )}
+                          }))
+                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingRegion; delete n.shippingDistrict; delete n.shippingWard; return n })
+                        }}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingRegion ? "border-red-500" : "")}
+                      >
+                        <option value="">Select region</option>
+                        {TANZANIA_REGIONS.map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                      {validationErrors.shippingRegion && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingRegion}</p>}
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingDistrict" className={cn("text-sm sm:text-base", themeClasses.mainText)}>District *</Label>
+                      <select
+                        id="shippingDistrict"
+                        value={formData.shippingAddress.district || ""}
+                        onChange={(e) => {
+                          const newDistrict = e.target.value
+                          handleInputChange(e, "shippingAddress", "district")
+                          const wards = newDistrict ? getWardOptions(newDistrict) : []
+                          const onlyWard = wards.length === 1 ? wards[0] : ''
+                          setFormData(prev => ({
+                            ...prev,
+                            shippingAddress: { ...prev.shippingAddress, ward: onlyWard }
+                          }))
+                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingDistrict; delete n.shippingWard; return n })
+                        }}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingDistrict ? "border-red-500" : "")}
+                      >
+                        <option value="">Select district</option>
+                        {(DISTRICTS_BY_REGION[formData.shippingAddress.region || ""] ?? []).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                      {validationErrors.shippingDistrict && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingDistrict}</p>}
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingWard" className={cn("text-sm sm:text-base", themeClasses.mainText)}>Ward *</Label>
+                      <select
+                        id="shippingWard"
+                        value={formData.shippingAddress.ward || ""}
+                        onChange={(e) => {
+                          handleInputChange(e, "shippingAddress", "ward")
+                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingWard; return n })
+                        }}
+                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingWard ? "border-red-500" : "")}
+                      >
+                        <option value="">Select ward</option>
+                        {getWardOptions(formData.shippingAddress.district || "").map((w) => (
+                          <option key={w} value={w}>{w}</option>
+                        ))}
+                      </select>
+                      {validationErrors.shippingWard && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingWard}</p>}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 items-start">
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>Country *</Label>
+                      <select id="shippingCountry" value={formData.shippingAddress.country} onChange={(e) => handleInputChange(e, "shippingAddress", "country")} className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary)}>
+                        <option value="Tanzania">Tanzania</option>
+                        <option value="Kenya">Kenya</option>
+                        <option value="Uganda">Uganda</option>
+                        <option value="Rwanda">Rwanda</option>
+                      </select>
+                    </div>
+                    <div className="grid gap-1 sm:gap-2">
+                      <Label htmlFor="shippingCity" className={cn("text-sm sm:text-base", themeClasses.mainText)}>Region/City *</Label>
+                      <Input id="shippingCity" value={formData.shippingAddress.city} onChange={(e) => { handleInputChange(e, "shippingAddress", "city"); if (validationErrors.shippingCity) setValidationErrors(prev => { const n = { ...prev }; delete n.shippingCity; return n }) }} placeholder="e.g., Nairobi, Kampala" className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, validationErrors.shippingCity ? "border-red-500" : darkHeaderFooterClasses.inputBorder)} />
+                      {validationErrors.shippingCity && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingCity}</p>}
+                    </div>
+                  </div>
+                )}
 
-                {/* Row 3: House Number, Postal Code (Optional), Additional Details */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                {/* Row 3: Street address — Street Name, House/Building Number, Famous place (optional) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-start">
                   <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingHouseNumber" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      House/Building Number *
-                    </Label>
+                    <Label htmlFor="shippingStreet" className={cn("text-sm sm:text-base", themeClasses.mainText)}>Street Name *</Label>
+                    <Input
+                      id="shippingStreet"
+                      value={formData.shippingAddress.streetName || ""}
+                      onChange={(e) => {
+                        handleInputChange(e, "shippingAddress", "streetName")
+                        if (validationErrors.shippingStreet) setValidationErrors(prev => { const n = { ...prev }; delete n.shippingStreet; return n })
+                      }}
+                      placeholder="e.g., Samora Avenue, Nyerere Road"
+                      className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, validationErrors.shippingStreet ? "border-red-500 focus:border-red-500 focus:ring-red-500" : darkHeaderFooterClasses.inputBorder)}
+                    />
+                    {validationErrors.shippingStreet && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingStreet}</p>}
+                  </div>
+                  <div className="grid gap-1 sm:gap-2">
+                    <Label htmlFor="shippingHouseNumber" className={cn("text-sm sm:text-base", themeClasses.mainText)}>House/Building Number *</Label>
                     <Input
                       id="shippingHouseNumber"
                       value={formData.shippingAddress.address1}
                       onChange={(e) => {
                         handleInputChange(e, "shippingAddress", "address1")
                         if (validationErrors.shippingAddress1) {
-                          setValidationErrors(prev => {
-                            const newErrors = { ...prev }
-                            delete newErrors.shippingAddress1
-                            return newErrors
-                          })
+                          setValidationErrors(prev => { const newErrors = { ...prev }; delete newErrors.shippingAddress1; return newErrors })
                         }
                       }}
                       placeholder="e.g., 123, Block A"
@@ -1254,91 +2249,40 @@ function CheckoutPageContent() {
                         darkHeaderFooterClasses.inputBg,
                         darkHeaderFooterClasses.textNeutralPrimary,
                         darkHeaderFooterClasses.inputPlaceholder,
-                        validationErrors.shippingAddress1
-                          ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                          : darkHeaderFooterClasses.inputBorder
-                  )}
-                />
-                    {validationErrors.shippingAddress1 && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingAddress1}</p>
-                  )}
+                        validationErrors.shippingAddress1 ? "border-red-500 focus:border-red-500 focus:ring-red-500" : darkHeaderFooterClasses.inputBorder
+                      )}
+                    />
+                    {validationErrors.shippingAddress1 && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingAddress1}</p>}
+                  </div>
+                  <div className="grid gap-1 sm:gap-2">
+                    <Label htmlFor="shippingLandmark" className={cn("text-sm sm:text-base", themeClasses.mainText)}>Famous place (optional)</Label>
+                    <Input
+                      id="shippingLandmark"
+                      value={formData.shippingAddress.address2 || ""}
+                      onChange={(e) => {
+                        handleInputChange(e, "shippingAddress", "address2")
+                        if (validationErrors.shippingLandmark) {
+                          setValidationErrors(prev => { const newErrors = { ...prev }; delete newErrors.shippingLandmark; return newErrors })
+                        }
+                      }}
+                      placeholder="e.g. City Mall, Mlimani City"
+                      className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, darkHeaderFooterClasses.inputBorder)}
+                    />
+                    <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>For precision selection.</p>
+                  </div>
                 </div>
 
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingPostalCode" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Postal Code <span className="text-gray-500">(Optional)</span>
-                  </Label>
+                {/* Row 4: More details (optional) */}
+                <div className="grid gap-1 sm:gap-2 w-full max-w-full">
+                  <Label htmlFor="shippingMoreDetails" className={cn("text-sm sm:text-base", themeClasses.mainText)}>More details (optional)</Label>
                   <Input
-                      id="shippingPostalCode"
-                      value={formData.shippingAddress.postalCode}
-                      onChange={(e) => handleInputChange(e, "shippingAddress", "postalCode")}
-                      placeholder="e.g., 11101"
-                    className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.inputBorder,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                  )}
-                />
-              </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingAdditional" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      Additional Details <span className="text-gray-500">(Optional)</span>
-                  </Label>
-                  <Input
-                      id="shippingAdditional"
-                    value={formData.shippingAddress.state}
+                    id="shippingMoreDetails"
+                    value={formData.shippingAddress.state || ""}
                     onChange={(e) => handleInputChange(e, "shippingAddress", "state")}
-                      placeholder="e.g., Floor 2, Apartment 5"
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.inputBorder,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                    )}
+                    placeholder="e.g. Near Agakan Hospital"
+                    className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder)}
                   />
-              </div>
                 </div>
-
-                {/* Row 4: Nearby Landmark (Full Width) */}
-                <div className="grid gap-1 sm:gap-2">
-                  <Label htmlFor="shippingLandmark" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                    Nearby Famous Place/Landmark *
-                  </Label>
-                  <Input
-                    id="shippingLandmark"
-                    value={formData.shippingAddress.address2 || ""}
-                    onChange={(e) => {
-                      handleInputChange(e, "shippingAddress", "address2")
-                      if (validationErrors.shippingLandmark) {
-                        setValidationErrors(prev => {
-                          const newErrors = { ...prev }
-                          delete newErrors.shippingLandmark
-                          return newErrors
-                        })
-                      }
-                    }}
-                    placeholder="e.g., Near Shoprite, Opposite Post Office, Next to Bank of Tanzania"
-                    className={cn(
-                      darkHeaderFooterClasses.inputBg,
-                      darkHeaderFooterClasses.textNeutralPrimary,
-                      darkHeaderFooterClasses.inputPlaceholder,
-                      validationErrors.shippingLandmark
-                        ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                        : darkHeaderFooterClasses.inputBorder
-                    )}
-                  />
-                  {validationErrors.shippingLandmark && (
-                    <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingLandmark}</p>
-                  )}
-                  <div className="flex items-center space-x-2 mt-1">
-                    <Lightbulb className="w-3 h-3 text-transparent" />
-                    <p className="text-xs text-green-600 dark:text-green-400">
-                      Help us find you easily by mentioning a nearby landmark, shop, or building
-                    </p>
-                </div>
-              </div>
             </CardContent>
           </Card>
         )
@@ -1763,7 +2707,9 @@ function CheckoutPageContent() {
                       <p className={themeClasses.mainText}>{formData.shippingAddress.fullName}</p>
                       <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.address1}</p>
                       <p className={themeClasses.textNeutralSecondary}>
-                        {formData.shippingAddress.city}, {formData.shippingAddress.country}
+                        {formData.shippingAddress.country === 'Tanzania'
+                          ? [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward].filter(Boolean).join(', ') || formData.shippingAddress.city
+                          : formData.shippingAddress.city}, {formData.shippingAddress.country}
                       </p>
                       <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.phone}</p>
                 </div>
@@ -1868,15 +2814,37 @@ function CheckoutPageContent() {
           }
           
         return (
-          <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-            <CardHeader>
-              <CardTitle className={themeClasses.mainText}>Order Review</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:gap-4 md:gap-6 p-3 sm:p-4 md:p-6" style={{ contentVisibility: 'auto' }}>
-              {/* Order Summary */}
-                <div className="space-y-3 sm:space-y-4">
-                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
-                <div className="space-y-3 sm:space-y-4">
+          <>
+            {/* Order Review - outside the box */}
+            <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>Order Review</h1>
+            {/* Cart-style header bar (no checkbox, no Clear All / Save for Later) */}
+            <div className={cn(
+              "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 rounded-lg border mb-4",
+              "bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200",
+              "dark:bg-gradient-to-r dark:from-gray-800 dark:to-gray-700 dark:border-gray-600",
+            )}>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
+                  <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
+                    Cart Items ({orderReviewItemCount})
+                  </span>
+                </div>
+                <div className="hidden sm:flex items-center gap-4 text-sm">
+                  <span className={cn(themeClasses.textNeutralSecondary)}>Total Items: {selectedItemsCount}</span>
+                  <span className={cn(themeClasses.textNeutralSecondary)}>Subtotal: {formatPrice(displaySubtotal)}</span>
+                </div>
+              </div>
+              <div className="flex sm:hidden items-center gap-2 text-xs">
+                <span className={cn(themeClasses.textNeutralSecondary)}>Items: {selectedItemsCount}</span>
+                <span className={cn(themeClasses.textNeutralSecondary)}>Total: {formatPrice(displaySubtotal)}</span>
+              </div>
+            </div>
+
+            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+              <CardContent className="p-3 sm:p-4 md:p-6 space-y-6" style={{ contentVisibility: 'auto' }}>
+                {/* Items list - same layout as cart page with cart-style qty controls */}
+                <div className="space-y-0">
                   {selectedItems.length === 0 ? (
                     <div className="text-center py-8">
                       <p className={cn("text-gray-500", themeClasses.textNeutralSecondary)}>
@@ -1884,106 +2852,182 @@ function CheckoutPageContent() {
                       </p>
                     </div>
                   ) : (
-                    selectedItems.flatMap((item, itemIndex) => 
-                      (item.variants || []).map((variant: any, variantIndex: number) => (
-                    <div key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`} className="flex flex-row items-start gap-2 sm:gap-3 md:gap-4 p-2 sm:p-3 md:p-4 rounded-lg border border-gray-200 dark:border-gray-700 w-full">
-                      <div className="flex-shrink-0 self-start">
-                          {item.product?.image ? (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <LazyImage
-                                src={item.product.image}
-                                alt={item.product.name || "Product image"}
-                                width={64}
-                                height={64}
-                                className="rounded-md object-contain w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-50 hover:opacity-80 transition-opacity"
-                                priority={false} // Not priority since it's in a list
-                                quality={80}
-                              />
-                            </Link>
-                          ) : (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
-                                <span className="text-gray-400 text-xs">No Image</span>
-                              </div>
-                            </Link>
-                          )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                          <Link 
-                            href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                            className="hover:underline"
+                    selectedItems.flatMap((item, itemIndex) =>
+                      (item.variants || []).map((variant: any, variantIndex: number) => {
+                        const product = item.product
+                        const variantPrice = variant.price || 0
+                        const variantQuantity = variant.quantity || 1
+                        const variantTotalPrice = variantPrice * variantQuantity
+                        const discountPercentage = (product as any)?.originalPrice && (product as any).originalPrice > variantPrice
+                          ? (((product as any).originalPrice - variantPrice) / (product as any).originalPrice) * 100
+                          : 0
+                        return (
+                          <div
+                            key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
+                            className={cn(
+                              "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
+                            )}
                           >
-                            <h4 className={cn("font-medium text-xs sm:text-sm md:text-base break-words", themeClasses.mainText)}>
-                              {item.product?.name || `Product ${item.productId}`}
-                              {variant.variant_name && (
-                                <span className={cn("font-normal text-blue-600 dark:text-blue-400 block sm:inline")}>
-                                  <span className="hidden sm:inline">{" | "}</span>
-                                  <span className="sm:hidden"> - </span>
-                                  {variant.variant_name}
-                                </span>
-                              )}
-                            </h4>
-                          </Link>
-                          <div className={cn("flex flex-col sm:flex-row items-start sm:items-center justify-between mt-1 sm:mt-0 gap-1 sm:gap-2")}>
-                            <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                              Unit Price: {formatPrice(variant.price || 0)}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <span className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                                Qty: {variant.quantity || 1}
-                              </span>
-                              <span className={cn("text-xs sm:text-sm md:text-base font-medium", themeClasses.mainText)}>
-                                {formatPrice((variant.price || 0) * (variant.quantity || 1))}
-                              </span>
+                            <div className="flex gap-1 sm:gap-2">
+                              <div className="flex items-start gap-2">
+                                <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
+                                  <div className="relative">
+                                    {product?.image ? (
+                                      <LazyImage
+                                        src={product.image}
+                                        alt={product.name || "Product"}
+                                        width={50}
+                                        height={50}
+                                        className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
+                                        priority={false}
+                                        quality={80}
+                                      />
+                                    ) : (
+                                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                                        <span className="text-gray-400 text-xs">No Image</span>
+                                      </div>
+                                    )}
+                                    {discountPercentage > 0 && (
+                                      <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
+                                        -{discountPercentage.toFixed(0)}%
+                                      </div>
+                                    )}
+                                  </div>
+                                </Link>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
+                                  <div className="flex-1 min-w-0">
+                                    <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
+                                      <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
+                                        {product?.name || `Product ${item.productId}`}
+                                        {variant.variant_name && (
+                                          <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
+                                        )}
+                                      </h3>
+                                    </Link>
+                                    <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
+                                      <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
+                                        {formatPrice(variantPrice)}
+                                      </span>
+                                      {(product as any)?.originalPrice && (product as any).originalPrice > variantPrice && (
+                                        <>
+                                          <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
+                                            {formatPrice((product as any).originalPrice)}
+                                          </span>
+                                          <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
+                                            Save {formatPrice((product as any).originalPrice - variantPrice)}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                    {/* Mobile: qty below product details */}
+                                    <div className="flex items-center gap-2 mt-1.5 sm:hidden">
+                                      <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                          <Minus className="w-3.5 h-3.5" />
+                                        </Button>
+                                        <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                          <Plus className="w-3.5 h-3.5" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
+                                      <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>Item Total Price:</span>
+                                      <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
+                                    </div>
+                                  </div>
+                                  {/* Desktop: qty on right side like cart */}
+                                  <div className="hidden sm:flex flex-col items-center gap-1">
+                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </Button>
+                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Plus className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
-              </div>
-                    </div>
-                      ))
+                        )
+                      })
                     )
                   )}
-                          </div>
-                    </div>
+                </div>
 
-                {/* Order Total */}
-                  <div className="border-t pt-3 sm:pt-4 space-y-2">
-                    <div className="flex justify-between items-center text-xs sm:text-sm">
-                      <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
-                      <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
+                {/* Summary totals - new style with background */}
+                <div className={cn(
+                  "rounded-xl p-4 sm:p-5 space-y-3",
+                  "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
+                )}>
+                  <div className="flex justify-between items-baseline gap-2">
+                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>Subtotal ({orderReviewItemCount} items):</span>
+                    <span className={cn("text-base font-semibold tabular-nums", themeClasses.mainText)}>{formatPrice(displaySubtotal)}</span>
+                  </div>
+                  {promotionDiscount > 0 && (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className="text-sm font-medium text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code}):</span>
+                      <span className="text-base font-semibold text-green-600 dark:text-green-400 tabular-nums">-{formatPrice(promotionDiscount)}</span>
                     </div>
-                    {promotionDiscount > 0 && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
-                        <span className="text-green-600 dark:text-green-400 font-medium">
-                          -{formatPrice(promotionDiscount)}
+                  )}
+                  {(deliveryOption as string) === 'shipping' && (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>Shipping:</span>
+                      <span
+                        className={cn(
+                          "text-sm sm:text-base font-semibold text-right max-w-[16rem] sm:max-w-[20rem] leading-snug tabular-nums",
+                          !hideShippingPrice && shippingFee === 0 ? "text-green-600 dark:text-green-400" : themeClasses.mainText
+                        )}
+                      >
+                        {shippingEstimateLoading
+                          ? '...'
+                          : hideShippingPrice
+                            ? shippingPricingLocked
+                              ? 'Not shown — continue with a known address; we will call to verify.'
+                              : 'Shipping address not found'
+                            : shippingFee === 0
+                              ? 'Free'
+                              : formatPrice(shippingFee as number)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="border-t border-neutral-200 dark:border-neutral-600 pt-3 mt-1">
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className={cn("text-base font-bold", themeClasses.mainText)}>Total:</span>
+                      <span className={cn("text-lg font-bold tabular-nums", themeClasses.mainText)}>
+                        {orderTotal === null ? '—' : formatPrice(orderTotal)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Applied promotion - same style as cart page (read-only) */}
+                {appliedPromotion && (
+                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Ticket className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                        <span className="text-xs sm:text-sm font-semibold text-green-800 dark:text-green-200">
+                          {appliedPromotion.code}
                         </span>
                       </div>
-                    )}
-                    {(deliveryOption as string) === 'shipping' && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
-                        <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
-                          {shippingFee === 0 ? 'Free' : formatPrice(shippingFee)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t">
-                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Total</span>
-                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
-                        {formatPrice(orderTotal)}
-                    </span>
-                      </div>
-                      </div>
+                      <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
+                        {(appliedPromotion as any).name || 'Promotion'} • {formatPrice(appliedPromotion.discountAmount)} discount applied
+                      </p>
+                    </div>
+                  </div>
+                )}
+
             </CardContent>
           </Card>
+          </>
         )
-        }
+          }
 
       case 3:
         if ((deliveryOption as string) === 'shipping') {
@@ -2082,116 +3126,270 @@ function CheckoutPageContent() {
           }
           
         return (
-          <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-            <CardHeader>
-              <CardTitle className={themeClasses.mainText}>Order Review</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:gap-4 md:gap-6 p-3 sm:p-4 md:p-6">
-              {/* Order Summary */}
-                <div className="space-y-3 sm:space-y-4">
-                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Order Summary</h3>
-                <div className="space-y-3 sm:space-y-4">
-                  {selectedItems.map((item, index) => (
-                    <div key={index} className="flex flex-row items-start gap-2 sm:gap-3 md:gap-4 p-2 sm:p-3 md:p-4 rounded-lg border border-gray-200 dark:border-gray-700 w-full">
-                      <div className="flex-shrink-0 self-start">
-                          {item.product?.image ? (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <LazyImage
-                                src={item.product.image}
-                                alt={item.product.name || "Product image"}
-                                width={80}
-                                height={80}
-                                className="rounded-md object-cover w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 hover:opacity-80 transition-opacity"
-                                priority={false} // Not priority since it's in a list
-                                quality={80}
-                              />
-                            </Link>
-                          ) : (
-                            <Link 
-                              href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                              className="block"
-                            >
-                              <div className="w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity">
-                                <span className="text-gray-400 text-xs">No Image</span>
-                              </div>
-                            </Link>
+          <>
+            {/* Order Review - outside the box */}
+            <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>Order Review</h1>
+            {/* Cart-style header bar (no checkbox, no Clear All / Save for Later) */}
+            <div className={cn(
+              "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 rounded-lg border mb-4",
+              "bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200",
+              "dark:bg-gradient-to-r dark:from-gray-800 dark:to-gray-700 dark:border-gray-600",
+            )}>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
+                  <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
+                    Cart Items ({orderReviewItemCount})
+                  </span>
+                </div>
+                <div className="hidden sm:flex items-center gap-4 text-sm">
+                  <span className={cn(themeClasses.textNeutralSecondary)}>Total Items: {selectedItemsCount}</span>
+                  <span className={cn(themeClasses.textNeutralSecondary)}>Subtotal: {formatPrice(displaySubtotal)}</span>
+                </div>
+              </div>
+              <div className="flex sm:hidden items-center gap-2 text-xs">
+                <span className={cn(themeClasses.textNeutralSecondary)}>Items: {selectedItemsCount}</span>
+                <span className={cn(themeClasses.textNeutralSecondary)}>Total: {formatPrice(displaySubtotal)}</span>
+              </div>
+            </div>
+
+            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+              <CardContent className="p-3 sm:p-4 md:p-6 space-y-6">
+                {/* Items list - same layout as cart page with cart-style qty controls */}
+                <div className="space-y-0">
+                  {selectedItems.flatMap((item, itemIndex) =>
+                    (item.variants || []).map((variant: any, variantIndex: number) => {
+                      const product = item.product
+                      const variantPrice = variant.price || 0
+                      const variantQuantity = variant.quantity || 1
+                      const variantTotalPrice = variantPrice * variantQuantity
+                      const discountPercentage = (product as any)?.originalPrice && (product as any).originalPrice > variantPrice
+                        ? (((product as any).originalPrice - variantPrice) / (product as any).originalPrice) * 100
+                        : 0
+                      return (
+                        <div
+                          key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
+                          className={cn(
+                            "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
                           )}
-                      </div>
-                        <div className="flex-1 min-w-0">
-                          <Link 
-                            href={`/products/${item.productId}-${encodeURIComponent(item.product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}
-                            className="hover:underline"
-                          >
-                            <h4 className={cn("font-medium text-xs sm:text-sm md:text-base break-words", themeClasses.mainText)}>
-                              {item.product?.name || "Product"}
-                            </h4>
-                          </Link>
-                          <div className={cn("flex flex-col sm:flex-row items-start sm:items-center justify-between mt-1 sm:mt-0 gap-1 sm:gap-2")}>
-                            <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                              Unit Price: {formatPrice(item.totalPrice / (item.totalQuantity || 1))}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <span className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
-                                Qty: {item.totalQuantity}
-                              </span>
-                              <span className={cn("text-xs sm:text-sm md:text-base font-medium", themeClasses.mainText)}>
-                                {formatPrice(item.totalPrice)}
-                              </span>
+                        >
+                          <div className="flex gap-1 sm:gap-2">
+                            <div className="flex items-start gap-2">
+                              <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
+                                <div className="relative">
+                                  {product?.image ? (
+                                    <LazyImage
+                                      src={product.image}
+                                      alt={product.name || "Product"}
+                                      width={50}
+                                      height={50}
+                                      className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
+                                      priority={false}
+                                      quality={80}
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                                      <span className="text-gray-400 text-xs">No Image</span>
+                                    </div>
+                                  )}
+                                  {discountPercentage > 0 && (
+                                    <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
+                                      -{discountPercentage.toFixed(0)}%
+                                    </div>
+                                  )}
+                                </div>
+                              </Link>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
+                                <div className="flex-1 min-w-0">
+                                  <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
+                                    <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
+                                      {product?.name || `Product ${item.productId}`}
+                                      {variant.variant_name && (
+                                        <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
+                                      )}
+                                    </h3>
+                                  </Link>
+                                  <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
+                                    <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
+                                      {formatPrice(variantPrice)}
+                                    </span>
+                                    {(product as any)?.originalPrice && (product as any).originalPrice > variantPrice && (
+                                      <>
+                                        <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
+                                          {formatPrice((product as any).originalPrice)}
+                                        </span>
+                                        <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
+                                          Save {formatPrice((product as any).originalPrice - variantPrice)}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                  {/* Mobile: qty below product details */}
+                                  <div className="flex items-center gap-2 mt-1.5 sm:hidden">
+                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </Button>
+                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Plus className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
+                                    <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>Item Total Price:</span>
+                                    <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
+                                  </div>
+                                </div>
+                                {/* Desktop: qty on right side like cart */}
+                                <div className="hidden sm:flex flex-col items-center gap-1">
+                                  <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </Button>
+                                    <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
-                      </div>
-                    </div>
-                  ))}
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
-              </div>
+
+                {/* Summary totals - new style with background */}
+                <div className={cn(
+                  "rounded-xl p-4 sm:p-5 space-y-3",
+                  "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
+                )}>
+                  <div className="flex justify-between items-baseline gap-2">
+                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>Subtotal ({orderReviewItemCount} items):</span>
+                    <span className={cn("text-base font-semibold tabular-nums", themeClasses.mainText)}>{formatPrice(displaySubtotal)}</span>
+                  </div>
+                  {promotionDiscount > 0 && (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className="text-sm font-medium text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code}):</span>
+                      <span className="text-base font-semibold text-green-600 dark:text-green-400 tabular-nums">-{formatPrice(promotionDiscount)}</span>
+                    </div>
+                  )}
+                  {(deliveryOption as string) === 'shipping' && (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>Shipping:</span>
+                      <span
+                        className={cn(
+                          "text-sm sm:text-base font-semibold text-right max-w-[16rem] sm:max-w-[20rem] leading-snug tabular-nums",
+                          !hideShippingPrice && shippingFee === 0 ? "text-green-600 dark:text-green-400" : themeClasses.mainText
+                        )}
+                      >
+                        {shippingEstimateLoading
+                          ? '...'
+                          : hideShippingPrice
+                            ? shippingPricingLocked
+                              ? 'Not shown — continue with a known address; we will call to verify.'
+                              : 'Shipping address not found'
+                            : shippingFee === 0
+                              ? 'Free'
+                              : formatPrice(shippingFee as number)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="border-t border-neutral-200 dark:border-neutral-600 pt-3 mt-1">
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className={cn("text-base font-bold", themeClasses.mainText)}>Total:</span>
+                      <span className={cn("text-lg font-bold tabular-nums", themeClasses.mainText)}>
+                        {orderTotal === null ? '—' : formatPrice(orderTotal)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Applied promotion - same style as cart page (read-only) */}
+                {appliedPromotion && (
+                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Ticket className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                        <span className="text-xs sm:text-sm font-semibold text-green-800 dark:text-green-200">
+                          {appliedPromotion.code}
+                        </span>
+                      </div>
+                      <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
+                        {(appliedPromotion as any).name || 'Promotion'} • {formatPrice(appliedPromotion.discountAmount)} discount applied
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Shipping Address */}
-              <div className="space-y-3 sm:space-y-4">
-                <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Shipping Address</h3>
-                <div className={cn("p-3 sm:p-4 rounded-lg border border-gray-200 dark:border-gray-700", themeClasses.cardBg)}>
-                    <p className={themeClasses.mainText}>{formData.shippingAddress.fullName}</p>
-                    <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.address1}</p>
-                    <p className={themeClasses.textNeutralSecondary}>
-                      {formData.shippingAddress.city}, {formData.shippingAddress.country}
-                    </p>
-                    <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.phone}</p>
-                </div>
-              </div>
-
-              {/* Order Total */}
-                  <div className="border-t pt-3 sm:pt-4 space-y-2">
-                    <div className="flex justify-between items-center text-xs sm:text-sm">
-                      <span className={themeClasses.textNeutralSecondary}>Subtotal</span>
-                      <span className={themeClasses.mainText}>{formatPrice(selectedSubtotal)}</span>
+                <div className="space-y-3 sm:space-y-4">
+                  <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Shipping Address</h3>
+                  <div className={cn(
+                    "rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-4",
+                    "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
+                  )}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>Full Name</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.fullName || '—'}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>Phone</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.phone || '—'}</p>
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>Email</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.email || '—'}</p>
+                      </div>
+                      {formData.shippingAddress.streetName && (
+                        <div className="space-y-1">
+                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>Street</p>
+                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.streetName}</p>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>House / Building</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address1 || '—'}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{formData.shippingAddress.country === 'Tanzania' ? 'Region / District / Ward' : 'City'}</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
+                          {formData.shippingAddress.country === 'Tanzania'
+                            ? [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward].filter(Boolean).join(', ') || '—'
+                            : (formData.shippingAddress.city || '—')}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>Country</p>
+                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.country || '—'}</p>
+                      </div>
+                      {(formData.shippingAddress.postalCode || formData.shippingAddress.state) && (
+                        <div className="space-y-1">
+                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>More details</p>
+                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
+                            {[formData.shippingAddress.postalCode, formData.shippingAddress.state].filter(Boolean).join(' · ') || '—'}
+                          </p>
+                        </div>
+                      )}
+                      {formData.shippingAddress.address2 && (
+                        <div className="space-y-1 sm:col-span-2">
+                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>Famous place</p>
+                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address2}</p>
+                        </div>
+                      )}
                     </div>
-                    {promotionDiscount > 0 && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className="text-green-600 dark:text-green-400">Discount ({appliedPromotion?.code})</span>
-                        <span className="text-green-600 dark:text-green-400 font-medium">
-                          -{formatPrice(promotionDiscount)}
-                        </span>
-                      </div>
-                    )}
-                    {(deliveryOption as string) === 'shipping' && (
-                      <div className="flex justify-between items-center text-xs sm:text-sm">
-                        <span className={themeClasses.textNeutralSecondary}>Shipping Fee</span>
-                        <span className={cn(themeClasses.mainText, shippingFee === 0 && "text-green-600")}>
-                          {shippingFee === 0 ? 'Free' : formatPrice(shippingFee)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t">
-                  <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>Total</span>
-                    <span className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
-                          {formatPrice(orderTotal)}
-                    </span>
+                  </div>
                 </div>
-              </div>
+
             </CardContent>
           </Card>
+          </>
         )
         } else {
           // For pickup, case 3 is order confirmation
@@ -2299,18 +3497,14 @@ function CheckoutPageContent() {
 
   const maxSteps = deliveryOption === 'pickup' ? 4 : 5
 
-  if (!isClient) {
-    return (
-      <div className={cn("min-h-screen", themeClasses.mainBg)}>
+  return (
+    <div className={cn("min-h-screen", themeClasses.mainBg)}>
+      {!isClient ? (
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <CheckoutPageSkeleton />
         </div>
-      </div>
-    )
-  }
-
-    return (
-    <div className={cn("min-h-screen", themeClasses.mainBg)}>
+      ) : (
+    <>
       {/* Welcome Message Bar - Mobile Only */}
       <div className="fixed top-0 z-50 w-full bg-stone-100/90 dark:bg-gray-900/95 backdrop-blur-sm border-b border-stone-200 dark:border-gray-700 sm:hidden">
         <div className="flex items-center justify-center h-8 px-4">
@@ -2487,7 +3681,77 @@ function CheckoutPageContent() {
         </div>
       </div>
 
+      {showLocationLoadingOverlay && locationOverlayRoot
+        ? createPortal(
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 backdrop-blur-sm">
+              <div className="rounded-xl border border-white/30 bg-white/90 px-6 py-5 shadow-xl dark:border-gray-700/60 dark:bg-gray-900/90">
+                <div className="flex items-center gap-3">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600 dark:border-gray-600 dark:border-t-blue-400" />
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Fetching your location...
+                  </p>
+                </div>
+              </div>
+            </div>,
+            locationOverlayRoot
+          )
+        : null}
+
+      <Dialog open={showMapContainer} onOpenChange={setShowMapContainer}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle>Select delivery point (Google Maps)</DialogTitle>
+            <DialogDescription>
+              Move the map until the pin matches your exact drop-off point, like Bolt. The shipping fee will use that point.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 pt-4">
+            <div className="relative overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700">
+              <div ref={mapPickerContainerRef} className="h-[50vh] min-h-[320px] w-full bg-neutral-100 dark:bg-neutral-900" />
+              {mapPickerLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
+                  <div className="rounded-lg bg-white/90 px-4 py-2 text-sm font-medium text-black shadow dark:bg-gray-900/90 dark:text-white">
+                    Loading map...
+                  </div>
+                </div>
+              )}
+              <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-full">
+                <div className="flex flex-col items-center">
+                  <MapPin className="h-9 w-9 fill-yellow-400 text-black drop-shadow" />
+                  <div className="-mt-1 h-2 w-2 rounded-full bg-black/60" />
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-900/60">
+              <p className={cn("text-sm font-medium", themeClasses.mainText)}>
+                {mapPickerResolving ? 'Resolving address...' : (mapPickerDisplayName || 'Move the map to choose a delivery point')}
+              </p>
+              {mapPickerCoords && (
+                <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
+                  {mapPickerCoords.lat.toFixed(6)}, {mapPickerCoords.lon.toFixed(6)}
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="px-6 pb-6 pt-4">
+            <Button type="button" variant="outline" onClick={() => setShowMapContainer(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmMapLocation}
+              disabled={!mapPickerCoords || mapPickerLoading || mapPickerResolving}
+              className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+            >
+              Use this point for price
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <ComingSoonModal />
+    </>
+    )}
     </div>
   )
 }
