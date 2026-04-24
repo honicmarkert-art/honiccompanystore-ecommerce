@@ -662,13 +662,14 @@ export function useCart() {
         })
         .catch(() => {}) // Silently handle errors
     }
-    // Check if product already exists in cart
+    // Check if product already exists in cart - if so, increment quantity only (do not add as new item)
     const existingItem = cart.find(item => item.productId === productId)
 
     if (existingItem) {
-      // Check if this exact variant already exists (match ONLY by variantId - simplified variant system)
+      // Match by normalized variantId (treat undefined/'default'/empty as same so we always merge)
+      const normId = (id: string | undefined) => (id == null || String(id).trim() === '') ? 'default' : String(id)
       const existingVariant = existingItem.variants.find(v =>
-        v.variantId === normalizedVariantId
+        normId(v.variantId) === normId(normalizedVariantId)
       )
 
       if (existingVariant) {
@@ -1106,12 +1107,11 @@ export function useCart() {
             }
           }
           
-          // For simple products (no attributes), send undefined so API normalizes to NULL
+          // Always send variantId so server can match existing item (same product + variant) and increment qty instead of adding duplicate
           // NOTE: We don't send price - API will fetch authoritative price from database
-          const isSimpleSelection = !variantAttributes || Object.keys(variantAttributes).length === 0
           const requestBody = {
             productId,
-            variantId: isSimpleSelection ? undefined : normalizedVariantId,
+            variantId: normalizedVariantId === 'default' ? undefined : normalizedVariantId,
             quantity,
             // price: NOT SENT - API fetches from database for security
             variantAttributes: variantAttributes

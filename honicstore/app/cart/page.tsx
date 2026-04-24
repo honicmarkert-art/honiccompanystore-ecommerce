@@ -125,7 +125,8 @@ function CartPageContent() {
   } | null>(null)
   const [promoError, setPromoError] = useState('')
   const [isApplyingPromo, setIsApplyingPromo] = useState(false)
-  
+  // Shipping is calculated on checkout page (shipping address step / summary), not on cart
+
   // Fetch stock data for all cart items (debounced + only when product set changes)
   const stockDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastIdsSignatureRef = useRef<string>("")
@@ -392,25 +393,11 @@ function CartPageContent() {
     ? selectedItems.reduce((s,i)=>s+(i.variants?.reduce((sum: number, v: any) => sum + (v.quantity || 0), 0) || i.totalQuantity || 0), 0)
     : totalQuantity
   const selectedSubtotal = hasSelection ? selectedItems.reduce((s,i)=>s+i.totalPrice,0) : cartSubtotal
+  const discountAmount = appliedPromotion ? appliedPromotion.discountAmount : 0
+  const cartTotal = hasSelection ? selectedSubtotal - discountAmount : 0
 
-  const calculateShippingFee = (subtotal: number) => {
-    // If cart total >= 100,000 TZS: Free delivery for all
-    if (subtotal >= FREE_SHIPPING_THRESHOLD) return 0
-    
-    // If cart total < 100,000 TZS: Check if ALL selected products have free delivery
-    const allProductsHaveFreeDelivery = selectedItems.every(item => {
-      const product = products.find(p => p.id === item.productId)
-      return (product as any)?.free_delivery === true || product?.freeDelivery === true
-    })
-    
-    // If ALL products have free delivery: Free delivery
-    // If MIXED products (some free, some paid): Apply delivery fee
-    return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
-  }
-
-  // Function to determine delivery status for each product
+  // Function to determine delivery status for each product (shipping calculated at checkout)
   const getDeliveryStatus = (product: any, itemTotal: number) => {
-    // Check if cart total qualifies for free shipping
     const cartQualifiesForFreeShipping = cartSubtotal >= FREE_SHIPPING_THRESHOLD
     
     // Check if individual product has free delivery (check both camelCase and snake_case)
@@ -426,25 +413,21 @@ function CartPageContent() {
     // Priority: Cart total threshold takes precedence
     // If cart total >= 100,000 TZS: All products get free delivery
     // If cart total < 100,000 TZS: Only products with free_delivery: true get free delivery
+    const dateRange = `${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`
     if (cartQualifiesForFreeShipping || (cartSubtotal < FREE_SHIPPING_THRESHOLD && productHasFreeDelivery)) {
       return {
         isFree: true,
-        text: `Free delivery ${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`,
+        text: `Free shipping ${dateRange}`,
         color: "text-green-600"
       }
     } else {
-      // Show delivery fee with date
       return {
         isFree: false,
-        text: `Delivery: ${formatPrice(SHIPPING_COST)} ${new Date().toLocaleDateString('en-GB')} - ${deliveryEndDate.toLocaleDateString('en-GB')}`,
+        text: `Shipping fee applied ${dateRange}`,
         color: "text-orange-600"
       }
     }
   }
-  
-  const shippingCost = calculateShippingFee(selectedSubtotal)
-  const discountAmount = appliedPromotion ? appliedPromotion.discountAmount : 0
-  const total = selectedSubtotal + shippingCost - discountAmount
 
   const handleApplyPromo = useCallback(async () => {
     if (!promoCode.trim()) return
@@ -889,20 +872,20 @@ function CartPageContent() {
                     </div>
                     <div className="hidden sm:flex items-center gap-4 text-sm">
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Total Items: {selectedTotalQuantity}
+                        Total Items: {hasSelection ? selectedTotalQuantity : 0}
                       </span>
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Subtotal: {formatPrice(selectedSubtotal)}
+                        Subtotal: {formatPrice(hasSelection ? selectedSubtotal : 0)}
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center justify-between sm:justify-end gap-2">
                     <div className="flex sm:hidden items-center gap-2 text-xs">
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Items: {selectedItemsCount}
+                        Items: {hasSelection ? selectedItemsCount : 0}
                       </span>
                       <span className={cn(themeClasses.textNeutralSecondary)}>
-                        Total: {formatPrice(selectedSubtotal)}
+                        Total: {formatPrice(cartTotal)}
                       </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1180,7 +1163,7 @@ function CartPageContent() {
                                           minWidth: '1.5rem',
                                           maxWidth: '4rem'
                                         }}
-                                        className="px-1 py-0.5 text-[10px] font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-5 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out"
+                                        className="px-1 py-0.5 text-[10px] font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-5 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                       />
                               <Button
                                 variant="ghost"
@@ -1277,7 +1260,7 @@ function CartPageContent() {
                                         minWidth: '2.5rem',
                                         maxWidth: '6rem'
                                       }}
-                                      className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out"
+                                      className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                     <Button
                                       variant="ghost"
@@ -1358,14 +1341,14 @@ function CartPageContent() {
                   <CardContent className="p-6 space-y-6">
                     <h2 className={cn("text-xl font-bold", themeClasses.mainText)}>Order Summary</h2>
                     
-                    {/* Summary Details */}
+                    {/* Summary — Subtotal and Total only; shipping calculated at checkout */}
                     <div className="space-y-3">
                       <div className="flex justify-between">
-                        <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>Subtotal ({hasSelection ? selectedItems.length : cart.length} items):</span>
-                        <span className={cn("font-medium", themeClasses.mainText)}>{formatPrice(selectedSubtotal)}</span>
+                        <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>Subtotal ({hasSelection ? selectedItems.length : 0} items):</span>
+                        <span className={cn("font-medium", themeClasses.mainText)}>{formatPrice(hasSelection ? selectedSubtotal : 0)}</span>
                       </div>
                       
-                      {discountAmount > 0 && (
+                      {hasSelection && discountAmount > 0 && (
                         <div className="flex justify-between">
                           <span className={cn("text-sm text-green-600 dark:text-green-400", themeClasses.textNeutralSecondary)}>Discount:</span>
                           <span className={cn("font-medium text-green-600 dark:text-green-400", themeClasses.mainText)}>
@@ -1374,18 +1357,11 @@ function CartPageContent() {
                         </div>
                       )}
                       
-                      <div className="flex justify-between">
-                        <span className={cn("text-sm", themeClasses.textNeutralSecondary)}>Shipping:</span>
-                        <span className={cn("font-medium", shippingCost === 0 ? "text-green-500" : themeClasses.mainText)}>
-                          {shippingCost === 0 ? "Free" : formatPrice(shippingCost)}
-                        </span>
-                      </div>
-                      
                       <div className="border-t pt-3">
                         <div className="flex justify-between">
                           <span className={cn("text-lg font-bold", themeClasses.mainText)}>Total:</span>
                           <span className={cn("text-lg font-bold", themeClasses.mainText)}>
-                            {formatPrice(total)}
+                            {formatPrice(cartTotal)}
                           </span>
                         </div>
                       </div>

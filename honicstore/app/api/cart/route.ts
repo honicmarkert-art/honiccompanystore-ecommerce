@@ -599,6 +599,9 @@ export async function POST(request: NextRequest) {
     variantIdType: typeof variantId
   })
 
+  // Normalize variant id for comparison: treat null/undefined/'' as 'default' so we always match existing item and increment instead of adding duplicate
+  const normVariantId = (v: any) => (v == null || String(v).trim() === '') ? 'default' : String(v)
+
   // Fetch authoritative pricing + stock from database - VALIDATE product exists
   // Also fetch supplier_id/user_id to get supplier info
   const { data: product, error: pErr } = await supabase
@@ -827,12 +830,11 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      // Compare each existing item with the new one
+      // Compare each existing item with the new one (normalize so null/''/default all match)
       for (const existingItemPartial of existingItemsPartial) {
-        const existingVariantIdPartial = String(existingItemPartial.variant_id || 'default')
-        const newVariantIdPartial = String(variantId || 'default')
+        const existingVariantIdPartial = normVariantId(existingItemPartial.variant_id)
+        const newVariantIdPartial = normVariantId(variantId)
         
-        // First check variant_id
         if (existingVariantIdPartial === newVariantIdPartial) {
           // If variant_id matches, also check variant_name
           let existingVariantNamePartial: string | null = null
@@ -980,13 +982,12 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // Compare each existing item with the new one
+    // Compare each existing item with the new one (normalize so null/''/default all match - increment instead of duplicate)
     for (let i = 0; i < existingItems.length; i++) {
       const existingItem = existingItems[i]
-      const existingVariantId = String(existingItem.variant_id || 'default')
-      const newVariantId = String(variantId || 'default')
+      const existingVariantId = normVariantId(existingItem.variant_id)
+      const newVariantId = normVariantId(variantId)
       
-      // First check variant_id
       if (existingVariantId === newVariantId) {
         // If variant_id matches, also check variant_name
         let existingVariantName: string | null = null

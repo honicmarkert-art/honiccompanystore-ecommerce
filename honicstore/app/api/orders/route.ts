@@ -7,6 +7,7 @@ import { securityUtils } from '@/lib/secure-config'
 import { validateAuth } from '@/lib/auth-server'
 import { emailService } from '@/lib/email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
+import { calculateShippingFee, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
 
 
 
@@ -366,21 +367,39 @@ export async function POST(request: NextRequest) {
     }
 
     // SECURITY: Calculate shipping fee server-side
-    const FREE_SHIPPING_THRESHOLD = 100000
-    const SHIPPING_COST = 5000
     let serverShippingFee = 0
 
     if (orderData.deliveryOption !== 'pickup') {
-      if (serverCalculatedSubtotal >= FREE_SHIPPING_THRESHOLD) {
-        serverShippingFee = 0
-      } else {
-        // Check if all products have free delivery
-        const allProductsHaveFreeDelivery = validatedItems.every((item: any) => {
-          const product = productMap.get(item.product_id)
-          return product && (product as any).free_delivery === true
-        })
-        serverShippingFee = allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
-      }
+      const shippingAddress = orderData.shippingAddress || {}
+      const shippingLocation = orderData.shippingLocation || {}
+      const allProductsHaveFreeDelivery = validatedItems.length > 0 && validatedItems.every((item: any) => {
+        const product = productMap.get(item.product_id)
+        return product && (product as any).free_delivery === true
+      })
+      const resolvedCoords = await resolveShippingCoordinatesFromAddress({
+        lat: typeof shippingLocation.lat === 'number' ? shippingLocation.lat : undefined,
+        lon: typeof shippingLocation.lon === 'number' ? shippingLocation.lon : undefined,
+        ward: shippingAddress.ward,
+        district: shippingAddress.district,
+        region: shippingAddress.region || shippingAddress.state,
+        streetName: shippingAddress.streetName,
+        address1: shippingAddress.address1,
+        city: shippingAddress.city,
+        state: shippingAddress.state,
+        country: shippingAddress.country,
+      })
+
+      const shippingCalc = calculateShippingFee({
+        deliveryOption: orderData.deliveryOption || 'shipping',
+        region: shippingAddress.region || shippingAddress.state,
+        ward: shippingAddress.ward,
+        lat: resolvedCoords?.lat ?? null,
+        lon: resolvedCoords?.lon ?? null,
+        country: shippingAddress.country,
+        subtotal: serverCalculatedSubtotal,
+        allProductsHaveFreeDelivery,
+      })
+      serverShippingFee = shippingCalc.shippingFee
     }
 
     // SECURITY: Validate and recalculate promotion discount server-side

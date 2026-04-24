@@ -6,7 +6,8 @@
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=6144 next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "test:google-geocoding": "node scripts/test-google-geocoding.mjs"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.3",
