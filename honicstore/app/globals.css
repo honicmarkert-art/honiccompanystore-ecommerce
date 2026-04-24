@@ -584,35 +584,22 @@
     }
   }
   
-  /* Responsive hero background - cover all devices */
+  /* Hero background: fixed attachment causes jank on mobile; keep scroll + stable compositing */
   .hero-bg-responsive {
     background-size: cover;
     background-position: center center;
+    background-repeat: no-repeat;
     background-attachment: scroll;
+    transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
   }
-  
-  /* Mobile hero background */
-  @media (max-width: 768px) {
+
+  /* Phones: tall viewport + bias toward top of wide art so faces/headlines stay visible */
+  @media (max-width: 639px) {
     .hero-bg-responsive {
       background-size: cover;
-      background-position: center center;
-      background-attachment: scroll;
-    }
-  }
-  
-  /* Tablet hero background */
-  @media (min-width: 769px) and (max-width: 1024px) {
-    .hero-bg-responsive {
-      background-size: cover;
-      background-position: center center;
-    }
-  }
-  
-  /* Desktop hero background */
-  @media (min-width: 1025px) {
-    .hero-bg-responsive {
-      background-size: cover;
-      background-position: center center;
+      background-position: center top;
     }
   }
 }

@@ -60,7 +60,10 @@ interface SimpleProductsOptions {
 
 interface SimpleProductsReturn {
   products: Product[]
+  /** True while loading and there are no products yet (first paint). */
   loading: boolean
+  /** True during any in-flight list fetch, including refetch after search/filter (list may still show previous results). */
+  isFetching: boolean
   loadingMore: boolean
   hasMore: boolean
   error: string | null
@@ -91,6 +94,8 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
 
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
+  /** Any list request in flight (initial or refetch); unlike `loading`, stays true when old rows are still shown. */
+  const [isFetching, setIsFetching] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -103,6 +108,9 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isInitialLoadRef = useRef(true)
   const hasRestoredFromCacheRef = useRef(false)
+  const productCountRef = useRef(0)
+  /** Bumps on each non–load-more fetch so an aborted request does not clear loading / isFetching for a newer one. */
+  const listFetchGenRef = useRef(0)
 
   // Build API URL with filters
   const buildApiUrl = useCallback((currentOffset: number) => {
@@ -139,23 +147,30 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
 
   // Fetch products with CDN caching
   const fetchProducts = useCallback(async (currentOffset: number, isLoadMore: boolean = false) => {
-    if (!enabled || loadingRef.current) return
+    if (!enabled) return
+    // Allow a new list fetch to replace an in-flight one (search/filter), but not duplicate load-more.
+    if (isLoadMore && loadingRef.current) return
 
-    // Abort previous request if exists
+    // Abort previous list request
     if (abortControllerRef.current) {
       try {
         abortControllerRef.current.abort()
       } catch {}
     }
 
-    abortControllerRef.current = new AbortController()
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
     loadingRef.current = true
 
-    // Set loading state
+    let listGen = -1
     if (isLoadMore) {
       setLoadingMore(true)
     } else {
-      setLoading(true)
+      listFetchGenRef.current += 1
+      listGen = listFetchGenRef.current
+      setIsFetching(true)
+      // Only show "full page" loading when there is nothing to keep on screen (avoids clearing the grid on search/filter).
+      setLoading(productCountRef.current === 0)
       setError(null)
     }
 
@@ -165,7 +180,7 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
       // Fetch with CDN cache support
       // Browser will use CDN cache automatically based on Cache-Control headers
       const response = await fetch(url, {
-        signal: abortControllerRef.current.signal,
+        signal: abortController.signal,
         headers: {
           'Content-Type': 'application/json',
         },
@@ -220,12 +235,23 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch products'
       setError(errorMessage)
     } finally {
-      setLoading(false)
-      setLoadingMore(false)
-      loadingRef.current = false
-      abortControllerRef.current = null
+      if (isLoadMore) {
+        setLoadingMore(false)
+        loadingRef.current = false
+      } else if (listGen === listFetchGenRef.current) {
+        setIsFetching(false)
+        setLoading(false)
+        loadingRef.current = false
+      }
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null
+      }
     }
   }, [enabled, buildApiUrl, limit])
+
+  useEffect(() => {
+    productCountRef.current = products.length
+  }, [products.length])
 
   // Load more function
   const loadMore = useCallback(async () => {
@@ -248,10 +274,12 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
       abortControllerRef.current = null
     }
     setProducts([])
+    productCountRef.current = 0
     setOffset(0)
     setHasMore(true)
     setError(null)
     setTotalCount(0)
+    setIsFetching(false)
     loadingRef.current = false
   }, [])
 
@@ -261,18 +289,24 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     await fetchProducts(0, false)
   }, [reset, fetchProducts])
 
+  /** Abort in-flight list fetch so a new filter/search can run; does not empty the visible list. */
+  const releaseInFlightListRequest = useCallback(() => {
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort()
+      } catch {}
+      abortControllerRef.current = null
+    }
+    loadingRef.current = false
+  }, [])
+
   // Track filter changes
   const prevFiltersRef = useRef<string>('')
+  /** Previous committed search (URL-driven). Used so we fetch immediately on new search even when `products.length` is still > 0 in the effect closure after `reset()`. */
+  const prevSearchForFetchRef = useRef<string | undefined>(undefined)
 
-  // Debounce delay: 300ms for search, 500ms for other filters
-  const getDebounceDelay = useCallback(() => {
-    // Search queries need faster response
-    if (search && search.trim().length >= 3) {
-      return 300
-    }
-    // Other filters can wait a bit longer
-    return 500
-  }, [search])
+  // Debounce delay for non-search filter tweaks (e.g. price slider) — not for discrete search submits
+  const getDebounceDelay = useCallback(() => 500, [])
 
   // Cache key for sessionStorage (include initialOffset so page 2 has its own cache)
   const getCacheKey = useCallback(() => {
@@ -392,13 +426,26 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
     }
 
     if (filtersChanged) {
+      const normalizedSearch =
+        search && search.trim().length >= 3 ? search.trim() : undefined
+      const searchQueryChanged = normalizedSearch !== prevSearchForFetchRef.current
+      prevSearchForFetchRef.current = normalizedSearch
+
       hasRestoredFromCacheRef.current = false
       try {
         sessionStorage.removeItem(getCacheKey())
       } catch (e) {}
-      reset()
+      releaseInFlightListRequest()
+      setError(null)
+      setHasMore(true)
       setOffset(startOffset)
-      if (isInitialLoadRef.current || products.length === 0) {
+      // Always fetch immediately on new search (Enter / URL). Debounce only when the user adjusts
+      // other filters while a list is already shown — avoids stale `products.length` delaying fetch by 300–500ms.
+      if (
+        isInitialLoadRef.current ||
+        products.length === 0 ||
+        searchQueryChanged
+      ) {
         isInitialLoadRef.current = false
         fetchProducts(startOffset, false)
         return
@@ -422,11 +469,12 @@ export function useSimpleProducts(options: SimpleProductsOptions = {}): SimplePr
         debounceTimerRef.current = null
       }
     }
-  }, [enabled, initialOffsetOption, category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina, reset, fetchProducts, products.length, getDebounceDelay, getCacheKey])
+  }, [enabled, initialOffsetOption, category, brand, search, sortBy, sortOrder, minPrice, maxPrice, categories, inStock, isChina, releaseInFlightListRequest, fetchProducts, products.length, getDebounceDelay, getCacheKey])
 
   return {
     products,
     loading,
+    isFetching,
     loadingMore,
     hasMore,
     error,

@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "distanceFromZoneOrigin": {
+    "includedKm": 1,
+    "perKmTz": 800,
+    "maxKmFromOrigin": 200,
+    "minBillableKmFromHub": 5
+  },
+  "rules": [  
+    { "region": "Arusha", "feeTz": 5500, "originLat": -3.3689, "originLon": 36.6944 },
+    { "region": "Dar es Salaam", "feeTz": 0, "originLat": -6.8159999, "originLon": 39.2800874 },
+    { "region": "Dodoma", "feeTz": 5500, "originLat": -6.1728, "originLon": 35.7395 },
+    { "region": "Geita", "feeTz": 6500, "originLat": -2.8725, "originLon": 32.2297 },
+    { "region": "Iringa", "feeTz": 6500, "originLat": -7.7667, "originLon": 35.7 },
+    { "region": "Kagera", "feeTz": 6500, "originLat": -1.3318, "originLon": 31.8136 },
+    { "region": "Katavi", "feeTz": 8000, "originLat": -6.133, "originLon": 31.066 },
+    { "region": "Kigoma", "feeTz": 8000, "originLat": -4.8769, "originLon": 29.6267 },
+    { "region": "Kilimanjaro", "feeTz": 5500, "originLat": -3.3505, "originLon": 37.3434 },
+    { "region": "Lindi", "feeTz": 7500, "originLat": -9.9975, "originLon": 39.7144 },
+    { "region": "Manyara", "feeTz": 6500, "originLat": -4.2167, "originLon": 35.75 },
+    { "region": "Mara", "feeTz": 6500, "originLat": -1.4983, "originLon": 33.8025 },
+    { "region": "Mbeya", "feeTz": 5500, "originLat": -8.9094, "originLon": 33.4608 },
+    { "region": "Morogoro", "feeTz": 5500, "originLat": -6.8167, "originLon": 37.6648 },
+    { "region": "Mtwara", "feeTz": 7500, "originLat": -10.2736, "originLon": 40.1828 },
+    { "region": "Mwanza", "feeTz": 5500, "originLat": -2.5164, "originLon": 32.9176 },
+    { "region": "Njombe", "feeTz": 7000, "originLat": -9.3333, "originLon": 34.7667 },
+    { "region": "Pemba North", "feeTz": 9000, "originLat": -5.0567, "originLon": 39.729 },
+    { "region": "Pemba South", "feeTz": 9000, "originLat": -5.2458, "originLon": 39.7719 },
+    { "region": "Pwani", "feeTz": 6000, "originLat": -6.7667, "originLon": 38.9167 },
+    { "region": "Rukwa", "feeTz": 8000, "originLat": -7.9667, "originLon": 31.6167 },
+    { "region": "Ruvuma", "feeTz": 7500, "originLat": -10.6797, "originLon": 35.6498 },
+    { "region": "Shinyanga", "feeTz": 6500, "originLat": -3.6619, "originLon": 33.4231 },
+    { "region": "Simiyu", "feeTz": 6500, "originLat": -2.5667, "originLon": 34.55 },
+    { "region": "Singida", "feeTz": 6500, "originLat": -4.8167, "originLon": 34.75 },
+    { "region": "Songwe", "feeTz": 5500, "originLat": -8.9167, "originLon": 32.9333 },
+    { "region": "Tabora", "feeTz": 6500, "originLat": -5.0167, "originLon": 32.8 },
+    { "region": "Tanga", "feeTz": 5500, "originLat": -5.0693, "originLon": 39.0991 },
+    { "region": "Zanzibar Central/South", "feeTz": 8500, "originLat": -6.2929, "originLon": 39.4736 },
+    { "region": "Zanzibar North", "feeTz": 8500, "originLat": -5.7316, "originLon": 39.2989 },
+    { "region": "Zanzibar Urban/West", "feeTz": 8500, "originLat": -6.1659, "originLon": 39.2026 },
+    { "region": "Zanzibar", "feeTz": 8500, "originLat": -6.1659, "originLon": 39.2026 }
+  ]
+}

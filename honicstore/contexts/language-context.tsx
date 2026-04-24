@@ -4,6 +4,9 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 
 type Language = 'en' | 'sw'
 
+/** Site default; only this key is read/written (legacy `preferred-language` is ignored so English is the default for all pages). */
+const LANGUAGE_STORAGE_KEY = 'honicstore-ui-language'
+
 interface LanguageContextType {
   language: Language
   setLanguage: (lang: Language) => void
@@ -14,23 +17,18 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>('en')
 
-  // Load language preference from localStorage on mount
+  // Load saved choice from storage; missing/invalid → English (default site-wide)
   useEffect(() => {
-    const savedLanguage = localStorage.getItem('preferred-language') as Language
-    if (savedLanguage === 'en' || savedLanguage === 'sw') {
-      setLanguageState(savedLanguage)
-    } else {
-      // Default to English
-      setLanguageState('en')
-      localStorage.setItem('preferred-language', 'en')
-    }
+    const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY) as Language | null
+    const next: Language = saved === 'en' || saved === 'sw' ? saved : 'en'
+    setLanguageState(next)
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, next)
+    document.documentElement.lang = next
   }, [])
 
-  // Save language preference to localStorage when changed
   const setLanguage = (newLanguage: Language) => {
     setLanguageState(newLanguage)
-    localStorage.setItem('preferred-language', newLanguage)
-    // Update document language attribute
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, newLanguage)
     if (typeof document !== 'undefined') {
       document.documentElement.lang = newLanguage
     }
