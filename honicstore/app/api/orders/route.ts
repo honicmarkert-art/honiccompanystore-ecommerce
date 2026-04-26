@@ -8,6 +8,7 @@ import { validateAuth } from '@/lib/auth-server'
 import { emailService } from '@/lib/email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { calculateShippingFee, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
+import { ShortTtlCache } from '@/lib/short-ttl-cache'
 
 
 
@@ -16,6 +17,8 @@ import { calculateShippingFee, resolveShippingCoordinatesFromAddress } from '@/l
 export const dynamic = 'force-dynamic'
 
 export const runtime = 'nodejs'
+
+const orderProductsCache = new ShortTtlCache<any[]>(10000)
 
 /**
  * POST /api/orders - Create order (server-side only, no client tampering).
@@ -28,7 +31,7 @@ export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   try {
     // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: '/api/orders',
@@ -113,25 +116,21 @@ export async function POST(request: NextRequest) {
       .map((id: any) => parseInt(id))
       .filter((id: number) => !isNaN(id))
 
-    logger.log('[POST /api/orders] Order items summary:', {
-      itemCount: orderData.items?.length ?? 0,
-      productIds,
-      variantIds,
-      firstItem: orderData.items?.[0] ? {
-        productId: orderData.items[0].productId,
-        variantId: orderData.items[0].variantId,
-        unitPrice: orderData.items[0].unitPrice,
-        totalPrice: orderData.items[0].totalPrice,
-        quantity: orderData.items[0].quantity,
-      } : null,
-    })
-
-    // Fetch products from database
-    const { data: products, error: productsError } = await supabase
-      .from('products')
-      .select('id, price, name, in_stock, stock_quantity, free_delivery')
-      .in('id', productIds)
-
+    // Fetch products from database (short cache to cut repeated read latency under load)
+    const productsCacheKey = [...productIds].sort((a, b) => a - b).join(',')
+    let products = orderProductsCache.get(productsCacheKey)
+    let productsError: any = null
+    if (!products) {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, price, name, in_stock, stock_quantity, free_delivery, supplier_id, user_id')
+        .in('id', productIds)
+      products = data || null
+      productsError = error
+      if (!error && data && data.length > 0) {
+        orderProductsCache.set(productsCacheKey, data as any[])
+      }
+    }
     if (productsError || !products) {
       logSecurityEvent('PRODUCTS_FETCH_ERROR', {
         endpoint: '/api/orders',
@@ -149,8 +148,6 @@ export async function POST(request: NextRequest) {
       productMap.set(p.id, p)
       if (p.id != null && !productMap.has(String(p.id))) productMap.set(String(p.id), p)
     })
-    logger.log('[POST /api/orders] Products loaded:', { count: products.length, productIds: products.map((p: any) => p.id) })
-
     // Fetch variants if any exist. Try with price/primary_values first; if that fails (e.g. column missing), try id+product_id only.
     let variantMap = new Map<string | number, any>()
     if (variantIds.length > 0) {
@@ -185,7 +182,6 @@ export async function POST(request: NextRequest) {
               variantMap.set(String(v.id), v)
             }
           })
-          logger.log('[POST /api/orders] Variants loaded:', { count: variants.length })
         }
       } catch (variantErr: any) {
         logger.error('[POST /api/orders] product_variants error:', variantErr?.message)
@@ -252,16 +248,6 @@ export async function POST(request: NextRequest) {
         const variantIdNum = parseInt(String(clientItem.variantId), 10)
         const variantIdStr = String(clientItem.variantId)
         const variant = !isNaN(variantIdNum) ? variantMap.get(variantIdNum) ?? variantMap.get(variantIdStr) : variantMap.get(variantIdStr)
-        logger.log('[POST /api/orders] Variant price lookup:', {
-          productId: clientItem.productId,
-          variantId: clientItem.variantId,
-          variantIdNum,
-          variantFound: !!variant,
-          variantProductId: variant?.product_id,
-          matchProductId: variant && variant.product_id === productIdForMatch,
-          variantPrice: variant?.price,
-          primary_values: variant?.primary_values,
-        })
         if (variant && (variant.product_id === productIdForMatch || Number(variant.product_id) === productIdForMatch)) {
           // Prefer top-level price
           if (variant.price != null && variant.price !== '') {
@@ -365,7 +351,6 @@ export async function POST(request: NextRequest) {
 
       serverCalculatedSubtotal += serverTotalPrice
     }
-
     // SECURITY: Calculate shipping fee server-side
     let serverShippingFee = 0
 
@@ -445,28 +430,8 @@ export async function POST(request: NextRequest) {
           )
         }
 
-        // Get product IDs from order items
-        const orderProductIds = validatedItems.map(item => item.product_id)
-        
-        // Fetch products to verify supplier ownership
-        const { data: orderProducts, error: productsError } = await supabase
-          .from('products')
-          .select('id, supplier_id, user_id, price')
-          .in('id', orderProductIds)
-
-        if (productsError || !orderProducts) {
-          logSecurityEvent('PROMOTION_PRODUCTS_FETCH_ERROR', {
-            endpoint: '/api/orders',
-            error: productsError?.message
-          }, request)
-          return NextResponse.json(
-            { error: 'Failed to validate promotion products' },
-            { status: 500 }
-          )
-        }
-
-        // Filter products that belong to the promotion's supplier
-        const supplierProductIds = orderProducts
+        // Filter products that belong to the promotion's supplier using already-fetched products
+        const supplierProductIds = products
           .filter((p: any) => p.supplier_id === promotion.supplier_id || p.user_id === promotion.supplier_id)
           .map((p: any) => p.id)
 
@@ -663,7 +628,6 @@ export async function POST(request: NextRequest) {
     if (!creationResult.success) {
       const errMsg = creationResult.error || 'Unknown'
       const errCode = (creationResult as any).code
-      logger.log('❌ Order creation failed:', { error: errMsg, details: (creationResult as any).details, code: errCode })
       if (process.env.NODE_ENV === 'development') {
         console.error('[POST /api/orders] Order creation failed:', errMsg, errCode, (creationResult as any).details)
       }
@@ -676,7 +640,6 @@ export async function POST(request: NextRequest) {
     const order = creationResult.data
     
     if (!order || !order.id) {
-      logger.log('❌ Order creation returned invalid data:', { order })
       return NextResponse.json(
         { error: 'Order creation failed: invalid response' },
         { status: 500 }
@@ -711,8 +674,9 @@ export async function POST(request: NextRequest) {
     }
     
 
-    // Send order notification email to admin (optional - doesn't block order creation)
-    try {
+    // Send order notification email to admin in background (doesn't block checkout response)
+    void (async () => {
+      try {
 
       const adminEmail = process.env.NEXT_PUBLIC_ORDER_EMAIL
       if (!adminEmail) {
@@ -880,13 +844,14 @@ Order ID: ${order.id}
           })
         }
       }
-    } catch (emailError: any) {
-      // Log email error but don't fail the order creation
-      logger.error('Failed to send order notification email', emailError, {
-        orderId: order.id,
-        userId: orderData.userId,
-      })
-    }
+      } catch (emailError: any) {
+        // Log email error but don't fail the order creation
+        logger.error('Failed to send order notification email', emailError, {
+          orderId: order.id,
+          userId: orderData.userId,
+        })
+      }
+    })()
 
     // Return order data with stored IDs
     const responseData = {
@@ -912,7 +877,7 @@ Order ID: ${order.id}
     logger.error('Error in POST /api/orders:', error, {
       message: error?.message,
       stack: error?.stack,
-      name: error?.name
+      name: error?.name,
     })
     // Log to console so it appears in dev server terminal
     if (process.env.NODE_ENV === 'development') {

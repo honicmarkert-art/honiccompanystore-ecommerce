@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { ShortTtlCache } from '@/lib/short-ttl-cache'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supplierInfoCache = new ShortTtlCache<any>(15000)
 
 export async function GET(
   request: NextRequest,
@@ -11,9 +13,10 @@ export async function GET(
 ) {
   try {
     const { id: productId } = await params
+    const cacheKey = `supplier-info:${productId}`
 
     // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: `/api/products/${productId}/supplier-info`,
@@ -29,6 +32,12 @@ export async function GET(
         { error: 'Product ID is required' },
         { status: 400 }
       )
+    }
+    const cached = supplierInfoCache.get(cacheKey)
+    if (cached) {
+      return NextResponse.json(cached, {
+        headers: { 'X-Cache-Status': 'HIT' }
+      })
     }
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
@@ -78,24 +87,25 @@ export async function GET(
         { status: 404 }
       )
     }
-    // Fetch product count for this supplier
-    const { count: productCount, error: countError } = await supabase
-      .from('products')
-      .select('*', { count: 'exact', head: true })
-      .or(`supplier_id.eq.${supplierId},user_id.eq.${supplierId}`)
-      .eq('is_hidden', false)
-
-    // Fetch total views (sum of all product views)
-    const { data: products, error: viewsError } = await supabase
-      .from('products')
-      .select('views')
-      .or(`supplier_id.eq.${supplierId},user_id.eq.${supplierId}`)
-      .eq('is_hidden', false)
+    const supplierProductsFilter = `supplier_id.eq.${supplierId},user_id.eq.${supplierId}`
+    // Run independent aggregations in parallel to reduce endpoint latency.
+    const [{ count: productCount }, { data: products }] = await Promise.all([
+      supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true })
+        .or(supplierProductsFilter)
+        .eq('is_hidden', false),
+      supabase
+        .from('products')
+        .select('views')
+        .or(supplierProductsFilter)
+        .eq('is_hidden', false),
+    ])
 
     // Calculate total views
     const totalViews = products?.reduce((sum: number, p: any) => sum + (p.views || 0), 0) || 0
 
-    return NextResponse.json({
+    const responsePayload = {
       companyName: supplierData.company_name || supplierData.full_name || null,
       companyLogo: supplierData.company_logo || null,
       isVerified: supplierData.is_verified || false,
@@ -107,6 +117,10 @@ export async function GET(
       productCount: productCount || null,
       totalViews: totalViews || null,
       region: supplierData.region || null
+    }
+    supplierInfoCache.set(cacheKey, responsePayload)
+    return NextResponse.json(responsePayload, {
+      headers: { 'X-Cache-Status': 'MISS' }
     })
   } catch (error: any) {
     return NextResponse.json(

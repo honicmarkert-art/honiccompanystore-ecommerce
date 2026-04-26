@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
+import { validateAuth } from '@/lib/auth-server'
+import { verifyTransactionWithClickPesa } from '@/lib/clickpesa-api'
+import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 // GET /api/orders/[referenceId] - Get order details by reference ID
 export async function GET(
@@ -10,6 +11,23 @@ export async function GET(
   { params }: { params: Promise<{ referenceId: string }> }
 ) {
   try {
+    const rateLimitResult = await enhancedRateLimitDistributed(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/orders/[referenceId]',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
+    const { user, error: authError } = await validateAuth(request)
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const { referenceId } = await params
     const supabase = getSupabaseClient()
     // Normalize: DB stores reference_id without hyphens, lowercase
@@ -48,6 +66,9 @@ export async function GET(
     }
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+    }
+    if (!order.user_id || order.user_id !== user.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     // Fetch order items separately since the join might cause issues
     const { data: orderItems } = await supabase
@@ -91,6 +112,23 @@ export async function PATCH(
   { params }: { params: Promise<{ referenceId: string }> }
 ) {
   try {
+    const rateLimitResult = await enhancedRateLimitDistributed(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/orders/[referenceId]',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
+    const { user, error: authError } = await validateAuth(request)
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const { referenceId } = await params
     const body = await request.json()
     const { paymentStatus } = body
@@ -126,30 +164,8 @@ export async function PATCH(
     if (orderError || !order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
-    // SECURITY: Verify user owns the order OR verify payment actually happened
-    // Get user from session if available
-    let isOrderOwner = false
-    try {
-      const cookieStore = cookies()
-      const supabaseAuth = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-        {
-          cookies: {
-            get(name: string) {
-              return cookieStore.get(name)?.value
-            },
-            set() {},
-            remove() {},
-          },
-        }
-      )
-
-      const { data: { user } } = await supabaseAuth.auth.getUser()
-      isOrderOwner = !!(user && order.user_id === user.id)
-    } catch (authError) {
-      // If auth fails, user is not authenticated - continue with other checks
-      logger.log('Auth check failed for return URL update:', authError)
+    if (!order.user_id || order.user_id !== user.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     // Check if this is a retry payment update request
     // IMPORTANT: Return URL updates are ONLY for retry payments when webhook fails
@@ -169,23 +185,22 @@ export async function PATCH(
           error: 'Order is not in retry state. Only failed or pending orders can be updated via return URL.'
         }, { status: 403 })
       }
-      // SECURITY CHECK 2: Verify user owns the order OR verify ClickPesa transaction exists
-      // For guest orders, we need to verify the payment actually happened
-      if (!isOrderOwner) {
-        // Check if there's a ClickPesa transaction ID (proves payment happened)
-        const hasClickPesaTransaction = order.clickpesa_transaction_id
-
-        if (!hasClickPesaTransaction) {
-          logger.log('⚠️ SECURITY: Unauthorized return URL update attempt:', {
-            orderId: order.id,
-            orderUserId: order.user_id,
-            requestUserId: user?.id || 'anonymous',
-            hasTransaction: false
-          })
-          return NextResponse.json({
-            error: 'Unauthorized. Only order owner or verified payment can update status.'
-          }, { status: 403 })
-        }
+      // SECURITY CHECK 2: Verify transaction with ClickPesa before paid transition.
+      const verification = await verifyTransactionWithClickPesa(order.reference_id, false)
+      if (!verification.verified) {
+        return NextResponse.json(
+          { error: 'Transaction verification failed. Could not confirm payment with ClickPesa.' },
+          { status: 401 }
+        )
+      }
+      const mappedStatus = (verification.status === 'SUCCESS' || verification.status === 'SETTLED')
+        ? 'paid'
+        : 'failed'
+      if (mappedStatus !== 'paid') {
+        return NextResponse.json(
+          { error: 'Payment not confirmed by ClickPesa.' },
+          { status: 401 }
+        )
       }
       // SECURITY CHECK 3: Rate limiting - prevent abuse
       // Check if this order was recently updated (prevent duplicate updates)

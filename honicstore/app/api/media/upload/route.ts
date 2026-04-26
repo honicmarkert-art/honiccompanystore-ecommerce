@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
-import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { validateAuth, getUserAndRole } from '@/lib/auth-server'
 
 
 
@@ -19,7 +20,7 @@ const supabase = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, s
 export async function POST(request: NextRequest) {
   try {
     // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimitDistributed(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: '/api/media/upload',
@@ -34,6 +35,12 @@ export async function POST(request: NextRequest) {
     if (!supabase) {
       return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
     }
+
+    const { user, error: authError } = await validateAuth(request)
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const { role } = await getUserAndRole(user.id)
     
     logger.log('📤 Media upload API called (using service role key)')
     
@@ -46,6 +53,27 @@ export async function POST(request: NextRequest) {
     const type = formData.get('type') as string
     const context = formData.get('context') as string || 'product'
     const productId = formData.get('productId') as string
+
+    if (!productId && role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden: productId required for non-admin upload' }, { status: 403 })
+    }
+    if (productId) {
+      const pid = Number.parseInt(productId, 10)
+      if (Number.isNaN(pid)) {
+        return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
+      }
+      if (role !== 'admin') {
+        const { data: ownedProduct, error: ownErr } = await supabase
+          .from('products')
+          .select('id')
+          .eq('id', pid)
+          .or(`user_id.eq.${user.id},supplier_id.eq.${user.id}`)
+          .maybeSingle()
+        if (ownErr || !ownedProduct) {
+          return NextResponse.json({ error: 'Forbidden: you do not own this product' }, { status: 403 })
+        }
+      }
+    }
 
     logger.log('📋 Upload details:', {
       fileName: file?.name,

@@ -23,7 +23,7 @@ export const runtime = 'nodejs'
 // POST - Subscribe to newsletter
 export async function POST(request: NextRequest) {
   // Rate limiting - stricter for newsletter subscription
-  const rateLimitResult = enhancedRateLimit(request)
+  const rateLimitResult = await enhancedRateLimit(request)
   if (!rateLimitResult.allowed) {
     logRateLimitEvent('/api/newsletter/subscribe', rateLimitResult.reason, request)
     

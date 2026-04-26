@@ -27,7 +27,7 @@ const logRateLimitEvent = (endpoint: string, reason: string | undefined, request
 // GET - Fetch advertisement rotation time for public use
 export async function GET(request: NextRequest) {
   // Rate limiting
-  const rateLimitResult = enhancedRateLimit(request)
+  const rateLimitResult = await enhancedRateLimit(request)
   if (!rateLimitResult.allowed) {
     logRateLimitEvent('/api/advertisements/rotation-time', rateLimitResult.reason, request)
     

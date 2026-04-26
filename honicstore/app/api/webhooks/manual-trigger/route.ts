@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { logger } from '@/lib/logger'
 import { buildUrl } from '@/lib/url-utils'
+import { validateAuth, getUserAndRole } from '@/lib/auth-server'
+import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 
 
@@ -12,6 +14,32 @@ export const runtime = 'nodejs'
 // Manual webhook trigger to test the webhook processing
 export async function POST(request: NextRequest) {
   try {
+    const rateLimitResult = await enhancedRateLimitDistributed(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/webhooks/manual-trigger',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
+    // Never expose this endpoint publicly in production.
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    const { user, error: authError } = await validateAuth(request)
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const { role } = await getUserAndRole(user.id)
+    if (role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     const { orderReference, transactionId, amount, currency = 'TZS' } = await request.json()
     
     if (!orderReference) {
@@ -47,14 +75,10 @@ export async function POST(request: NextRequest) {
     
     logger.log('🔄 Forwarding to webhook:', webhookUrl)
     
-    // Send without signature header to skip signature verification
-    // Add a header to indicate this is a manual trigger (skip API verification)
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Manual-Trigger': 'true', // Flag to skip API verification
-        // Don't include signature - webhook handler will skip signature validation
       },
       body: JSON.stringify(mockWebhookPayload)
     })

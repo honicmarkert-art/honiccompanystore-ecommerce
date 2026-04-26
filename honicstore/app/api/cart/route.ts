@@ -467,7 +467,7 @@ export async function GET(request: NextRequest) {
 // POST /api/cart - Add product (or increment if exists)
 export async function POST(request: NextRequest) {
   // Security: Rate limiting
-  const rateLimitCheck = enhancedRateLimit(request)
+  const rateLimitCheck = await enhancedRateLimit(request)
   if (!rateLimitCheck.allowed) {
     logSecurityEvent('Rate limit exceeded on cart POST', { 
       ip: request.headers.get('x-forwarded-for') || 'unknown',
@@ -1205,7 +1205,7 @@ export async function PATCH(request: NextRequest) {
 // DELETE /api/cart - Clear entire cart
 export async function DELETE(request: NextRequest) {
   // Security: Rate limiting
-  const rateLimitCheck = enhancedRateLimit(request)
+  const rateLimitCheck = await enhancedRateLimit(request)
   if (!rateLimitCheck.allowed) {
     logSecurityEvent('Rate limit exceeded on cart DELETE', { 
       ip: request.headers.get('x-forwarded-for') || 'unknown' 

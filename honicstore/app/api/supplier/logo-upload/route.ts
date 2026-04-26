@@ -10,7 +10,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 export async function POST(request: NextRequest) {
   try {
     // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: '/api/supplier/logo-upload',

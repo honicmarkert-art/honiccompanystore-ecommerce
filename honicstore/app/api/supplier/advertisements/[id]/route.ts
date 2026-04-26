@@ -14,7 +14,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   return performanceMonitor.measure('supplier_advertisements_delete_by_id', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/advertisements/[id]',

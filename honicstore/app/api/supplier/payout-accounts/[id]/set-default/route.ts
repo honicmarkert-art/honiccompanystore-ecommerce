@@ -19,7 +19,7 @@ export async function POST(
   return performanceMonitor.measure('supplier_payout_accounts_set_default', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/payout-accounts/[id]/set-default',

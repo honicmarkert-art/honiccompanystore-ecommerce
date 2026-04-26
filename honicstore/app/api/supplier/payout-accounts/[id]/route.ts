@@ -20,7 +20,7 @@ export async function PUT(
   return performanceMonitor.measure('supplier_payout_accounts_put', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/payout-accounts/[id]',
@@ -162,7 +162,7 @@ export async function DELETE(
   return performanceMonitor.measure('supplier_payout_accounts_delete', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/payout-accounts/[id]',

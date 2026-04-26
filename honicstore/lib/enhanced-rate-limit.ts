@@ -25,6 +25,10 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   // Payment endpoints - very strict
   '/api/payment': { windowMs: 5 * 60 * 1000, maxRequests: 10, blockDurationMs: 60 * 60 * 1000 },
   '/api/checkout': { windowMs: 5 * 60 * 1000, maxRequests: 5, blockDurationMs: 30 * 60 * 1000 },
+  '/api/webhooks/manual-trigger': { windowMs: 60 * 60 * 1000, maxRequests: 3, blockDurationMs: 2 * 60 * 60 * 1000 },
+  '/api/media/upload': { windowMs: 60 * 1000, maxRequests: 10, blockDurationMs: 15 * 60 * 1000 },
+  '/api/media/delete': { windowMs: 60 * 1000, maxRequests: 20, blockDurationMs: 15 * 60 * 1000 },
+  '/api/orders/': { windowMs: 60 * 1000, maxRequests: 30, blockDurationMs: 10 * 60 * 1000 },
   
   // Cart endpoints - moderate limits to prevent abuse
   '/api/cart': { windowMs: 60 * 1000, maxRequests: 30, blockDurationMs: 5 * 60 * 1000 },
@@ -49,7 +53,35 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   default: { windowMs: 60 * 1000, maxRequests: 100, blockDurationMs: 5 * 60 * 1000 }
 }
 
-export function enhancedRateLimit(request: NextRequest): { allowed: boolean; reason?: string; retryAfter?: number } {
+const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL
+const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
+
+async function upstashCommand(command: string[]): Promise<any> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
+    throw new Error('Upstash Redis is not configured')
+  }
+
+  const response = await fetch(UPSTASH_REDIS_REST_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Upstash request failed: ${response.status}`)
+  }
+
+  const payload = await response.json()
+  if (payload?.error) {
+    throw new Error(String(payload.error))
+  }
+  return payload?.result
+}
+
+function enhancedRateLimitInMemory(request: NextRequest): { allowed: boolean; reason?: string; retryAfter?: number } {
   const clientIP = getClientIP(request)
   const pathname = request.nextUrl.pathname
   
@@ -95,6 +127,93 @@ export function enhancedRateLimit(request: NextRequest): { allowed: boolean; rea
   }
   
   return { allowed: true }
+}
+
+export async function enhancedRateLimitDistributed(
+  request: NextRequest
+): Promise<{ allowed: boolean; reason?: string; retryAfter?: number }> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
+    return enhancedRateLimitInMemory(request)
+  }
+
+  const clientIP = getClientIP(request)
+  const pathname = request.nextUrl.pathname
+  const config = getRateLimitConfig(pathname)
+  const baseKey = `ratelimit:${pathname}:${clientIP}`
+  const windowKey = `${baseKey}:window`
+  const blockKey = `${baseKey}:blocked`
+
+  try {
+    const blockedExists = Number(await upstashCommand(['EXISTS', blockKey])) === 1
+    if (blockedExists) {
+      const ttlMs = Number(await upstashCommand(['PTTL', blockKey]))
+      return {
+        allowed: false,
+        reason: 'Rate limit exceeded. Account temporarily blocked.',
+        retryAfter: Math.max(1, Math.ceil((ttlMs > 0 ? ttlMs : config.blockDurationMs) / 1000)),
+      }
+    }
+
+    const count = Number(await upstashCommand(['INCR', windowKey]))
+    if (count === 1) {
+      await upstashCommand(['PEXPIRE', windowKey, String(config.windowMs)])
+    }
+
+    if (count > config.maxRequests) {
+      await upstashCommand(['SET', blockKey, '1', 'PX', String(config.blockDurationMs)])
+      return {
+        allowed: false,
+        reason: 'Rate limit exceeded. Too many requests.',
+        retryAfter: Math.ceil(config.blockDurationMs / 1000),
+      }
+    }
+
+    return { allowed: true }
+  } catch (error) {
+    logger.warn('Distributed rate limit unavailable; falling back to in-memory limiter')
+    return enhancedRateLimitInMemory(request)
+  }
+}
+
+// Default limiter used across routes: distributed-first with in-memory fallback.
+export async function enhancedRateLimit(
+  request: NextRequest
+): Promise<{ allowed: boolean; reason?: string; retryAfter?: number }> {
+  return enhancedRateLimitDistributed(request)
+}
+
+export async function getRateLimitBackendStatus(): Promise<{
+  backend: 'upstash' | 'memory'
+  healthy: boolean
+  configured: boolean
+  reason?: string
+}> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
+    return {
+      backend: 'memory',
+      healthy: true,
+      configured: false,
+      reason: 'Upstash environment variables are missing; using in-memory fallback.',
+    }
+  }
+
+  try {
+    const pong = await upstashCommand(['PING'])
+    const healthy = String(pong).toUpperCase() === 'PONG'
+    return {
+      backend: 'upstash',
+      healthy,
+      configured: true,
+      reason: healthy ? undefined : 'Unexpected Upstash PING response.',
+    }
+  } catch (error) {
+    return {
+      backend: 'memory',
+      healthy: false,
+      configured: true,
+      reason: 'Upstash is configured but currently unreachable; requests will fall back to in-memory.',
+    }
+  }
 }
 
 function getClientIP(request: NextRequest): string {

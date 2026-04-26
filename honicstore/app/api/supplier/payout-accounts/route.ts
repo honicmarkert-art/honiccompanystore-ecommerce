@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   return performanceMonitor.measure('supplier_payout_accounts_get', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/payout-accounts',
@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
   return performanceMonitor.measure('supplier_payout_accounts_post', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/payout-accounts',

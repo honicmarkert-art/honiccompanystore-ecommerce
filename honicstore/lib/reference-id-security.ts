@@ -127,7 +127,7 @@ export class ReferenceIdSecurity {
           timestamp: new Date().toISOString()
         })
     } catch (error) {
-      logger.log('⚠️ Failed to log security event:', error)
+      logger.error('Failed to log security event', error)
     }
   }
 }
@@ -184,13 +184,6 @@ export async function secureOrderUpdate(
     // Add timestamp
     sanitizedData.updated_at = new Date().toISOString()
     
-    // Log the update attempt for debugging
-    logger.log('🔧 Attempting to update order:', {
-      orderId,
-      updateData: sanitizedData,
-      usingServiceRole: true
-    })
-
     // Perform the update
     const { data: updatedOrder, error: updateError } = await supabase
       .from('orders')
@@ -200,22 +193,9 @@ export async function secureOrderUpdate(
       .single()
     
     if (updateError) {
-      logger.log('❌ Order update failed:', {
-        error: updateError,
-        code: updateError.code,
-        message: updateError.message,
-        details: updateError.details,
-        hint: updateError.hint
-      })
+      logger.error('Order update failed', updateError)
       return { success: false, error: updateError.message || 'Failed to update order' }
     }
-    
-    logger.log('✅ Order update succeeded:', {
-      orderId,
-      updatedFields: Object.keys(sanitizedData),
-      newStatus: sanitizedData.status,
-      newPaymentStatus: sanitizedData.payment_status
-    })
     
     // Log successful update
     await ReferenceIdSecurity.logSecurityEvent(
@@ -231,7 +211,7 @@ export async function secureOrderUpdate(
     return { success: true, data: updatedOrder }
     
   } catch (error) {
-    logger.log('❌ Error in secure order update:', error)
+    logger.error('Error in secure order update', error)
     return { success: false, error: 'Internal server error' }
   }
 }
@@ -265,13 +245,7 @@ export async function secureOrderCreation(
       .single()
     
     if (createError) {
-      logger.log('❌ Order creation database error:', {
-        error: createError,
-        message: createError.message,
-        code: createError.code,
-        details: createError.details,
-        hint: createError.hint
-      })
+      logger.error('Order creation database error', createError)
       return { 
         success: false, 
         error: createError.message || 'Failed to create order',
@@ -281,7 +255,7 @@ export async function secureOrderCreation(
     }
     
     if (!newOrder) {
-      logger.log('❌ Order creation returned no data')
+      logger.error('Order creation returned no data')
       return { success: false, error: 'Order creation returned no data' }
     }
     
@@ -298,7 +272,7 @@ export async function secureOrderCreation(
     return { success: true, data: newOrder }
     
   } catch (error) {
-    logger.log('❌ Error in secure order creation:', error)
+    logger.error('Error in secure order creation', error)
     return { success: false, error: 'Internal server error' }
   }
 }

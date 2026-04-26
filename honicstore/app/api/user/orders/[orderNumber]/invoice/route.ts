@@ -14,7 +14,7 @@ export async function GET(
 ) {
   try {
     // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: '/api/user/orders/[orderNumber]/invoice',

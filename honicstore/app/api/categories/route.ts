@@ -24,7 +24,7 @@ export const runtime = 'nodejs'
 // GET - Fetch categories from categories table
 export async function GET(request: NextRequest) {
   // Rate limiting
-  const rateLimitResult = enhancedRateLimit(request)
+  const rateLimitResult = await enhancedRateLimit(request)
   if (!rateLimitResult.allowed) {
     logRateLimitEvent('/api/categories', rateLimitResult.reason, request)
     

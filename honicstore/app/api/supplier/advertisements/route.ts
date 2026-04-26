@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   return performanceMonitor.measure('supplier_advertisements_get', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/advertisements',
@@ -133,7 +133,7 @@ export async function DELETE(request: NextRequest) {
   return performanceMonitor.measure('supplier_advertisements_delete', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/advertisements',
@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
   return performanceMonitor.measure('supplier_advertisements_post', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/advertisements',

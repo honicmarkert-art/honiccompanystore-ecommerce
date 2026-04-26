@@ -10,6 +10,8 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey)
 // Cache for stock data
 let stockCache: Map<number, { stock: any, timestamp: number }> = new Map()
 const CACHE_DURATION = 30 * 1000 // 30 seconds cache
+const CACHE_CLEANUP_INTERVAL = 60 * 1000 // 1 minute
+let lastCacheCleanupAt = 0
 
 // GET /api/stock - Get stock information for products
 export async function GET(request: NextRequest) {
@@ -29,14 +31,22 @@ export async function GET(request: NextRequest) {
     }
 
     const now = Date.now()
-    const results: any[] = []
+    if (now - lastCacheCleanupAt > CACHE_CLEANUP_INTERVAL) {
+      for (const [key, entry] of stockCache.entries()) {
+        if (now - entry.timestamp >= CACHE_DURATION) {
+          stockCache.delete(key)
+        }
+      }
+      lastCacheCleanupAt = now
+    }
+    const resultById = new Map<number, any>()
     const uncachedIds: number[] = []
 
     // Check cache first
     for (const id of ids) {
       const cached = stockCache.get(id)
       if (cached && (now - cached.timestamp) < CACHE_DURATION) {
-        results.push(cached.stock)
+        resultById.set(id, cached.stock)
       } else {
         uncachedIds.push(id)
       }
@@ -52,7 +62,6 @@ export async function GET(request: NextRequest) {
           stock_quantity, 
           name,
           product_variants (
-            id,
             stock_quantity
           )
         `)
@@ -90,9 +99,14 @@ export async function GET(request: NextRequest) {
         
         // Cache the result
         stockCache.set(product.id, { stock: stockData, timestamp: now })
-        results.push(stockData)
+        resultById.set(product.id, stockData)
       }
     }
+
+    // Keep output order aligned with requested ids.
+    const results = ids
+      .map((id) => resultById.get(id))
+      .filter((item) => item !== undefined)
 
     return NextResponse.json({
       success: true,

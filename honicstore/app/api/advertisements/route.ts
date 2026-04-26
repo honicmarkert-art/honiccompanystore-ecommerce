@@ -27,7 +27,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 // GET - Fetch active advertisements for public display
 export async function GET(request: NextRequest) {
   // Rate limiting
-  const rateLimitResult = enhancedRateLimit(request)
+  const rateLimitResult = await enhancedRateLimit(request)
   if (!rateLimitResult.allowed) {
     logRateLimitEvent('/api/advertisements', rateLimitResult.reason, request)
     

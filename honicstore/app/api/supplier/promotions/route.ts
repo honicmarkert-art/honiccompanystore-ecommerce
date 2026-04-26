@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
   return performanceMonitor.measure('supplier_promotions_post', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/promotions',

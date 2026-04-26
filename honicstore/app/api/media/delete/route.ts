@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { validateAuth, getUserAndRole } from '@/lib/auth-server'
+import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 
 
@@ -60,9 +62,27 @@ function extractObjectNameFromUrl(publicUrl: string, bucketName: string): string
 
 export async function DELETE(request: NextRequest) {
   try {
+    const rateLimitResult = await enhancedRateLimitDistributed(request)
+    if (!rateLimitResult.allowed) {
+      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+        endpoint: '/api/media/delete',
+        reason: rateLimitResult.reason
+      }, request)
+      return NextResponse.json(
+        { error: rateLimitResult.reason },
+        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
+      )
+    }
+
     if (!supabase) {
       return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
     }
+
+    const { user, error: authError } = await validateAuth(request)
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const { role } = await getUserAndRole(user.id)
     
     // Support both JSON body and query params
     let body: any = {}
@@ -81,6 +101,21 @@ export async function DELETE(request: NextRequest) {
 
     if (!type) {
       return NextResponse.json({ error: 'type is required' }, { status: 400 })
+    }
+
+    if (!productId && role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden: productId required for non-admin deletion' }, { status: 403 })
+    }
+    if (productId && role !== 'admin') {
+      const { data: ownedProduct, error: ownErr } = await supabase
+        .from('products')
+        .select('id')
+        .eq('id', productId)
+        .or(`user_id.eq.${user.id},supplier_id.eq.${user.id}`)
+        .maybeSingle()
+      if (ownErr || !ownedProduct) {
+        return NextResponse.json({ error: 'Forbidden: you do not own this product' }, { status: 403 })
+      }
     }
 
     const bucket = getBucketName(type, context)

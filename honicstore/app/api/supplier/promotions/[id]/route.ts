@@ -51,7 +51,7 @@ export async function DELETE(
   return performanceMonitor.measure('supplier_promotions_delete', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/promotions/[id]',
@@ -155,7 +155,7 @@ export async function PATCH(
   return performanceMonitor.measure('supplier_promotions_patch', async () => {
     try {
       // Rate limiting
-      const rateLimitResult = enhancedRateLimit(request)
+      const rateLimitResult = await enhancedRateLimit(request)
       if (!rateLimitResult.allowed) {
         logSecurityEvent('RATE_LIMIT_EXCEEDED', {
           endpoint: '/api/supplier/promotions/[id]',

@@ -14,7 +14,7 @@ export function clearSupplierPlansCache() {
 export async function GET(request: NextRequest) {
   try {
     // Rate limiting (public endpoint, but still limit to prevent abuse)
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: '/api/supplier-plans',

@@ -1,3 +1,11 @@
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const workspaceRoot = path.resolve(__dirname, '..')
+const shouldUseStandaloneOutput = process.env.NEXT_OUTPUT_STANDALONE === 'true'
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -85,13 +93,13 @@ const nextConfig = {
   ],
   experimental: {
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
-    // Enable modern performance features
-    turbo: {
-      rules: {
-        '*.svg': {
-          loaders: ['@svgr/webpack'],
-          as: '*.js',
-        },
+  },
+  // `experimental.turbo` is deprecated in Next 15+, use top-level `turbopack`.
+  turbopack: {
+    rules: {
+      '*.svg': {
+        loaders: ['@svgr/webpack'],
+        as: '*.js',
       },
     },
   },
@@ -197,8 +205,11 @@ const nextConfig = {
   // Navigation and prefetching optimizations
   trailingSlash: false, // Consistent URL structure
   skipTrailingSlashRedirect: true, // Avoid redirects
-  // Enable static optimization
-  output: 'standalone', // Optimize for deployment
+  // Monorepo/workspace root for tracing to avoid lockfile-root warnings.
+  outputFileTracingRoot: workspaceRoot,
+  // Use standalone only when explicitly enabled (e.g., CI/deploy).
+  // This avoids Windows EBUSY copyfile issues during local builds.
+  output: shouldUseStandaloneOutput ? 'standalone' : undefined,
   // Enhanced Security Headers and Performance Optimizations
   async headers() {
     return [

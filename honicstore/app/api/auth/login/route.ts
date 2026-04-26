@@ -23,7 +23,7 @@ const loginSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     // Enhanced rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: '/api/auth/login',

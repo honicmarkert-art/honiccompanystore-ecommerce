@@ -203,7 +203,7 @@ export async function GET(request: NextRequest) {
   
   try {
     // Rate limiting with graceful degradation (return cached data if rate limited)
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logRateLimitEvent('/api/products', rateLimitResult.reason, request)
       

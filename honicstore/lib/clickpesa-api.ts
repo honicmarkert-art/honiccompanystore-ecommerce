@@ -46,6 +46,120 @@ const CLICKPESA_CONFIG: ClickPesaConfig = {
   isLive: process.env.NODE_ENV === "production"
 }
 
+const CLICKPESA_REQUEST_TIMEOUT_MS = Math.max(
+  3000,
+  parseInt(process.env.CLICKPESA_REQUEST_TIMEOUT_MS || '12000', 10) || 12000
+)
+const CLICKPESA_TOKEN_CACHE_TTL_MS = Math.max(
+  60000,
+  parseInt(process.env.CLICKPESA_TOKEN_CACHE_TTL_MS || '300000', 10) || 300000
+)
+
+type CredentialType = 'regular' | 'supplier'
+type TokenCacheEntry = { token: string; expiresAt: number }
+const clickPesaTokenCache = new Map<CredentialType, TokenCacheEntry>()
+const clickPesaTokenInflight = new Map<CredentialType, Promise<string>>()
+const CLICKPESA_VERIFY_CACHE_TTL_MS = Math.max(
+  5000,
+  parseInt(process.env.CLICKPESA_VERIFY_CACHE_TTL_MS || '20000', 10) || 20000
+)
+const CLICKPESA_DISTRIBUTED_LOCK_TTL_MS = Math.max(
+  2000,
+  parseInt(process.env.CLICKPESA_DISTRIBUTED_LOCK_TTL_MS || '15000', 10) || 15000
+)
+const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL
+const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
+type VerifyCacheKey = `${CredentialType}:${string}`
+type VerifyCacheEntry = { value: TransactionVerificationResult; expiresAt: number }
+const clickPesaVerifyCache = new Map<VerifyCacheKey, VerifyCacheEntry>()
+const clickPesaVerifyInflight = new Map<VerifyCacheKey, Promise<TransactionVerificationResult>>()
+
+async function upstashCommand(command: string[]): Promise<any> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
+    throw new Error('Upstash Redis is not configured')
+  }
+
+  const response = await fetch(UPSTASH_REDIS_REST_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Upstash request failed: ${response.status}`)
+  }
+
+  const payload = await response.json()
+  if (payload?.error) {
+    throw new Error(String(payload.error))
+  }
+
+  return payload?.result
+}
+
+async function getDistributedJson<T>(key: string): Promise<T | null> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) return null
+  try {
+    const raw = await upstashCommand(['GET', key])
+    if (!raw || typeof raw !== 'string') return null
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
+async function setDistributedJson(key: string, value: unknown, ttlMs: number): Promise<void> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) return
+  try {
+    await upstashCommand(['SET', key, JSON.stringify(value), 'PX', String(ttlMs)])
+  } catch {
+    // keep local fallback behavior
+  }
+}
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function tryAcquireDistributedLock(
+  lockKey: string,
+  token: string,
+  ttlMs: number
+): Promise<boolean> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) return false
+  try {
+    const result = await upstashCommand(['SET', lockKey, token, 'NX', 'PX', String(ttlMs)])
+    return result === 'OK'
+  } catch {
+    return false
+  }
+}
+
+async function releaseDistributedLock(lockKey: string, token: string): Promise<void> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) return
+  try {
+    const current = await upstashCommand(['GET', lockKey])
+    if (current === token) {
+      await upstashCommand(['DEL', lockKey])
+    }
+  } catch {
+    // ignore lock release errors
+  }
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 // ClickPesa API Keys - Regular checkout
 export const CLICKPESA_API_KEY = process.env.CLICKPESA_API_KEY || ""
 export const CLICKPESA_CLIENT_ID = process.env.CLICKPESA_CLIENT_ID || ""
@@ -118,37 +232,63 @@ export const formatPhoneForClickPesa = (phone: string): string => {
 // Generate ClickPesa access token
 // useSupplierCredentials: true = use supplier credentials, false = use regular checkout credentials
 export const generateAccessToken = async (useSupplierCredentials: boolean = false): Promise<string> => {
+  const credentialType: CredentialType = useSupplierCredentials ? 'supplier' : 'regular'
+  const now = Date.now()
+  const distributedTokenKey = `clickpesa:token:${credentialType}`
+  const distributedTokenLockKey = `clickpesa:lock:token:${credentialType}`
+  const distributedToken = await getDistributedJson<TokenCacheEntry>(distributedTokenKey)
+  if (distributedToken && distributedToken.expiresAt > now && distributedToken.token) {
+    return distributedToken.token
+  }
+
+  const cached = clickPesaTokenCache.get(credentialType)
+  if (cached && cached.expiresAt > now) {
+    return cached.token
+  }
+
+  const inflight = clickPesaTokenInflight.get(credentialType)
+  if (inflight) {
+    return inflight
+  }
+
+  let distributedLockToken: string | null = null
+  const candidateLockToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const hasDistributedLock = await tryAcquireDistributedLock(
+    distributedTokenLockKey,
+    candidateLockToken,
+    CLICKPESA_DISTRIBUTED_LOCK_TTL_MS
+  )
+  if (hasDistributedLock) {
+    distributedLockToken = candidateLockToken
+  } else if (UPSTASH_REDIS_REST_URL && UPSTASH_REDIS_REST_TOKEN) {
+    // Another instance likely generating token; briefly wait for shared cache fill.
+    for (let i = 0; i < 8; i++) {
+      await waitMs(250)
+      const waited = await getDistributedJson<TokenCacheEntry>(distributedTokenKey)
+      if (waited && waited.expiresAt > Date.now() && waited.token) {
+        return waited.token
+      }
+    }
+  }
+
+  const tokenPromise = (async () => {
   try {
     // Select credentials based on useSupplierCredentials flag
     const apiKey = useSupplierCredentials ? CLICKPESA_API_SUPPLIER_KEY : CLICKPESA_API_KEY
     const clientId = useSupplierCredentials ? CLICKPESA_CLIENT_SUPPLIER_ID : CLICKPESA_CLIENT_ID
-    const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
     
-    logger.log(`ClickPesa: Generating access token (${credentialType})...`, {
-      baseUrl: CLICKPESA_CONFIG.baseUrl,
-      hasApiKey: Boolean(apiKey),
-      hasClientId: Boolean(clientId),
-      credentialType: credentialType
-    })
-
     if (!apiKey || !clientId) {
       throw new Error(`Missing ClickPesa credentials for ${credentialType} checkout. Please configure ${useSupplierCredentials ? 'CLICKPESA_API_SUPPLIER_KEY and CLICKPESA_CLIENT_SUPPLIER_ID' : 'CLICKPESA_API_KEY and CLICKPESA_CLIENT_ID'}`)
     }
 
-    const response = await fetch(`${CLICKPESA_CONFIG.baseUrl}/third-parties/generate-token`, {
+    const response = await fetchWithTimeout(`${CLICKPESA_CONFIG.baseUrl}/third-parties/generate-token`, {
       method: "POST",
       headers: {
         "api-key": apiKey,
         "client-id": clientId,
         "Content-Type": "application/json"
       },
-    })
-
-    logger.log("ClickPesa: Token generation response:", {
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries())
-    })
+    }, CLICKPESA_REQUEST_TIMEOUT_MS)
 
     if (!response.ok) {
       const responseText = await response.text()
@@ -159,13 +299,11 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
         errorData = { message: responseText }
       }
 
-      // Log detailed error for debugging
+      // Log detailed error for debugging (without exposing credentials)
       logger.error("ClickPesa token generation failed:", {
         status: response.status,
         statusText: response.statusText,
         errorData: errorData,
-        apiKeyPrefix: apiKey.substring(0, 8) + '...',
-        clientIdPrefix: clientId.substring(0, 8) + '...',
         baseUrl: CLICKPESA_CONFIG.baseUrl,
         endpoint: `${CLICKPESA_CONFIG.baseUrl}/third-parties/generate-token`
       })
@@ -177,7 +315,6 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
     }
 
     const responseText = await response.text()
-    logger.log("ClickPesa: Token response body:", responseText)
 
     let data: TokenResponse
     try {
@@ -199,13 +336,29 @@ export const generateAccessToken = async (useSupplierCredentials: boolean = fals
       throw new Error("Invalid response from ClickPesa token generation API")
     }
 
-    logger.log("ClickPesa: Access token generated successfully")
+    clickPesaTokenCache.set(credentialType, {
+      token: data.token,
+      expiresAt: Date.now() + CLICKPESA_TOKEN_CACHE_TTL_MS,
+    })
+    await setDistributedJson(distributedTokenKey, {
+      token: data.token,
+      expiresAt: Date.now() + CLICKPESA_TOKEN_CACHE_TTL_MS,
+    }, CLICKPESA_TOKEN_CACHE_TTL_MS)
     return data.token
   } catch (error) {
     // Log detailed error server-side but throw generic error for client
     logger.error("Failed to generate access token:", error instanceof Error ? error.message : String(error))
     throw new Error("Failed")
   }
+  })().finally(async () => {
+    if (distributedLockToken) {
+      await releaseDistributedLock(distributedTokenLockKey, distributedLockToken)
+    }
+    clickPesaTokenInflight.delete(credentialType)
+  })
+
+  clickPesaTokenInflight.set(credentialType, tokenPromise)
+  return tokenPromise
 }
 
 // Canonicalize payload recursively - sort all object keys alphabetically at every nesting level
@@ -277,7 +430,6 @@ export const createCheckoutLink = async (
 ): Promise<CheckoutLinkResponse> => {
   try {
     // Step 1: Generate access token with appropriate credentials
-    const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
     const accessToken = await generateAccessToken(useSupplierCredentials)
 
     // Step 2: Generate checksum if not provided
@@ -301,14 +453,14 @@ export const createCheckoutLink = async (
     
     const authHeader = accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`
     
-    const response = await fetch(`${CLICKPESA_CONFIG.baseUrl}/third-parties/checkout-link/generate-checkout-url`, {
+    const response = await fetchWithTimeout(`${CLICKPESA_CONFIG.baseUrl}/third-parties/checkout-link/generate-checkout-url`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": authHeader,
       },
       body: JSON.stringify(requestPayload),
-    })
+    }, CLICKPESA_REQUEST_TIMEOUT_MS)
 
 
     if (!response.ok) {
@@ -382,12 +534,19 @@ export const validateWebhook = (payload: any, signature: string, secretKey: stri
       .digest('hex')
     
     // 5. Compare signatures using timing-safe comparison
-    const providedSignature = signature.replace('sha256=', '').trim() // Remove prefix if present
-    
-    return crypto.timingSafeEqual(
-      Buffer.from(expectedSignature, 'hex'),
-      Buffer.from(providedSignature, 'hex')
-    )
+    const providedSignature = signature
+      .replace(/^sha256=/i, '')
+      .replace(/^bearer\s+/i, '')
+      .trim()
+      .toLowerCase()
+    const isHex = /^[a-f0-9]+$/i.test(providedSignature)
+    if (!isHex) return false
+
+    const expected = Buffer.from(expectedSignature, 'hex')
+    const provided = Buffer.from(providedSignature, 'hex')
+    if (expected.length !== provided.length) return false
+
+    return crypto.timingSafeEqual(expected, provided)
   } catch (error) {
     logger.error("Webhook signature validation error:", error instanceof Error ? error.message : String(error))
     return false
@@ -450,7 +609,6 @@ export const isClickPesaConfigured = (): boolean => {
 // Test checksum generation with example data
 export const testChecksumGeneration = () => {
   if (typeof window !== 'undefined') {
-    logger.log("Checksum testing should be done server-side")
     return null
   }
 
@@ -506,27 +664,62 @@ export const verifyTransactionWithClickPesa = async (
   orderReference: string,
   useSupplierCredentials: boolean = false
 ): Promise<TransactionVerificationResult> => {
-  try {
-    const credentialType = useSupplierCredentials ? 'supplier' : 'regular'
-    logger.log(`🔍 Verifying transaction with ClickPesa API (${credentialType}):`, {
-      orderReference,
-      baseUrl: CLICKPESA_CONFIG.baseUrl,
-      credentialType: credentialType
-    })
+  const credentialType: CredentialType = useSupplierCredentials ? 'supplier' : 'regular'
+  const cacheKey: VerifyCacheKey = `${credentialType}:${orderReference}`
+  const now = Date.now()
+  const distributedVerifyKey = `clickpesa:verify:${cacheKey}`
+  const distributedVerifyLockKey = `clickpesa:lock:verify:${cacheKey}`
+  const distributedCached = await getDistributedJson<VerifyCacheEntry>(distributedVerifyKey)
+  if (distributedCached && distributedCached.expiresAt > now) {
+    return distributedCached.value
+  }
 
+  const cached = clickPesaVerifyCache.get(cacheKey)
+  if (cached && cached.expiresAt > now) {
+    return cached.value
+  }
+
+  const inflight = clickPesaVerifyInflight.get(cacheKey)
+  if (inflight) {
+    return inflight
+  }
+
+  let distributedLockToken: string | null = null
+  const candidateLockToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const hasDistributedLock = await tryAcquireDistributedLock(
+    distributedVerifyLockKey,
+    candidateLockToken,
+    CLICKPESA_DISTRIBUTED_LOCK_TTL_MS
+  )
+  if (hasDistributedLock) {
+    distributedLockToken = candidateLockToken
+  } else if (UPSTASH_REDIS_REST_URL && UPSTASH_REDIS_REST_TOKEN) {
+    // Another instance likely verifying now; briefly wait for shared cache fill.
+    for (let i = 0; i < 8; i++) {
+      await waitMs(250)
+      const waited = await getDistributedJson<VerifyCacheEntry>(distributedVerifyKey)
+      if (waited && waited.expiresAt > Date.now()) {
+        return waited.value
+      }
+    }
+  }
+
+  const verifyPromise = (async () => {
+  try {
     // Step 1: Generate access token with appropriate credentials
     const accessToken = await generateAccessToken(useSupplierCredentials)
     
     // Step 2: Query payment status from ClickPesa API
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${CLICKPESA_CONFIG.baseUrl}/third-parties/payments/${orderReference}`,
       {
         method: 'GET',
         headers: {
-          'Authorization': accessToken,
+          'Authorization': accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         }
-      }
+      },
+      CLICKPESA_REQUEST_TIMEOUT_MS
     )
 
     if (!response.ok) {
@@ -547,14 +740,6 @@ export const verifyTransactionWithClickPesa = async (
 
     const transactionData = await response.json()
     
-    logger.log('✅ ClickPesa API verification response:', {
-      orderReference,
-      status: transactionData.status,
-      transactionId: transactionData.id,
-      amount: transactionData.collectedAmount,
-      currency: transactionData.collectedCurrency
-    })
-
     // Step 3: Verify transaction status
     const status = transactionData.status?.toUpperCase() || 'UNKNOWN'
     const isSuccess = status === 'SUCCESS' || status === 'SETTLED'
@@ -579,6 +764,26 @@ export const verifyTransactionWithClickPesa = async (
       status: 'ERROR',
       error: error instanceof Error ? error.message : 'Unknown error during verification'
     }
+  }
+  })()
+
+  clickPesaVerifyInflight.set(cacheKey, verifyPromise)
+  try {
+    const result = await verifyPromise
+    clickPesaVerifyCache.set(cacheKey, {
+      value: result,
+      expiresAt: Date.now() + CLICKPESA_VERIFY_CACHE_TTL_MS,
+    })
+    await setDistributedJson(distributedVerifyKey, {
+      value: result,
+      expiresAt: Date.now() + CLICKPESA_VERIFY_CACHE_TTL_MS,
+    }, CLICKPESA_VERIFY_CACHE_TTL_MS)
+    return result
+  } finally {
+    if (distributedLockToken) {
+      await releaseDistributedLock(distributedVerifyLockKey, distributedLockToken)
+    }
+    clickPesaVerifyInflight.delete(cacheKey)
   }
 }
 

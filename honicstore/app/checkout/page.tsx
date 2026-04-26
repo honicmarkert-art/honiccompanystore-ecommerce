@@ -792,6 +792,7 @@ function CheckoutPageContent() {
       // Payment API validates amount against order in DB and uses DB total for the link (anti-tampering).
       const reference = result.order.referenceId || orderId
       const orderTotalAmount = result.order.totalAmount || orderData.totalAmount
+      const checkoutIdempotencyKey = `checkout-link:${reference}:${String(orderTotalAmount)}`
       const checkoutLinkStartTime = performance.now()
       const checkoutLinkStartTimestamp = Date.now()
       
@@ -807,6 +808,7 @@ function CheckoutPageContent() {
             amount: String(orderTotalAmount),
             currency: 'TZS',
             orderId: reference,
+            idempotencyKey: checkoutIdempotencyKey,
             returnUrl: buildReturnUrl(reference),
             cancelUrl: buildCancelUrl(reference),
             customerDetails: {

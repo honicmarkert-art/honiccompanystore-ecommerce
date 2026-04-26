@@ -21,10 +21,105 @@ import { createClient } from '@supabase/supabase-js'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
+const CHECKOUT_LINK_IDEMPOTENCY_TTL_MS = Math.max(
+  60000,
+  parseInt(process.env.CHECKOUT_LINK_IDEMPOTENCY_TTL_MS || '600000', 10) || 600000
+)
+type CheckoutLinkCacheEntry = {
+  expiresAt: number
+  orderRef: string
+  amount: string
+  response: Record<string, any>
+}
+const checkoutLinkCache = new Map<string, CheckoutLinkCacheEntry>()
+const checkoutLinkInflight = new Map<string, Promise<Record<string, any>>>()
+const distributedCheckoutLockStore = new Map<string, number>()
+const CHECKOUT_LINK_DISTRIBUTED_LOCK_TTL_MS = Math.max(
+  5000,
+  parseInt(process.env.CHECKOUT_LINK_DISTRIBUTED_LOCK_TTL_MS || '45000', 10) || 45000
+)
+const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL
+const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
+
+function cleanupCheckoutLinkCache(now = Date.now()) {
+  for (const [key, entry] of checkoutLinkCache.entries()) {
+    if (entry.expiresAt <= now) checkoutLinkCache.delete(key)
+  }
+}
+
+async function upstashCommand(command: string[]): Promise<any> {
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
+    throw new Error('Upstash Redis is not configured')
+  }
+
+  const response = await fetch(UPSTASH_REDIS_REST_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Upstash request failed: ${response.status}`)
+  }
+
+  const payload = await response.json()
+  if (payload?.error) {
+    throw new Error(String(payload.error))
+  }
+  return payload?.result
+}
+
+async function tryAcquireCheckoutLock(lockKey: string, token: string): Promise<{ acquired: boolean; backend: 'upstash' | 'memory' }> {
+  if (UPSTASH_REDIS_REST_URL && UPSTASH_REDIS_REST_TOKEN) {
+    try {
+      const result = await upstashCommand(['SET', lockKey, token, 'NX', 'PX', String(CHECKOUT_LINK_DISTRIBUTED_LOCK_TTL_MS)])
+      return { acquired: result === 'OK', backend: 'upstash' }
+    } catch {
+      // fall through to memory lock
+    }
+  }
+
+  const now = Date.now()
+  const expiresAt = distributedCheckoutLockStore.get(lockKey)
+  if (expiresAt && expiresAt > now) {
+    return { acquired: false, backend: 'memory' }
+  }
+  distributedCheckoutLockStore.set(lockKey, now + CHECKOUT_LINK_DISTRIBUTED_LOCK_TTL_MS)
+  return { acquired: true, backend: 'memory' }
+}
+
+async function releaseCheckoutLock(lockKey: string, token: string) {
+  if (UPSTASH_REDIS_REST_URL && UPSTASH_REDIS_REST_TOKEN) {
+    try {
+      const current = await upstashCommand(['GET', lockKey])
+      if (current === token) {
+        await upstashCommand(['DEL', lockKey])
+      }
+      return
+    } catch {
+      // fall through to memory lock release
+    }
+  }
+
+  distributedCheckoutLockStore.delete(lockKey)
+}
+
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, expiresAt] of distributedCheckoutLockStore.entries()) {
+    if (expiresAt <= now) {
+      distributedCheckoutLockStore.delete(key)
+    }
+  }
+}, 10 * 60 * 1000)
+
 export async function POST(request: NextRequest) {
   try {
     // Rate limiting
-    const rateLimitResult = enhancedRateLimit(request)
+    const rateLimitResult = await enhancedRateLimit(request)
     if (!rateLimitResult.allowed) {
       logSecurityEvent('RATE_LIMIT_EXCEEDED', {
         endpoint: '/api/payment/clickpesa',
@@ -35,14 +130,6 @@ export async function POST(request: NextRequest) {
         { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
       )
     }
-
-    // Log the incoming request for debugging
-    logger.log('ClickPesa API Request:', {
-      url: request.url,
-      method: request.method,
-      headers: Object.fromEntries(request.headers.entries()),
-      timestamp: new Date().toISOString()
-    })
 
     let body
     try {
@@ -61,13 +148,11 @@ export async function POST(request: NextRequest) {
       amount, 
       currency = "TZS",
       orderId,
+      idempotencyKey,
       returnUrl,
       cancelUrl,
       customerDetails
     } = body
-
-    // Log without sensitive order data
-    logger.log('ClickPesa API: Request received', { action, currency })
 
     // Check if ClickPesa is properly configured
     if (!isClickPesaConfigured()) {
@@ -83,6 +168,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "create-checkout-link") {
+      cleanupCheckoutLinkCache()
       // SECURITY (guest + auth): Payment link uses only server-authoritative data.
       // Order is fetched from DB by reference_id; client-sent amount must match order.total_amount.
       // The amount sent to ClickPesa is order.total_amount from DB (never client-sent amount).
@@ -97,6 +183,13 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
+      if (idempotencyKey != null && (typeof idempotencyKey !== 'string' || idempotencyKey.trim().length < 8 || idempotencyKey.trim().length > 128)) {
+        return NextResponse.json(
+          { success: false, error: "Invalid idempotencyKey. Must be 8-128 characters." },
+          { status: 400 }
+        )
+      }
+      const normalizedIdempotencyKey = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : null
 
       if (!customerDetails) {
         return NextResponse.json(
@@ -140,26 +233,32 @@ export async function POST(request: NextRequest) {
       // Optimized: Use normalized reference directly for faster lookup
       const adminSupabase = getSupabaseClient()
       const normalizedOrderRef = normalizeOrderReference(orderId)
+      const idempotencyScopeKey = normalizedIdempotencyKey ? `${normalizedOrderRef}:${normalizedIdempotencyKey}` : null
+      const distributedLockKey = idempotencyScopeKey ? `checkout-idempotency-lock:${idempotencyScopeKey}` : null
+
+      if (idempotencyScopeKey) {
+        const cached = checkoutLinkCache.get(idempotencyScopeKey)
+        if (cached && cached.expiresAt > Date.now() && cached.orderRef === normalizedOrderRef && cached.amount === String(amount)) {
+          return NextResponse.json(cached.response)
+        }
+
+        const inflight = checkoutLinkInflight.get(idempotencyScopeKey)
+        if (inflight) {
+          const inflightResponse = await inflight
+          return NextResponse.json(inflightResponse)
+        }
+      }
       
-      // Optimized: Single query with normalized reference (most common case)
-      // Fallback to original if normalized doesn't match (handles edge cases)
-      const { data: order, error: orderError } = await adminSupabase
+      const candidateOrderRefs = Array.from(
+        new Set([normalizedOrderRef, String(orderId)].filter((v) => Boolean(v)))
+      )
+      const { data: orders, error: orderError } = await adminSupabase
         .from('orders')
         .select('id, reference_id, total_amount, currency, payment_status, status')
-        .eq('reference_id', normalizedOrderRef)
-        .maybeSingle()
-
-
-      // Fallback: Try original orderId if normalized didn't match
-      let finalOrder = order
-      if ((orderError || !order) && normalizedOrderRef !== orderId) {
-        const { data: fallbackOrder } = await adminSupabase
-          .from('orders')
-          .select('id, reference_id, total_amount, currency, payment_status, status')
-          .eq('reference_id', orderId)
-          .maybeSingle()
-        finalOrder = fallbackOrder
-      }
+        .in('reference_id', candidateOrderRefs)
+      const finalOrder =
+        orders?.find((o: any) => o.reference_id === normalizedOrderRef) ??
+        orders?.find((o: any) => o.reference_id === String(orderId))
 
       if (!finalOrder) {
         logSecurityEvent('ORDER_NOT_FOUND', {
@@ -275,24 +374,73 @@ export async function POST(request: NextRequest) {
 
         // Create checkout link
         // Create checkout link using regular credentials (not supplier)
-        const checkoutResult = await createCheckoutLink(checkoutRequest, false)
+        const createLinkTask = async () => {
+          const checkoutResult = await createCheckoutLink(checkoutRequest, false)
 
-        return NextResponse.json({
-          success: true,
-          checkoutLink: checkoutResult.checkoutLink,
-          clientId: checkoutResult.clientId || CLICKPESA_CLIENT_ID,
-          orderReference: checkoutRequest.orderReference,
-          amount: checkoutRequest.totalPrice,
-          currency: checkoutRequest.orderCurrency,
-          configuredClientId: CLICKPESA_CLIENT_ID,
-          supportedPaymentMethods: [
-            'mobile_money',
-            'credit_card',
-            'debit_card',
-            'bank_transfer'
-          ],
-          message: 'ClickPesa checkout link created successfully. Supports mobile money, cards, and bank transfers.'
-        })
+          const responsePayload = {
+            success: true,
+            checkoutLink: checkoutResult.checkoutLink,
+            clientId: checkoutResult.clientId || CLICKPESA_CLIENT_ID,
+            orderReference: checkoutRequest.orderReference,
+            amount: checkoutRequest.totalPrice,
+            currency: checkoutRequest.orderCurrency,
+            configuredClientId: CLICKPESA_CLIENT_ID,
+            supportedPaymentMethods: [
+              'mobile_money',
+              'credit_card',
+              'debit_card',
+              'bank_transfer'
+            ],
+            message: 'ClickPesa checkout link created successfully. Supports mobile money, cards, and bank transfers.'
+          } as const
+
+          return responsePayload
+        }
+
+        const responsePayload =
+          idempotencyScopeKey
+            ? await (async () => {
+                const lockToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+                const lockKey = distributedLockKey as string
+                const lock = await tryAcquireCheckoutLock(lockKey, lockToken)
+                if (!lock.acquired) {
+                  logSecurityEvent('PAYMENT_IDEMPOTENCY_COLLISION', {
+                    endpoint: '/api/payment/clickpesa',
+                    orderReference: normalizedOrderRef,
+                    idempotencyScopeKey,
+                    lockBackend: lock.backend
+                  }, request)
+                  return {
+                    success: false,
+                    error: 'Payment request is already being processed. Please retry shortly.'
+                  }
+                }
+
+                try {
+                  const task = createLinkTask()
+                  checkoutLinkInflight.set(idempotencyScopeKey, task)
+                  try {
+                    const payload = await task
+                    checkoutLinkCache.set(idempotencyScopeKey, {
+                      expiresAt: Date.now() + CHECKOUT_LINK_IDEMPOTENCY_TTL_MS,
+                      orderRef: normalizedOrderRef,
+                      amount: String(amount),
+                      response: payload,
+                    })
+                    return payload
+                  } finally {
+                    checkoutLinkInflight.delete(idempotencyScopeKey)
+                  }
+                } finally {
+                  await releaseCheckoutLock(lockKey, lockToken)
+                }
+              })()
+            : await createLinkTask()
+
+        if (!responsePayload.success) {
+          return NextResponse.json(responsePayload, { status: 409 })
+        }
+        return NextResponse.json(responsePayload)
 
       } catch (error) {
         logger.error("ClickPesa API Error:", error instanceof Error ? error.message : String(error))
@@ -377,7 +525,10 @@ async function handleClickPesaWebhook(request: NextRequest) {
     const isValidSignature = validateWebhook(payload, signature, process.env.CLICKPESA_WEBHOOK_SECRET || '')
     
     if (!isValidSignature) {
-      logger.error('ClickPesa webhook: Invalid signature', { signature, payload })
+      logger.error('ClickPesa webhook: Invalid signature', {
+        hasSignature: Boolean(signature),
+        payloadKeys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+      })
       return NextResponse.json(
         { success: false, error: "Invalid webhook signature" },
         { status: 401 }
@@ -387,9 +538,6 @@ async function handleClickPesaWebhook(request: NextRequest) {
     // Parse and validate webhook payload
     const webhookData = parseWebhookPayload(payload)
     
-    // Log webhook receipt without sensitive data
-    logger.log('ClickPesa webhook received', { status: webhookData.status })
-
     // Initialize Supabase client
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -470,8 +618,6 @@ async function handleClickPesaWebhook(request: NextRequest) {
     // (sold_count and buyers_count are now handled by a DB trigger)
     if (paymentStatus === 'paid' && order.payment_status !== 'paid' && order.payment_status !== 'success') {
       try {
-        logger.log('📦 Reducing stock for paid order via payment webhook:', order.id)
-        
         // Get order items to reduce stock
         const { data: orderItems, error: itemsError } = await supabase
           .from('order_items')
@@ -565,8 +711,6 @@ async function handleClickPesaWebhook(request: NextRequest) {
 
                       if (productUpdateError) {
                         logger.error(`❌ Error updating product stock:`, productUpdateError)
-                      } else {
-                        logger.log(`✅ Product ${item.product_id} total stock updated to: ${totalStock}`)
                       }
                     }
                   }
@@ -599,8 +743,6 @@ async function handleClickPesaWebhook(request: NextRequest) {
 
                 if (stockUpdateError) {
                   logger.error('❌ Error updating stock for product:', item.product_id, stockUpdateError)
-                } else {
-                  logger.log('✅ Stock reduced for product', { productId: item.product_id, quantity: item.quantity })
                 }
               }
             } catch (stockError) {
@@ -616,11 +758,7 @@ async function handleClickPesaWebhook(request: NextRequest) {
     // If payment failed or cancelled, release reserved stock (if any was reserved)
     if (newStatus === 'failed' || newStatus === 'cancelled') {
       // Note: Stock is not reserved during checkout, so no need to release
-      logger.log('📦 Payment failed/cancelled - no stock to release (stock not reserved during checkout)')
     }
-
-    // Log successful webhook processing
-    logger.log('ClickPesa webhook processed successfully', { status: newStatus })
 
     return NextResponse.json({
       success: true,
