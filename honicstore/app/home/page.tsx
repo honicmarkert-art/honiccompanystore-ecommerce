@@ -915,8 +915,19 @@ export default function LandingPage() {
                 </div>
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
-                  <span className="text-xs sm:text-sm">
-                    {adminSettings?.address || 'Dar es Salaam, Tanzania'}
+                  <span className="text-xs sm:text-sm leading-snug">
+                    {(() => {
+                      const address = String(adminSettings?.address || 'Dar es Salaam, Tanzania')
+                      const citySuffix = /,\s*Dar\s+es\s+Salaam,\s*Tanzania$/i
+                      if (!citySuffix.test(address)) return address
+                      const firstLine = address.replace(citySuffix, '').trim()
+                      return (
+                        <>
+                          <span>{firstLine || 'Dar es Salaam, Tanzania'}</span>
+                          {firstLine ? <span className="block">Dar es Salaam, Tanzania</span> : null}
+                        </>
+                      )
+                    })()}
                   </span>
                 </div>
               </div>
