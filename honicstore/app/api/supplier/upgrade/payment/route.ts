@@ -4,19 +4,13 @@ import { buildUrl } from '@/lib/url-utils'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { performanceMonitor } from '@/lib/performance-monitor'
 import { createErrorResponse, logError } from '@/lib/error-handler'
-import { 
-  createCheckoutLink, 
-  formatAmountForClickPesa,
-  formatPhoneForClickPesa,
-  isClickPesaConfigured,
-  getConfigStatus,
-  type CheckoutLinkRequest 
-} from "@/lib/clickpesa-api"
+import { createSnippeCheckout, isSnippeConfigured, tzsAmount } from "@/lib/snippe-api"
+import { getSupabaseClient } from "@/lib/supabase-server"
 import { createServerClient } from '@supabase/ssr'
 
 export const runtime = 'nodejs'
 
-// POST /api/supplier/upgrade/payment - Create ClickPesa checkout link for upgrade
+// POST /api/supplier/upgrade/payment - Create a Snippe checkout for a plan upgrade
 export async function POST(request: NextRequest) {
   return performanceMonitor.measure('supplier_upgrade_payment_post', async () => {
     try {
@@ -103,21 +97,25 @@ export async function POST(request: NextRequest) {
       plan: plan
     }
 
-    // Check if ClickPesa is configured
-    if (!isClickPesaConfigured()) {
+    if (tzsAmount(profile.payment_amount) == null) {
+      return NextResponse.json({ success: false, error: "The saved plan amount cannot be charged." }, { status: 400 })
+    }
+    if (profile.payment_status === "paid") {
+      return NextResponse.json({ success: false, error: "This plan is already paid." }, { status: 400 })
+    }
+    if (String(profile.payment_currency || "TZS").toUpperCase() !== "TZS") {
+      return NextResponse.json({ success: false, error: "Snippe accepts Tanzanian shillings only." }, { status: 400 })
+    }
+
+    if (!isSnippeConfigured()) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: "Payment gateway is not properly configured. Please contact support.",
-          debug: process.env.NODE_ENV === "development" ? getConfigStatus() : undefined
-        },
+        { success: false, error: "Payment gateway is not configured. Add SNIPPE_API_KEY on the server." },
         { status: 500 }
       )
     }
 
-    const webhookUrl = buildUrl('/api/webhooks/supplier-upgrade')
+    const webhookUrl = buildUrl('/api/webhooks/snippe')
     const returnUrl = buildUrl('/supplier/dashboard', { payment: 'success', referenceId })
-    const cancelUrl = buildUrl('/supplier/dashboard', { payment: 'cancelled', referenceId })
 
     // Get supplier profile for customer details
     const { data: supplierProfile } = await supabase
@@ -126,36 +124,42 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    logger.log('Creating ClickPesa checkout link for plan payment:', {
+    logger.log('Creating Snippe checkout for plan payment:', {
       referenceId,
       amount: payment.amount,
       currency: payment.currency
     })
 
-    // Ensure currency is TZS (default for supplier plans)
-    const paymentCurrency = (payment.currency === 'TZS' || !payment.currency) ? 'TZS' : payment.currency as 'TZS' | 'USD'
-    
-    // Prepare ClickPesa checkout link request
-    const checkoutRequest: CheckoutLinkRequest = {
-      totalPrice: formatAmountForClickPesa(parseFloat(payment.amount.toString())),
+    const checkoutResult = await createSnippeCheckout({
+      amount: parseFloat(payment.amount.toString()),
       orderReference: referenceId,
-      orderCurrency: paymentCurrency,
       customerName: customerDetails?.fullName || supplierProfile?.full_name || 'Supplier',
       customerEmail: customerDetails?.email || supplierProfile?.email || '',
-      customerPhone: customerDetails?.phone ? formatPhoneForClickPesa(customerDetails.phone) : (supplierProfile?.phone ? formatPhoneForClickPesa(supplierProfile.phone) : undefined),
-      returnUrl: returnUrl,
-      cancelUrl: cancelUrl,
-      webhookUrl: webhookUrl
-    }
-
-    // Create checkout link using supplier credentials
-    const checkoutResult = await createCheckoutLink(checkoutRequest, true)
+      customerPhone: customerDetails?.phone || supplierProfile?.phone || undefined,
+      redirectUrl: returnUrl,
+      webhookUrl,
+      description: `Supplier plan ${referenceId}`,
+    })
 
     if (!checkoutResult.checkoutLink) {
       return NextResponse.json(
         { success: false, error: 'Failed' },
         { status: 500 }
       )
+    }
+
+    if (checkoutResult.reference) {
+      await getSupabaseClient()
+        .from("profiles")
+        .update({
+          clickpesa_transaction_id: checkoutResult.reference,
+          payment_method: "snippe",
+          payment_status: "pending",
+          payment_failure_reason: null,
+          payment_updated_at: new Date().toISOString(),
+        })
+        .eq("id", profile.id)
+        .in("payment_status", ["pending", "failed"])
     }
 
       logSecurityEvent('SUPPLIER_UPGRADE_PAYMENT_INITIATED', user.id, {

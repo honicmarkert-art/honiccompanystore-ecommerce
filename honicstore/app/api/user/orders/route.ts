@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { getSupabaseClient } from '@/lib/supabase-server'
+import { expireAwaitingConfirmationOrders } from '@/lib/expire-awaiting-orders'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -45,6 +47,10 @@ export async function GET(request: NextRequest) {
         { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
       )
     }
+
+    try {
+      await expireAwaitingConfirmationOrders(getSupabaseClient())
+    } catch {}
 
     // SECURITY: Don't log UUIDs or sensitive user information
     const supabase = await getClient()

@@ -195,7 +195,7 @@ export default function SupplierUpgradePage() {
       })
       const profileData = await profileResponse.json()
 
-      // Step 3: Create ClickPesa checkout link
+      // Step 3: Create the Snippe checkout.
       const paymentResponse = await fetch('/api/supplier/upgrade/payment', {
         method: 'POST',
         headers: {
@@ -218,7 +218,7 @@ export default function SupplierUpgradePage() {
         throw new Error(paymentData.error || 'Failed to create payment link')
       }
 
-      // Step 4: Open ClickPesa checkout in new tab
+      // Step 4: Open the Snippe checkout in a new tab.
       toast({
         title: 'Payment Page Opened',
         description: 'Please complete your payment in the new tab. You will be redirected back after payment.',

@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
         payment_id: paymentResult.paymentId,
         amount: paymentData.amount,
         status: paymentResult.status,
-        payment_method: paymentData.method || 'clickpesa',
+        payment_method: paymentData.method || 'snippe',
         created_at: new Date().toISOString(),
       })
 

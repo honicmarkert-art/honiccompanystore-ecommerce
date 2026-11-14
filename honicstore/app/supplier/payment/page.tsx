@@ -237,7 +237,7 @@ function SupplierPaymentPageContent() {
           setPaymentStatus('pending') // Set to pending since payment was just initiated
         }
         
-        // Open ClickPesa checkout in new tab
+        // Open the Snippe checkout in a new tab
         window.open(result.checkoutUrl, '_blank', 'noopener,noreferrer')
         
         // Show success message
@@ -514,7 +514,7 @@ function SupplierPaymentPageContent() {
                       <CheckCircle className="h-3 w-3" />
                     </span>
                     <span className={themeClasses.textNeutralSecondary}>
-                      Secure ClickPesa payment • Encrypted & protected
+                      Secure Snippe payment • Encrypted & protected
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -610,7 +610,7 @@ function SupplierPaymentPageContent() {
             )}
 
             <p className={cn("text-[11px] md:text-xs text-center", themeClasses.textNeutralSecondary)}>
-              You will be redirected to our secure payment gateway (ClickPesa) to complete your purchase.
+              You will be redirected to Snippe to complete your purchase.
             </p>
           </CardContent>
         </Card>

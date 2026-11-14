@@ -52,7 +52,7 @@ export async function PUT(request: NextRequest) {
       shipping_address: orderDetails.shippingAddress,
       billing_address: orderDetails.billingAddress,
       delivery_option: orderDetails.deliveryOption || 'shipping',
-      payment_method: 'clickpesa',
+      payment_method: 'snippe',
       payment_status: 'pending',
       status: 'pending',
       updated_at: new Date().toISOString(),

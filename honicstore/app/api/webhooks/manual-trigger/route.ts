@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Forward to the actual webhook handler
-    const webhookUrl = buildUrl('/api/webhooks/clickpesa')
+    const webhookUrl = buildUrl('/api/webhooks/snippe')
     
     logger.log('🔄 Forwarding to webhook:', webhookUrl)
     

@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       status: 'reserved', // Special status for reserved orders
       total_amount: 0, // Will be updated later
       payment_status: 'reserved',
-      payment_method: 'clickpesa',
+      payment_method: 'snippe',
       currency: 'TZS',
       shipping_address: {}, // Will be updated later
       billing_address: {}, // Will be updated later

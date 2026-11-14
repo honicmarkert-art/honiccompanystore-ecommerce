@@ -10,6 +10,9 @@ import { useCurrency } from "@/contexts/currency-context"
 import { CheckCircle, AlertCircle, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
+import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
+import { downloadOrderReceipt, getLocalOrder, saveLocalOrder, type LocalOrder } from "@/lib/local-orders"
 
 interface OrderData {
   orderId: string
@@ -38,12 +41,40 @@ interface OrderData {
   createdAt: string
 }
 
+function localToOrder(local: LocalOrder): OrderData {
+  return {
+    orderId: local.referenceId,
+    customerDetails: { fullName: local.customerName, email: local.email, phone: local.phone },
+    shippingAddress: {
+      fullName: local.customerName,
+      email: local.email,
+      phone: local.phone,
+      address1: "",
+      city: "",
+      state: "",
+      country: "",
+      postalCode: "",
+    },
+    billingAddress: {},
+    paymentMethod: "snippe",
+    items: local.items.map((item) => ({ productName: item.name, quantity: item.quantity, totalPrice: item.total })),
+    subtotal: local.total,
+    total: local.total,
+    currency: local.currency || "TZS",
+    status: local.status,
+    createdAt: local.createdAt,
+  }
+}
+
 function CheckoutSuccessContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { themeClasses, darkHeaderFooterClasses } = useTheme()
   const { companyName } = useCompanyContext()
   const { formatPrice } = useCurrency()
+  const { isAuthenticated } = useAuth()
+  const { openAuthModal } = useGlobalAuthModal()
+  const [askForAccount, setAskForAccount] = useState(true)
   
   const [orderData, setOrderData] = useState<OrderData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -53,79 +84,84 @@ function CheckoutSuccessContent() {
 
   const orderId = searchParams.get("orderId")
   const status = searchParams.get("status")
-  const orderReference = searchParams.get("orderReference") // ClickPesa parameter
-  const transactionId = searchParams.get("transactionId") // ClickPesa parameter
+  const orderReference = searchParams.get("orderReference")
+  const transactionId = searchParams.get("transactionId")
 
   useEffect(() => {
     const loadOrderData = async () => {
-      // Try to get orderId from different sources
-      let actualOrderId = orderId
-      
-      // If no orderId but we have orderReference, try to find order by reference
-      if (!actualOrderId && orderReference) {
-        // Extract orderId from orderReference (new format: ORDtimestamprandom + more)
-        // The orderReference contains the cleaned orderId + timestamp + random
-        // We need to find the original orderId pattern: ORD + timestamp + random
-        const match = orderReference.match(/^(ORD\d+[A-Z0-9]+)/)
-        if (match) {
-          // Look for the pattern ORD followed by timestamp (13 digits) and random chars
-          const timestampMatch = orderReference.match(/^ORD(\d{13})[A-Z0-9]+/)
-          if (timestampMatch) {
-            actualOrderId = `ORD${timestampMatch[1]}${orderReference.substring(16, 22)}` // Extract original format
-          } else {
-            // Fallback: try to find any stored order that matches the reference
-            const allOrders = Object.keys(localStorage).filter(key => key.startsWith('order-'))
-            for (const orderKey of allOrders) {
-              const order = JSON.parse(localStorage.getItem(orderKey) || '{}')
-              if (order.clickPesa?.orderReference === orderReference) {
-                actualOrderId = orderKey.replace('order-', '')
-                break
-              }
-            }
-          }
-        }
-      }
-      
-      if (!actualOrderId) {
+      const reference = orderReference || orderId
+      if (!reference) {
         setError("No order information provided")
         setIsLoading(false)
         return
       }
 
       try {
-        // Load order data from localStorage (in a real app, this would be from API)
-        const storedOrder = localStorage.getItem(`order-${actualOrderId}`)
-        
-        if (storedOrder) {
-          const orderData = JSON.parse(storedOrder)
-          
-          // Update order status based on ClickPesa response
-          if (status === "success" || status === "completed") {
-            orderData.status = "confirmed"
-            orderData.paymentConfirmedAt = new Date().toISOString()
-            
-            // Add ClickPesa transaction details if available
-            if (transactionId) {
-              orderData.clickPesa = {
-                ...orderData.clickPesa,
-                transactionId,
-                status: "completed"
-              }
-            }
-            
-            // Update localStorage with confirmed status
-            localStorage.setItem(`order-${actualOrderId}`, JSON.stringify(orderData))
-          } else if (status === "failed" || status === "cancelled") {
-            orderData.status = "failed"
-            orderData.paymentFailedAt = new Date().toISOString()
-            localStorage.setItem(`order-${actualOrderId}`, JSON.stringify(orderData))
-          }
-          
-          setOrderData(orderData)
-        } else {
-          setError("Order not found. Please contact support if you believe this is an error.")
+        const response = await fetch(`/api/orders/${encodeURIComponent(reference)}`, { cache: "no-store" })
+        if (response.ok) {
+          const payload = await response.json()
+          const order = payload.order || payload
+          const address = order.shippingAddress || order.billingAddress || {}
+          const paymentStatus = String(order.paymentStatus || order.payment_status || "pending")
+          setLiveStatus(paymentStatus)
+          setOrderData({
+            orderId: order.referenceId || reference,
+            customerDetails: {
+              fullName: address.fullName || "",
+              email: address.email || "",
+              phone: address.phone || "",
+            },
+            shippingAddress: {
+              fullName: address.fullName || "",
+              email: address.email || "",
+              phone: address.phone || "",
+              address1: address.address1 || "",
+              city: address.city || address.district || "",
+              state: address.state || address.region || "",
+              country: address.country || "",
+              postalCode: address.postalCode || "",
+            },
+            billingAddress: order.billingAddress || address,
+            paymentMethod: "snippe",
+            items: order.orderItems || [],
+            subtotal: Number(order.totalAmount || 0),
+            total: Number(order.totalAmount || 0),
+            currency: order.currency || "TZS",
+            status: paymentStatus,
+            createdAt: order.createdAt || new Date().toISOString(),
+          })
+          return
         }
-      } catch (error) {
+
+        const local = getLocalOrder(reference)
+        if (local) {
+          setLiveStatus(local.status)
+          setOrderData(localToOrder(local))
+          return
+        }
+
+        const payment = await fetch(`/api/payment/snippe?orderReference=${encodeURIComponent(reference)}`, { cache: "no-store" })
+        const paymentData = await payment.json().catch(() => null)
+        if (paymentData?.success) {
+          setLiveStatus(paymentData.paymentStatus)
+          setOrderData({
+            orderId: reference,
+            customerDetails: { fullName: "", email: "", phone: "" },
+            shippingAddress: { fullName: "", email: "", phone: "", address1: "", city: "", state: "", country: "", postalCode: "" },
+            billingAddress: {},
+            paymentMethod: "snippe",
+            items: [],
+            subtotal: 0,
+            total: 0,
+            currency: "TZS",
+            status: paymentData.paymentStatus || "pending",
+            createdAt: new Date().toISOString(),
+          })
+          return
+        }
+
+        setError("Order not found. Please contact support if you believe this is an error.")
+      } catch {
         setError("Failed to load order details. Please contact support.")
       } finally {
         setIsLoading(false)
@@ -133,7 +169,26 @@ function CheckoutSuccessContent() {
     }
 
     loadOrderData()
-  }, [orderId, orderReference, status, transactionId])
+  }, [orderId, orderReference])
+
+  useEffect(() => {
+    if (!orderData?.orderId) return
+    saveLocalOrder({
+      referenceId: orderData.orderId,
+      status: orderData.status || "pending",
+      total: Number(orderData.total) || 0,
+      currency: orderData.currency || "TZS",
+      createdAt: orderData.createdAt || new Date().toISOString(),
+      customerName: orderData.customerDetails.fullName || "",
+      phone: orderData.customerDetails.phone || "",
+      email: orderData.customerDetails.email || "",
+      items: (orderData.items || []).map((item: { productName?: string; product_name?: string; name?: string; quantity?: number; totalPrice?: number; total_price?: number }) => ({
+        name: item.productName || item.product_name || item.name || "Item",
+        quantity: Number(item.quantity) || 1,
+        total: Number(item.totalPrice ?? item.total_price) || 0,
+      })),
+    })
+  }, [orderData])
 
   // Poll backend orders to reflect webhook-updated status
   useEffect(() => {
@@ -159,22 +214,21 @@ function CheckoutSuccessContent() {
           return
         }
         
-        let resp = await fetch(apiPath, { cache: 'no-store' })
+        const statusPath = reference ? `/api/payment/snippe?orderReference=${encodeURIComponent(reference)}` : apiPath
+        let resp = await fetch(statusPath || apiPath, { cache: 'no-store' })
         if (resp.status === 429) {
           await sleep(400 + Math.floor(Math.random() * 300))
-          resp = await fetch(apiPath, { cache: 'no-store' })
+          resp = await fetch(statusPath || apiPath, { cache: 'no-store' })
         }
         if (resp.ok) {
           const matched = await resp.json()
-
-          if (matched) {
-            setLiveStatus(matched.status)
-            // If confirmed/failed/cancelled, stop polling
-            if (['confirmed', 'failed', 'cancelled', 'delivered', 'shipped'].includes(String(matched.status))) {
+          const nextStatus = matched.paymentStatus || matched.order?.paymentStatus || matched.status
+          if (nextStatus) {
+            setLiveStatus(nextStatus)
+            setOrderData(prev => prev ? { ...prev, status: nextStatus } : prev)
+            if (['paid', 'failed', 'success'].includes(String(nextStatus))) {
               clearInterval(interval)
               setPolling(false)
-              // Merge into local state if we had any
-              setOrderData(prev => prev ? { ...prev, status: matched.status } : prev)
             }
           }
         }
@@ -242,12 +296,14 @@ function CheckoutSuccessContent() {
       <div className="max-w-2xl mx-auto">
         <Card className={cn("", themeClasses.cardBg, themeClasses.cardBorder)}>
           <CardHeader className="text-center">
-            <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-            <CardTitle className={cn("text-green-500 text-2xl", themeClasses.mainText)}>
-              Order Confirmed!
+            <CheckCircle className={cn("h-16 w-16 mx-auto mb-4", orderData?.status === 'failed' ? 'text-red-500' : 'text-green-500')} />
+            <CardTitle className={cn("text-2xl", orderData?.status === 'paid' || orderData?.status === 'success' ? 'text-green-500' : themeClasses.mainText)}>
+              {orderData?.status === 'paid' || orderData?.status === 'success' ? 'Payment received' : orderData?.status === 'failed' ? 'Payment not completed' : 'Order received'}
             </CardTitle>
             <p className={themeClasses.mainText}>
-              Thank you for your order. Your order has been placed successfully and is being processed.
+              {orderData?.status === 'paid' || orderData?.status === 'success'
+                ? 'Honic Company Limited has confirmed this payment.'
+                : 'Your order is saved. This page updates when the payment is confirmed.'}
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -272,10 +328,12 @@ function CheckoutSuccessContent() {
                           </span>
                         </div>
                       )}
+                      {orderData.total > 0 && (
                       <div className="flex justify-between">
                         <span className={themeClasses.mainText}>Total Amount:</span>
                         <span className={themeClasses.mainText}>{formatPrice(orderData.total)}</span>
                       </div>
+                      )}
                       <div className="flex justify-between">
                         <span className={themeClasses.mainText}>Date:</span>
                         <span className={themeClasses.mainText}>{formatDate(orderData.createdAt)}</span>
@@ -315,6 +373,7 @@ function CheckoutSuccessContent() {
                   </div>
                 </div>
                 
+                {orderData.shippingAddress.address1 && (
                 <div className="border-t pt-4">
                   <h3 className={cn("font-semibold mb-2", themeClasses.mainText)}>
                     Delivery Address
@@ -325,15 +384,61 @@ function CheckoutSuccessContent() {
                     {orderData.shippingAddress.country} {orderData.shippingAddress.postalCode}
                   </p>
                 </div>
+                )}
+              </div>
+            )}
+
+            {!isAuthenticated && askForAccount && (
+              <div className="rounded-lg border border-[#184a96]/20 bg-[#184a96]/5 p-4 space-y-3">
+                <p className={cn("font-semibold", themeClasses.mainText)}>Keep this order in an account</p>
+                <p className={cn("text-sm", themeClasses.mainText)}>
+                  Create an account if you want order history on any device. This is optional. The receipt is already saved on this computer.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    className="bg-[#184a96] text-white hover:bg-[#12386f]"
+                    onClick={() => openAuthModal("register", `/checkout/success?orderReference=${encodeURIComponent(orderData?.orderId || orderReference || "")}`)}
+                  >
+                    Create account
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setAskForAccount(false)}>
+                    Not now
+                  </Button>
+                </div>
               </div>
             )}
 
             <div className="space-y-3">
-              <Button asChild className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600">
-                <Link href="/home">Continue Shopping</Link>
+              <Button
+                type="button"
+                className="w-full bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
+                onClick={() => {
+                  if (!orderData) return
+                  downloadOrderReceipt({
+                    referenceId: orderData.orderId,
+                    status: orderData.status,
+                    total: orderData.total,
+                    currency: orderData.currency,
+                    createdAt: orderData.createdAt,
+                    customerName: orderData.customerDetails.fullName,
+                    phone: orderData.customerDetails.phone,
+                    email: orderData.customerDetails.email,
+                    items: (orderData.items || []).map((item: { productName?: string; product_name?: string; name?: string; quantity?: number; totalPrice?: number; total_price?: number }) => ({
+                      name: item.productName || item.product_name || item.name || "Item",
+                      quantity: Number(item.quantity) || 1,
+                      total: Number(item.totalPrice ?? item.total_price) || 0,
+                    })),
+                  })
+                }}
+              >
+                Save receipt on this computer
               </Button>
               <Button asChild variant="outline" className="w-full">
-                <Link href="/orders">View Orders</Link>
+                <Link href={isAuthenticated ? "/account/orders" : "/orders"}>View orders</Link>
+              </Button>
+              <Button asChild variant="outline" className="w-full">
+                <Link href="/home">Continue shopping</Link>
               </Button>
             </div>
 

@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
         .eq('id', user.id)
     }
 
-    // Generate unique reference ID (32 characters, no hyphens for ClickPesa)
+    // Generate a unique payment reference.
     const referenceId = uuidv4().replace(/-/g, '').substring(0, 32)
 
     // Calculate payment expiration date for Premium plan (1 month from now)
@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
         payment_amount: parseFloat(amount),
         payment_currency: currency,
         payment_status: 'pending',
-        payment_method: 'clickpesa',
+        payment_method: 'snippe',
         payment_created_at: new Date().toISOString(),
         payment_updated_at: new Date().toISOString(),
         payment_expires_at: paymentExpiresAt // Store expiration date for Premium plan

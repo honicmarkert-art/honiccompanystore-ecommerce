@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { validateAuth } from '@/lib/auth-server'
-import { verifyTransactionWithClickPesa } from '@/lib/clickpesa-api'
+import { getSnippePayment } from '@/lib/snippe-api'
 import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 // GET /api/orders/[referenceId] - Get order details by reference ID
@@ -185,21 +185,22 @@ export async function PATCH(
           error: 'Order is not in retry state. Only failed or pending orders can be updated via return URL.'
         }, { status: 403 })
       }
-      // SECURITY CHECK 2: Verify transaction with ClickPesa before paid transition.
-      const verification = await verifyTransactionWithClickPesa(order.reference_id, false)
-      if (!verification.verified) {
+      const verification = order.clickpesa_transaction_id
+        ? await getSnippePayment(order.clickpesa_transaction_id)
+        : null
+      const orderTotal = Math.round(Number(order.total_amount || 0))
+      const verifiedReference = String(verification?.orderReference || "").replace(/[^A-Za-z0-9]/g, "")
+      const orderReference = String(order.reference_id || "").replace(/[^A-Za-z0-9]/g, "")
+      if (
+        !verification ||
+        verification.status !== "completed" ||
+        verification.currency !== "TZS" ||
+        verification.amount !== orderTotal ||
+        (verifiedReference && verifiedReference !== orderReference)
+      ) {
         return NextResponse.json(
-          { error: 'Transaction verification failed. Could not confirm payment with ClickPesa.' },
-          { status: 401 }
-        )
-      }
-      const mappedStatus = (verification.status === 'SUCCESS' || verification.status === 'SETTLED')
-        ? 'paid'
-        : 'failed'
-      if (mappedStatus !== 'paid') {
-        return NextResponse.json(
-          { error: 'Payment not confirmed by ClickPesa.' },
-          { status: 401 }
+          { error: "Payment is not confirmed by Snippe yet." },
+          { status: 409 }
         )
       }
       // SECURITY CHECK 3: Rate limiting - prevent abuse
@@ -223,17 +224,21 @@ export async function PATCH(
       const { data: updatedOrder, error: updateError } = await supabase
         .from('orders')
         .update({
-          payment_status: paymentStatus,
+          payment_status: 'paid',
+          payment_method: 'snippe',
           updated_at: new Date().toISOString()
         })
         .eq('id', order.id)
+        .in('payment_status', ['pending', 'failed'])
         .select()
-        .single()
+        .maybeSingle()
 
       if (updateError) {
         return NextResponse.json({ error: 'Failed to update retry payment' }, { status: 500 })
       }
-      // Reduce stock for retry payment (only if not already reduced)
+      if (!updatedOrder) {
+        return NextResponse.json({ success: true, duplicate: true })
+      }
       if (order.payment_status !== 'paid' && order.payment_status !== 'success') {
         try {
           logger.log('📦 Reducing stock for retry payment via return URL:', order.id)

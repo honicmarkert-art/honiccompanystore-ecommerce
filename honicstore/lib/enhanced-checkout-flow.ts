@@ -104,10 +104,10 @@ const handlePlaceOrder = async () => {
     setPaymentStatus(result.order.paymentStatus)
     setOrderPlaced(true)
     
-    // Generate ClickPesa checkout link with proper reference ID
-    let clickpesaRedirectSuccess = false
+    // Open the Snippe checkout for this order.
+    let paymentOpened = false
     try {
-      const resp = await fetch('/api/payment/clickpesa', {
+      const resp = await fetch('/api/payment/snippe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -132,23 +132,23 @@ const handlePlaceOrder = async () => {
       })
       
       if (resp.ok) {
-        const clickpesaResult = await resp.json()
-        if (clickpesaResult.success && clickpesaResult.checkoutUrl) {
-          // Open ClickPesa in new tab
-          const popupWindow = window.open(clickpesaResult.checkoutUrl, '_blank', 'noopener,noreferrer')
+        const paymentResult = await resp.json()
+        if (paymentResult.success && paymentResult.checkoutUrl) {
+          // Open Snippe in a new tab.
+          const popupWindow = window.open(paymentResult.checkoutUrl, '_blank', 'noopener,noreferrer')
           if (popupWindow && !popupWindow.closed) {
-            clickpesaRedirectSuccess = true
+            paymentOpened = true
           } else {
             // Fallback if popup blocked
-            window.location.href = clickpesaResult.checkoutUrl
-            clickpesaRedirectSuccess = true
+            window.location.href = paymentResult.checkoutUrl
+            paymentOpened = true
           }
         }
       }
-    } catch (clickpesaError) {
+    } catch (paymentError) {
       }
     
-    if (!clickpesaRedirectSuccess) {
+    if (!paymentOpened) {
       // Fallback: show order confirmation page
       router.push(`/checkout/confirmation?orderId=${backendOrderId}&referenceId=${referenceId}&pickupId=${pickupId}`)
     }

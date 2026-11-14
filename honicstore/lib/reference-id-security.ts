@@ -79,6 +79,10 @@ export class ReferenceIdSecurity {
     delete sanitized.id
     delete sanitized.user_id
     delete sanitized.created_at
+    delete sanitized.total_amount
+    delete sanitized.currency
+    delete sanitized.subtotal
+    delete sanitized.grand_total
     
     // Only allow specific fields to be updated
     const allowedFields = [
@@ -86,6 +90,7 @@ export class ReferenceIdSecurity {
       'status',
       'failure_reason',
       'clickpesa_transaction_id',
+      'payment_method',
       'payment_timestamp',
       'notes',
       'tracking_number',

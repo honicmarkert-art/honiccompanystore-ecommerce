@@ -38,7 +38,7 @@ const CSP_HEADER = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https: http:",
   "font-src 'self' https://fonts.gstatic.com",
-  `connect-src 'self' https://*.supabase.co ${process.env.CLICKPESA_API_URL || process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'} wss://*.supabase.co https://va.vercel-scripts.com`,
+  `connect-src 'self' https://*.supabase.co https://api.snippe.sh https://snippe.me wss://*.supabase.co https://va.vercel-scripts.com`,
   "media-src 'self' data: blob: https: http:",
   "object-src 'none'",
   "base-uri 'self'",

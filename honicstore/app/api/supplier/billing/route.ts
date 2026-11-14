@@ -132,7 +132,7 @@ export async function GET(request: NextRequest) {
             updated_at: payment.updated_at,
             expires_at: null,
             failure_reason: null,
-            payment_method: payment.payment_method || 'clickpesa'
+            payment_method: payment.payment_method || 'snippe'
           })
         }
       })
@@ -162,7 +162,7 @@ export async function GET(request: NextRequest) {
         updated_at: currentProfile.payment_updated_at,
         expires_at: currentProfile.payment_expires_at,
         failure_reason: failureReason,
-        payment_method: 'clickpesa'
+        payment_method: 'snippe'
       })
     }
 

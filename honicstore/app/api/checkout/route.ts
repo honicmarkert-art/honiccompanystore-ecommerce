@@ -72,9 +72,8 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Validate payment method (only ClickPesa is supported)
-    if (sanitizedPaymentMethod.paymentMethod !== 'clickpesa') {
-      throw createValidationError('Only ClickPesa payment method is supported', 'paymentMethod', { 
+    if (sanitizedPaymentMethod.paymentMethod !== 'snippe') {
+      throw createValidationError('Only Snippe payment is supported', 'paymentMethod', { 
         userId: user.id, 
         ip: clientIP,
         providedMethod: sanitizedPaymentMethod.paymentMethod
@@ -193,10 +192,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate unique order ID and reference IDs
-    // Normalize reference ID to ensure consistency with ClickPesa (remove hyphens)
     const orderId = `ORD${Date.now()}${Math.random().toString(36).substring(2, 8).toUpperCase()}`
     const referenceIdRaw = `REF-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
-    // Store normalized reference ID (without hyphens) for consistent matching with ClickPesa webhooks
     const referenceId = referenceIdRaw.replace(/[^A-Za-z0-9]/g, '')
     const pickupId = `PICKUP-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
 
@@ -213,7 +210,7 @@ export async function POST(request: NextRequest) {
         currency: 'TZS', // Default currency
         shipping_address: sanitizedShippingAddress,
         delivery_option: requestData.deliveryOption || 'shipping', // Store delivery option
-        payment_method: 'clickpesa', // All payments go through ClickPesa
+        payment_method: 'snippe',
         payment_status: 'pending',
         status: 'pending',
         created_at: new Date().toISOString(),

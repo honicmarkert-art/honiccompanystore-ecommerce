@@ -26,10 +26,9 @@ const envSchema = z.object({
   NEXTAUTH_URL: z.string().url('Invalid NextAuth URL').optional(),
   
   // API Configuration
-  CLICKPESA_API_KEY: z.string().min(1, 'ClickPesa API key is required').optional(),
-  CLICKPESA_SECRET: z.string().min(1, 'ClickPesa secret is required').optional(),
-  CLICKPESA_API_URL: z.string().url('Invalid ClickPesa API URL').default('https://api.clickpesa.com'),
-  NEXT_PUBLIC_CLICKPESA_API_URL: z.string().url('Invalid ClickPesa API URL').optional(),
+  SNIPPE_API_KEY: z.string().min(1, 'Snippe API key is required').optional(),
+  SNIPPE_WEBHOOK_SECRET: z.string().min(1, 'Snippe webhook secret is required').optional(),
+  SNIPPE_API_URL: z.string().url('Invalid Snippe API URL').default('https://api.snippe.sh'),
   RESEND_API_URL: z.string().url('Invalid Resend API URL').default('https://api.resend.com'),
   
   // Email Configuration
@@ -119,7 +118,8 @@ export const securityConfig = {
         "'self'",
         process.env.NEXT_PUBLIC_SUPABASE_URL || "",
         "https://*.supabase.co",
-        env.CLICKPESA_API_URL
+        "https://api.snippe.sh",
+        "https://snippe.me"
       ],
       mediaSrc: [
         "'self'",
@@ -146,10 +146,10 @@ export const cacheConfig = {
 
   // API configuration
 export const apiConfig = {
-  clickpesa: {
-    apiKey: env.CLICKPESA_API_KEY,
-    secret: env.CLICKPESA_SECRET,
-    baseUrl: env.CLICKPESA_API_URL,
+  snippe: {
+    apiKey: env.SNIPPE_API_KEY,
+    webhookSecret: env.SNIPPE_WEBHOOK_SECRET,
+    baseUrl: env.SNIPPE_API_URL,
   },
   resend: {
     apiUrl: env.RESEND_API_URL,

@@ -19,7 +19,7 @@ function CheckoutCancelContent() {
   const [orderData, setOrderData] = useState<any>(null)
 
   const orderId = searchParams.get("orderId")
-  const orderReference = searchParams.get("orderReference") // ClickPesa parameter
+  const orderReference = searchParams.get("orderReference")
   const reason = searchParams.get("reason") || searchParams.get("error") || "Payment was cancelled or failed"
 
   useEffect(() => {
@@ -60,7 +60,7 @@ function CheckoutCancelContent() {
             order.cancelledAt = new Date().toISOString()
             order.cancellationReason = reason
             
-            // Add ClickPesa cancellation details if available
+            // Record the cancellation details from the return URL.
             if (orderReference) {
               order.clickPesa = {
                 ...order.clickPesa,

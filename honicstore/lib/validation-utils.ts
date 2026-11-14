@@ -145,7 +145,7 @@ export function validatePaymentMethod(paymentMethod: PaymentMethod): ValidationR
   }
 
   // Validate payment method type
-  const validPaymentMethods = ['card', 'mobile', 'clickpesa', 'bank_transfer']
+  const validPaymentMethods = ['card', 'mobile', 'snippe', 'bank_transfer']
   if (paymentMethod.paymentMethod && !validPaymentMethods.includes(paymentMethod.paymentMethod)) {
     errors.push('Invalid payment method')
   }

@@ -8,14 +8,7 @@ import { buildUrl } from '@/lib/url-utils'
 import { performanceMonitor } from '@/lib/performance-monitor'
 import { getCachedData, setCachedData, CACHE_TTL, clearCache } from '@/lib/database-optimization'
 import { createErrorResponse, logError } from '@/lib/error-handler'
-import { 
-  createCheckoutLink, 
-  formatAmountForClickPesa,
-  formatPhoneForClickPesa,
-  isClickPesaConfigured,
-  getConfigStatus,
-  type CheckoutLinkRequest 
-} from '@/lib/clickpesa-api'
+import { createSnippeCheckout, isSnippeConfigured, tzsAmount } from '@/lib/snippe-api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -142,7 +135,7 @@ export async function POST(request: NextRequest) {
         : basePrice
 
     // Generate unique reference ID for this payment
-    // ClickPesa requires alphanumeric characters only (no hyphens) and max 32 characters
+    // Payment reference used by Snippe metadata.
     // Use same format as upgrade route: UUID without hyphens, limited to 32 characters
     const referenceId = uuidv4().replace(/-/g, '').substring(0, 32)
 
@@ -153,7 +146,7 @@ export async function POST(request: NextRequest) {
       payment_amount: expectedAmount.toString(),
       payment_currency: currency,
       payment_status: 'pending',
-      payment_method: 'clickpesa',
+      payment_method: 'snippe',
       payment_created_at: new Date().toISOString(),
       payment_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -188,23 +181,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if ClickPesa is configured
-    if (!isClickPesaConfigured()) {
+    if (tzsAmount(expectedAmount) == null) {
+      return NextResponse.json({ success: false, error: "The plan price cannot be charged." }, { status: 400 })
+    }
+
+    if (!isSnippeConfigured()) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: "Payment gateway is not properly configured. Please contact support.",
-          debug: process.env.NODE_ENV === "development" ? getConfigStatus() : undefined
-        },
+        { success: false, error: "Payment gateway is not configured. Add SNIPPE_API_KEY on the server." },
         { status: 500 }
       )
     }
 
-    const webhookUrl = buildUrl('/api/webhooks/supplier-upgrade')
+    const webhookUrl = buildUrl('/api/webhooks/snippe')
     const returnUrl = buildUrl('/supplier/dashboard', { payment: 'success', referenceId })
-    const cancelUrl = buildUrl('/supplier/dashboard', { payment: 'cancelled', referenceId })
 
-    logger.log('Creating ClickPesa checkout link for premium plan payment:', {
+    logger.log('Creating Snippe checkout for premium plan payment:', {
       referenceId,
       planId,
       billingCycle: normalizedBillingCycle,
@@ -213,28 +204,33 @@ export async function POST(request: NextRequest) {
       userId: user.id
     })
 
-    // Prepare ClickPesa checkout link request
-    const checkoutRequest: CheckoutLinkRequest = {
-      totalPrice: formatAmountForClickPesa(expectedAmount),
+    const checkoutResult = await createSnippeCheckout({
+      amount: expectedAmount,
       orderReference: referenceId,
-      orderCurrency: currency as 'TZS' | 'USD',
       customerName: profile.full_name || 'Supplier',
       customerEmail: profile.email || '',
-      customerPhone: profile.phone ? formatPhoneForClickPesa(profile.phone) : undefined,
-      returnUrl: returnUrl,
-      cancelUrl: cancelUrl,
-      webhookUrl: webhookUrl
-    }
-
-    // Create checkout link
-    // Create checkout link using supplier credentials
-    const checkoutResult = await createCheckoutLink(checkoutRequest, true)
+      customerPhone: profile.phone || undefined,
+      redirectUrl: returnUrl,
+      webhookUrl,
+      description: `Premium plan ${referenceId}`,
+    })
 
     if (!checkoutResult.checkoutLink) {
       return NextResponse.json(
         { success: false, error: 'Failed' },
         { status: 500 }
       )
+    }
+
+    if (checkoutResult.reference) {
+      await adminSupabase
+        .from("profiles")
+        .update({
+          clickpesa_transaction_id: checkoutResult.reference,
+          payment_updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id)
+        .in("payment_status", ["pending", "failed"])
     }
 
       logSecurityEvent('SUPPLIER_PREMIUM_PAYMENT_INITIATED', user.id, {

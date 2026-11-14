@@ -564,7 +564,7 @@ function PaymentPageContent() {
         </CardContent>
       </Card>
 
-      {/* ClickPesa Integration Notice */}
+      {/* Payment notice */}
       <Card className="mb-8">
         <CardContent className="p-6">
           <div className="flex items-center space-x-3">
@@ -572,9 +572,9 @@ function PaymentPageContent() {
               <Wallet className="w-6 h-6 text-orange-600" />
             </div>
             <div>
-              <h4 className="font-medium">ClickPesa Integration</h4>
+              <h4 className="font-medium">Snippe</h4>
               <p className="text-sm text-muted-foreground">
-                Your payment information will be securely processed through ClickPesa for all transactions. 
+                Your payment is processed through Snippe. 
                 Billing and delivery information will be used to auto-fill checkout forms for faster purchasing.
               </p>
             </div>

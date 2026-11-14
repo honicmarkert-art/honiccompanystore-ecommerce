@@ -4,7 +4,6 @@ import { BuyerRouteGuard } from '@/components/buyer-route-guard'
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import Image from "next/image"
 import { LazyImage } from "@/components/lazy-image"
 import { logger } from '@/lib/logger'
 import {
@@ -13,16 +12,11 @@ import {
   MapPin,
   Package,
   Clock,
-  DollarSign,
-  Navigation,
   Zap,
   Gift,
-  MapPinIcon,
-  Bell,
-  Lightbulb,
-  RefreshCcw,
-  Shield,
-  CreditCard,
+  ShieldCheck,
+  Smartphone,
+  Lock,
   Ticket,
   Plus,
   Minus,
@@ -35,7 +29,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
-import { useCart } from "@/hooks/use-cart"
+import { useCart, type CartItem } from "@/hooks/use-cart"
 import { useAuth } from "@/contexts/auth-context"
 import { useCompanyContext } from "@/components/company-provider"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
@@ -46,17 +40,14 @@ import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
 import { TANZANIA_REGIONS, DISTRICTS_BY_REGION, getWardOptions } from "@/lib/tanzania-address"
 import { CheckoutPageSkeleton } from "@/components/ui/skeleton"
 import { 
-  getSiteUrl, 
-  buildReturnUrl, 
-  buildCancelUrl, 
   sessionStorage as safeSessionStorage,
-  clearCheckoutSessionStorage,
   getSecureErrorMessage,
   fetchWithRetry
 } from "@/lib/checkout-utils"
 import { getClientShippingPricing, shouldDeferShippingFeeDisplay } from "@/lib/shipping-calculator"
 import { useTranslation } from "@/hooks/use-translation"
 import { CheckoutLanguageToggle } from "@/components/checkout-language-toggle"
+import { downloadOrderReceipt, saveLocalOrder, savePendingOrder, takePendingOrder } from "@/lib/local-orders"
 
 interface ShippingAddress {
   fullName: string
@@ -79,7 +70,7 @@ interface ShippingAddress {
 }
 
 interface PaymentDetails {
-  paymentMethod: 'clickpesa' | 'card' | 'mobile_money'
+  paymentMethod: 'snippe' | 'card' | 'mobile_money'
   cardNumber?: string
   expiryDate?: string
   cvv?: string
@@ -106,32 +97,32 @@ export default function CheckoutPage() {
 
 function CheckoutPageContent() {
   const router = useRouter()
-  const { backgroundColor, setBackgroundColor, themeClasses, darkHeaderFooterClasses } = useTheme()
-  const { cart, cartTotalItems, cartSubtotal, clearCart, removeItem, updateItemQuantity } = useCart()
+  const { themeClasses, darkHeaderFooterClasses } = useTheme()
+  const { cart, updateItemQuantity } = useCart()
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
-  const { companyName, companyColor, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
+  const { companyName, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
   const { toast } = useToast()
   
   // Fallback logo system - use local logo if API is not loaded or logo is not available
   const fallbackLogo = "/android-chrome-512x512.png"
   const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
-  const { currency, setCurrency, formatPrice } = useCurrency()
-  const { showComingSoon, ComingSoonModal } = useComingSoonModal()
+  const { formatPrice } = useCurrency()
+  const { ComingSoonModal } = useComingSoonModal()
   const t = useTranslation()
 
   // Get selected items for display
   const getSelectedItems = () => {
     let selectedIds: number[] = []
     let buyNowMode: boolean = false
-    let buyNowItemData: any = null
+    let buyNowItemData: CartItem | null = null
     
     try { 
       const raw = safeSessionStorage.getItem('selected_cart_items')
       if (raw) {
         const parsed = JSON.parse(raw)
         // Validate that parsed data is an array of numbers
-        if (Array.isArray(parsed) && parsed.every((id: any) => typeof id === 'number' && id > 0)) {
+        if (Array.isArray(parsed) && parsed.every((id: unknown) => typeof id === 'number' && id > 0)) {
           selectedIds = parsed
         }
       }
@@ -143,8 +134,8 @@ function CheckoutPageContent() {
       if (buyNowDataRaw) {
         const parsed = JSON.parse(buyNowDataRaw)
         // Validate buyNowItemData structure
-        if (parsed && typeof parsed === 'object' && parsed.productId && typeof parsed.productId === 'number') {
-          buyNowItemData = parsed
+        if (parsed && typeof parsed === 'object' && typeof (parsed as CartItem).productId === 'number') {
+          buyNowItemData = parsed as CartItem
         }
       }
     } catch {}
@@ -161,9 +152,7 @@ function CheckoutPageContent() {
 
   // Calculate totals for selected items only
   const selectedItems = getSelectedItems()
-  const selectedItemsCount = selectedItems.reduce((sum, item) => sum + item.totalQuantity, 0)
   const selectedSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
-  const orderReviewItemCount = selectedItems.flatMap(i => i.variants || []).length || selectedItems.length
 
   // Same as cart page - for qty input width
   const getDesktopQuantityInputWidth = (qty: number) => {
@@ -180,7 +169,7 @@ function CheckoutPageContent() {
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [hasTimedOut, setHasTimedOut] = useState(false)
   const [paymentLinkGenerated, setPaymentLinkGenerated] = useState(false)
-  const [checkoutLinkUrl, setCheckoutLinkUrl] = useState<string | null>(null)
+  const [, setCheckoutLinkUrl] = useState<string | null>(null)
   const [orderId, setOrderId] = useState<string>("")
   const [orderReferenceId, setOrderReferenceId] = useState<string | null>(null)
   const [orderPickupId, setOrderPickupId] = useState<string | null>(null)
@@ -223,7 +212,7 @@ function CheckoutPageContent() {
       ward: "",
     },
     paymentDetails: {
-      paymentMethod: 'clickpesa',
+      paymentMethod: 'snippe',
       cardNumber: "",
       expiryDate: "",
       cvv: "",
@@ -251,7 +240,8 @@ function CheckoutPageContent() {
     if (deliveryOption === 'pickup') return 0
     if (selectedSubtotal >= FREE_SHIPPING_THRESHOLD) return 0
     const allProductsHaveFreeDelivery = selectedItems.every(item => {
-      return (item as any)?.free_delivery === true || (item as any)?.freeDelivery === true
+      const extra = item as CartItem & { free_delivery?: boolean; freeDelivery?: boolean }
+      return extra.free_delivery === true || extra.freeDelivery === true
     })
     return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
   }
@@ -267,12 +257,12 @@ function CheckoutPageContent() {
         : (shippingEstimate?.shipping ?? fallbackShippingFee)
   const shippingFee = displayShipping
   const shippingFeeLineLoading = deferShippingFeeDisplay ? false : shippingEstimateLoading
-  const shippingFeeIsPromoZero = !deferShippingFeeDisplay && !shippingFeeLineLoading && shippingFee === 0
   
   // Get applied promotion from sessionStorage
   const [appliedPromotion, setAppliedPromotion] = useState<{
     code: string
     discountAmount: number
+    name?: string
   } | null>(null)
   
   useEffect(() => {
@@ -285,7 +275,11 @@ function CheckoutPageContent() {
             typeof parsed.code === 'string' && 
             typeof parsed.discountAmount === 'number' && 
             parsed.discountAmount >= 0) {
-          setAppliedPromotion(parsed)
+          setAppliedPromotion({
+            code: parsed.code,
+            discountAmount: parsed.discountAmount,
+            name: typeof parsed.name === 'string' ? parsed.name : undefined,
+          })
         }
       }
     } catch {}
@@ -294,7 +288,7 @@ function CheckoutPageContent() {
   // Stable key for shipping estimate so we only refetch when cart/location/delivery actually change
   const shippingEstimateKey = (() => {
     const items = selectedItems.flatMap((item) =>
-      (item.variants || []).map((v: any) => [item.productId, v.variantId ?? null, v.quantity ?? 1])
+      (item.variants || []).map((v) => [item.productId, v.variantId ?? null, v.quantity ?? 1])
     )
     const a = formData.shippingAddress
     return JSON.stringify({
@@ -314,7 +308,7 @@ function CheckoutPageContent() {
   // Fetch server-side shipping estimate when items, delivery option, or location (shipping address) change
   useEffect(() => {
     const items = selectedItems.flatMap((item) =>
-      (item.variants || []).map((v: any) => ({
+      (item.variants || []).map((v) => ({
         productId: item.productId,
         variantId: v.variantId ?? null,
         quantity: v.quantity ?? 1,
@@ -397,6 +391,56 @@ function CheckoutPageContent() {
   const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
   const orderTotal = displaySubtotal + displayShipping - promotionDiscount
 
+  useEffect(() => {
+    if (!paymentLinkGenerated || !orderReferenceId) return
+    let stopped = false
+    const checkStatus = async () => {
+      try {
+        const response = await fetch(`/api/payment/snippe?orderReference=${encodeURIComponent(orderReferenceId)}`)
+        const data = await response.json().catch(() => null)
+        if (stopped || !data?.success) return
+        if (data.paymentStatus === 'paid') {
+          stopped = true
+          const saved = takePendingOrder(orderReferenceId) || {
+            referenceId: orderReferenceId,
+            status: "paid",
+            total: orderTotal,
+            currency: "TZS",
+            createdAt: new Date().toISOString(),
+            customerName: "",
+            phone: "",
+            email: "",
+            items: [],
+          }
+          saved.status = "paid"
+          saveLocalOrder(saved)
+          try {
+            if (!sessionStorage.getItem(`honic-receipt-${orderReferenceId}`)) {
+              downloadOrderReceipt(saved)
+              sessionStorage.setItem(`honic-receipt-${orderReferenceId}`, "1")
+            }
+          } catch {}
+          router.push(`/checkout/success?orderReference=${encodeURIComponent(orderReferenceId)}`)
+        } else if (data.paymentStatus === 'failed') {
+          stopped = true
+          setPaymentLinkGenerated(false)
+          setIsProcessingPayment(false)
+          const message = data.failureReason || 'The payment was not completed. You can try again.'
+          setPaymentError(message)
+          toast({ title: 'Payment not completed', description: message, variant: 'destructive', duration: 6000 })
+        }
+      } catch {
+        // Keep waiting. The next check will try again.
+      }
+    }
+    checkStatus()
+    const timer = setInterval(checkStatus, 3000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [paymentLinkGenerated, orderReferenceId, orderTotal, router, toast])
+
   // Timeout for payment processing (increased to 60 seconds for slower networks)
   useEffect(() => {
     if (isProcessingPayment) {
@@ -424,7 +468,6 @@ function CheckoutPageContent() {
   }
   
   const [isClient, setIsClient] = useState(false)
-  const [showMapContainer, setShowMapContainer] = useState(false)
 
   // Fix hydration mismatch
   useEffect(() => {
@@ -553,7 +596,7 @@ function CheckoutPageContent() {
     setFormData(prev => ({
       ...prev,
       [section]: {
-        ...(prev[section] as any),
+        ...(prev[section] as Record<string, string>),
         [field]: value
       }
     }))
@@ -574,9 +617,7 @@ function CheckoutPageContent() {
     setPaymentLinkGenerated(false) // Reset payment link state
     setCheckoutLinkUrl(null)
 
-    // Declare paymentFlowStartTime outside try block so it's accessible in catch block
-    let paymentFlowStartTime: number | undefined
-    let paymentFlowStartTimestamp: number | undefined
+    // Order is created first. Payment uses the saved server total.
 
     try {
       // For pickup orders, validate billing address; for shipping, validate shipping address
@@ -615,7 +656,7 @@ function CheckoutPageContent() {
         if (raw) {
           const parsed = JSON.parse(raw)
           // Validate that parsed data is an array of numbers
-          if (Array.isArray(parsed) && parsed.every((id: any) => typeof id === 'number' && id > 0)) {
+          if (Array.isArray(parsed) && parsed.every((id: unknown) => typeof id === 'number' && id > 0)) {
             selectedIds = parsed
           }
         }
@@ -635,9 +676,10 @@ function CheckoutPageContent() {
           quantity: variant.quantity ?? 1,
         }))
       )
-      let serverShippingFee = deliveryOption === 'pickup' ? 0 : SHIPPING_COST
-      let serverSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
-      try {
+      let serverShippingFee = deliveryOption === 'pickup' ? 0 : (shippingEstimate?.shipping ?? SHIPPING_COST)
+      let serverSubtotal = shippingEstimate?.subtotal ?? selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
+      const hasFreshEstimate = deliveryOption === 'pickup' || (typeof shippingEstimate?.subtotal === 'number' && typeof shippingEstimate?.shipping === 'number')
+      if (!hasFreshEstimate) try {
         const estimateRes = await fetch('/api/cart/shipping-estimate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -717,14 +759,9 @@ function CheckoutPageContent() {
         timestamp: new Date().toISOString(),
       }
 
-      // Start payment flow timing after orderData is created
-      paymentFlowStartTime = performance.now()
-      paymentFlowStartTimestamp = Date.now()
-
       // Check if we already have an order (from previous failed payment link generation)
       // If order exists, reuse it instead of creating a new one
       let result
-      let orderSubmissionDuration = 0
       
       try {
         if (orderReferenceId && orderId) {
@@ -747,21 +784,15 @@ function CheckoutPageContent() {
               }
             } else {
               // Order not found, create new one
-              const orderSubmissionStartTime = performance.now()
               result = await submitOrder(orderData)
-              const orderSubmissionEndTime = performance.now()
-              orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
               setOrderId(result.order.id)
               setOrderReferenceId(result.order.referenceId)
               setOrderPickupId(result.order.pickupId)
               setPaymentStatus(result.order.paymentStatus)
             }
-          } catch (error) {
+          } catch {
             // Error fetching order, create new one
-            const orderSubmissionStartTime = performance.now()
             result = await submitOrder(orderData)
-            const orderSubmissionEndTime = performance.now()
-            orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
             setOrderId(result.order.id)
             setOrderReferenceId(result.order.referenceId)
             setOrderPickupId(result.order.pickupId)
@@ -769,17 +800,13 @@ function CheckoutPageContent() {
           }
         } else {
           // No existing order, create new one
-          const orderSubmissionStartTime = performance.now()
           result = await submitOrder(orderData)
-          const orderSubmissionEndTime = performance.now()
-          orderSubmissionDuration = orderSubmissionEndTime - orderSubmissionStartTime
-          
           setOrderId(result.order.id)
           setOrderReferenceId(result.order.referenceId)
           setOrderPickupId(result.order.pickupId)
           setPaymentStatus(result.order.paymentStatus)
         }
-      } catch (orderError: any) {
+      } catch (orderError: unknown) {
         // If order submission fails, clear loading state and throw error
         setIsProcessingPayment(false)
         throw orderError
@@ -788,121 +815,67 @@ function CheckoutPageContent() {
       // DON'T remove items from cart yet - wait until payment is confirmed
       // Items will be removed after successful payment via webhook or return page
 
-      // Generate ClickPesa checkout link: use total from server response (never trust client-only state).
+      // Open a Snippe checkout for the total saved on the order.
       // Payment API validates amount against order in DB and uses DB total for the link (anti-tampering).
       const reference = result.order.referenceId || orderId
       const orderTotalAmount = result.order.totalAmount || orderData.totalAmount
       const checkoutIdempotencyKey = `checkout-link:${reference}:${String(orderTotalAmount)}`
-      const checkoutLinkStartTime = performance.now()
-      const checkoutLinkStartTimestamp = Date.now()
-      
       // Optimized: Use fetchWithRetry with faster retries (2 retries, shorter delays)
       // Retries on: network errors, 5xx server errors, 429 rate limits, 408 timeouts
-      const response = await fetchWithRetry(
-        '/api/payment/clickpesa',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'create-checkout-link',
-            amount: String(orderTotalAmount),
-            currency: 'TZS',
-            orderId: reference,
-            idempotencyKey: checkoutIdempotencyKey,
-            returnUrl: buildReturnUrl(reference),
-            cancelUrl: buildCancelUrl(reference),
-            customerDetails: {
-              fullName: formData.billingAddress.fullName || formData.shippingAddress.fullName,
-              email: formData.billingAddress.email || formData.shippingAddress.email,
-              phone: formData.billingAddress.phone || formData.shippingAddress.phone,
-              firstName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ')[0] || '',
-              lastName: (formData.billingAddress.fullName || formData.shippingAddress.fullName)?.split(' ').slice(1).join(' ') || '',
-              address: formData.billingAddress.address1 || formData.shippingAddress.address1 || '',
-              city: formData.billingAddress.city || formData.shippingAddress.city || '',
-              country: formData.billingAddress.country || formData.shippingAddress.country || 'Tanzania',
-            },
-          }),
-        },
-        1 // Reduced to 1 retry for fastest failure (handles network errors, 5xx, 429, 408)
-      )
+      const response = await fetch('/api/payment/snippe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: String(orderTotalAmount),
+          currency: 'TZS',
+          orderId: reference,
+          idempotencyKey: checkoutIdempotencyKey,
+          customerDetails: {
+            fullName: customerInfo.fullName,
+            email: customerInfo.email,
+            phone: customerInfo.phone,
+            firstName: customerInfo.fullName.split(' ')[0] || '',
+            lastName: customerInfo.fullName.split(' ').slice(1).join(' ') || '',
+          },
+        }),
+      })
 
       // Optimized: Parse JSON directly instead of text() then parse
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Failed' }))
-        throw new Error(getSecureErrorMessage(errorData.error || 'Failed', 'Unable to open payment page. Please try again.'))
+        throw new Error(getSecureErrorMessage(errorData.error || 'Failed', 'Unable to send the payment request. Please try again.'))
       }
 
       const data = await response.json()
 
-      if (!data.checkoutLink) {
-        throw new Error(getSecureErrorMessage('No checkout link', 'Unable to open payment page. Please try again.'))
+      if (!data.success || !data.paymentReference) {
+        throw new Error(getSecureErrorMessage(data.error || 'No payment request', 'Unable to send the payment request. Please try again.'))
       }
 
-      const checkoutLinkEndTime = performance.now()
-      const checkoutLinkDuration = checkoutLinkEndTime - checkoutLinkStartTime
-      const checkoutLinkEndTimestamp = Date.now()
-
-      // Store reference for later use
       safeSessionStorage.setItem('last_order_reference', reference)
-
-      // Store checkout link for fallback if popup is blocked
-      setCheckoutLinkUrl(data.checkoutLink)
-      
-      // Mark payment link as generated (for UI message update)
+      savePendingOrder({
+        referenceId: reference,
+        status: "pending",
+        total: Number(orderTotalAmount) || 0,
+        currency: "TZS",
+        createdAt: new Date().toISOString(),
+        customerName: customerInfo.fullName || "",
+        phone: customerInfo.phone || "",
+        email: customerInfo.email || "",
+        items: (orderData.items || []).map((item: { name?: string; productName?: string; quantity?: number; totalPrice?: number }) => ({
+          name: item.productName || item.name || "Item",
+          quantity: Number(item.quantity) || 1,
+          total: Number(item.totalPrice) || 0,
+        })),
+      })
+      setCheckoutLinkUrl(null)
       setPaymentLinkGenerated(true)
- // Reset popup blocked state
-
-      // Track redirect timing
-      const redirectStartTime = performance.now()
-      const redirectStartTimestamp = Date.now()
-
-      // Immediately open ClickPesa checkout in new window/tab
-      // Since this is called from a user click event, window.open should work
-      let popupOpened = false
-      try {
-        const popupWindow = window.open(data.checkoutLink, '_blank', 'noopener,noreferrer')
-        
-        // Check if popup was blocked (check immediately and after brief delay)
-        if (popupWindow) {
-          // Check immediately
-          if (popupWindow.closed === false) {
-            popupOpened = true
-          } else {
-            // Check again after a brief delay (popup might take time to open)
-            setTimeout(() => {
-              if (popupWindow && !popupWindow.closed) {
-                popupOpened = true
-              }
-            }, 100)
-          }
-        }
-      } catch (error) {
-        // Popup failed to open
-      }
-      
-      const redirectEndTime = performance.now()
-      const redirectDuration = redirectEndTime - redirectStartTime
-      const redirectCompleteTimestamp = Date.now()
-      
-      if (popupOpened) {
-        // Successfully opened in new tab
-        const totalFlowDuration = paymentFlowStartTime ? performance.now() - paymentFlowStartTime : 0
-        
-        toast({
-          title: 'Payment Page Opened',
-          description: 'Please complete your payment in the new window. You will be redirected back after payment.',
-          duration: 5000
-        })
-      } else {
-        // Popup was blocked or failed - show fallback button
-        
-        toast({
-          title: 'Payment Link Ready',
-          description: 'Click the button below to open the payment page in a new window.',
-          duration: 5000
-        })
-      }
+      toast({
+        title: 'Check your phone',
+        description: 'A payment request was sent to your mobile money number. Enter your PIN on this page\'s phone prompt.',
+        duration: 6000
+      })
       
       // Clear processing state after redirect is initiated (keep message visible briefly)
       // Small delay to ensure redirect happens and user sees success message
@@ -910,17 +883,13 @@ function CheckoutPageContent() {
         setIsProcessingPayment(false)
       }, 500) // Brief delay to show success message
 
-      // Log total payment flow duration
-      const totalPaymentFlowDuration = paymentFlowStartTime ? performance.now() - paymentFlowStartTime : 0
-
-    } catch (error: any) {
-      const totalPaymentFlowDuration = paymentFlowStartTime ? performance.now() - paymentFlowStartTime : 0
-      
+    } catch (error: unknown) {
+      const paymentErrorRecord = error as { message?: string; stack?: string; name?: string }
       logger.error('Payment initiation error:', {
         error: error,
-        message: error?.message,
-        stack: error?.stack,
-        name: error?.name
+        message: paymentErrorRecord.message,
+        stack: paymentErrorRecord.stack,
+        name: paymentErrorRecord.name
       })
       
       // Always clear loading state on error
@@ -946,8 +915,7 @@ function CheckoutPageContent() {
   }
 
   // Function to submit order
-  const submitOrder = async (orderData: any) => {
-    const apiCallStartTime = performance.now()
+  const submitOrder = async (orderData: Record<string, unknown>) => {
     try {
       
       // Submit order to public API with retry logic
@@ -974,7 +942,6 @@ function CheckoutPageContent() {
       }
 
       const result = await response.json()
-      const apiCallDuration = performance.now() - apiCallStartTime
       
       // Store order IDs and payment URL for later use
       if (result.order.paymentUrl) {
@@ -1143,13 +1110,186 @@ function CheckoutPageContent() {
     }
   }
 
+  const paymentPhone = deliveryOption === 'pickup' ? formData.billingAddress.phone : formData.shippingAddress.phone
+  const brandName = companyName || 'Honic Company Limited'
+
+  const renderSecurePayment = () => (
+    <Card className="overflow-hidden rounded-none border border-neutral-200 bg-white shadow-none">
+      <div className="flex items-end justify-between gap-4 border-b border-neutral-200 px-6 py-5">
+        <div>
+          <p className="text-sm font-semibold text-neutral-500">Honic Company Limited</p>
+          <h3 className="mt-2 text-xl font-bold text-neutral-950 sm:text-2xl">{paymentLinkGenerated ? 'Approve on your phone' : 'Sending a secure request'}</h3>
+          <p className="mt-1 text-sm sm:text-base text-neutral-500">Mobile money stays on this page. Your PIN is never typed here.</p>
+        </div>
+        <p className="text-right text-lg font-bold tabular-nums text-neutral-950">{formatPrice(orderTotal)}</p>
+      </div>
+      <CardContent className="px-6 py-8">
+        {!hasTimedOut ? (
+          <div className="mx-auto max-w-md text-center">
+            <div className="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center bg-yellow-500 text-neutral-950">
+              {paymentLinkGenerated ? <Smartphone className="h-7 w-7" /> : <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-950 border-t-transparent" />}
+            </div>
+            <h3 className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
+              {paymentLinkGenerated ? 'Enter your PIN' : 'Connecting to mobile money'}
+            </h3>
+            <p className={cn("mt-2 text-sm leading-relaxed sm:text-base", themeClasses.textNeutralSecondary)}>
+              {paymentLinkGenerated
+                ? `A payment request is on ${paymentPhone || 'your phone'}. Approve it with your mobile-money PIN. This page confirms the result.`
+                : 'Honic is sending the request for the saved order total. The amount cannot be changed in the browser.'}
+            </p>
+            <div className="mt-6 grid grid-cols-3 gap-2 text-left">
+              {[
+                { icon: Zap, label: 'Fast push' },
+                { icon: Lock, label: 'Amount locked' },
+                { icon: ShieldCheck, label: 'PIN private' },
+              ].map(({ icon: Icon, label }) => (
+                <div key={label} className="border border-neutral-200 px-3 py-3 dark:border-neutral-800">
+                  <Icon className="mb-2 h-4 w-4 text-yellow-600" />
+                  <p className="text-sm font-semibold">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-md text-center">
+            <Clock className="mx-auto mb-4 h-10 w-10 text-yellow-600" />
+            <h3 className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>The request needs another try</h3>
+            <p className={cn("mt-2 text-sm sm:text-base", themeClasses.textNeutralSecondary)}>Stay on this page. The same order total will be used.</p>
+            <div className="mt-6 flex justify-center gap-3">
+              <Button onClick={handleRetryPayment} className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600">Try again</Button>
+              <Button variant="outline" onClick={() => window.location.reload()}>Refresh</Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+
+  const renderReviewItems = () => (
+                <div className="space-y-0">
+                  {selectedItems.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className={cn("text-gray-500", themeClasses.textNeutralSecondary)}>
+                        {t('checkout.orderReviewEmptyCart')}
+                      </p>
+                    </div>
+                  ) : (
+                    selectedItems.flatMap((item, itemIndex) =>
+                      (item.variants || []).map((variant, variantIndex: number) => {
+                        const product = item.product
+                        const variantPrice = variant.price || 0
+                        const variantQuantity = variant.quantity || 1
+                        const variantTotalPrice = variantPrice * variantQuantity
+                        const discountPercentage = product?.originalPrice && product.originalPrice > variantPrice
+                          ? ((product.originalPrice - variantPrice) / product.originalPrice) * 100
+                          : 0
+                        return (
+                          <div
+                            key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
+                            className={cn(
+                              "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
+                            )}
+                          >
+                            <div className="flex gap-1 sm:gap-2">
+                              <div className="flex items-start gap-2">
+                                <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
+                                  <div className="relative">
+                                    {product?.image ? (
+                                      <LazyImage
+                                        src={product.image}
+                                        alt={product.name || "Product"}
+                                        width={50}
+                                        height={50}
+                                        className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
+                                        priority={false}
+                                        quality={80}
+                                      />
+                                    ) : (
+                                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                                        <span className="text-gray-400 text-xs">No Image</span>
+                                      </div>
+                                    )}
+                                    {discountPercentage > 0 && (
+                                      <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
+                                        -{discountPercentage.toFixed(0)}%
+                                      </div>
+                                    )}
+                                  </div>
+                                </Link>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
+                                  <div className="flex-1 min-w-0">
+                                    <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
+                                      <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
+                                        {product?.name || `Product ${item.productId}`}
+                                        {variant.variant_name && (
+                                          <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
+                                        )}
+                                      </h3>
+                                    </Link>
+                                    <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
+                                      <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
+                                        {formatPrice(variantPrice)}
+                                      </span>
+                                      {product?.originalPrice && product.originalPrice > variantPrice && (
+                                        <>
+                                          <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
+                                            {formatPrice(product.originalPrice)}
+                                          </span>
+                                          <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
+                                            {t('checkout.saveAmountPrefix')} {formatPrice(product.originalPrice - variantPrice)}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                    {/* Mobile: qty below product details */}
+                                    <div className="flex items-center gap-2 mt-1.5 sm:hidden">
+                                      <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                          <Minus className="w-3.5 h-3.5" />
+                                        </Button>
+                                        <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                          <Plus className="w-3.5 h-3.5" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
+                                      <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>{t('checkout.itemTotalPriceLabel')}</span>
+                                      <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
+                                    </div>
+                                  </div>
+                                  {/* Desktop: qty on right side like cart */}
+                                  <div className="hidden sm:flex flex-col items-center gap-1">
+                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Minus className="w-3.5 h-3.5" />
+                                      </Button>
+                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
+                                        <Plus className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )
+                  )}
+                </div>
+  )
+
   const renderStepContent = () => {
     switch (currentStep) {
       case 0:
         return (
-          <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+          <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
             <CardHeader className="p-3 sm:p-6">
-              <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>
+              <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
                 {t('checkout.deliveryOptionTitle')}
               </CardTitle>
               <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
@@ -1164,13 +1304,13 @@ function CheckoutPageContent() {
               </div>
               )}
 
-              <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div 
                          className={cn(
-                    "border-2 rounded-lg p-4 cursor-pointer transition-all",
+                    "relative cursor-pointer border p-5 transition-all",
                     (deliveryOption as string) === 'shipping' 
-                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" 
-                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                      ? "border-neutral-950 bg-white shadow-[inset_3px_0_0_#eab308]" 
+                      : "border-neutral-200 bg-white hover:border-neutral-400"
                   )}
                   onClick={() => {
                     setDeliveryOption('shipping')
@@ -1187,7 +1327,7 @@ function CheckoutPageContent() {
                   <div className="flex items-start space-x-3">
                     <Truck className="w-5 h-5 text-blue-500 mt-1" />
                     <div className="flex-1">
-                      <h3 className={cn("font-medium text-base", themeClasses.mainText)}>
+                      <h3 className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
                         {t('checkout.shippingDeliveryTitle')}
                       </h3>
                       <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
@@ -1207,10 +1347,10 @@ function CheckoutPageContent() {
 
                 <div 
                    className={cn(
-                    "border-2 rounded-lg p-4 cursor-pointer transition-all",
+                    "relative cursor-pointer border p-5 transition-all",
                     deliveryOption === 'pickup' 
-                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" 
-                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                      ? "border-neutral-950 bg-white shadow-[inset_3px_0_0_#eab308]" 
+                      : "border-neutral-200 bg-white hover:border-neutral-400"
                   )}
                   onClick={() => {
                     setDeliveryOption('pickup')
@@ -1227,7 +1367,7 @@ function CheckoutPageContent() {
                   <div className="flex items-start space-x-3">
                     <MapPin className="w-5 h-5 text-green-500 mt-1" />
                     <div className="flex-1">
-                      <h3 className={cn("font-medium text-base", themeClasses.mainText)}>
+                      <h3 className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
                         {t('checkout.storePickupTitle')}
                       </h3>
                       <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
@@ -1258,11 +1398,11 @@ function CheckoutPageContent() {
       case 1:
         if ((deliveryOption as string) === 'shipping') {
           return (
-            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
               <CardHeader className="p-3 sm:p-6 space-y-0">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                   <div className="min-w-0 flex-1">
-                    <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>
+                    <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
                       {t('checkout.shippingAddressTitle')}
                     </CardTitle>
                     <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
@@ -1276,7 +1416,7 @@ function CheckoutPageContent() {
                       themeClasses.cardBg
                     )}
                   >
-                    <p className={cn('text-[10px] sm:text-xs font-medium text-neutral-500 dark:text-neutral-400')}>
+                    <p className={cn('text-xs font-semibold text-neutral-500 dark:text-neutral-400 sm:text-sm')}>
                       {t('checkout.totalShippingFee')}
                     </p>
                     <p
@@ -1582,9 +1722,9 @@ function CheckoutPageContent() {
         } else {
           // For pickup, case 1 is billing information
         return (
-          <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+          <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
               <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>{t('checkout.contactInfoTitle')}</CardTitle>
+                <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>{t('checkout.contactInfoTitle')}</CardTitle>
                 <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
                   {t('checkout.contactInfoSubtitle')}
                 </p>
@@ -1701,9 +1841,9 @@ function CheckoutPageContent() {
         if ((deliveryOption as string) === 'shipping') {
           // For shipping, case 2 is billing information
           return (
-            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
               <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-lg sm:text-xl", themeClasses.mainText)}>
+                <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
                   {t('checkout.billingInformationTitle')}
                 </CardTitle>
                 <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
@@ -2016,281 +2156,14 @@ function CheckoutPageContent() {
         } else {
           // For pickup, case 2 is order review
           if (isProcessingPayment || paymentLinkGenerated) {
-            // Show loading message when order is placed or processing payment
-            return (
-              <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-                <CardContent className="text-center py-12">
-                  {!hasTimedOut ? (
-                    <>
-                      {paymentLinkGenerated ? (
-                        <div className="mb-6">
-                          <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
-                            <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
-                      )}
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
-                            {paymentLinkGenerated ? 'Payment link generated' : 'Generating payment link...'}
-                          </h3>
-                          <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                            {paymentLinkGenerated ? 'Waiting for payment completion...' : 'Please wait while we generate your payment link...'}
-                          </p>
-                        </div>
-                        {paymentLinkGenerated && checkoutLinkUrl && (
-                          <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-                            <Button
-                              onClick={() => {
-                                if (checkoutLinkUrl) {
-                                  window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')
-                                }
-                              }}
-                              className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
-                              size="lg"
-                            >
-                              <Navigation className="mr-2 h-4 w-4" />
-                              Open Payment Page
-                            </Button>
-                            <p className={cn("text-xs text-center", themeClasses.textNeutralSecondary)}>
-                              Complete your payment in the new window. You will be redirected back after payment.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900/20">
-                        <Clock className="w-8 h-8 text-yellow-600 dark:text-yellow-400" />
-                      </div>
-                      <div className="space-y-4">
-                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
-                          Payment Redirect Taking Too Long
-                        </h3>
-                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                          The payment redirect is taking longer than expected. You can try again or check if the payment page opened in a new tab.
-                        </p>
-                        {checkoutLinkUrl && (
-                          <Button
-                            onClick={() => window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')}
-                            className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
-                            size="lg"
-                          >
-                            <Navigation className="mr-2 h-4 w-4" />
-                            Open Payment Page
-                          </Button>
-                        )}
-                        <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
-                          <Button
-                            onClick={handleRetryPayment}
-                            className="bg-yellow-500 hover:bg-yellow-600 text-white"
-                          >
-                            Try Again
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => window.location.reload()}
-                            className={cn(themeClasses.borderNeutralSecondary)}
-                          >
-                            Refresh Page
-                          </Button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            )
+            return renderSecurePayment()
           }
           
         return (
           <>
-            {/* Order Review - outside the box */}
-            <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>
-              {t('checkout.orderReviewTitle')}
-            </h1>
-            {/* Cart-style header bar (no checkbox, no Clear All / Save for Later) */}
-            <div className={cn(
-              "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 rounded-lg border mb-4",
-              "bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200",
-              "dark:bg-gradient-to-r dark:from-gray-800 dark:to-gray-700 dark:border-gray-600",
-            )}>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                <div className="flex items-center gap-2">
-                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
-                  <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
-                    {t('cart.cartItemsHeading')} ({orderReviewItemCount})
-                  </span>
-                </div>
-                <div className="hidden sm:flex items-center gap-4 text-sm">
-                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalItems')} {selectedItemsCount}</span>
-                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.subtotalLabel')} {formatPrice(displaySubtotal)}</span>
-                </div>
-              </div>
-              <div className="flex sm:hidden items-center gap-2 text-xs">
-                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.itemsShort')} {selectedItemsCount}</span>
-                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalHeading')} {formatPrice(displaySubtotal)}</span>
-              </div>
-            </div>
-
-            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
               <CardContent className="p-3 sm:p-4 md:p-6 space-y-6" style={{ contentVisibility: 'auto' }}>
-                {/* Items list - same layout as cart page with cart-style qty controls */}
-                <div className="space-y-0">
-                  {selectedItems.length === 0 ? (
-                    <div className="text-center py-8">
-                      <p className={cn("text-gray-500", themeClasses.textNeutralSecondary)}>
-                        {t('checkout.orderReviewEmptyCart')}
-                      </p>
-                    </div>
-                  ) : (
-                    selectedItems.flatMap((item, itemIndex) =>
-                      (item.variants || []).map((variant: any, variantIndex: number) => {
-                        const product = item.product
-                        const variantPrice = variant.price || 0
-                        const variantQuantity = variant.quantity || 1
-                        const variantTotalPrice = variantPrice * variantQuantity
-                        const discountPercentage = (product as any)?.originalPrice && (product as any).originalPrice > variantPrice
-                          ? (((product as any).originalPrice - variantPrice) / (product as any).originalPrice) * 100
-                          : 0
-                        return (
-                          <div
-                            key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
-                            className={cn(
-                              "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
-                            )}
-                          >
-                            <div className="flex gap-1 sm:gap-2">
-                              <div className="flex items-start gap-2">
-                                <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
-                                  <div className="relative">
-                                    {product?.image ? (
-                                      <LazyImage
-                                        src={product.image}
-                                        alt={product.name || "Product"}
-                                        width={50}
-                                        height={50}
-                                        className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
-                                        priority={false}
-                                        quality={80}
-                                      />
-                                    ) : (
-                                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                                        <span className="text-gray-400 text-xs">No Image</span>
-                                      </div>
-                                    )}
-                                    {discountPercentage > 0 && (
-                                      <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
-                                        -{discountPercentage.toFixed(0)}%
-                                      </div>
-                                    )}
-                                  </div>
-                                </Link>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
-                                  <div className="flex-1 min-w-0">
-                                    <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
-                                      <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
-                                        {product?.name || `Product ${item.productId}`}
-                                        {variant.variant_name && (
-                                          <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
-                                        )}
-                                      </h3>
-                                    </Link>
-                                    <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
-                                      <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
-                                        {formatPrice(variantPrice)}
-                                      </span>
-                                      {(product as any)?.originalPrice && (product as any).originalPrice > variantPrice && (
-                                        <>
-                                          <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
-                                            {formatPrice((product as any).originalPrice)}
-                                          </span>
-                                          <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
-                                            {t('checkout.saveAmountPrefix')} {formatPrice((product as any).originalPrice - variantPrice)}
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                    {/* Mobile: qty below product details */}
-                                    <div className="flex items-center gap-2 mt-1.5 sm:hidden">
-                                      <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
-                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
-                                          <Minus className="w-3.5 h-3.5" />
-                                        </Button>
-                                        <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
-                                          <Plus className="w-3.5 h-3.5" />
-                                        </Button>
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
-                                      <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>{t('checkout.itemTotalPriceLabel')}</span>
-                                      <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
-                                    </div>
-                                  </div>
-                                  {/* Desktop: qty on right side like cart */}
-                                  <div className="hidden sm:flex flex-col items-center gap-1">
-                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
-                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
-                                        <Minus className="w-3.5 h-3.5" />
-                                      </Button>
-                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
-                                        <Plus className="w-3.5 h-3.5" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })
-                    )
-                  )}
-                </div>
-
-                {/* Summary totals - new style with background */}
-                <div className={cn(
-                  "rounded-xl p-4 sm:p-5 space-y-3",
-                  "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
-                )}>
-                  <div className="flex justify-between items-baseline gap-2">
-                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
-                      {t('cart.subtotalWord')} ({orderReviewItemCount} {t('cart.itemsWord')}):
-                    </span>
-                    <span className={cn("text-base font-semibold tabular-nums", themeClasses.mainText)}>{formatPrice(displaySubtotal)}</span>
-                  </div>
-                  {promotionDiscount > 0 && (
-                    <div className="flex justify-between items-baseline gap-2">
-                      <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                        {t('checkout.discountPrefix')} ({appliedPromotion?.code}):
-                      </span>
-                      <span className="text-base font-semibold text-green-600 dark:text-green-400 tabular-nums">-{formatPrice(promotionDiscount)}</span>
-                    </div>
-                  )}
-                  {(deliveryOption as string) === 'shipping' && (
-                    <div className="flex justify-between items-baseline gap-2">
-                      <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>{t('checkout.shippingSummaryLabel')}</span>
-                      <span className={cn("text-base font-semibold tabular-nums", shippingFeeIsPromoZero ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
-                        {shippingFeeLineLoading ? '…' : (deferShippingFeeDisplay ? formatPrice(0) : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee)))}
-                      </span>
-                    </div>
-                  )}
-                  <div className="border-t border-neutral-200 dark:border-neutral-600 pt-3 mt-1">
-                    <div className="flex justify-between items-baseline gap-2">
-                      <span className={cn("text-base font-bold", themeClasses.mainText)}>{t('cart.totalHeading')}</span>
-                      <span className={cn("text-lg font-bold tabular-nums", themeClasses.mainText)}>{formatPrice(orderTotal)}</span>
-                    </div>
-                  </div>
-                </div>
+                {renderReviewItems()}
 
                 {/* Applied promotion - same style as cart page (read-only) */}
                 {appliedPromotion && (
@@ -2303,7 +2176,7 @@ function CheckoutPageContent() {
                         </span>
                       </div>
                       <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
-                        {(appliedPromotion as any).name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
+                        {appliedPromotion.name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
                       </p>
                     </div>
                   </div>
@@ -2319,271 +2192,14 @@ function CheckoutPageContent() {
         if ((deliveryOption as string) === 'shipping') {
           // For shipping, case 3 is order review
           if (isProcessingPayment || paymentLinkGenerated) {
-            // Show loading message when order is placed or processing payment
-            return (
-              <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
-                <CardContent className="text-center py-12">
-                  {!hasTimedOut ? (
-                    <>
-                      {paymentLinkGenerated ? (
-                        <div className="mb-6">
-                          <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
-                            <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-500 mx-auto mb-6"></div>
-                      )}
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
-                            {paymentLinkGenerated ? 'Payment link generated' : 'Generating payment link...'}
-                          </h3>
-                          <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                            {paymentLinkGenerated ? 'Waiting for payment completion...' : 'Please wait while we generate your payment link...'}
-                          </p>
-                        </div>
-                        {paymentLinkGenerated && checkoutLinkUrl && (
-                          <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-                            <Button
-                              onClick={() => {
-                                if (checkoutLinkUrl) {
-                                  window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')
-                                }
-                              }}
-                              className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
-                              size="lg"
-                            >
-                              <Navigation className="mr-2 h-4 w-4" />
-                              Open Payment Page
-                            </Button>
-                            <p className={cn("text-xs text-center", themeClasses.textNeutralSecondary)}>
-                              Complete your payment in the new window. You will be redirected back after payment.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900/20">
-                        <Clock className="w-8 h-8 text-yellow-600 dark:text-yellow-400" />
-                      </div>
-                      <div className="space-y-4">
-                        <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
-                          Payment Redirect Taking Too Long
-                        </h3>
-                        <p className={cn("text-base", themeClasses.textNeutralSecondary)}>
-                          The payment redirect is taking longer than expected. You can try again or check if the payment page opened in a new tab.
-                        </p>
-                        {checkoutLinkUrl && (
-                          <Button
-                            onClick={() => window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')}
-                            className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
-                            size="lg"
-                          >
-                            <Navigation className="mr-2 h-4 w-4" />
-                            Open Payment Page
-                          </Button>
-                        )}
-                        <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
-                          <Button
-                            onClick={handleRetryPayment}
-                            className="bg-yellow-500 hover:bg-yellow-600 text-white"
-                          >
-                            Try Again
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => window.location.reload()}
-                            className={cn(themeClasses.borderNeutralSecondary)}
-                          >
-                            Refresh Page
-                          </Button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            )
+            return renderSecurePayment()
           }
           
         return (
           <>
-            {/* Order Review - outside the box */}
-            <h1 className={cn("text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6", themeClasses.mainText)}>
-              {t('checkout.orderReviewTitle')}
-            </h1>
-            {/* Cart-style header bar (no checkbox, no Clear All / Save for Later) */}
-            <div className={cn(
-              "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 rounded-lg border mb-4",
-              "bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200",
-              "dark:bg-gradient-to-r dark:from-gray-800 dark:to-gray-700 dark:border-gray-600",
-            )}>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                <div className="flex items-center gap-2">
-                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
-                  <span className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
-                    {t('cart.cartItemsHeading')} ({orderReviewItemCount})
-                  </span>
-                </div>
-                <div className="hidden sm:flex items-center gap-4 text-sm">
-                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalItems')} {selectedItemsCount}</span>
-                  <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.subtotalLabel')} {formatPrice(displaySubtotal)}</span>
-                </div>
-              </div>
-              <div className="flex sm:hidden items-center gap-2 text-xs">
-                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.itemsShort')} {selectedItemsCount}</span>
-                <span className={cn(themeClasses.textNeutralSecondary)}>{t('cart.totalHeading')} {formatPrice(displaySubtotal)}</span>
-              </div>
-            </div>
-
-            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
               <CardContent className="p-3 sm:p-4 md:p-6 space-y-6">
-                {/* Items list - same layout as cart page with cart-style qty controls */}
-                <div className="space-y-0">
-                  {selectedItems.flatMap((item, itemIndex) =>
-                    (item.variants || []).map((variant: any, variantIndex: number) => {
-                      const product = item.product
-                      const variantPrice = variant.price || 0
-                      const variantQuantity = variant.quantity || 1
-                      const variantTotalPrice = variantPrice * variantQuantity
-                      const discountPercentage = (product as any)?.originalPrice && (product as any).originalPrice > variantPrice
-                        ? (((product as any).originalPrice - variantPrice) / (product as any).originalPrice) * 100
-                        : 0
-                      return (
-                        <div
-                          key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
-                          className={cn(
-                            "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
-                          )}
-                        >
-                          <div className="flex gap-1 sm:gap-2">
-                            <div className="flex items-start gap-2">
-                              <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
-                                <div className="relative">
-                                  {product?.image ? (
-                                    <LazyImage
-                                      src={product.image}
-                                      alt={product.name || "Product"}
-                                      width={50}
-                                      height={50}
-                                      className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
-                                      priority={false}
-                                      quality={80}
-                                    />
-                                  ) : (
-                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                                      <span className="text-gray-400 text-xs">No Image</span>
-                                    </div>
-                                  )}
-                                  {discountPercentage > 0 && (
-                                    <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
-                                      -{discountPercentage.toFixed(0)}%
-                                    </div>
-                                  )}
-                                </div>
-                              </Link>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
-                                <div className="flex-1 min-w-0">
-                                  <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
-                                    <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
-                                      {product?.name || `Product ${item.productId}`}
-                                      {variant.variant_name && (
-                                        <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
-                                      )}
-                                    </h3>
-                                  </Link>
-                                  <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
-                                    <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
-                                      {formatPrice(variantPrice)}
-                                    </span>
-                                    {(product as any)?.originalPrice && (product as any).originalPrice > variantPrice && (
-                                      <>
-                                        <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
-                                          {formatPrice((product as any).originalPrice)}
-                                        </span>
-                                        <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
-                                          {t('checkout.saveAmountPrefix')} {formatPrice((product as any).originalPrice - variantPrice)}
-                                        </span>
-                                      </>
-                                    )}
-                                  </div>
-                                  {/* Mobile: qty below product details */}
-                                  <div className="flex items-center gap-2 mt-1.5 sm:hidden">
-                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
-                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
-                                        <Minus className="w-3.5 h-3.5" />
-                                      </Button>
-                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
-                                        <Plus className="w-3.5 h-3.5" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
-                                    <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>{t('checkout.itemTotalPriceLabel')}</span>
-                                    <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
-                                  </div>
-                                </div>
-                                {/* Desktop: qty on right side like cart */}
-                                <div className="hidden sm:flex flex-col items-center gap-1">
-                                  <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
-                                    <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
-                                      <Minus className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                                    <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
-                                      <Plus className="w-3.5 h-3.5" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-
-                {/* Summary totals - new style with background */}
-                <div className={cn(
-                  "rounded-xl p-4 sm:p-5 space-y-3",
-                  "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
-                )}>
-                  <div className="flex justify-between items-baseline gap-2">
-                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>
-                      {t('cart.subtotalWord')} ({orderReviewItemCount} {t('cart.itemsWord')}):
-                    </span>
-                    <span className={cn("text-base font-semibold tabular-nums", themeClasses.mainText)}>{formatPrice(displaySubtotal)}</span>
-                  </div>
-                  {promotionDiscount > 0 && (
-                    <div className="flex justify-between items-baseline gap-2">
-                      <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                        {t('checkout.discountPrefix')} ({appliedPromotion?.code}):
-                      </span>
-                      <span className="text-base font-semibold text-green-600 dark:text-green-400 tabular-nums">-{formatPrice(promotionDiscount)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-baseline gap-2">
-                    <span className={cn("text-sm font-medium", themeClasses.textNeutralSecondary)}>{t('checkout.shippingSummaryLabel')}</span>
-                    <span className={cn("text-base font-semibold tabular-nums", shippingFeeIsPromoZero ? "text-green-600 dark:text-green-400" : themeClasses.mainText)}>
-                      {shippingFeeLineLoading ? '…' : (deferShippingFeeDisplay ? formatPrice(0) : (shippingFee === 0 ? t('checkout.free') : formatPrice(shippingFee)))}
-                    </span>
-                  </div>
-                  <div className="border-t border-neutral-200 dark:border-neutral-600 pt-3 mt-1">
-                    <div className="flex justify-between items-baseline gap-2">
-                      <span className={cn("text-base font-bold", themeClasses.mainText)}>{t('cart.totalHeading')}</span>
-                      <span className={cn("text-lg font-bold tabular-nums", themeClasses.mainText)}>{formatPrice(orderTotal)}</span>
-                    </div>
-                  </div>
-                </div>
+                {renderReviewItems()}
 
                 {/* Applied promotion - same style as cart page (read-only) */}
                 {appliedPromotion && (
@@ -2596,7 +2212,7 @@ function CheckoutPageContent() {
                         </span>
                       </div>
                       <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
-                        {(appliedPromotion as any).name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
+                        {appliedPromotion.name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
                       </p>
                     </div>
                   </div>
@@ -2604,7 +2220,7 @@ function CheckoutPageContent() {
 
                 {/* Shipping Address */}
                 <div className="space-y-3 sm:space-y-4">
-                  <h3 className={cn("text-base sm:text-lg font-semibold", themeClasses.mainText)}>
+                  <h3 className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
                     {t('checkout.reviewShippingTitle')}
                   </h3>
                   <div className={cn(
@@ -2613,29 +2229,29 @@ function CheckoutPageContent() {
                   )}>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       <div className="space-y-1">
-                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFullName')}</p>
+                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFullName')}</p>
                         <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.fullName || '—'}</p>
                       </div>
                       <div className="space-y-1">
-                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewPhone')}</p>
+                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewPhone')}</p>
                         <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.phone || '—'}</p>
                       </div>
                       <div className="space-y-1 sm:col-span-2">
-                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewEmail')}</p>
+                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewEmail')}</p>
                         <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.email || '—'}</p>
                       </div>
                       {formData.shippingAddress.streetName && (
                         <div className="space-y-1">
-                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewStreet')}</p>
+                          <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewStreet')}</p>
                           <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.streetName}</p>
                         </div>
                       )}
                       <div className="space-y-1">
-                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewHouseBuilding')}</p>
+                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewHouseBuilding')}</p>
                         <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address1 || '—'}</p>
                       </div>
                       <div className="space-y-1">
-                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{formData.shippingAddress.country === 'Tanzania' ? t('checkout.reviewRegionDistrictWard') : t('checkout.reviewCity')}</p>
+                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{formData.shippingAddress.country === 'Tanzania' ? t('checkout.reviewRegionDistrictWard') : t('checkout.reviewCity')}</p>
                         <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
                           {formData.shippingAddress.country === 'Tanzania'
                             ? [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward].filter(Boolean).join(', ') || '—'
@@ -2643,12 +2259,12 @@ function CheckoutPageContent() {
                         </p>
                       </div>
                       <div className="space-y-1">
-                        <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewCountry')}</p>
+                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewCountry')}</p>
                         <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.country || '—'}</p>
                       </div>
                       {(formData.shippingAddress.postalCode || formData.shippingAddress.state) && (
                         <div className="space-y-1">
-                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewMoreDetails')}</p>
+                          <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewMoreDetails')}</p>
                           <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
                             {[formData.shippingAddress.postalCode, formData.shippingAddress.state].filter(Boolean).join(' · ') || '—'}
                           </p>
@@ -2656,7 +2272,7 @@ function CheckoutPageContent() {
                       )}
                       {formData.shippingAddress.address2 && (
                         <div className="space-y-1 sm:col-span-2">
-                          <p className={cn("text-xs font-medium uppercase tracking-wide", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFamousPlace')}</p>
+                          <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFamousPlace')}</p>
                           <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address2}</p>
                         </div>
                       )}
@@ -2671,13 +2287,13 @@ function CheckoutPageContent() {
         } else {
           // For pickup, case 3 is order confirmation
           return (
-            <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
               <CardHeader className="text-center">
                 <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>
                   {t('checkout.orderConfirmedTitle')}
                 </CardTitle>
                 <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                  Thank you for your order. We'll notify you when it's ready for pickup.
+                  Thank you for your order. We will notify you when it is ready for pickup.
                 </p>
               </CardHeader>
               <CardContent className="text-center space-y-4">
@@ -2721,13 +2337,13 @@ function CheckoutPageContent() {
       case 4:
         // For shipping, case 4 is order confirmation
         return (
-          <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
+          <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
             <CardHeader className="text-center">
               <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>
                   {t('checkout.orderConfirmedTitle')}
                 </CardTitle>
               <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                Thank you for your order. We'll process it and send you tracking information.
+                Thank you for your order. We will process it and send you tracking information.
               </p>
             </CardHeader>
             <CardContent className="text-center space-y-4">
@@ -2793,191 +2409,126 @@ function CheckoutPageContent() {
 
   const maxSteps = deliveryOption === 'pickup' ? 4 : 5
 
+  const summaryItems = selectedItems.flatMap((item) =>
+    (item.variants || []).map((variant: { variantId?: string | number; variant_name?: string; quantity?: number; price?: number }) => ({
+      key: `${item.productId}-${variant.variantId || variant.variant_name || "item"}`,
+      name: item.product?.name || "Item",
+      variant: variant.variant_name,
+      quantity: variant.quantity || 1,
+      total: (variant.price || 0) * (variant.quantity || 1),
+      image: item.product?.image,
+    }))
+  )
+
   return (
-    <div className={cn("min-h-screen", themeClasses.mainBg)}>
+    <div className="honic-checkout min-h-screen bg-[#f5f6f8] text-neutral-900">
       {!isClient ? (
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mx-auto max-w-6xl px-4 py-8">
           <CheckoutPageSkeleton />
         </div>
       ) : (
     <>
-      {/* Welcome Message Bar - Mobile Only */}
-      <div className="fixed top-0 z-50 w-full bg-stone-100/90 dark:bg-gray-900/95 backdrop-blur-sm border-b border-stone-200 dark:border-gray-700 sm:hidden">
-        <div className="flex items-center justify-center h-8 px-4">
-          {user ? (
-            <div className="text-xs text-green-600 dark:text-green-400 font-medium">
-              Hi! {(user as any)?.user_metadata?.full_name || user.email?.split('@')[0] || 'User'} - Welcome again <span className="text-blue-600 dark:text-blue-400">{companyName || 'Honic Co.'}</span>
-            </div>
-          ) : (
-            <button 
-              onClick={() => openAuthModal('login')}
-              className="text-xs text-gray-700 dark:text-gray-300 hover:text-yellow-600 dark:hover:text-yellow-400 transition-colors font-medium"
-            >
-              Welcome to {companyName || 'Honic Co.'} <span className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300">login here</span> for better search
-            </button>
-          )}
-        </div>
-      </div>
-
-          {/* Header */}
-      <header className={cn("border-b pt-8 sm:pt-0", darkHeaderFooterClasses.headerBorder, darkHeaderFooterClasses.headerBg)}>
-        <div className="container mx-auto px-4 py-4">
-            <div className="flex items-center justify-between">
-            <Link href="/cart" className="flex items-center space-x-2 text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100">
-            <ChevronLeft className="w-5 h-5" />
-            <span className="hidden sm:inline">{t('checkout.backToCart')}</span>
-            <span className="sm:hidden">{t('checkout.backShort')}</span>
+      <header className="border-b border-neutral-200 bg-white">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+            <Link href="/cart" className="flex items-center gap-1.5 text-sm font-medium text-neutral-600 hover:text-neutral-950">
+            <ChevronLeft className="h-4 w-4" />
+            <span>{t('checkout.backToCart')}</span>
           </Link>
-            <h1 className={cn("text-lg sm:text-xl font-semibold", darkHeaderFooterClasses.textNeutralPrimary)}>
-              {t('checkout.title')}
-            </h1>
-            <CheckoutLanguageToggle />
+            <div className="flex items-center gap-2">
+              <LazyImage src={displayLogo} alt={brandName} width={24} height={24} className="h-6 w-6 object-contain" />
+              <p className="text-base font-bold text-neutral-950 sm:text-lg">Honic Company Limited</p>
+            </div>
+            <div className="flex items-center gap-3 text-sm font-medium">
+              {!user && (
+                <button type="button" onClick={() => openAuthModal('login')} className="hidden font-semibold text-neutral-950 sm:inline">
+                  Sign in
+                </button>
+              )}
+              <span className="hidden items-center gap-1 text-neutral-500 sm:flex"><Lock className="h-3.5 w-3.5" /> Secure</span>
+              <CheckoutLanguageToggle />
+            </div>
           </div>
-        </div>
       </header>
 
-      <div className="container mx-auto px-4 py-6 sm:py-8 pt-10 sm:pt-10">
-        <div className="max-w-4xl mx-auto">
-          {/* Progress Steps */}
-          <div className="mb-6 sm:mb-8">
-            {/* Mobile: Stacked layout */}
-            <div className="block sm:hidden">
-            <div className="flex items-center justify-between">
-              {stepTitles.map((title, index) => (
-                  <div key={index} className="flex flex-col items-center flex-1">
-                    <div className={cn(
-                      "w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium mb-1",
-                  index <= currentStep
-                    ? "bg-yellow-500 text-neutral-950"
-                        : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400"
-                    )}>
-                {index + 1}
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        <div className="grid items-start gap-8 md:grid-cols-[200px_minmax(0,1fr)]">
+          <nav className="flex gap-4 overflow-x-auto border-b border-neutral-200 pb-4 md:block md:border-b-0 md:pb-0">
+            {stepTitles.map((title, index) => (
+              <div key={`${title}-${index}`} className={cn("flex min-w-0 items-baseline gap-3 py-2 text-xs sm:text-sm md:border-l-2 md:pl-3", index === currentStep ? "border-yellow-500 font-semibold text-neutral-950" : index < currentStep ? "border-yellow-200 font-medium text-yellow-700" : "border-transparent font-medium text-neutral-400")}>
+                <span className="text-xs font-bold tabular-nums sm:text-sm">{index + 1}</span>
+                <span className="truncate">{title}</span>
               </div>
-                    <span className={cn(
-                      "text-xs text-center leading-tight px-1",
-                      index <= currentStep
-                        ? themeClasses.mainText
-                        : themeClasses.textNeutralSecondary
-                    )}>
-                      {title}
-                    </span>
-                </div>
-              ))}
-            </div>
-              {/* Mobile progress line */}
-              <div className="relative mt-2">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
-                <div 
-                  className="absolute top-0 left-0 h-1 bg-yellow-500 rounded-full transition-all duration-300"
-                  style={{ 
-                    width: `${(currentStep / (maxSteps - 1)) * 100}%` 
-                  }}
-                ></div>
-              </div>
-            </div>
+            ))}
+          </nav>
 
-            {/* Desktop: Horizontal layout */}
-            <div className="hidden sm:block">
-              <div className="flex items-start justify-center gap-4">
-              {stepTitles.map((title, index) => (
-                  <div key={index} className="flex items-center">
-                    <div className="flex flex-col items-center">
-                      <div className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium mb-2",
-                        index <= currentStep
-                          ? "bg-yellow-500 text-neutral-950"
-                          : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400"
-                      )}>
-                        {index + 1}
-                      </div>
-                      <span className={cn(
-                        "text-sm text-center max-w-24",
-                        index <= currentStep
-                          ? themeClasses.mainText
-                          : themeClasses.textNeutralSecondary
-                      )}>
-                {title}
-              </span>
+          <div className="min-w-0 space-y-4">
+            <div className="border border-neutral-200 bg-white">
+              <div className="flex items-center justify-between gap-4 border-b border-neutral-100 px-4 py-3">
+                <p className="text-base font-bold sm:text-lg">Your order · {summaryItems.length} item{summaryItems.length === 1 ? "" : "s"}</p>
+                <p className="text-sm font-medium text-neutral-500">{deliveryOption === "pickup" ? "Store pickup" : "Delivery"} · {shippingFeeLineLoading && deliveryOption === "shipping" ? "…" : deliveryOption === "pickup" || shippingFee === 0 ? "Free delivery fee" : formatPrice(shippingFee)}</p>
+              </div>
+              <div className="flex gap-4 overflow-x-auto px-4 py-3">
+                {summaryItems.length === 0 ? (
+                  <p className="text-sm text-neutral-500">Your cart is empty.</p>
+                ) : summaryItems.map((item) => (
+                  <div key={item.key} className="flex w-48 shrink-0 items-center gap-2">
+                    <div className="h-10 w-10 shrink-0 overflow-hidden bg-neutral-100">
+                      {item.image ? <LazyImage src={item.image} alt="" width={40} height={40} className="h-10 w-10 object-cover" /> : null}
                     </div>
-                    {index < stepTitles.length - 1 && (
-                      <div className={cn(
-                        "w-16 h-px mx-2 mt-4",
-                        index < currentStep
-                          ? "bg-yellow-500"
-                          : "bg-gray-200 dark:bg-gray-700"
-                      )} />
-                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{item.name}</p>
+                      <p className="text-xs sm:text-sm text-neutral-500">Qty {item.quantity} · {formatPrice(item.total)}</p>
+                    </div>
                   </div>
                 ))}
               </div>
+              <div className="flex flex-wrap items-end justify-between gap-3 bg-yellow-500 px-4 py-3 text-neutral-950">
+                <div className="text-sm font-medium">
+                  <p>Subtotal {formatPrice(displaySubtotal)}{promotionDiscount > 0 ? ` · Discount -${formatPrice(promotionDiscount)}` : ""}</p>
+                  <p className="mt-1">PIN on {(deliveryOption === "pickup" ? formData.billingAddress.phone : formData.shippingAddress.phone) || "your phone"} · Airtel Money, M-Pesa, Mixx by Yas, Halotel</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold">Total due now</p>
+                  <p className="text-lg font-bold tabular-nums">{formatPrice(orderTotal)}</p>
+                </div>
+              </div>
             </div>
-        </div>
 
-        {/* Step Content */}
-          <div className="mb-6">
-            {renderStepContent()}
-          </div>
+            <style>{`.honic-checkout-form .text-white{color:#171717}.honic-checkout-form .honic-checkout-pay,.honic-checkout-form .honic-checkout-pay *{color:#fff!important}.honic-checkout button,.honic-checkout input,.honic-checkout select,.honic-checkout textarea,.honic-checkout [class*="rounded-"]:not(.rounded-full){border-radius:0!important}`}</style>
+            <div className="honic-checkout-form space-y-4 text-sm text-neutral-900 sm:text-base [&_input]:h-10 [&_input]:border-neutral-200 [&_input]:bg-white [&_input]:text-base [&_input]:md:text-sm [&_label]:text-sm [&_label]:font-medium [&_label]:text-neutral-700">
+              {renderStepContent()}
+            </div>
 
-          {/* Navigation Buttons */}
-          {currentStep < maxSteps - 1 && (
-            <div className="flex justify-between">
-              <Button
-                onClick={handleBack}
-                variant="outline"
-                className={cn(
-                  "px-6 border border-neutral-300 text-neutral-700 hover:bg-neutral-100",
-                  darkHeaderFooterClasses.inputBorder,
-                  darkHeaderFooterClasses.textNeutralPrimary,
-                  darkHeaderFooterClasses.buttonGhostHoverBg
-                )}
-              >
-                {currentStep === 0 ? t('checkout.backToCart') : t('checkout.backShort')}
-              </Button>
-              
-              {/* Show Place Order button on order review step, Continue button on other steps */}
-              {((deliveryOption === 'pickup' && currentStep === 2) || ((deliveryOption as string) === 'shipping' && currentStep === 3)) ? (
-                <div className="flex flex-col items-end">
-                  {paymentLinkGenerated && checkoutLinkUrl ? (
-                    <Button
-                      onClick={() => {
-                        if (checkoutLinkUrl) {
-                          window.open(checkoutLinkUrl, '_blank', 'noopener,noreferrer')
-                        }
-                      }}
-                      className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-                    >
-                      <Navigation className="mr-2 h-4 w-4" />
-                      {t('checkout.openPaymentPage')}
-                    </Button>
+            {currentStep < maxSteps - 1 && (
+              <div className="flex flex-col-reverse gap-2 border-t border-neutral-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <Button onClick={handleBack} variant="ghost" className="h-11 text-sm font-semibold text-neutral-600 sm:text-base">
+                  {currentStep === 0 ? t('checkout.backToCart') : t('checkout.backShort')}
+                </Button>
+                <div className="sm:w-56">
+                  {((deliveryOption === 'pickup' && currentStep === 2) || ((deliveryOption as string) === 'shipping' && currentStep === 3)) ? (
+                    paymentLinkGenerated ? (
+                      <Button disabled className="h-11 w-full bg-yellow-500 text-sm font-semibold text-neutral-950 sm:text-base">Waiting for your PIN</Button>
+                    ) : (
+                      <Button
+                        onClick={handlePlaceOrder}
+                        disabled={isProcessingPayment || paymentLinkGenerated}
+                        className="h-11 w-full bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 disabled:opacity-50 sm:text-base"
+                      >
+                        {isProcessingPayment ? 'Sending securely' : paymentError ? t('checkout.tryAgain') : `Pay ${formatPrice(orderTotal)}`}
+                      </Button>
+                    )
                   ) : (
-                    <Button
-                      onClick={handlePlaceOrder}
-                      disabled={isProcessingPayment || paymentLinkGenerated}
-                      className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isProcessingPayment
-                        ? t('checkout.processing')
-                        : paymentError
-                          ? t('checkout.tryAgain')
-                          : t('checkout.placeOrder')}
+                    <Button onClick={handleNext} className="h-11 w-full bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 sm:text-base">
+                      {t('checkout.continue')}
                     </Button>
                   )}
                   {paymentError && !isProcessingPayment && !paymentLinkGenerated && (
-                    <p className="mt-3 text-sm text-red-600 dark:text-red-400 text-right max-w-md">
-                      {paymentError}
-                    </p>
+                    <p className="mt-2 text-sm text-red-600">{paymentError}</p>
                   )}
                 </div>
-              ) : (
-              <Button
-                onClick={handleNext}
-                  className="px-6 bg-yellow-500 text-neutral-950 hover:bg-yellow-600"
-              >
-                  {t('checkout.continue')}
-              </Button>
-              )}
+              </div>
+            )}
           </div>
-        )}
         </div>
       </div>
 

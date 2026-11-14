@@ -32,8 +32,7 @@ function CheckoutReturnContent() {
   let amount = searchParams.get('amount')
   let currency = searchParams.get('currency') || 'TZS'
 
-  // Handle malformed URLs from ClickPesa where placeholders aren't replaced
-  // ClickPesa sometimes sends URLs like: ?orderReference={reference}?orderReference=real_id&status=FAILED
+  // Handle a return URL that repeats the order reference.
   // Also sometimes the first value includes a nested query string.
   if (orderReference === '{orderReference}' || !orderReference || orderReference.includes('orderReference=')) {
     // Try to extract from the full URL string (handles malformed URLs with duplicate parameters)
@@ -167,13 +166,13 @@ function CheckoutReturnContent() {
     
     setIsRetryingPayment(true)
     try {
-      // Use the correct ClickPesa API format
+      // Open the Snippe checkout again.
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
       const baseUrl = typeof window !== 'undefined' 
         ? window.location.origin 
         : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://www.honiccompanystore.com'))
       
-      let response = await fetch('/api/payment/clickpesa', {
+      let response = await fetch('/api/payment/snippe', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -199,7 +198,7 @@ function CheckoutReturnContent() {
       })
       if (response.status === 429) {
         await sleep(400 + Math.floor(Math.random() * 300))
-        response = await fetch('/api/payment/clickpesa', {
+        response = await fetch('/api/payment/snippe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -261,18 +260,18 @@ function CheckoutReturnContent() {
     })
     
     try {
-      // Generate a new reference ID for retry (ClickPesa doesn't allow reusing reference IDs)
+      // Generate a new reference for a payment retry.
       // Use timestamp to ensure uniqueness
       const timestamp = Date.now()
       const newReferenceId = `${referenceId}-retry-${timestamp}`
       
-      // Create new ClickPesa checkout link with new reference ID
+      // Create a new Snippe checkout for the retry.
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
       const baseUrl = typeof window !== 'undefined' 
         ? window.location.origin 
         : (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || (process.env.NODE_ENV === 'development' ? `http://localhost:${process.env.LOCALHOST_PORT || '3000'}` : 'https://www.honiccompanystore.com'))
       
-      let response = await fetch('/api/payment/clickpesa', {
+      let response = await fetch('/api/payment/snippe', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -298,7 +297,7 @@ function CheckoutReturnContent() {
       })
       if (response.status === 429) {
         await sleep(400 + Math.floor(Math.random() * 300))
-        response = await fetch('/api/payment/clickpesa', {
+        response = await fetch('/api/payment/snippe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -315,7 +314,7 @@ function CheckoutReturnContent() {
       const result = await response.json()
       
       if (result.success && (result.checkoutUrl || result.checkoutLink)) {
-        // Redirect to ClickPesa checkout
+        // Redirect to the Snippe checkout.
         router.push(result.checkoutUrl || result.checkoutLink)
       } else {
         alert(`Payment system is temporarily unavailable. ${result.error || 'Please contact support or try again later.'}`)
@@ -419,7 +418,7 @@ function CheckoutReturnContent() {
   const isPaymentFailedFromDB = displayPaymentStatus === 'failed' || displayPaymentStatus === 'unpaid'
   const isPaymentPendingFromDB = displayPaymentStatus === 'pending'
 
-  // Prioritize URL parameter status over database status for ClickPesa returns
+  // Prefer the status in the return URL when the saved order is still pending.
   // URL parameters are more reliable for real-time payment status
   const finalIsPaymentSuccessful = isPaymentSuccessful || (orderData && isPaymentSuccessfulFromDB)
   const finalIsPaymentFailed = isPaymentFailed || (orderData && isPaymentFailedFromDB && !isPaymentSuccessful)
@@ -618,7 +617,7 @@ function CheckoutReturnContent() {
                               </p>
                             </div>
                             <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                              Please wait while we redirect you to ClickPesa
+                              Please wait while we open the Snippe payment page
                             </p>
                           </div>
                         )}

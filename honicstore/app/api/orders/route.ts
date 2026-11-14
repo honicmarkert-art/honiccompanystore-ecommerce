@@ -605,7 +605,7 @@ export async function POST(request: NextRequest) {
       delivery_option: orderData.deliveryOption || 'shipping',
       total_amount: serverCalculatedTotal,
       currency: orderData.currency || 'TZS',
-      payment_method: 'clickpesa',
+      payment_method: 'snippe',
       payment_status: 'pending',
       status: 'pending',
       created_at: orderData.timestamp || new Date().toISOString(),
