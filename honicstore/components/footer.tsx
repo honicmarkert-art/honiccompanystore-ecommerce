@@ -26,7 +26,8 @@ export function Footer() {
     companyLogo,
     contactEmail,
     contactPhone,
-    address
+    address,
+    socialLinks: savedSocialLinks,
   } = usePublicCompanyContext()
   
   const [email, setEmail] = useState('')
@@ -91,32 +92,27 @@ export function Footer() {
       { name: 'Contact Us', href: '/contact' },
     ],
     services: [
-      { name: 'Electronics Supply', href: '/services/electronics' },
-      { name: 'Prototyping Services', href: '/services/prototyping' },
-      { name: 'PCB Printing', href: '/services/pcb' },
-      { name: 'AI Consultancy', href: '/services/ai' }
+      { name: 'STEM Training Kits', href: '/services/stem-kits' }
     ],
     support: [
       { name: 'Help Center', href: '/support' },
-      { name: 'Order Tracking', href: '/tracking' },
-      { name: 'Returns & Refunds', href: '/returns' },
-      { name: 'Shipping Info', href: '/shipping' },
-      { name: 'Technical Support', href: '/support' }
+      { name: 'Order Tracking', href: '/support/order-tracking' },
+      { name: 'Returns & Refunds', href: '/support/returns-refunds' },
+      { name: 'Shipping Info', href: '/support/shipping-info' },
+      { name: 'Technical Support', href: '/support/technical-support' }
     ],
     legal: [
       { name: 'Privacy Policy', href: '/privacy' },
       { name: 'Terms of Service', href: '/terms' },
-      { name: 'Cookie Policy', href: '/cookies' },
-      { name: 'GDPR Compliance', href: '/gdpr' },
-      { name: 'Data Protection', href: '/data-protection' }
+      { name: 'Cookie Policy', href: '/cookies' }
     ]
   }
 
   const socialLinks = [
-    { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, href: process.env.NEXT_PUBLIC_FACEBOOK_URL || '/social/facebook' },
-    { name: 'Instagram', icon: <Instagram className="w-5 h-5" />, href: process.env.NEXT_PUBLIC_INSTAGRAM_URL || '/social/instagram' },
-    { name: 'YouTube', icon: <Youtube className="w-5 h-5" />, href: process.env.NEXT_PUBLIC_YOUTUBE_URL || '/social/youtube' }
-  ]
+    { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, href: savedSocialLinks?.facebook || '' },
+    { name: 'Instagram', icon: <Instagram className="w-5 h-5" />, href: savedSocialLinks?.instagram || '' },
+    { name: 'YouTube', icon: <Youtube className="w-5 h-5" />, href: savedSocialLinks?.youtube || '' },
+  ].filter((social) => /^https?:\/\//i.test(social.href))
 
   return (
     <footer className="bg-gray-950 text-gray-300" suppressHydrationWarning>
@@ -198,6 +194,8 @@ export function Footer() {
                  <a
                    key={index}
                    href={social.href}
+                   target="_blank"
+                   rel="noopener noreferrer"
                    className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-orange-500 transition-colors"
                    aria-label={social.name}
                  >

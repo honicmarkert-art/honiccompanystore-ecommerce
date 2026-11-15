@@ -577,12 +577,6 @@ function PrivacyPolicyPageContent() {
                       </div>
                     </div>
                     
-                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Data Protection Officer</h4>
-                      <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                        For GDPR-related inquiries, you can also contact our Data Protection Officer at {process.env.NEXT_PUBLIC_DPO_EMAIL || process.env.DPO_EMAIL || process.env.NEXT_PUBLIC_PRIVACY_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co'}
-                      </p>
-                    </div>
                   </CardContent>
                 </Card>
               )}

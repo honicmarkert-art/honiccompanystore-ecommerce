@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { UserRoute } from '@/components/protected-route'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ShoppingBag, MessageCircle, CreditCard, Heart, Settings, User, ChevronRight, Clock, X, ArrowLeft, Package, ShoppingCart, Menu } from 'lucide-react'
+import { ShoppingBag, MessageCircle, CreditCard, Heart, Settings, User, ChevronRight, Clock, X, ArrowLeft, Package, ShoppingCart, Menu, Bell, Ticket } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useCart } from '@/hooks/use-cart'
@@ -30,6 +30,8 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
     { href: '/account/orders/history', label: 'Order History', icon: Clock },
     { href: '/cart', label: 'Cart', icon: ShoppingCart },
     { href: '/account/messages', label: 'Messages', icon: MessageCircle },
+    { href: '/account/price-alerts', label: 'Price alerts', icon: Bell },
+    { href: '/account/coupons', label: 'Coupons', icon: Ticket },
     { href: '/account/payment', label: 'Payment', icon: CreditCard },
     { href: '/account/wishlist', label: 'Wishlist', icon: Heart },
     { href: '/account/saved-later', label: 'Saved for Later', icon: Clock },
@@ -210,7 +212,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
             {/* Top navigation tabs (consistent across account pages) */}
             <div className="mb-4 sm:mb-6 border-b">
               <div className="flex flex-wrap gap-2">
-                {[ '/account', '/account/orders', '/account/orders/history', '/account/messages', '/account/payment', '/account/wishlist', '/account/saved-later' ].map((href) => {
+                {[ '/account', '/account/orders', '/account/orders/history', '/account/messages', '/account/price-alerts', '/account/coupons', '/account/payment', '/account/wishlist', '/account/saved-later' ].map((href) => {
                   const cfg = nav.find(n => n.href === href)!
                   const active = pathname === href
                   return (

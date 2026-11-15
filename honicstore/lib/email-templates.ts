@@ -26,7 +26,6 @@ export function getBaseEmailTemplate(
     salesEmail = process.env.SALES_EMAIL || 'sales@honiccompanystore.com',
     legalEmail = process.env.LEGAL_EMAIL || process.env.CONTACT_EMAIL || 'legal@honic.co',
     privacyEmail = process.env.PRIVACY_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co',
-    dpoEmail = process.env.DPO_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co',
     securityEmail = process.env.SECURITY_EMAIL || process.env.SUPPORT_EMAIL || 'security@honic.co',
   } = options
 

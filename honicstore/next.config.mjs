@@ -210,6 +210,33 @@ const nextConfig = {
   // Use standalone only when explicitly enabled (e.g., CI/deploy).
   // This avoids Windows EBUSY copyfile issues during local builds.
   output: shouldUseStandaloneOutput ? 'standalone' : undefined,
+  async redirects() {
+    return [
+      { source: '/tracking', destination: '/support/order-tracking', permanent: false },
+      { source: '/returns', destination: '/support/returns-refunds', permanent: false },
+      { source: '/shipping', destination: '/support/shipping-info', permanent: false },
+      { source: '/services/terms-of-service', destination: '/terms', permanent: false },
+      { source: '/services/privacy-policy', destination: '/privacy', permanent: false },
+      { source: '/gdpr', destination: '/privacy', permanent: false },
+      { source: '/data-protection', destination: '/privacy', permanent: false },
+      { source: '/coming-soon', destination: '/support', permanent: false },
+      { source: '/help', destination: '/support', permanent: false },
+      { source: '/services/pcb', destination: '/services/stem-kits', permanent: false },
+      { source: '/services/ai', destination: '/services/stem-kits', permanent: false },
+      { source: '/services/prototyping', destination: '/services/stem-kits', permanent: false },
+      { source: '/services/electronics', destination: '/products', permanent: false },
+      { source: '/services/electronics-supply', destination: '/products', permanent: false },
+      { source: '/services/pcb-printing', destination: '/services/stem-kits', permanent: false },
+      { source: '/services/ai-consultancy', destination: '/services/stem-kits', permanent: false },
+      { source: '/discover', destination: '/products', permanent: false },
+      { source: '/featured', destination: '/products', permanent: false },
+      { source: '/buyer-central', destination: '/products', permanent: false },
+      { source: '/products/on-demand', destination: '/products', permanent: false },
+      { source: '/qrcode', destination: '/products', permanent: false },
+      { source: '/location', destination: '/products', permanent: false },
+      { source: '/test-location', destination: '/products', permanent: false },
+    ]
+  },
   // Enhanced Security Headers and Performance Optimizations
   async headers() {
     return [
@@ -308,7 +335,7 @@ const nextConfig = {
           // Content Security Policy
           {
             key: 'Content-Security-Policy',
-            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} https://*.supabase.co; connect-src 'self' ${process.env.CLICKPESA_API_URL || process.env.NEXT_PUBLIC_CLICKPESA_API_URL || 'https://api.clickpesa.com'} ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} wss://${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('https://', '').replace('http://', '') || ''} https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';`
+            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} https://*.supabase.co; connect-src 'self' https://api.snippe.sh ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} wss://${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('https://', '').replace('http://', '') || ''} https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';`
           },
           // Security Headers
           {

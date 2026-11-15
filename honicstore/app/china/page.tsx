@@ -63,7 +63,6 @@ import {
   ChevronRight,
   MessageSquare,
   CreditCard,
-  Coins,
   Ticket,
   Settings,
   MoreHorizontal,
@@ -1897,27 +1896,9 @@ function ChinaPageContent() {
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/electronics-supply'}
+                  onClick={() => window.location.href = '/services/stem-kits'}
                 >
-                  <Package className="w-4 h-4 mr-2" /> Electronics Supply
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/prototyping'}
-                >
-                  <Settings className="w-4 h-4 mr-2" /> Prototyping Services
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/pcb-printing'}
-                >
-                  <Laptop className="w-4 h-4 mr-2" /> PCB Printing
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                  onClick={() => window.location.href = '/services/ai-consultancy'}
-                >
-                  <TrendingUp className="w-4 h-4 mr-2" /> AI Consultancy
+                  <Package className="w-4 h-4 mr-2" /> STEM Training Kits
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

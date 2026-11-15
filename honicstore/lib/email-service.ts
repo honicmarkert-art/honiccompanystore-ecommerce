@@ -325,7 +325,6 @@ class EmailService {
       tech: process.env.TECH_EMAIL || process.env.SUPPORT_EMAIL || 'tech@honiccompanystore.com',
       legal: process.env.LEGAL_EMAIL || process.env.CONTACT_EMAIL || 'legal@honic.co',
       privacy: process.env.PRIVACY_EMAIL || process.env.LEGAL_EMAIL || 'privacy@honic.co',
-      dpo: process.env.DPO_EMAIL || process.env.PRIVACY_EMAIL || 'dpo@honic.co',
       security: process.env.SECURITY_EMAIL || process.env.SUPPORT_EMAIL || 'security@honic.co',
     }
   }

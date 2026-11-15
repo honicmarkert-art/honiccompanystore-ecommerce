@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { OTPUtils } from '@/lib/otp'
 import { otpManager } from '@/lib/otp'
 import { sendPasswordChangeOTPEmail } from '@/lib/user-email-service'
+import { sendPasswordChangedAlert } from '@/lib/customer-emails'
 import { validatePasswordStrength } from '@/lib/security'
 import { createHash } from 'crypto'
 
@@ -360,6 +361,8 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         )
       }
+
+      if (user.email) void sendPasswordChangedAlert(user.email, request)
 
       return NextResponse.json({
         success: true,

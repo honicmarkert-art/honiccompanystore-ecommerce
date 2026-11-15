@@ -8,8 +8,6 @@ import { sendEmail } from './email-service'
 import { emailService } from './email-service'
 import {
   getOrderConfirmationTemplate,
-  getOrderStatusUpdateTemplate,
-  getShippingNotificationTemplate,
   getDeliveryConfirmationTemplate,
   getInvoiceEmailTemplate,
   getWelcomeUserTemplate,
@@ -18,11 +16,9 @@ import {
   getBackInStockTemplate,
   getAbandonedCartTemplate,
   getOrderCancellationTemplate,
-  getRefundConfirmationTemplate,
   getNewsletterWelcomeTemplate,
   getSecurityAlertTemplate,
   getReviewRequestTemplate,
-  getPickupReminderTemplate,
   getOrderPlacedWelcomeTemplate,
   getPasswordChangeOTPTemplate,
   EmailTemplateOptions
@@ -253,89 +249,9 @@ export async function sendOrderConfirmationEmail(
   }
 }
 
-/**
- * Send Order Status Update Email
- */
-export async function sendOrderStatusUpdateEmail(
-  userEmail: string,
-  orderData: {
-    orderNumber: string
-    status: string
-    statusMessage: string
-    trackingNumber?: string
-    trackingUrl?: string
-    estimatedDelivery?: string
-    items?: Array<{ name: string; quantity: number }>
-  }
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!validateEmail(userEmail)) {
-      return { success: false, error: 'Invalid email address' }
-    }
 
-    const options = await getCompanySettings()
-    const { html, text } = getOrderStatusUpdateTemplate(orderData, options)
 
-    const result = await sendEmail({
-      to: userEmail,
-      subject: `Order Status Update #${orderData.orderNumber}`,
-      html,
-      text,
-      from: `Orders <${getSenderEmailForFrom()}>`,
-    })
 
-    if (result.success) {
-      logger.log(`Order status update email sent to ${userEmail} for order ${orderData.orderNumber}`)
-    }
-
-    return result
-  } catch (error: any) {
-    logger.error('Error sending order status update email:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-/**
- * Send Shipping Notification Email
- */
-export async function sendShippingNotificationEmail(
-  userEmail: string,
-  orderData: {
-    orderNumber: string
-    trackingNumber: string
-    carrier: string
-    trackingUrl: string
-    estimatedDelivery: string
-    shippingAddress: any
-    items: Array<{ name: string; quantity: number; image?: string }>
-  }
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!validateEmail(userEmail)) {
-      return { success: false, error: 'Invalid email address' }
-    }
-
-    const options = await getCompanySettings()
-    const { html, text } = getShippingNotificationTemplate(orderData, options)
-
-    const result = await sendEmail({
-      to: userEmail,
-      subject: `Your Order #${orderData.orderNumber} Has Shipped!`,
-      html,
-      text,
-      from: `Shipping <${getSenderEmailForFrom()}>`,
-    })
-
-    if (result.success) {
-      logger.log(`Shipping notification email sent to ${userEmail} for order ${orderData.orderNumber}`)
-    }
-
-    return result
-  } catch (error: any) {
-    logger.error('Error sending shipping notification email:', error)
-    return { success: false, error: error.message }
-  }
-}
 
 /**
  * Send Delivery Confirmation Email
@@ -697,45 +613,7 @@ export async function sendOrderCancellationEmail(
   }
 }
 
-/**
- * Send Refund Confirmation Email
- */
-export async function sendRefundConfirmationEmail(
-  userEmail: string,
-  refundData: {
-    orderNumber: string
-    refundAmount: number
-    refundMethod: string
-    refundTimeline: string
-    transactionId?: string
-  }
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!validateEmail(userEmail)) {
-      return { success: false, error: 'Invalid email address' }
-    }
 
-    const options = await getCompanySettings()
-    const { html, text } = getRefundConfirmationTemplate(refundData, options)
-
-    const result = await sendEmail({
-      to: userEmail,
-      subject: `Refund Processed for Order #${refundData.orderNumber}`,
-      html,
-      text,
-      from: `Billing <${getSenderEmailForFrom()}>`,
-    })
-
-    if (result.success) {
-      logger.log(`Refund confirmation email sent to ${userEmail} for order ${refundData.orderNumber}`)
-    }
-
-    return result
-  } catch (error: any) {
-    logger.error('Error sending refund confirmation email:', error)
-    return { success: false, error: error.message }
-  }
-}
 
 /**
  * Send Newsletter Welcome Email
@@ -860,45 +738,90 @@ export async function sendReviewRequestEmail(
   }
 }
 
-/**
- * Send Pickup Reminder Email
- */
-export async function sendPickupReminderEmail(
-  userEmail: string,
-  orderData: {
-    orderNumber: string
-    pickupId: string
-    pickupLocation: string
-    pickupInstructions: string
-    availableTimes: string
-    items: Array<{ name: string; quantity: number }>
+
+
+export function getAdminNoticeEmails(): string[] {
+  const raw = [
+    ...(process.env.ADMIN_EMAILS || '').split(','),
+    process.env.NEXT_PUBLIC_ORDER_EMAIL || '',
+  ]
+  const seen = new Set<string>()
+  const emails: string[] = []
+  for (const item of raw) {
+    const email = item.trim().toLowerCase()
+    if (!validateEmail(email) || seen.has(email)) continue
+    seen.add(email)
+    emails.push(email)
   }
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!validateEmail(userEmail)) {
-      return { success: false, error: 'Invalid email address' }
+  return emails
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+export async function sendAccountCreatedNotice(input: {
+  userEmail: string
+  name: string
+  isSupplier?: boolean
+}): Promise<{ userSent: boolean }> {
+  const userEmail = input.userEmail.trim()
+  const name = input.name.trim() || userEmail.split('@')[0]
+  const appUrl = process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_WEBSITE_URL ||
+    'https://honiccompanystore.com'
+  const kind = input.isSupplier ? 'Supplier' : 'Customer'
+  let userSent = false
+
+  if (validateEmail(userEmail)) {
+    try {
+      const welcome = input.isSupplier
+        ? await sendWelcomeSupplierEmail(userEmail, {
+            name,
+            companyName: name,
+            dashboardUrl: `${appUrl}/supplier/dashboard`,
+            commissionRate: '5%',
+          })
+        : await sendWelcomeUserEmail(userEmail, {
+            name,
+            accountUrl: `${appUrl}/account`,
+          })
+      userSent = welcome.success
+      if (!welcome.success) {
+        logger.error('Account welcome email failed:', welcome.error)
+      }
+    } catch (error) {
+      logger.error('Account welcome email failed:', error)
     }
-
-    const options = await getCompanySettings()
-    const { html, text } = getPickupReminderTemplate(orderData, options)
-
-    const result = await sendEmail({
-      to: userEmail,
-      subject: `Your Order #${orderData.orderNumber} is Ready for Pickup!`,
-      html,
-      text,
-      from: `Pickup <${getSenderEmailForFrom()}>`,
-    })
-
-    if (result.success) {
-      logger.log(`Pickup reminder email sent to ${userEmail} for order ${orderData.orderNumber}`)
-    }
-
-    return result
-  } catch (error: any) {
-    logger.error('Error sending pickup reminder email:', error)
-    return { success: false, error: error.message }
   }
+
+  const admins = getAdminNoticeEmails().filter((email) => email !== userEmail.toLowerCase())
+  if (admins.length > 0) {
+    const safeName = escapeHtml(name)
+    const safeEmail = escapeHtml(userEmail)
+    try {
+      const notice = await sendEmail({
+        to: admins,
+        subject: `New ${kind.toLowerCase()} account: ${userEmail}`,
+        text: `A new ${kind.toLowerCase()} account was created.\n\nName: ${name}\nEmail: ${userEmail}`,
+        html: `<p>A new ${kind.toLowerCase()} account was created.</p><p><strong>Name:</strong> ${safeName}<br><strong>Email:</strong> ${safeEmail}</p>`,
+        from: `Accounts <${getSenderEmailForFrom()}>`,
+        replyTo: validateEmail(userEmail) ? userEmail : undefined,
+      })
+      if (!notice.success) {
+        logger.error('Admin account notice failed:', notice.error)
+      }
+    } catch (error) {
+      logger.error('Admin account notice failed:', error)
+    }
+  }
+
+  return { userSent }
 }
 
 

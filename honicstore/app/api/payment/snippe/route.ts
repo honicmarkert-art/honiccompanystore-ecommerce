@@ -173,7 +173,7 @@ export async function GET(request: NextRequest) {
   try {
     const rateLimitResult = allowPaymentAction(request, "status")
     if (!rateLimitResult.allowed) {
-      return NextResponse.json({ success: true, paymentStatus: "pending" })
+      return NextResponse.json({ success: true, paymentStatus: "pending" }, { headers: { "Cache-Control": "no-store" } })
     }
     const orderReference = normalizeOrderReference(request.nextUrl.searchParams.get("orderReference") || "")
     if (!orderReference) {
@@ -186,9 +186,9 @@ export async function GET(request: NextRequest) {
       .select("id, reference_id, total_amount, payment_status, failure_reason, clickpesa_transaction_id")
       .eq("reference_id", orderReference)
       .maybeSingle()
-    if (!order) return NextResponse.json({ success: false, error: "Order not found" }, { status: 404 })
+    if (!order) return NextResponse.json({ success: false, error: "Order not found" }, { status: 404, headers: { "Cache-Control": "no-store" } })
     if (order.payment_status === "paid" || order.payment_status === "success") {
-      return NextResponse.json({ success: true, paymentStatus: "paid" })
+      return NextResponse.json({ success: true, paymentStatus: "paid" }, { headers: { "Cache-Control": "no-store" } })
     }
 
     const verified = order.clickpesa_transaction_id ? await getSnippePayment(String(order.clickpesa_transaction_id)) : null
@@ -208,8 +208,14 @@ export async function GET(request: NextRequest) {
         .eq("id", order.id)
         .in("payment_status", ["pending", "failed", "reserved"])
         .select("id")
-      if (claimed?.length) await processPaidOrderStockAndCart(supabase, order)
-      return NextResponse.json({ success: true, paymentStatus: "paid" })
+      if (claimed?.length) {
+        try {
+          await processPaidOrderStockAndCart(supabase, order)
+        } catch (stockError) {
+          logger.error("Paid order stock update failed:", stockError instanceof Error ? stockError.message : String(stockError))
+        }
+      }
+      return NextResponse.json({ success: true, paymentStatus: "paid" }, { headers: { "Cache-Control": "no-store" } })
     }
 
     const rejected = verified?.status === "failed" || verified?.status === "expired" || verified?.status === "voided" || verified?.status === "cancelled"
@@ -220,14 +226,14 @@ export async function GET(request: NextRequest) {
         .update({ payment_status: "failed", failure_reason: reason, payment_method: "snippe", updated_at: new Date().toISOString() })
         .eq("id", order.id)
         .in("payment_status", ["pending", "reserved"])
-      return NextResponse.json({ success: true, paymentStatus: "failed", failureReason: reason })
+      return NextResponse.json({ success: true, paymentStatus: "failed", failureReason: reason }, { headers: { "Cache-Control": "no-store" } })
     }
 
     return NextResponse.json({
       success: true,
       paymentStatus: order.payment_status === "failed" ? "failed" : "pending",
       failureReason: order.failure_reason || undefined,
-    })
+    }, { headers: { "Cache-Control": "no-store" } })
   } catch (error) {
     logger.error("Snippe status error:", error instanceof Error ? error.message : String(error))
     return NextResponse.json({ success: false, error: "Unable to check the payment." }, { status: 500 })

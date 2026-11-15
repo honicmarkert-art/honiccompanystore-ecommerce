@@ -20,6 +20,7 @@ import {
   Ticket,
   Plus,
   Minus,
+  Check,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -34,7 +35,6 @@ import { useAuth } from "@/contexts/auth-context"
 import { useCompanyContext } from "@/components/company-provider"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { useCurrency } from "@/contexts/currency-context"
-import { useComingSoonModal } from "@/components/coming-soon-modal"
 import { useToast } from "@/hooks/use-toast"
 import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
 import { TANZANIA_REGIONS, DISTRICTS_BY_REGION, getWardOptions } from "@/lib/tanzania-address"
@@ -108,7 +108,6 @@ function CheckoutPageContent() {
   const fallbackLogo = "/android-chrome-512x512.png"
   const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { formatPrice } = useCurrency()
-  const { ComingSoonModal } = useComingSoonModal()
   const t = useTranslation()
 
   // Get selected items for display
@@ -396,10 +395,10 @@ function CheckoutPageContent() {
     let stopped = false
     const checkStatus = async () => {
       try {
-        const response = await fetch(`/api/payment/snippe?orderReference=${encodeURIComponent(orderReferenceId)}`)
+        const response = await fetch(`/api/payment/snippe?orderReference=${encodeURIComponent(orderReferenceId)}&t=${Date.now()}`, { cache: "no-store" })
         const data = await response.json().catch(() => null)
         if (stopped || !data?.success) return
-        if (data.paymentStatus === 'paid') {
+        if (data.paymentStatus === 'paid' || data.paymentStatus === 'completed' || data.paymentStatus === 'success') {
           stopped = true
           const saved = takePendingOrder(orderReferenceId) || {
             referenceId: orderReferenceId,
@@ -1307,7 +1306,7 @@ function CheckoutPageContent() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div 
                          className={cn(
-                    "relative cursor-pointer border p-5 transition-all",
+                    "relative cursor-pointer rounded-xl border p-5 transition-all",
                     (deliveryOption as string) === 'shipping' 
                       ? "border-neutral-950 bg-white shadow-[inset_3px_0_0_#eab308]" 
                       : "border-neutral-200 bg-white hover:border-neutral-400"
@@ -1347,7 +1346,7 @@ function CheckoutPageContent() {
 
                 <div 
                    className={cn(
-                    "relative cursor-pointer border p-5 transition-all",
+                    "relative cursor-pointer rounded-xl border p-5 transition-all",
                     deliveryOption === 'pickup' 
                       ? "border-neutral-950 bg-white shadow-[inset_3px_0_0_#eab308]" 
                       : "border-neutral-200 bg-white hover:border-neutral-400"
@@ -2408,6 +2407,16 @@ function CheckoutPageContent() {
   )
 
   const maxSteps = deliveryOption === 'pickup' ? 4 : 5
+  const onPayStep = (deliveryOption === 'pickup' && currentStep === 2) || (deliveryOption === 'shipping' && currentStep === 3)
+  const phoneDigits = paymentPhone.replace(/\D/g, "")
+  const networkPrefix = phoneDigits.startsWith("255") ? phoneDigits.slice(3, 5) : phoneDigits.startsWith("0") ? phoneDigits.slice(1, 3) : phoneDigits.slice(0, 2)
+  const detectedNetwork =
+    ["74", "75", "76"].includes(networkPrefix) ? "M-Pesa" :
+    ["68", "69", "78"].includes(networkPrefix) ? "Airtel Money" :
+    ["65", "67", "71"].includes(networkPrefix) ? "Mixx by Yas" :
+    networkPrefix === "62" ? "Halotel" :
+    null
+  const mobileNetworks = ["Airtel Money", "M-Pesa", "Mixx by Yas", "Halotel"]
 
   const summaryItems = selectedItems.flatMap((item) =>
     (item.variants || []).map((variant: { variantId?: string | number; variant_name?: string; quantity?: number; price?: number }) => ({
@@ -2421,7 +2430,7 @@ function CheckoutPageContent() {
   )
 
   return (
-    <div className="honic-checkout min-h-screen bg-[#f5f6f8] text-neutral-900">
+    <div className="honic-checkout min-h-screen bg-[#f3f4f6] text-neutral-950">
       {!isClient ? (
         <div className="mx-auto max-w-6xl px-4 py-8">
           <CheckoutPageSkeleton />
@@ -2429,14 +2438,14 @@ function CheckoutPageContent() {
       ) : (
     <>
       <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-            <Link href="/cart" className="flex items-center gap-1.5 text-sm font-medium text-neutral-600 hover:text-neutral-950">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+            <Link href="/cart" className="flex items-center gap-1.5 text-sm font-semibold text-neutral-600 hover:text-neutral-950">
             <ChevronLeft className="h-4 w-4" />
-            <span>{t('checkout.backToCart')}</span>
+            <span className="hidden sm:inline">{t('checkout.backToCart')}</span>
           </Link>
             <div className="flex items-center gap-2">
-              <LazyImage src={displayLogo} alt={brandName} width={24} height={24} className="h-6 w-6 object-contain" />
-              <p className="text-base font-bold text-neutral-950 sm:text-lg">Honic Company Limited</p>
+              <LazyImage src={displayLogo} alt={brandName} width={28} height={28} className="h-7 w-7 object-contain" />
+              <p className="text-base font-bold tracking-tight sm:text-lg">Honic Company Limited</p>
             </div>
             <div className="flex items-center gap-3 text-sm font-medium">
               {!user && (
@@ -2450,75 +2459,48 @@ function CheckoutPageContent() {
           </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        <div className="grid items-start gap-8 md:grid-cols-[200px_minmax(0,1fr)]">
-          <nav className="flex gap-4 overflow-x-auto border-b border-neutral-200 pb-4 md:block md:border-b-0 md:pb-0">
-            {stepTitles.map((title, index) => (
-              <div key={`${title}-${index}`} className={cn("flex min-w-0 items-baseline gap-3 py-2 text-xs sm:text-sm md:border-l-2 md:pl-3", index === currentStep ? "border-yellow-500 font-semibold text-neutral-950" : index < currentStep ? "border-yellow-200 font-medium text-yellow-700" : "border-transparent font-medium text-neutral-400")}>
-                <span className="text-xs font-bold tabular-nums sm:text-sm">{index + 1}</span>
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+        <ol className="mb-6 flex gap-2 overflow-x-auto pb-1">
+          {stepTitles.map((title, index) => {
+            const done = index < currentStep
+            const active = index === currentStep
+            return (
+              <li key={`${title}-${index}`} className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold sm:text-sm", active ? "border-neutral-950 bg-neutral-950 text-white" : done ? "border-yellow-300 bg-yellow-400 text-neutral-950" : "border-neutral-200 bg-white text-neutral-400")}>
+                <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px]", active ? "bg-yellow-400 text-neutral-950" : done ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-400")}>
+                  {done ? <Check className="h-3 w-3" /> : index + 1}
+                </span>
                 <span className="truncate">{title}</span>
-              </div>
-            ))}
-          </nav>
+              </li>
+            )
+          })}
+        </ol>
 
-          <div className="min-w-0 space-y-4">
-            <div className="border border-neutral-200 bg-white">
-              <div className="flex items-center justify-between gap-4 border-b border-neutral-100 px-4 py-3">
-                <p className="text-base font-bold sm:text-lg">Your order · {summaryItems.length} item{summaryItems.length === 1 ? "" : "s"}</p>
-                <p className="text-sm font-medium text-neutral-500">{deliveryOption === "pickup" ? "Store pickup" : "Delivery"} · {shippingFeeLineLoading && deliveryOption === "shipping" ? "…" : deliveryOption === "pickup" || shippingFee === 0 ? "Free delivery fee" : formatPrice(shippingFee)}</p>
-              </div>
-              <div className="flex gap-4 overflow-x-auto px-4 py-3">
-                {summaryItems.length === 0 ? (
-                  <p className="text-sm text-neutral-500">Your cart is empty.</p>
-                ) : summaryItems.map((item) => (
-                  <div key={item.key} className="flex w-48 shrink-0 items-center gap-2">
-                    <div className="h-10 w-10 shrink-0 overflow-hidden bg-neutral-100">
-                      {item.image ? <LazyImage src={item.image} alt="" width={40} height={40} className="h-10 w-10 object-cover" /> : null}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{item.name}</p>
-                      <p className="text-xs sm:text-sm text-neutral-500">Qty {item.quantity} · {formatPrice(item.total)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-end justify-between gap-3 bg-yellow-500 px-4 py-3 text-neutral-950">
-                <div className="text-sm font-medium">
-                  <p>Subtotal {formatPrice(displaySubtotal)}{promotionDiscount > 0 ? ` · Discount -${formatPrice(promotionDiscount)}` : ""}</p>
-                  <p className="mt-1">PIN on {(deliveryOption === "pickup" ? formData.billingAddress.phone : formData.shippingAddress.phone) || "your phone"} · Airtel Money, M-Pesa, Mixx by Yas, Halotel</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold">Total due now</p>
-                  <p className="text-lg font-bold tabular-nums">{formatPrice(orderTotal)}</p>
-                </div>
-              </div>
-            </div>
-
-            <style>{`.honic-checkout-form .text-white{color:#171717}.honic-checkout-form .honic-checkout-pay,.honic-checkout-form .honic-checkout-pay *{color:#fff!important}.honic-checkout button,.honic-checkout input,.honic-checkout select,.honic-checkout textarea,.honic-checkout [class*="rounded-"]:not(.rounded-full){border-radius:0!important}`}</style>
-            <div className="honic-checkout-form space-y-4 text-sm text-neutral-900 sm:text-base [&_input]:h-10 [&_input]:border-neutral-200 [&_input]:bg-white [&_input]:text-base [&_input]:md:text-sm [&_label]:text-sm [&_label]:font-medium [&_label]:text-neutral-700">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="order-2 min-w-0 space-y-4 lg:order-1">
+            <div className="honic-checkout-form space-y-4 text-sm text-neutral-900 sm:text-base [&_input]:h-11 [&_input]:rounded-lg [&_input]:border-neutral-200 [&_input]:bg-white [&_input]:text-base [&_input]:md:text-sm [&_label]:text-sm [&_label]:font-medium [&_label]:text-neutral-700">
               {renderStepContent()}
             </div>
 
             {currentStep < maxSteps - 1 && (
-              <div className="flex flex-col-reverse gap-2 border-t border-neutral-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <Button onClick={handleBack} variant="ghost" className="h-11 text-sm font-semibold text-neutral-600 sm:text-base">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Button onClick={handleBack} variant="ghost" className="h-12 rounded-lg text-sm font-semibold text-neutral-600 sm:text-base">
                   {currentStep === 0 ? t('checkout.backToCart') : t('checkout.backShort')}
                 </Button>
-                <div className="sm:w-56">
-                  {((deliveryOption === 'pickup' && currentStep === 2) || ((deliveryOption as string) === 'shipping' && currentStep === 3)) ? (
+                <div className="sm:w-64">
+                  {onPayStep ? (
                     paymentLinkGenerated ? (
-                      <Button disabled className="h-11 w-full bg-yellow-500 text-sm font-semibold text-neutral-950 sm:text-base">Waiting for your PIN</Button>
+                      <Button disabled className="h-12 w-full rounded-lg bg-yellow-500 text-sm font-semibold text-neutral-950 sm:text-base">Waiting for your PIN</Button>
                     ) : (
                       <Button
                         onClick={handlePlaceOrder}
                         disabled={isProcessingPayment || paymentLinkGenerated}
-                        className="h-11 w-full bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 disabled:opacity-50 sm:text-base"
+                        className="h-12 w-full rounded-lg bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 disabled:opacity-50 sm:text-base"
                       >
                         {isProcessingPayment ? 'Sending securely' : paymentError ? t('checkout.tryAgain') : `Pay ${formatPrice(orderTotal)}`}
                       </Button>
                     )
                   ) : (
-                    <Button onClick={handleNext} className="h-11 w-full bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 sm:text-base">
+                    <Button onClick={handleNext} className="h-12 w-full rounded-lg bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 sm:text-base">
                       {t('checkout.continue')}
                     </Button>
                   )}
@@ -2529,10 +2511,68 @@ function CheckoutPageContent() {
               </div>
             )}
           </div>
+
+          <aside className="order-1 space-y-4 lg:sticky lg:top-6 lg:order-2">
+            <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-neutral-100 px-5 py-4">
+                <h2 className="text-base font-bold">Your order</h2>
+                <p className="text-sm font-medium text-neutral-500">{summaryItems.length} item{summaryItems.length === 1 ? "" : "s"}</p>
+              </div>
+              <div className="max-h-80 divide-y divide-neutral-100 overflow-y-auto px-5">
+                {summaryItems.length === 0 ? (
+                  <p className="py-6 text-sm text-neutral-500">Your cart is empty.</p>
+                ) : summaryItems.map((item) => (
+                  <div key={item.key} className="flex items-center gap-3 py-3">
+                    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-neutral-100">
+                      {item.image ? <LazyImage src={item.image} alt="" width={64} height={64} className="h-16 w-16 object-cover" /> : null}
+                      <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-neutral-950 px-1 text-[11px] font-bold text-white">{item.quantity}</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{item.name}</p>
+                      {item.variant ? <p className="truncate text-xs text-neutral-500">{item.variant}</p> : null}
+                    </div>
+                    <p className="text-sm font-semibold tabular-nums">{formatPrice(item.total)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-2 border-t border-neutral-100 px-5 py-4 text-sm">
+                <div className="flex justify-between"><span className="text-neutral-500">Subtotal</span><span className="font-medium tabular-nums">{formatPrice(displaySubtotal)}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500">{deliveryOption === "pickup" ? "Store pickup" : "Delivery"}</span><span className="font-medium">{shippingFeeLineLoading && deliveryOption === "shipping" ? "…" : deliveryOption === "pickup" || shippingFee === 0 ? "Free" : formatPrice(shippingFee)}</span></div>
+                {promotionDiscount > 0 && (
+                  <div className="flex justify-between text-green-700"><span>Discount</span><span className="font-medium tabular-nums">-{formatPrice(promotionDiscount)}</span></div>
+                )}
+                <div className="flex items-end justify-between border-t border-neutral-100 pt-3">
+                  <span className="font-semibold">Total due now</span>
+                  <span className="text-xl font-bold tabular-nums">{formatPrice(orderTotal)}</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold">Payment</h2>
+                <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Snippe</span>
+              </div>
+              <div className="mt-3 rounded-xl border-2 border-neutral-950 p-3">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-yellow-400 text-neutral-950"><Smartphone className="h-4 w-4" /></span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">Mobile money</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">The request goes to {paymentPhone || "your phone"}. Your PIN stays on the phone.</p>
+                  </div>
+                  <Check className="h-4 w-4 shrink-0 text-neutral-950" />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {mobileNetworks.map((network) => (
+                    <span key={network} className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", detectedNetwork === network ? "bg-yellow-400 text-neutral-950" : "bg-neutral-100 text-neutral-600")}>{network}</span>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-neutral-500">{detectedNetwork ? `This number is ${detectedNetwork}.` : "The network is read from the phone number."}</p>
+              </div>
+            </section>
+          </aside>
         </div>
       </div>
-
-      <ComingSoonModal />
     </>
     )}
     </div>

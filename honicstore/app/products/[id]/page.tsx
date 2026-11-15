@@ -52,7 +52,6 @@ import {
   X,
   ImageIcon,
   User,
-  Coins,
   MessageSquare,
   Ticket,
   Play,
@@ -2833,12 +2832,6 @@ function ProductDetailPageContent() {
                     onClick={() => openAuthModal('login')}
                   >
                     <Package className="w-4 h-4 mr-2" /> My Orders
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={darkHeaderFooterClasses.dropdownItemHoverBg}
-                    onClick={() => openAuthModal('login')}
-                  >
-                    <Coins className="w-4 h-4 mr-2" /> My Coins
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className={darkHeaderFooterClasses.dropdownItemHoverBg}

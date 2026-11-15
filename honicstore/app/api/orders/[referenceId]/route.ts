@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
 import { validateAuth } from '@/lib/auth-server'
 import { getSnippePayment } from '@/lib/snippe-api'
+import { sendPaidOrderEmails } from '@/lib/customer-emails'
 import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 // GET /api/orders/[referenceId] - Get order details by reference ID
@@ -239,6 +240,7 @@ export async function PATCH(
       if (!updatedOrder) {
         return NextResponse.json({ success: true, duplicate: true })
       }
+      void sendPaidOrderEmails(supabase, updatedOrder)
       if (order.payment_status !== 'paid' && order.payment_status !== 'success') {
         try {
           logger.log('📦 Reducing stock for retry payment via return URL:', order.id)

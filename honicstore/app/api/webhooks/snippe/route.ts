@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { logger } from "@/lib/logger"
 import { getSnippePayment, normalizeOrderReference, tzsAmount, verifySnippeWebhook } from "@/lib/snippe-api"
 import { processPaidOrderStockAndCart } from "@/lib/paid-order"
+import { sendPaidOrderEmails, sendSupplierPlanReceipt } from "@/lib/customer-emails"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid webhook signature" }, { status: 401 })
     }
 
-    const event = JSON.parse(rawBody) as { id?: string; type?: string; data?: Record<string, any> }
+    const event = JSON.parse(rawBody) as { id?: string; type?: string; data?: Record<string, unknown> }
     const data = event.data || {}
     const eventType = String(event.type || request.headers.get("x-webhook-event") || "").toLowerCase()
     const reportedStatus = String(data.status || "").toLowerCase()
@@ -52,9 +53,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, duplicate: true })
     }
 
-    const claimedReference = normalizeOrderReference(String(data.metadata?.order_reference || data.metadata?.order_id || ""))
+    const metadata = data.metadata && typeof data.metadata === "object" ? data.metadata as Record<string, unknown> : {}
+    const claimedReference = normalizeOrderReference(String(metadata.order_reference || metadata.order_id || ""))
     const paymentReference = String(data.reference || "")
-    if (!claimedReference || !paymentReference) {
+    if (!paymentReference) {
       return NextResponse.json({ error: "Payment could not be matched" }, { status: 400 })
     }
 
@@ -68,22 +70,20 @@ export async function POST(request: NextRequest) {
       if (!verified || verified.status !== "completed" || verified.currency !== "TZS" || verified.amount == null) {
         return NextResponse.json({ error: "Payment was not confirmed by Snippe" }, { status: 401 })
       }
-      if (verifiedReference && verifiedReference !== claimedReference) {
+      if (claimedReference && verifiedReference && verifiedReference !== claimedReference) {
         return NextResponse.json({ error: "Payment does not belong to this order" }, { status: 401 })
       }
     }
 
     const supabase = await import("@/lib/supabase-server").then((mod) => mod.getSupabaseClient())
-    if (paid) {
-      const { data: reused } = await supabase
-        .from("orders")
-        .select("id")
-        .eq("clickpesa_transaction_id", paymentReference)
-        .limit(1)
-      if (reused?.length) return NextResponse.json({ success: true, duplicate: true })
+    const orderResult = claimedReference
+      ? await supabase.from("orders").select("*").eq("reference_id", claimedReference).maybeSingle()
+      : { data: null }
+    let order = orderResult.data
+    if (!order) {
+      const byPayment = await supabase.from("orders").select("*").eq("clickpesa_transaction_id", paymentReference).maybeSingle()
+      order = byPayment.data
     }
-    let orderResult = await supabase.from("orders").select("*").eq("reference_id", claimedReference).maybeSingle()
-    const order = orderResult.data
 
     if (!order) {
       const profileResult = await supabase
@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
         .in("payment_status", ["pending", "failed"])
         .select("id")
       if (!updated?.length) return NextResponse.json({ success: true, duplicate: true })
+      if (paid) void sendSupplierPlanReceipt(supabase, profile.id)
       return NextResponse.json({ success: true })
     }
 
@@ -137,7 +138,10 @@ export async function POST(request: NextRequest) {
       .select("id")
     if (claimError) return NextResponse.json({ error: "Failed to update order" }, { status: 500 })
     if (!claimed?.length) return NextResponse.json({ success: true, duplicate: true })
-    if (paid) await processPaidOrderStockAndCart(supabase, order)
+    if (paid) {
+      await processPaidOrderStockAndCart(supabase, order)
+      void sendPaidOrderEmails(supabase, order)
+    }
 
     return NextResponse.json({ success: true, payment_status: paid ? "paid" : "failed" })
   } catch (error) {

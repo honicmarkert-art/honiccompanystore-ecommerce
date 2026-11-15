@@ -28,7 +28,6 @@ import {
   RefreshCcw,
   HelpCircle,
   ClipboardList,
-  Coins,
   User,
   Palette,
   Heart,

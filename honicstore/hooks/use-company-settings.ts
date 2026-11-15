@@ -32,6 +32,11 @@ const DEFAULT_COMPANY_SETTINGS = {
   contactEmail: process.env.CONTACT_EMAIL || "contact@honic-co.com",
   contactPhone: "+255 123 456 789",
   address: "Dar es Salaam, Tanzania",
+  socialLinks: {
+    facebook: "",
+    instagram: "",
+    youtube: "",
+  },
 
   // Public API extras (footer, product shell, etc.)
   currency: "TZS",
@@ -133,6 +138,7 @@ export function useCompanySettings() {
     contactEmail: settings.contactEmail,
     contactPhone: settings.contactPhone,
     address: settings.address,
+    socialLinks: settings.socialLinks,
     productsPerRowMobile: 3,
     productCardSpacing: 4,
     productCardRadius: 0.5,

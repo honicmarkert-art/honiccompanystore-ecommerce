@@ -70,6 +70,7 @@ export async function GET(request: NextRequest) {
         contact_email,
         contact_phone,
         address,
+        social_links,
         currency,
         timezone,
         language,
@@ -111,6 +112,11 @@ export async function GET(request: NextRequest) {
       contactEmail: data?.contact_email || '',
       contactPhone: data?.contact_phone || '',
       address: data?.address || '',
+      socialLinks: {
+        facebook: typeof data?.social_links?.facebook === 'string' ? data.social_links.facebook : '',
+        instagram: typeof data?.social_links?.instagram === 'string' ? data.social_links.instagram : '',
+        youtube: typeof data?.social_links?.youtube === 'string' ? data.social_links.youtube : '',
+      },
       // Localization
       currency: data?.currency || 'TZS',
       timezone: data?.timezone || 'Africa/Dar_es_Salaam',

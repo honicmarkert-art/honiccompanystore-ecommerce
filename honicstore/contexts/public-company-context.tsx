@@ -27,6 +27,7 @@ interface PublicCompanyContextType {
   contactEmail: string
   contactPhone: string
   address: string
+  socialLinks: { facebook: string; instagram: string; youtube: string }
   // Localization
   currency: string
   timezone: string
@@ -66,6 +67,7 @@ export function PublicCompanyProvider({ children }: { children: ReactNode }) {
     contactEmail: ctx.contactEmail,
     contactPhone: ctx.contactPhone,
     address: ctx.address,
+    socialLinks: ctx.socialLinks || { facebook: "", instagram: "", youtube: "" },
     currency: ctx.currency,
     timezone: ctx.timezone,
     language: ctx.language,

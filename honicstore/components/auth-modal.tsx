@@ -1029,11 +1029,11 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login', redirectUrl }
                   />
                   <Label htmlFor="terms" className="text-xs text-gray-900 dark:text-gray-100">
                     I agree to the{' '}
-                    <Link href="/services/terms-of-service" className="text-orange-500 hover:text-orange-600 underline" onClick={(e) => { e.stopPropagation(); onClose(); }}>
+                    <Link href="/terms" className="text-orange-500 hover:text-orange-600 underline" onClick={(e) => { e.stopPropagation(); onClose(); }}>
                       Terms
                     </Link>{' '}
                     and{' '}
-                    <Link href="/services/privacy-policy" className="text-orange-500 hover:text-orange-600 underline" onClick={(e) => { e.stopPropagation(); onClose(); }}>
+                    <Link href="/privacy" className="text-orange-500 hover:text-orange-600 underline" onClick={(e) => { e.stopPropagation(); onClose(); }}>
                       Privacy
                     </Link>
                   </Label>

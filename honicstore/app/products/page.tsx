@@ -78,7 +78,6 @@ import {
   ChevronRight,
   MessageSquare,
   CreditCard,
-  Coins,
   Ticket,
   Settings,
   MoreHorizontal,
@@ -87,7 +86,6 @@ import {
   Sun,
   UserPlus,
   Sparkles,
-  Compass,
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -3072,18 +3070,6 @@ function ProductsPageContent() {
               >
                 <Sparkles className="w-3 h-3 md:w-3.5 md:h-3.5 lg:w-4 lg:h-4" />
                 AI Sourcing
-              </Link>
-              <Link 
-                href="/discover" 
-                className={cn(
-                  "text-sm md:text-xs lg:text-base font-medium whitespace-nowrap inline-flex items-center justify-center gap-1",
-                  "transition-all duration-300 ease-in-out",
-                  "transform hover:scale-110",
-                  cn(themeClasses.mainText, "hover:text-yellow-500")
-                )}
-              >
-                <Compass className="w-3 h-3 md:w-3.5 md:h-3.5 lg:w-4 lg:h-4" />
-                Discovery
               </Link>
             </div>
             {desktopVisibleCategories.map((cat: any) => (

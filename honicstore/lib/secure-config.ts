@@ -39,7 +39,6 @@ const envSchema = z.object({
   TECH_EMAIL: z.string().email('Invalid tech email').optional(),
   LEGAL_EMAIL: z.string().email('Invalid legal email').optional(),
   PRIVACY_EMAIL: z.string().email('Invalid privacy email').optional(),
-  DPO_EMAIL: z.string().email('Invalid DPO email').optional(),
   SECURITY_EMAIL: z.string().email('Invalid security email').optional(),
   NOREPLY_EMAIL: z.string().email('Invalid noreply email').optional(),
   SMTP_SENDER_EMAIL_NOREPLY: z.string().email('Invalid SMTP sender noreply email').optional(),

@@ -20,7 +20,6 @@ const rateLimitStore = new Map<string, RateLimitEntry>()
 const rateLimitConfigs: Record<string, RateLimitConfig> = {
   // Authentication endpoints - stricter limits
   '/api/auth/login': { windowMs: 15 * 60 * 1000, maxRequests: 5, blockDurationMs: 30 * 60 * 1000 },
-  '/api/auth/register': { windowMs: 60 * 60 * 1000, maxRequests: 3, blockDurationMs: 60 * 60 * 1000 },
   
   // Payment endpoints - very strict
   '/api/payment': { windowMs: 5 * 60 * 1000, maxRequests: 10, blockDurationMs: 60 * 60 * 1000 },

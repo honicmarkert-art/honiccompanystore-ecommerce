@@ -13,7 +13,6 @@ import {
   Heart, 
   MessageCircle, 
   CreditCard, 
-  Coins, 
   Ticket,
   Settings,
   LogOut,
@@ -65,8 +64,7 @@ function AccountPageContent() {
   const { items: savedLaterItems } = useSavedLater()
   const [activeCoupons, setActiveCoupons] = useState<Coupon[]>([])
   const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
-  const [coins] = useState<number | null>(null)
-  const [unreadMessages] = useState(0)
+  const [unreadMessages, setUnreadMessages] = useState(0)
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const [fullName, setFullName] = useState('')
@@ -80,7 +78,26 @@ function AccountPageContent() {
   const [password2, setPassword2] = useState('')
   const [isChangingPassword, setIsChangingPassword] = useState(false)
 
-  useEffect(() => { setActiveCoupons([]) }, [])
+  useEffect(() => {
+    fetch('/api/promotions', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        const rows = Array.isArray(data.promotions) ? data.promotions : []
+        setActiveCoupons(rows.slice(0, 4).map((row: { id: string; code: string; discount_type: string; discount_value: number; end_date: string }) => ({
+          id: String(row.id),
+          code: row.code,
+          discount: Number(row.discount_value) || 0,
+          type: row.discount_type === 'percentage' ? 'percentage' as const : 'fixed' as const,
+          validUntil: new Date(row.end_date),
+          isUsed: false,
+        })))
+      })
+      .catch(() => setActiveCoupons([]))
+    fetch('/api/notifications?unread_only=true', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => setUnreadMessages(Number(data.unreadCount) || 0))
+      .catch(() => setUnreadMessages(0))
+  }, [])
 
   // Load profile from API (requires supabase access token)
   useEffect(() => {
@@ -263,20 +280,6 @@ function AccountPageContent() {
         </Card>
 
         <Card>
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <Coins className="w-6 h-6 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">My Coins</p>
-                <p className="text-2xl font-bold">{coins}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
           <CardContent className="p-6">
             <div className="flex items-center space-x-3">
               <div className="p-2 bg-red-100 rounded-lg">
@@ -382,6 +385,7 @@ function AccountPageContent() {
               <div key={coupon.id} className="p-4 border rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-mono font-bold text-lg">{coupon.code}</span>
+            {activeCoupons.length === 0 ? <p className="text-sm text-muted-foreground">No active coupons.</p> : null}
                   <Badge variant="outline">
                     {coupon.type === 'percentage' ? `${coupon.discount}%` : `$${coupon.discount}`}
                   </Badge>

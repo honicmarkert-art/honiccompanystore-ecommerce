@@ -316,7 +316,7 @@ function AuthCallbackContent() {
                       isNewUser = timeDiff < 5 * 60 * 1000
                     }
                     
-                    if (isNewUser && data.user?.email) {
+                    if (isNewUser && data.user?.email && !data.user.user_metadata?.account_notice_sent) {
                       const response = await fetch('/api/auth/send-welcome-email', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

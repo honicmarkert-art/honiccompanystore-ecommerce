@@ -52,14 +52,11 @@ import {
   MapPin,
   MessageSquare,
   CreditCard,
-  Coins,
   Ticket,
   Settings,
   Heart,
   Facebook,
-  Twitter,
   Instagram,
-  Linkedin,
   Youtube,
   ArrowRight,
   CheckCircle,
@@ -313,34 +310,28 @@ export default function LandingPage() {
       { name: 'Contact Us', href: '/contact' },
     ],
     services: [
-      { name: 'Electronics Supply', href: '/services/electronics' },
-      { name: 'Prototyping Services', href: '/services/prototyping' },
-      { name: 'PCB Printing', href: '/services/pcb' },
-      { name: 'AI Consultancy', href: '/services/ai' }
+      { name: 'STEM Training Kits', href: '/services/stem-kits' }
     ],
     support: [
       { name: 'Help Center', href: '/support' },
-      { name: 'Order Tracking', href: '/tracking' },
-      { name: 'Returns & Refunds', href: '/returns' },
-      { name: 'Shipping Info', href: '/shipping' },
-      { name: 'Technical Support', href: '/support' }
+      { name: 'Order Tracking', href: '/support/order-tracking' },
+      { name: 'Returns & Refunds', href: '/support/returns-refunds' },
+      { name: 'Shipping Info', href: '/support/shipping-info' },
+      { name: 'Technical Support', href: '/support/technical-support' }
     ],
     legal: [
       { name: 'Privacy Policy', href: '/privacy' },
       { name: 'Terms of Service', href: '/terms' },
-      { name: 'Cookie Policy', href: '/cookies' },
-      { name: 'GDPR Compliance', href: '/gdpr' },
-      { name: 'Data Protection', href: '/data-protection' }
+      { name: 'Cookie Policy', href: '/cookies' }
     ]
   }
 
+  const savedSocial = adminSettings?.socialLinks || {}
   const socialLinks = [
-    { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, href: '/social/facebook' },
-    { name: 'Twitter', icon: <Twitter className="w-5 h-5" />, href: '/social/twitter' },
-    { name: 'Instagram', icon: <Instagram className="w-5 h-5" />, href: '/social/instagram' },
-    { name: 'LinkedIn', icon: <Linkedin className="w-5 h-5" />, href: '/social/linkedin' },
-    { name: 'YouTube', icon: <Youtube className="w-5 h-5" />, href: '/social/youtube' }
-  ]
+    { name: 'Facebook', icon: <Facebook className="w-5 h-5" />, href: savedSocial.facebook || '' },
+    { name: 'Instagram', icon: <Instagram className="w-5 h-5" />, href: savedSocial.instagram || '' },
+    { name: 'YouTube', icon: <Youtube className="w-5 h-5" />, href: savedSocial.youtube || '' },
+  ].filter((social) => /^https?:\/\//i.test(social.href))
 
   return (
     <div className="min-h-screen bg-gray-900 text-white" suppressHydrationWarning>
@@ -938,6 +929,8 @@ export default function LandingPage() {
                   <a
                     key={index}
                     href={social.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="w-8 h-8 sm:w-10 sm:h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-orange-500 transition-colors"
                     aria-label={social.name}
                   >
@@ -1312,16 +1305,7 @@ export default function LandingPage() {
                         <span className="text-white font-medium">Payment</span>
                         <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
                       </Link>
-                      <Link 
-                        href="/account/coins"
-                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                        onClick={() => setIsHamburgerMenuOpen(false)}
-                      >
-                        <Coins className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                        <span className="text-white font-medium">My Coins</span>
-                        <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                      </Link>
-                      <Link 
+                      <Link
                         href="/account/coupons"
                         className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
                         onClick={() => setIsHamburgerMenuOpen(false)}

@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { notifyAllAdmins } from '@/lib/notification-helpers'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
+import { sendAccountCreatedNotice } from '@/lib/user-email-service'
 import { validateEmailDomain, EMAIL_DOMAIN_TYPOS } from '@/lib/email-validation'
 import { validateEmailDomainWithTimeout } from '@/lib/email-domain-validator'
 
@@ -492,6 +493,28 @@ export async function POST(request: NextRequest) {
           logger.error('Error assigning plan during registration:', planAssignError)
           // Don't fail registration if plan assignment fails
         }
+      }
+
+      if (userData?.id && userData.email) {
+        void sendAccountCreatedNotice({
+          userEmail: userData.email,
+          name,
+          isSupplier: !!isSupplier,
+        }).then(async (notice) => {
+          if (!notice.userSent) return
+          try {
+            await getSupabaseClient().auth.admin.updateUserById(userData.id, {
+              user_metadata: {
+                ...(userData.user_metadata || {}),
+                account_notice_sent: true,
+              },
+            })
+          } catch (markError) {
+            logger.error('Could not mark account notice as sent:', markError)
+          }
+        }).catch((emailError) => {
+          logger.error('Account creation email failed:', emailError)
+        })
       }
 
       // Notify admins when a supplier registers

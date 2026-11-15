@@ -1,31 +1,54 @@
-import { GraduationCap } from 'lucide-react'
-import { ComingSoonPageClient } from '@/components/coming-soon-page-client'
-import { getCompanySettings } from '@/lib/company-settings-server'
+"use client"
 
-// Force static generation with ISR (revalidate every 24 hours)
-export const dynamic = 'force-static'
-export const revalidate = 86400
+import Link from 'next/link'
+import { GraduationCap, ArrowLeft } from 'lucide-react'
+import { usePublicCompanyContext } from '@/contexts/public-company-context'
 
-export default async function StemKitsPage() {
-  const companySettings = await getCompanySettings()
-  
+const kits = [
+  "Complete STEM curriculum kits",
+  "Hands-on learning projects",
+  "Educational resources and guides",
+  "Teacher training programs",
+  "Student assessment tools",
+  "Custom curriculum development",
+]
+
+export default function StemKitsPage() {
+  const { companyName } = usePublicCompanyContext()
+
   return (
-    <ComingSoonPageClient
-      title="STEM Training Kits"
-      description="Educational STEM kits and training programs. Comprehensive learning solutions for students and educators in science, technology, engineering, and mathematics."
-      icon={<GraduationCap className="w-10 h-10 text-white" />}
-      category="Service"
-      estimatedLaunch="Q2 2024"
-      features={[
-        "Complete STEM curriculum kits",
-        "Hands-on learning projects",
-        "Educational resources and guides",
-        "Teacher training programs",
-        "Student assessment tools",
-        "Custom curriculum development"
-      ]}
-      companyName={companySettings.companyName}
-      companyColor={companySettings.companyColor}
-    />
+    <main className="min-h-screen bg-white text-neutral-950">
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+        <Link href="/home" className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-700 hover:text-yellow-600">
+          <ArrowLeft className="h-4 w-4" />
+          Home
+        </Link>
+        <div className="mt-6 flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center bg-yellow-500 text-neutral-950">
+            <GraduationCap className="h-6 w-6" />
+          </div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-neutral-500">{companyName || 'Honic Company Limited'}</p>
+        </div>
+        <h1 className="mt-4 text-2xl font-bold sm:text-3xl">STEM Training Kits</h1>
+        <p className="mt-3 text-base text-neutral-700">
+          Educational STEM kits and training programs for students and educators in science, technology, engineering, and mathematics.
+        </p>
+        <ul className="mt-8 grid gap-3 sm:grid-cols-2">
+          {kits.map((item) => (
+            <li key={item} className="border border-neutral-200 px-4 py-3 text-sm font-semibold">
+              {item}
+            </li>
+          ))}
+        </ul>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link href="/contact" className="bg-yellow-500 px-4 py-2 text-sm font-semibold text-neutral-950 hover:bg-yellow-600">
+            Ask about a kit
+          </Link>
+          <Link href="/products" className="border border-neutral-300 px-4 py-2 text-sm font-semibold hover:bg-neutral-100">
+            Shop products
+          </Link>
+        </div>
+      </div>
+    </main>
   )
 }

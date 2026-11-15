@@ -27,6 +27,7 @@ interface CompanyContextType {
   contactEmail: string
   contactPhone: string
   address: string
+  socialLinks: { facebook: string; instagram: string; youtube: string }
   currency: string
   timezone: string
   language: string
@@ -122,6 +123,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     contactEmail: companySettings.contactEmail,
     contactPhone: companySettings.contactPhone,
     address: companySettings.address,
+    socialLinks: companySettings.socialLinks || { facebook: "", instagram: "", youtube: "" },
     currency: companySettings.currency,
     timezone: companySettings.timezone,
     language: companySettings.language,

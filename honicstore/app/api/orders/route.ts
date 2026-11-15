@@ -6,6 +6,7 @@ import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { securityUtils } from '@/lib/secure-config'
 import { validateAuth } from '@/lib/auth-server'
 import { emailService } from '@/lib/email-service'
+import { getAdminNoticeEmails, sendOrderPlacedWelcomeEmail } from '@/lib/user-email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { calculateShippingFee, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
 import { ShortTtlCache } from '@/lib/short-ttl-cache'
@@ -676,11 +677,11 @@ export async function POST(request: NextRequest) {
 
     // Send order notification email to admin in background (doesn't block checkout response)
     void (async () => {
+      const customerEmailRaw = orderData.customerEmail || orderData.shippingAddress?.email || orderData.billingAddress?.email || ''
+      const customerEmailAddress = typeof customerEmailRaw === 'string' ? customerEmailRaw.trim() : ''
       try {
 
-      const adminEmail = process.env.NEXT_PUBLIC_ORDER_EMAIL
-      if (!adminEmail) {
-      } else {
+      const adminEmails = getAdminNoticeEmails()
         // Format order items for email
         const orderItemsHtml = orderItemsData.map((item, index) => `
           <tr>
@@ -828,7 +829,7 @@ Order ID: ${order.id}
 
         // Send email using Resend API
         const emailResult = await emailService.sendEmailViaResend({
-          to: adminEmail,
+          to: adminEmails,
           from: senderEmail,
           subject: emailSubject,
           text: emailText,
@@ -836,40 +837,56 @@ Order ID: ${order.id}
           replyTo: customerEmail !== 'No email provided' ? customerEmail : undefined
         })
 
-        if (emailResult.success) {
-        } else {
+        if (!emailResult.success) {
           logger.error('Failed to send order notification email', new Error(emailResult.error || 'Unknown error'), {
             orderId: order.id,
             orderNumber: order.order_number
           })
         }
-      }
-      } catch (emailError: any) {
-        // Log email error but don't fail the order creation
+      } catch (emailError) {
         logger.error('Failed to send order notification email', emailError, {
           orderId: order.id,
-          userId: orderData.userId,
+          orderNumber: order.order_number,
         })
+      }
+      if (customerEmailAddress.includes('@')) {
+        try {
+          const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'
+          const customerResult = await sendOrderPlacedWelcomeEmail(customerEmailAddress, {
+            orderNumber: order.order_number,
+            orderDate: new Date(order.created_at).toLocaleString('en-TZ', { timeZone: 'Africa/Dar_es_Salaam' }),
+            totalAmount: Number(order.total_amount) || 0,
+            itemsCount: orderItemsData.length,
+            orderUrl: `${siteUrl}/checkout/success?orderReference=${encodeURIComponent(order.reference_id || '')}`,
+          })
+          if (!customerResult.success) {
+            logger.error('Failed to send customer order email', new Error(customerResult.error || 'Unknown error'), {
+              orderId: order.id,
+              orderNumber: order.order_number,
+            })
+          }
+        } catch (customerEmailError) {
+          logger.error('Failed to send customer order email', customerEmailError, {
+            orderId: order.id,
+            userId: orderData.userId,
+          })
+        }
       }
     })()
 
-    // Return order data with stored IDs
-    const responseData = {
-      success: true,
+    return NextResponse.json({
       order: {
         id: order.id,
         orderNumber: order.order_number,
-        referenceId: order.reference_id, // Use stored reference ID
-        pickupId: order.pickup_id,       // Use stored pickup ID
+        referenceId: order.reference_id,
+        pickupId: order.pickup_id,
         totalAmount: order.total_amount,
         paymentStatus: order.payment_status,
         status: order.status,
         deliveryOption: order.delivery_option,
         createdAt: order.created_at,
       },
-    }
-
-    return NextResponse.json(responseData)
+    })
 
   } catch (error: any) {
     const message = error?.message || (typeof error === 'string' ? error : 'Unknown error')

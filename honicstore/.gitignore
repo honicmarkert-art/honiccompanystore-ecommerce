@@ -72,3 +72,6 @@ tmp-*
 next-env.d.ts
 .vercel
 # honicstore
+
+.vercel
+.env*
