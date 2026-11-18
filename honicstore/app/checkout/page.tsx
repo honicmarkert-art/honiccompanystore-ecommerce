@@ -1193,15 +1193,11 @@ function CheckoutPageContent() {
                               <div className="flex items-start gap-2">
                                 <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
                                   <div className="relative">
-                                    {product?.image ? (
-                                      <LazyImage
-                                        src={product.image}
-                                        alt={product.name || "Product"}
-                                        width={50}
-                                        height={50}
-                                        className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 hover:border-yellow-500 transition-colors bg-gray-50"
-                                        priority={false}
-                                        quality={80}
+                                    {(variant.image || product?.image) ? (
+                                      <img
+                                        src={variant.image || product?.image}
+                                        alt={product?.name || "Product"}
+                                        className="h-12 w-12 rounded object-cover border border-neutral-200 bg-gray-50 sm:h-16 sm:w-16"
                                       />
                                     ) : (
                                       <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
@@ -2419,13 +2415,13 @@ function CheckoutPageContent() {
   const mobileNetworks = ["Airtel Money", "M-Pesa", "Mixx by Yas", "Halotel"]
 
   const summaryItems = selectedItems.flatMap((item) =>
-    (item.variants || []).map((variant: { variantId?: string | number; variant_name?: string; quantity?: number; price?: number }) => ({
+    (item.variants || []).map((variant: { variantId?: string | number; variant_name?: string; quantity?: number; price?: number; image?: string }) => ({
       key: `${item.productId}-${variant.variantId || variant.variant_name || "item"}`,
       name: item.product?.name || "Item",
       variant: variant.variant_name,
       quantity: variant.quantity || 1,
       total: (variant.price || 0) * (variant.quantity || 1),
-      image: item.product?.image,
+      image: variant.image || item.product?.image || "",
     }))
   )
 
@@ -2523,9 +2519,13 @@ function CheckoutPageContent() {
                   <p className="py-6 text-sm text-neutral-500">Your cart is empty.</p>
                 ) : summaryItems.map((item) => (
                   <div key={item.key} className="flex items-center gap-3 py-3">
-                    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-neutral-100">
-                      {item.image ? <LazyImage src={item.image} alt="" width={64} height={64} className="h-16 w-16 object-cover" /> : null}
-                      <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-neutral-950 px-1 text-[11px] font-bold text-white">{item.quantity}</span>
+                    <div className="relative h-16 w-16 shrink-0 rounded-lg bg-neutral-100">
+                      {item.image ? (
+                        <img src={item.image} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                      ) : (
+                        <div className="flex h-16 w-16 items-center justify-center text-neutral-300"><Package className="h-5 w-5" /></div>
+                      )}
+                      <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-neutral-950 px-1 text-[11px] font-bold text-white">{item.quantity}</span>
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{item.name}</p>
@@ -2549,10 +2549,7 @@ function CheckoutPageContent() {
             </section>
 
             <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold">Payment</h2>
-                <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Snippe</span>
-              </div>
+              <h2 className="text-base font-bold">Payment</h2>
               <div className="mt-3 rounded-xl border-2 border-neutral-950 p-3">
                 <div className="flex items-start gap-3">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-yellow-400 text-neutral-950"><Smartphone className="h-4 w-4" /></span>

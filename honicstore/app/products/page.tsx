@@ -23,6 +23,7 @@ import { LazyImage } from "@/components/lazy-image"
 import { ImagePreloader } from "@/components/image-preloader"
 import { OptimizedLink } from "@/components/optimized-link"
 import { ProductCard } from "@/components/product-card"
+import { AiProductFinder } from "@/components/ai-product-finder"
 import { VirtualizedProductGrid } from "@/components/virtualized-product-grid"
 import { useOptimizedNavigation } from "@/components/optimized-link"
 import { useRobustApi } from "@/hooks/use-robust-api"
@@ -2444,6 +2445,16 @@ function ProductsPageContent() {
                 
           </div>
             </form>
+            <AiProductFinder
+              onQuery={(query) => {
+                setSearchTerm(query)
+                const params = new URLSearchParams(urlSearchParams?.toString() || "")
+                if (query.trim().length >= 2) params.set("search", query.trim())
+                else params.delete("search")
+                params.delete("returnTo")
+                router.replace(`/products${params.toString() ? `?${params.toString()}` : ""}`, { scroll: false })
+              }}
+            />
           </div>
 
           {/* Navigation Links - Near Search Bar */}
