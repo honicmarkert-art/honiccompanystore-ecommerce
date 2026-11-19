@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * Fix invoice numbers to follow global sequential pattern: INV-{year}-{globalNumber}
+ * Fix invoice numbers to follow the pattern: INV-{year}-{clientInitials}-HCIR-{globalCounter}
  *
- * This script reorganizes all invoices to use a continuous global counter per year,
- * independent of client names.
+ * This script reorganizes all invoices to use a global counter independent of client name,
+ * while still including client initials in the invoice number.
  *
  * Example:
- * - Invoice 1 (Emanuel Kaiga) -> INV-2026-0001
- * - Invoice 2 (Hosea) -> INV-2026-0002
- * - Invoice 3 (Juma) -> INV-2026-0003
+ * - Invoice 1 (Emanuel Kaiga) -> INV-2026-EK-HCIR-0001
+ * - Invoice 2 (Hosea) -> INV-2026-H-HCIR-0002
+ * - Invoice 3 (Juma) -> INV-2026-J-HCIR-0003
+ * - Invoice 4 (Emanuel again) -> INV-2026-EK-HCIR-0004 (not 0002!)
  *
  * Usage: npx ts-node scripts/fix-invoice-numbers.ts
  */
@@ -27,6 +28,16 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 })
 
+function clientInitials(name: string): string {
+  const skip = new Set(["of", "and", "the", "for", "a", "an"])
+  const letters = String(name || "")
+    .split(/[^A-Za-z0-9]+/)
+    .map((word) => word.trim())
+    .filter((word) => word && !skip.has(word.toLowerCase()))
+    .map((word) => word[0].toUpperCase())
+  return letters.join("").slice(0, 4)
+}
+
 interface Invoice {
   id: string
   invoice_number: string
@@ -35,7 +46,7 @@ interface Invoice {
 }
 
 async function fixInvoiceNumbers() {
-  console.log("Starting global sequential invoice number fix...")
+  console.log("Starting invoice number fix with global counter...")
   console.log("")
 
   const year = 2026
@@ -61,14 +72,16 @@ async function fixInvoiceNumbers() {
   console.log(`Found ${invoices.length} invoices to reorganize:`)
   console.log("")
 
-  const updates: Array<{ id: string; oldNumber: string; newNumber: string; clientName: string; createdAt: string }> = []
+  const updates: Array<{ id: string; oldNumber: string; newNumber: string; clientName: string; initials: string; createdAt: string }> = []
 
-  // Assign new global sequential numbers based on creation date
+  // Assign new numbers with global counter but keep client initials
   for (let i = 0; i < invoices.length; i++) {
     const invoice = invoices[i] as Invoice
-    const newNumber = `INV-${year}-${String(i + 1).padStart(4, "0")}`
+    const initials = clientInitials(invoice.client_name)
+    const mark = initials ? `${initials}-HCIR` : "HCIR"
+    const newNumber = `INV-${year}-${mark}-${String(i + 1).padStart(4, "0")}`
 
-    console.log(`${i + 1}. ${invoice.client_name}`)
+    console.log(`${i + 1}. ${invoice.client_name} (${initials})`)
     console.log(`   Old: ${invoice.invoice_number}`)
     console.log(`   New: ${newNumber}`)
     console.log(`   Created: ${invoice.created_at}`)
@@ -79,6 +92,7 @@ async function fixInvoiceNumbers() {
       oldNumber: invoice.invoice_number,
       newNumber,
       clientName: invoice.client_name,
+      initials,
       createdAt: invoice.created_at,
     })
 
@@ -98,14 +112,17 @@ async function fixInvoiceNumbers() {
     }
   }
 
-  console.log("\n" + "=".repeat(70))
+  console.log("\n" + "=".repeat(80))
   console.log("SUMMARY OF CHANGES:")
-  console.log("=".repeat(70))
+  console.log("=".repeat(80))
   updates.forEach((u, idx) => {
-    console.log(`${idx + 1}. ${u.clientName.padEnd(30)} | ${u.oldNumber.padEnd(25)} → ${u.newNumber}`)
+    console.log(
+      `${String(idx + 1).padStart(2, " ")}. ${u.clientName.padEnd(25)} (${u.initials.padEnd(4)}) | ${u.oldNumber.padEnd(30)} → ${u.newNumber}`
+    )
   })
-  console.log("=".repeat(70))
-  console.log(`\n✓ Successfully reorganized ${updates.length} invoices to global sequential numbering`)
+  console.log("=".repeat(80))
+  console.log(`\n✓ Successfully reorganized ${updates.length} invoices with global counter`)
+  console.log("Note: Counter is GLOBAL across all clients, but client initials are preserved")
 }
 
 fixInvoiceNumbers().catch((err) => {
