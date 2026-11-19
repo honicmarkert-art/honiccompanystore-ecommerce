@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
- * Fix invoice numbers to follow the proper sequence pattern: INV-{year}-{clientInitials}-HCIR-{4digitNumber}
+ * Fix invoice numbers to follow global sequential pattern: INV-{year}-{globalNumber}
  *
- * This script updates invoices that don't follow the new naming convention:
- * - INV-2026-79592 (THERESIA) -> INV-2026-T-HCIR-0001
- * - INV-2026-43621 (Emmanuel Kaiga) -> INV-2026-EK-HCIR-0001
+ * This script reorganizes all invoices to use a continuous global counter per year,
+ * independent of client names.
+ *
+ * Example:
+ * - Invoice 1 (Emanuel Kaiga) -> INV-2026-0001
+ * - Invoice 2 (Hosea) -> INV-2026-0002
+ * - Invoice 3 (Juma) -> INV-2026-0003
  *
  * Usage: npx ts-node scripts/fix-invoice-numbers.ts
  */
@@ -23,24 +27,26 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 })
 
-function clientInitials(name: string): string {
-  const skip = new Set(["of", "and", "the", "for", "a", "an"])
-  const letters = String(name || "")
-    .split(/[^A-Za-z0-9]+/)
-    .map((word) => word.trim())
-    .filter((word) => word && !skip.has(word.toLowerCase()))
-    .map((word) => word[0].toUpperCase())
-  return letters.join("").slice(0, 4)
+interface Invoice {
+  id: string
+  invoice_number: string
+  client_name: string
+  created_at: string
 }
 
 async function fixInvoiceNumbers() {
-  console.log("Starting invoice number fix...")
+  console.log("Starting global sequential invoice number fix...")
+  console.log("")
 
-  // Get all invoices that need fixing
+  const year = 2026
+
+  // Get all invoices for this year, sorted by creation date
   const { data: invoices, error: fetchError } = await supabase
     .from("invoices")
-    .select("id, invoice_number, client_name")
-    .or(`invoice_number.eq.INV-2026-79592,invoice_number.eq.INV-2026-43621`)
+    .select("id, invoice_number, client_name, created_at")
+    .like("invoice_number", `INV-${year}-%`)
+    .order("created_at", { ascending: true })
+    .limit(500)
 
   if (fetchError) {
     console.error("Error fetching invoices:", fetchError)
@@ -48,51 +54,32 @@ async function fixInvoiceNumbers() {
   }
 
   if (!invoices || invoices.length === 0) {
-    console.log("No invoices found that need fixing")
+    console.log("No invoices found for this year")
     return
   }
 
-  console.log(`Found ${invoices.length} invoices to fix:`)
-  invoices.forEach((inv) => console.log(`  - ${inv.invoice_number} (${inv.client_name})`))
+  console.log(`Found ${invoices.length} invoices to reorganize:`)
+  console.log("")
 
-  const updates: Array<{ id: string; oldNumber: string; newNumber: string }> = []
+  const updates: Array<{ id: string; oldNumber: string; newNumber: string; clientName: string; createdAt: string }> = []
 
-  // Fix each invoice
-  for (const invoice of invoices) {
-    const initials = clientInitials(invoice.client_name)
-    const year = 2026
-    const mark = initials ? `${initials}-HCIR` : "HCIR"
+  // Assign new global sequential numbers based on creation date
+  for (let i = 0; i < invoices.length; i++) {
+    const invoice = invoices[i] as Invoice
+    const newNumber = `INV-${year}-${String(i + 1).padStart(4, "0")}`
 
-    // Get the next number for this client
-    const { data: existing, error: countError } = await supabase
-      .from("invoices")
-      .select("invoice_number")
-      .like("invoice_number", `INV-${year}-${mark}-%`)
-      .limit(400)
-
-    if (countError) {
-      console.error(`Error counting invoices for ${invoice.client_name}:`, countError)
-      continue
-    }
-
-    const maxNum = (existing || []).reduce((max: number, row: any) => {
-      const match = String(row?.invoice_number || "").trim().match(new RegExp(`^INV-${year}-${mark}-(\\d+)$`))
-      const number = match ? Number(match[1]) : 0
-      return Number.isFinite(number) ? Math.max(max, number) : max
-    }, 0)
-
-    const newNumber = `INV-${year}-${mark}-${String(maxNum + 1).padStart(4, "0")}`
-
-    console.log(`\nUpdating invoice:`)
-    console.log(`  Client: ${invoice.client_name}`)
-    console.log(`  Initials: ${initials}`)
-    console.log(`  Old number: ${invoice.invoice_number}`)
-    console.log(`  New number: ${newNumber}`)
+    console.log(`${i + 1}. ${invoice.client_name}`)
+    console.log(`   Old: ${invoice.invoice_number}`)
+    console.log(`   New: ${newNumber}`)
+    console.log(`   Created: ${invoice.created_at}`)
+    console.log("")
 
     updates.push({
       id: invoice.id,
       oldNumber: invoice.invoice_number,
       newNumber,
+      clientName: invoice.client_name,
+      createdAt: invoice.created_at,
     })
 
     // Update the invoice
@@ -105,18 +92,20 @@ async function fixInvoiceNumbers() {
       .eq("id", invoice.id)
 
     if (updateError) {
-      console.error(`Error updating invoice ${invoice.invoice_number}:`, updateError)
+      console.error(`❌ Error updating invoice ${invoice.invoice_number}:`, updateError)
     } else {
-      console.log(`  ✓ Updated successfully`)
+      console.log(`   ✓ Updated successfully`)
     }
   }
 
-  console.log("\n" + "=".repeat(60))
-  console.log("Summary of changes:")
-  updates.forEach((u) => {
-    console.log(`  ${u.oldNumber} → ${u.newNumber}`)
+  console.log("\n" + "=".repeat(70))
+  console.log("SUMMARY OF CHANGES:")
+  console.log("=".repeat(70))
+  updates.forEach((u, idx) => {
+    console.log(`${idx + 1}. ${u.clientName.padEnd(30)} | ${u.oldNumber.padEnd(25)} → ${u.newNumber}`)
   })
-  console.log("=".repeat(60))
+  console.log("=".repeat(70))
+  console.log(`\n✓ Successfully reorganized ${updates.length} invoices to global sequential numbering`)
 }
 
 fixInvoiceNumbers().catch((err) => {

@@ -1,43 +1,64 @@
-# Invoice Numbering Fix
+# Invoice Numbering System - Global Sequential
 
-## Problem
+## Overview
 
-The invoicing system was updated to use a standardized invoice numbering format, but some legacy invoices still used the old format:
+The invoicing system now uses **global sequential numbering** where each invoice gets a unique number **independent of the client name**. The counter increments continuously for each new invoice added.
 
-- **INV-2026-79592** (THERESIA)
-- **INV-2026-43621** (Emmanuel Kaiga)
+## Format
 
-## Expected Format
-
-All invoices should follow this pattern:
 ```
-INV-{year}-{clientInitials}-HCIR-{4digitNumber}
+INV-{year}-{4digitNumber}
 ```
 
 Where:
-- `{year}` = Current year (e.g., 2026)
-- `{clientInitials}` = First letter of each significant word in client name (up to 4 letters)
-  - Skip articles: "of", "and", "the", "for", "a", "an"
-  - Examples:
-    - "Swahili DMakers (Pyrameter)" → "SDP"
-    - "Swahili D Makers (Robotic Arm)" → "SDMR"
-    - "Bryan" → "B"
-    - "THERESIA" → "T"
-    - "Emmanuel Kaiga" → "EK"
-- `{4digitNumber}` = Incrementing counter per client (0001, 0002, etc.)
+- `{year}` = Year of invoice (e.g., 2026)
+- `{4digitNumber}` = Continuous counter across all clients
 
-## Current State
+## Examples
 
-| Old Invoice | Client | Should Be |
+| Order | Client | Invoice Number |
 |--|--|--|
-| INV-2026-79592 | THERESIA | INV-2026-T-HCIR-0001 |
-| INV-2026-43621 | Emmanuel Kaiga | INV-2026-EK-HCIR-0001 |
+| 1st | Emanuel Kaiga | INV-2026-0001 |
+| 2nd | Hosea | INV-2026-0002 |
+| 3rd | Juma | INV-2026-0003 |
+| 4th | Emanuel Kaiga | INV-2026-0004 |
+| 5th | Bryan | INV-2026-0005 |
 
-## How to Apply the Fix
+## Previous Format (Deprecated)
+
+The old system used client initials:
+```
+INV-{year}-{clientInitials}-HCIR-{4digitNumber}  ❌ OLD
+```
+
+Examples:
+- `INV-2026-EK-HCIR-0001` (Emanuel Kaiga)
+- `INV-2026-H-HCIR-0001` (Hosea)
+- `INV-2026-J-HCIR-0001` (Juma)
+
+**This format is no longer used.**
+
+## How It Works
+
+### Auto-Increment on New Invoice
+
+When you create a new invoice:
+1. System finds the highest invoice number for the year
+2. Adds 1 to it
+3. Pads to 4 digits
+4. Generates the new invoice number
+
+**Example flow:**
+- Create invoice 1 → `INV-2026-0001` ✓
+- Create invoice 2 → `INV-2026-0002` ✓
+- Create invoice 3 → `INV-2026-0003` ✓
+
+## Applying the Fix
 
 ### Option 1: Automated Script (Recommended)
 
-Run the fix script:
+This script will reorganize all existing invoices to use global sequential numbering:
+
 ```bash
 cd honicstore-admin
 
@@ -49,51 +70,93 @@ export SUPABASE_SERVICE_ROLE_KEY="<your-service-role-key>"
 npx ts-node ../scripts/fix-invoice-numbers.ts
 ```
 
-The script will:
-1. Find all invoices with the old format
-2. Calculate the correct new invoice number based on client name
-3. Update the invoice numbers in the database
-4. Display a summary of all changes
+**What the script does:**
+1. Fetches all invoices for the current year
+2. Sorts them by creation date (oldest first)
+3. Reassigns sequential numbers: 0001, 0002, 0003, ...
+4. Updates the database
+5. Displays a summary of all changes
+
+**Output example:**
+```
+Found 6 invoices to reorganize:
+
+1. Emanuel Kaiga
+   Old: INV-2026-EK-HCIR-0001
+   New: INV-2026-0001
+   ✓ Updated successfully
+
+2. Hosea
+   Old: INV-2026-H-HCIR-0001
+   New: INV-2026-0002
+   ✓ Updated successfully
+...
+```
 
 ### Option 2: Manual Database Update
 
-If you prefer to update manually using Supabase:
+If you prefer SQL, update each invoice manually in Supabase:
 
 ```sql
--- Update THERESIA invoice
+-- Set new sequential numbers based on creation order
 UPDATE invoices
-SET invoice_number = 'INV-2026-T-HCIR-0001'
-WHERE invoice_number = 'INV-2026-79592';
+SET invoice_number = 'INV-2026-0001'
+WHERE id = '<invoice-id-1>' AND created_at <= '<creation-date-1>';
 
--- Update Emmanuel Kaiga invoice
 UPDATE invoices
-SET invoice_number = 'INV-2026-EK-HCIR-0001'
-WHERE invoice_number = 'INV-2026-43621';
+SET invoice_number = 'INV-2026-0002'
+WHERE id = '<invoice-id-2>' AND created_at <= '<creation-date-2>';
+
+-- And so on...
 ```
 
-## Code References
+## Code Changes
 
-The invoice numbering logic is implemented in:
-- **[invoice-sequence.ts](honicstore-admin/lib/invoice-sequence.ts)** - Core numbering logic
-- **[route.ts](honicstore-admin/app/api/admin/invoices/route.ts)** - API endpoint that generates invoice numbers
+### Modified Files
 
-Key functions:
-- `clientInitials()` - Extracts initials from client name
-- `invoiceNumberSeries()` - Generates the numbering pattern
-- `generateNextInvoiceNumber()` - Creates the next invoice number for a client
+1. **[invoice-sequence.ts](honicstore-admin/lib/invoice-sequence.ts)**
+   - Updated `invoiceNumberSeries()` function
+   - Removed client initials from invoice number pattern
+   - Now uses simple global counter: `INV-{year}-####`
+
+### Key Function
+
+```typescript
+export function invoiceNumberSeries(documentKind: string | undefined, year: number, clientName = ""): {
+  if (documentKind === "invoice") {
+    // Global sequential numbering - independent of client name
+    const prefix = `INV-${year}-`
+    return {
+      pattern: new RegExp(`^INV-${year}-(\\d+)$`),
+      prefix,
+      format: (value) => `${prefix}${value}`
+    }
+  }
+  // ... other document types ...
+}
+```
+
+## Notes
+
+- **Client names do NOT affect the invoice number** - only the order of creation
+- **Invoices are assigned numbers by creation date** - oldest first
+- **Different document types** (quotes, delivery notes, reports) keep their own prefixes:
+  - Quotes: `QT-{year}-####`
+  - Delivery Notes: `DN-{year}-####`
+  - Technical Reports: `TR-{year}-####`
+- **Only invoices use the new global sequential system**
 
 ## Verification
 
-After applying the fix:
+After applying the fix, verify:
 
-1. Check the invoices list in the admin dashboard
-2. Verify that all invoices now follow the `INV-YYYY-INITIALS-HCIR-####` pattern
-3. Confirm that the numbers are sequential per client
-4. For reports/payments, ensure the `payload.referenceNumber` field is also updated if needed
+1. ✓ All invoices follow format: `INV-YYYY-####`
+2. ✓ Numbers are sequential: 0001, 0002, 0003, ...
+3. ✓ No client names affect the numbering
+4. ✓ Next new invoice gets the correct next number
 
-## Related Changes
+## Support
 
-This fix is related to the system update referenced in commit:
-> "Point the admin submodule at invoice numbers that follow a renamed client."
-
-The reference number system also supports project categories (FYP, Side, Research) with their own numbering sequences.
+For questions about the invoice numbering system, refer to:
+- [invoice-sequence.ts](honicstore-admin/lib/invoice-sequence.ts) - Core logic
+- [invoices route.ts](honicstore-admin/app/api/admin/invoices/route.ts) - API endpoint

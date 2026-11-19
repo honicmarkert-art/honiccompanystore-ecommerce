@@ -1,0 +1,160 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Amplifier grouped invoice</title>
+    <style>
+      html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
+      * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { font-family: 'Segoe UI', system-ui, Arial, sans-serif; margin: 0; padding: 0; color: #111827; background: #fff; }
+      .page { max-width: 820px; margin: 0 auto; padding: 18px 22px 16px; background: #fff; }
+      .head { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+      .brand { display: flex; align-items: center; gap: 14px; max-width: 62%; }
+      .brand img { height: 64px; max-width: 110px; object-fit: contain; display: block; }
+      .co { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
+      .tag { font-size: 10px; font-weight: 800; color: #374151; letter-spacing: 0.12em; text-transform: uppercase; margin-top: 2px; }
+      .co-addr { margin-top: 6px; padding-left: 8px; border-left: 2px solid #e2e8f0; font-size: 10px; line-height: 1.45; color: #64748b; white-space: pre-line; }
+      .inv-title { font-size: 32px; font-weight: 800; color: #184a96; letter-spacing: 0.04em; line-height: 1; text-align: right; }
+      .url-row { text-align: right; font-size: 9px; font-weight: 600; margin: 8px 0 4px; color: #475569; }
+      .line-rule { position: relative; }
+      .line-bg { border-top: 1px solid #d1d5db; }
+      .line-accent { position: absolute; left: 0; top: 0; width: 96px; border-top: 3px solid #184a96; }
+      .meta { display: flex; justify-content: space-between; margin-top: 16px; gap: 24px; }
+      .to-label { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+      .to-name { font-size: 14px; font-weight: 800; margin: 0; }
+      .inv-meta { text-align: right; }
+      .inv-no { font-size: 13px; font-weight: 800; margin: 0; }
+      .inv-date { font-size: 12px; margin: 3px 0 0; }
+      table { width: 100%; border-collapse: collapse; margin-top: 14px; border: 1px solid #cbd5e1; }
+      th { background: #184a96; color: #fff; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding: 7px 8px; text-align: left; font-weight: 700; border: 1px solid #184a96; }
+      td { border: 1px solid #e5e7eb; padding: 5px 8px; font-size: 11px; }
+      th.r, td.r { text-align: right; }
+      th.c, td.c { text-align: center; }
+      tr.group td { background: #eff6ff; font-weight: 800; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #0f172a; }
+      tr.sub td { font-weight: 800; background: #fff; }
+      tr.stripe td { background: #f8fafc; }
+      .note { margin: 8px 0 0; font-size: 10px; color: #64748b; }
+      .totals { margin-top: 12px; }
+      .sum { max-width: 260px; margin-left: auto; }
+      .sumline { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; color: #374151; }
+      .grand { background: #184a96; color: #fff; display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 6px; }
+      .pay { margin-top: 16px; max-width: 320px; }
+      .pay-head { font-size: 10px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }
+      .pay-box { margin-top: 8px; padding-left: 10px; border-left: 4px solid #184a96; }
+      .pay-lbl { font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; display: block; }
+      .pay-line { font-size: 12px; margin: 0 0 6px; }
+      .foot { margin-top: 16px; display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; }
+      .terms { flex: 1; font-size: 11px; line-height: 1.45; color: #4b5563; }
+      .terms h4 { font-size: 12px; font-weight: 800; color: #111; margin: 8px 0 4px; }
+      .sign { text-align: right; min-width: 160px; }
+      .sign-name { font-size: 16px; font-family: Georgia, 'Times New Roman', serif; font-style: italic; margin: 0; }
+      .sign-t { font-size: 11px; color: #6b7280; margin: 2px 0 0; }
+      .bar { position: relative; margin-top: 14px; }
+      .bar .line-accent { left: auto; right: 0; }
+      .icons { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 10px; color: #4b5563; }
+      .ic { max-width: 34%; line-height: 1.35; }
+      @page { size: A4; margin: 10mm; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="head">
+        <div class="brand">
+          <img src="honic-invoice-logo.jpg" alt="Honic" />
+          <div>
+            <div class="co">Honic Company Store</div>
+            <div class="tag">Online retail</div>
+            <div class="co-addr">42 Bibi Titi Road
+DIT CEITT Building, 3rd Floor
+P.O. Box 2958
+Dar es Salaam, Tanzania</div>
+          </div>
+        </div>
+        <div class="inv-title">INVOICE</div>
+      </div>
+      <div class="url-row">honiccompanystore.com</div>
+      <div class="line-rule"><div class="line-bg"></div><div class="line-accent"></div></div>
+      <div class="meta">
+        <div>
+          <p class="to-label">Bill to</p>
+          <p class="to-name">—</p>
+        </div>
+        <div class="inv-meta">
+          <p class="inv-no">Invoice No. DRAFT-AMP-2026</p>
+          <p class="inv-date">Issue date 16 November 2026</p>
+          <p class="inv-date" style="color:#6b7280;">Due date 23 November 2026</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th class="c" style="width:8%;">No</th>
+            <th>Description</th>
+            <th class="r" style="width:10%;">Qty</th>
+            <th class="r" style="width:18%;">Price (TZS)</th>
+            <th class="r" style="width:18%;">Total (TZS)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="group"><td colspan="5">One of each part, shared by every circuit</td></tr>
+          <tr><td class="c">1</td><td>Center-tapped transformer</td><td class="r">1</td><td class="r">18,000.00</td><td class="r">18,000.00</td></tr>
+          <tr class="stripe"><td class="c">2</td><td>Bridge rectifier</td><td class="r">1</td><td class="r">2,000.00</td><td class="r">2,000.00</td></tr>
+          <tr><td class="c">3</td><td>Filter capacitor</td><td class="r">1</td><td class="r">500.00</td><td class="r">500.00</td></tr>
+          <tr class="stripe"><td class="c">4</td><td>Breadboard, 830-point solderless</td><td class="r">1</td><td class="r">6,000.00</td><td class="r">6,000.00</td></tr>
+          <tr><td class="c">5</td><td>Jumper wires</td><td class="r">30</td><td class="r">100.00</td><td class="r">3,000.00</td></tr>
+          <tr class="stripe"><td class="c">6</td><td>BC547 NPN transistor</td><td class="r">1</td><td class="r">300.00</td><td class="r">300.00</td></tr>
+          <tr><td class="c">7</td><td>BC557 PNP transistor</td><td class="r">1</td><td class="r">300.00</td><td class="r">300.00</td></tr>
+          <tr class="stripe"><td class="c">8</td><td>Resistor 33 kΩ</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr><td class="c">9</td><td>Resistor 10 kΩ</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr class="stripe"><td class="c">10</td><td>Resistor 2.2 kΩ</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr><td class="c">11</td><td>Resistor 470 Ω</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr class="stripe"><td class="c">12</td><td>Resistor 100 kΩ</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr><td class="c">13</td><td>Resistor 1 kΩ</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr class="stripe"><td class="c">14</td><td>Resistor 47 kΩ</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr><td class="c">15</td><td>Resistor 220 kΩ</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr class="stripe"><td class="c">16</td><td>Resistor 100 Ω</td><td class="r">1</td><td class="r">200.00</td><td class="r">200.00</td></tr>
+          <tr><td class="c">17</td><td>Capacitor 10 µF</td><td class="r">1</td><td class="r">500.00</td><td class="r">500.00</td></tr>
+          <tr class="stripe"><td class="c">18</td><td>Capacitor 47 µF</td><td class="r">1</td><td class="r">500.00</td><td class="r">500.00</td></tr>
+          <tr><td class="c">19</td><td>Capacitor 1 µF</td><td class="r">1</td><td class="r">500.00</td><td class="r">500.00</td></tr>
+          <tr class="stripe"><td class="c">20</td><td>Capacitor 100 µF</td><td class="r">1</td><td class="r">500.00</td><td class="r">500.00</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Each matching part is listed once. Every circuit uses BC547 and BC557. The same resistor or capacitor value is not repeated.</p>
+      <div class="totals">
+        <div class="sum">
+          <div class="sumline"><span>Sub total :</span><span>TZS 33,900.00</span></div>
+          <div class="sumline"><span>Tax 0% :</span><span>TZS 0.00</span></div>
+          <div class="grand"><span>Grand total</span><span>TZS 33,900.00</span></div>
+        </div>
+      </div>
+
+      <div class="pay">
+        <div class="pay-head">Payment method</div>
+        <div class="pay-box">
+          <p class="pay-line"><span class="pay-lbl">Account name</span><strong>HONIC COMPANY LIMITED</strong></p>
+          <p class="pay-line"><span class="pay-lbl">Bank</span><strong>SELCOM PESA</strong></p>
+          <p class="pay-line" style="margin-bottom:0;"><span class="pay-lbl">Account</span><strong>6123 8368</strong></p>
+        </div>
+      </div>
+
+      <div class="foot">
+        <div class="terms">
+          <p style="margin:0;font-weight:800;color:#111;">Thank you for your business.</p>
+          <h4>Terms</h4>
+          <p style="margin:0;">Payment is due within 7 days. Please use the invoice number as your payment reference.</p>
+        </div>
+        <div class="sign">
+          <p class="sign-name">Authorized Signatory</p>
+          <p class="sign-t">Abdulaziz Halekwa G.</p>
+        </div>
+      </div>
+      <div class="bar line-rule"><div class="line-bg"></div><div class="line-accent"></div></div>
+      <div class="icons">
+        <div class="ic">+255 786 957 939</div>
+        <div class="ic">support@honiccompany.com</div>
+        <div class="ic">42 Bibi Titi Road, DIT CEITT Building, 3rd Floor, P.O. Box 2958, Dar es Salaam, Tanzania</div>
+      </div>
+    </div>
+  </body>
+</html>
