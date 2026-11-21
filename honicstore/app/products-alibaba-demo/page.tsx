@@ -6,13 +6,13 @@ import { AlibabaCategoriesSection } from '@/components/alibaba-categories-sectio
 import { AlibabaHotPicksSection, type HotPickProduct } from '@/components/alibaba-hot-picks-section'
 import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
-import { Footer } from '@/components/footer'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
 export default function AlibabaProductDemoPage() {
-  const { themeClasses } = useTheme()
+  const theme = useTheme()
+  const themeClasses = typeof theme?.themeClasses === 'string' ? theme.themeClasses : ''
   const { toast } = useToast()
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -192,8 +192,7 @@ export default function AlibabaProductDemoPage() {
           </div>
         </div>
 
-        {/* Footer */}
-        <Footer />
+        {/* Footer placeholder - add your footer component here */}
       </div>
     </div>
   )
