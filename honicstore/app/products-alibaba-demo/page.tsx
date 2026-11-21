@@ -1,14 +1,17 @@
 "use client"
 
 import React, { useState } from 'react'
-import { AlibabaHeroSection } from '@/components/alibaba-hero-section'
-import { AlibabaCategoriesSection } from '@/components/alibaba-categories-section'
-import { AlibabaHotPicksSection, type HotPickProduct } from '@/components/alibaba-hot-picks-section'
+import dynamic from 'next/dynamic'
 import { useTheme } from '@/hooks/use-theme'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
+
+// Dynamically import Alibaba components to avoid hydration issues
+const AlibabaHeroSection = dynamic(() => import('@/components/alibaba-hero-section').then(mod => ({ default: mod.AlibabaHeroSection })), { ssr: true })
+const AlibabaCategoriesSection = dynamic(() => import('@/components/alibaba-categories-section').then(mod => ({ default: mod.AlibabaCategoriesSection })), { ssr: true })
+const AlibabaHotPicksSection = dynamic(() => import('@/components/alibaba-hot-picks-section').then(mod => ({ default: mod.AlibabaHotPicksSection })), { ssr: true })
 
 export default function AlibabaProductDemoPage() {
   const theme = useTheme()
@@ -17,6 +20,19 @@ export default function AlibabaProductDemoPage() {
   const [searchQuery, setSearchQuery] = useState('')
 
   // Sample featured products
+  interface HotPickProduct {
+    id: string
+    name: string
+    price: number
+    originalPrice?: number
+    image: string
+    rating: number
+    reviews: number
+    soldCount?: number
+    badge?: string
+    discount?: number
+  }
+
   const featuredProducts: HotPickProduct[] = [
     {
       id: '1',
