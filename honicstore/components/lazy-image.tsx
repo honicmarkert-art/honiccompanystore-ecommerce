@@ -21,6 +21,13 @@ interface LazyImageProps {
   onError?: () => void
 }
 
+// Helper function to validate image URL
+function isValidImageUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false
+  // Check if it's an absolute URL (http/https) or starts with /
+  return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')
+}
+
 export function LazyImage({
   src,
   alt,
@@ -39,20 +46,26 @@ export function LazyImage({
 }: LazyImageProps) {
   const [isLoaded, setIsLoaded] = useState(false)
   const [isInView, setIsInView] = useState(priority)
-  const [hasError, setHasError] = useState(false)
-  const [imageSrc, setImageSrc] = useState(src)
+  const [hasError, setHasError] = useState(!isValidImageUrl(src))
+  const [imageSrc, setImageSrc] = useState(isValidImageUrl(src) ? src : '')
   const [useProxy, setUseProxy] = useState(false)
   const [useUnoptimized, setUseUnoptimized] = useState(false)
   const imgRef = useRef<HTMLDivElement>(null)
-  
+
   // Check if it's a Supabase image - use unoptimized to avoid timeout issues
   const isSupabaseImage = typeof src === 'string' && (
-    src.includes('supabase.co') || 
+    src.includes('supabase.co') ||
     src.includes('/storage/v1/object/public/')
   )
 
   // Update imageSrc when src prop changes
   useEffect(() => {
+    // Validate the URL before setting it
+    if (!isValidImageUrl(src)) {
+      setImageSrc('')
+      setHasError(true)
+      return
+    }
     setImageSrc(src)
     setUseProxy(false)
     setUseUnoptimized(isSupabaseImage) // Use unoptimized for Supabase images to avoid timeout
