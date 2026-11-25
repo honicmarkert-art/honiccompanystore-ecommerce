@@ -30,7 +30,7 @@ export function OffersBoard() {
   const [now, setNow] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [counter, setCounter] = useState<Record<string, string>>({})
-  const [result, setResult] = useState<Record<string, { code?: string; whatsapp: string; error?: string }>>({})
+  const [result, setResult] = useState<Record<string, { code?: string; whatsapp: string; error?: string; sentByApi?: boolean }>>({})
 
   const load = useCallback(async () => {
     try {
@@ -50,8 +50,8 @@ export function OffersBoard() {
       const res = await fetch(`/api/team/offers/${o.id}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, price }) })
       const d = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(d.error || 'Failed')
-      setResult((r) => ({ ...r, [o.id]: { code: d.code, whatsapp: d.whatsapp } }))
-      window.open(d.whatsapp, '_blank', 'noopener,noreferrer')
+      setResult((r) => ({ ...r, [o.id]: { code: d.code, whatsapp: d.whatsapp, sentByApi: !!d.sentByApi } }))
+      if (!d.sentByApi) window.open(d.whatsapp, '_blank', 'noopener,noreferrer') // API not set up / not delivered: open the chat instead
       setOffers((list) => list.map((x) => (x.id === o.id ? { ...x, status: action === 'decline' ? 'declined' : action === 'accept' ? 'accepted' : 'countered', coupon_code: d.code || null, agreed_price: action === 'accept' ? o.offer_price : price || null } : x)))
     } catch (e) {
       setResult((r) => ({ ...r, [o.id]: { whatsapp: '', error: e instanceof Error ? e.message : 'Failed' } }))
@@ -114,7 +114,8 @@ export function OffersBoard() {
                               </div>
                             )}
                             {r?.error && <p role="alert" className="mt-3 text-sm text-red-600">{r.error}</p>}
-                            {r?.whatsapp && <a href={r.whatsapp} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"><MessageCircle className="h-4 w-4" /> Send the reply on WhatsApp</a>}
+                            {r?.sentByApi && <p className="mt-3 text-sm font-semibold text-emerald-700">✓ Sent to the customer on WhatsApp automatically.</p>}
+                            {r?.whatsapp && !r.sentByApi && <a href={r.whatsapp} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"><MessageCircle className="h-4 w-4" /> Send the reply on WhatsApp</a>}
                           </li>
                         )
                       })}

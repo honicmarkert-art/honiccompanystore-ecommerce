@@ -9,6 +9,7 @@ import { emailService } from '@/lib/email-service'
 import { getAdminNoticeEmails } from '@/lib/user-email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { paymentTopUp } from '@/lib/policies'
+import { recordWaConsent } from '@/lib/whatsapp'
 import { calculateShippingFee, getShippingSizes, largestSize, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
 import { ShortTtlCache } from '@/lib/short-ttl-cache'
 
@@ -880,6 +881,12 @@ Order ID: ${order.id}
           orderId: order.id,
           orderNumber: order.order_number,
         })
+      }
+      // WhatsApp consent from checkout (order updates / offers) for the number that pays
+      try {
+        await recordWaConsent({ phone: orderData.customerPhone || orderData.shippingAddress?.phone || '', name: orderData.customerName || null, userId: orderData.userId || null, updates: orderData.whatsappUpdates === true, marketing: orderData.whatsappOffers === true, source: 'checkout' })
+      } catch (consentError) {
+        logger.error('Saving WhatsApp consent failed', consentError)
       }
       // No customer email here: the order is not paid yet (the shopper is approving the payment prompt).
       // The one customer email goes out when payment is confirmed (lib/customer-emails.ts sendPaidOrderEmails).

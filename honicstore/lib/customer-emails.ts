@@ -8,6 +8,7 @@ import {
 } from '@/lib/user-email-service'
 import { buildInvoicePdf, invoiceFileName, loadInvoiceOrder } from '@/lib/invoice-pdf'
 import { TOP_UP_LABEL } from '@/lib/policies'
+import { invoiceUrl as waInvoiceUrl, orderButton, sendUtility } from '@/lib/whatsapp'
 
 type Row = Record<string, unknown>
 
@@ -64,7 +65,6 @@ export async function sendPaidOrderEmails(supabase: Supabase, partial: Row) {
     const shipping = readAddress(order.shipping_address)
     const billing = readAddress(order.billing_address)
     const email = await customerEmail(supabase, order.user_id || null, shipping, billing)
-    if (!email) return
 
     const { data: rows } = await supabase
       .from('order_items')
@@ -98,7 +98,15 @@ export async function sendPaidOrderEmails(supabase: Supabase, partial: Row) {
       logger.error('Invoice PDF for email failed:', error)
     }
 
-    await sendPaymentReceivedEmail(email, {
+    // WhatsApp (if the customer ticked "order updates on WhatsApp"): receipt with the invoice PDF
+    if (ref) {
+      await sendUtility('order_paid', shipping.phone || billing.phone, {
+        params: [String(shipping.fullName || billing.fullName || '').trim().split(/\s+/)[0] || 'Mteja', orderNumber, `TSh ${Math.round(total).toLocaleString('en-US')}`],
+        button: orderButton(ref), documentUrl: waInvoiceUrl(ref), documentName: invoicePdf?.filename || `Honic-invoice-${orderNumber}.pdf`, ref: orderNumber,
+      }).catch(() => null)
+    }
+
+    if (email) await sendPaymentReceivedEmail(email, {
       name: shipping.fullName || billing.fullName,
       orderNumber,
       orderDate: new Date(String(order.created_at || Date.now())).toLocaleString('en-GB', { timeZone: 'Africa/Dar_es_Salaam' }),
@@ -185,8 +193,13 @@ export async function sendExpiredOrderEmails(supabase: Supabase, orders: Array<{
       const shipping = readAddress(order.shipping_address)
       const billing = readAddress(order.billing_address)
       const email = await customerEmail(supabase, order.user_id || null, shipping, billing)
-      if (!email) continue
       const paid = order.payment_status === 'paid' || order.payment_status === 'success'
+      if (!paid) {
+        await sendUtility('order_expired', shipping.phone || billing.phone, {
+          params: [String(shipping.fullName || billing.fullName || '').trim().split(/\s+/)[0] || 'Mteja', String(order.order_number || order.id)], ref: String(order.order_number || ''),
+        }).catch(() => null)
+      }
+      if (!email) continue
       await sendOrderCancellationEmail(email, {
         orderNumber: String(order.order_number || order.id),
         cancellationReason: 'Expired. Not confirmed within 15 minutes.',

@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/lib/supabase-server'
 import { requireAdmin } from '@/lib/team-auth'
 import { OFFER_COUPON_HOURS, newCode, offerReply, tsh } from '@/lib/offers'
 import { logger } from '@/lib/logger'
+import { sendTextIfWindowOpen, sendUtility, whatsappEnabled } from '@/lib/whatsapp'
 import { z } from '@/lib/zod'
 
 export const dynamic = 'force-dynamic'
@@ -77,5 +78,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }).eq('id', id)
 
   const text = offerReply({ name: offer.name, productName: offer.product_name, productUrl, quantity: qty, agreedPrice: agreed, code, counter: action === 'counter' })
-  return NextResponse.json({ success: true, code, whatsapp: waTo(text), expiresAt: end.toISOString() })
+
+  // send it automatically through the WhatsApp API when set up: free text inside the 24 h window
+  // (the customer just wrote to us about this offer), otherwise the approved offer template
+  let sentByApi = false
+  if (whatsappEnabled()) {
+    const viaText = await sendTextIfWindowOpen(offer.phone, text, { kind: 'offer_reply', ref: offer.ref })
+    sentByApi = viaText.ok
+    if (!sentByApi) {
+      const r = await sendUtility('offer_reply', offer.phone, {
+        params: [String(offer.name || 'Mteja').split(/\s+/)[0], offer.product_name, tsh(agreed), String(qty), code, String(OFFER_COUPON_HOURS)],
+        button: String(product?.slug || offer.product_id), ref: offer.ref, requireConsent: false, // a reply to the customer's own request
+      })
+      sentByApi = r.ok
+    }
+  }
+  return NextResponse.json({ success: true, code, whatsapp: waTo(text), sentByApi, expiresAt: end.toISOString() })
 }

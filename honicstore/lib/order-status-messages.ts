@@ -7,6 +7,7 @@
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { sendOrderStatusEmail } from '@/lib/user-email-service'
 import { sendSms } from '@/lib/sms'
+import { orderButton, sendUtility } from '@/lib/whatsapp'
 import { tzPhone } from '@/lib/offers'
 import { logger } from '@/lib/logger'
 
@@ -30,11 +31,11 @@ export function smsText(kind: StatusKind, o: { orderNumber: string; link: string
 }
 
 /** claim (order, kind, channel); false if it was already sent */
-async function claim(orderNumber: string, kind: StatusKind, channel: 'sms' | 'email') {
+async function claim(orderNumber: string, kind: StatusKind, channel: 'sms' | 'email' | 'whatsapp') {
   const { error } = await getSupabaseClient().from('order_notifications').insert({ order_number: orderNumber, kind, channel })
   return !error
 }
-async function unclaim(orderNumber: string, kind: StatusKind, channel: 'sms' | 'email') {
+async function unclaim(orderNumber: string, kind: StatusKind, channel: 'sms' | 'email' | 'whatsapp') {
   await getSupabaseClient().from('order_notifications').delete().eq('order_number', orderNumber).eq('kind', kind).eq('channel', channel)
 }
 
@@ -67,9 +68,22 @@ export async function notifyOrderStatus(input: { table: string; id: string | num
   const firstName = String(bill.fullName || ship.fullName || '').trim().split(/\s+/)[0] || ''
   const sent: string[] = []
 
-  // SMS
+  // WhatsApp first (if they opted in), SMS only when WhatsApp did not go
   const phone = tzPhone(ship.phone || bill.phone || '')
-  if (phone && (await claim(o.order_number, kind, 'sms'))) {
+  let viaWhatsApp = false
+  if (phone && (await claim(o.order_number, kind, 'whatsapp'))) {
+    const name = firstName || 'Mteja'
+    const wa = kind === 'shipped'
+      ? await sendUtility('order_shipped', phone, { params: [name, o.order_number, tracking || '-'], button: orderButton(ref), ref: o.order_number })
+      : kind === 'ready_for_pickup'
+        ? await sendUtility('order_ready_pickup', phone, { params: [name, o.order_number, o.pickup_id || '-'], button: orderButton(ref), ref: o.order_number })
+        : await sendUtility('order_delivered', phone, { params: [name, o.order_number], button: orderButton(ref), ref: o.order_number })
+    viaWhatsApp = wa.ok
+    if (wa.ok) sent.push('whatsapp'); else await unclaim(o.order_number, kind, 'whatsapp')
+  }
+
+  // SMS
+  if (phone && !viaWhatsApp && (await claim(o.order_number, kind, 'sms'))) {
     const ok = await sendSms(phone, smsText(kind, { orderNumber: o.order_number, link, pickupId: o.pickup_id, tracking }))
     if (ok) sent.push('sms'); else await unclaim(o.order_number, kind, 'sms') // not set up / failed: allow a later try
   }

@@ -292,6 +292,8 @@ function CheckoutPageContent() {
   const [shippingAddress, setShippingAddress] = useState<Address>(EMPTY_ADDRESS)
   const [billingAddress, setBillingAddress] = useState<Address>(EMPTY_ADDRESS)
   const [sameAsShipping, setSameAsShipping] = useState(true)
+  const [waUpdates, setWaUpdates] = useState(true)
+  const [waOffers, setWaOffers] = useState(false)
   const [errors, setErrors] = useState<Errors>({})
   const [summaryOpen, setSummaryOpen] = useState(false)
 
@@ -689,6 +691,8 @@ function CheckoutPageContent() {
         customerName: customerInfo.fullName,
         customerEmail: customerInfo.email,
         customerPhone: customerInfo.phone,
+        whatsappUpdates: waUpdates,
+        whatsappOffers: waOffers,
         items: items.flatMap((item) =>
           item.variants.map((variant) => ({
             productId: item.productId,
@@ -1051,6 +1055,17 @@ function CheckoutPageContent() {
           />
         </Field>
                     </div>
+      {/* WhatsApp consent: order updates (on by default, clearly stated) and offers (only if ticked) */}
+      <div className="mt-4 space-y-2 rounded-2xl bg-emerald-50/60 p-3.5 text-sm dark:bg-emerald-950/20">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input type="checkbox" checked={waUpdates} onChange={(e) => setWaUpdates(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600" />
+          <span><span className="font-semibold">Send my order updates on WhatsApp</span><span className="block text-xs text-neutral-500">Receipt, invoice and delivery updates to this number. Taarifa za oda kwa WhatsApp.</span></span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-3">
+          <input type="checkbox" checked={waOffers} onChange={(e) => setWaOffers(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600" />
+          <span><span className="font-semibold">Also send me offers on WhatsApp</span><span className="block text-xs text-neutral-500">Deals and new arrivals, a few times a month. Reply STOP any time.</span></span>
+        </label>
+      </div>
     </SectionCard>
   )
 
