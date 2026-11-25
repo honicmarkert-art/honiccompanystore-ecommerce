@@ -1,181 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { sendEmail, emailService } from '@/lib/email-service'
-import { enhancedRateLimit } from '@/lib/enhanced-rate-limit'
+import { getSupabaseClient } from '@/lib/supabase-server'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { clientIp } from '@/lib/client-ip'
+import { normEmail } from '@/lib/email-links'
+import { sendNewsletterConfirmEmail } from '@/lib/user-email-service'
 import { logger } from '@/lib/logger'
-
-// Rate limit logging helper
-const logRateLimitEvent = (endpoint: string, reason: string | undefined, request: NextRequest) => {
-  const clientIP = request.headers.get('x-forwarded-for') || 
-                   request.headers.get('x-real-ip') || 
-                   request.headers.get('cf-connecting-ip') || 
-                   'unknown'
-  logger.security(`Rate limit exceeded on ${endpoint}`, undefined, {
-    ip: clientIP,
-    reason,
-    path: request.nextUrl.pathname
-  })
-}
+import { z } from '@/lib/zod'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-// POST - Subscribe to newsletter
+/**
+ * POST /api/newsletter/subscribe { email, source? }  -> double opt-in, step 1.
+ * Saves the address as 'pending' and emails a confirmation link. Nobody gets offers until they
+ * click it. The answer is the same whether or not the address is already subscribed (no lookups).
+ */
+const Body = z.object({ email: z.string().trim().email('Enter a valid email address').max(254), source: z.string().trim().max(40).optional() })
+const RESEND_AFTER_MS = 10 * 60 * 1000
+const OK = { success: true, message: 'Almost done! Check your inbox and click the link to confirm.' }
+
 export async function POST(request: NextRequest) {
-  // Rate limiting - stricter for newsletter subscription
-  const rateLimitResult = await enhancedRateLimit(request)
-  if (!rateLimitResult.allowed) {
-    logRateLimitEvent('/api/newsletter/subscribe', rateLimitResult.reason, request)
-    
-    return NextResponse.json(
-      { 
-        success: false,
-        error: rateLimitResult.reason || 'Too many subscription attempts. Please try again later.' 
-      },
-      { 
-        status: 429,
-        headers: {
-          'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
-        }
-      }
-    )
+  const limit = await enhancedRateLimit(request)
+  if (!limit.allowed) {
+    logSecurityEvent('RATE_LIMIT_EXCEEDED', { endpoint: '/api/newsletter/subscribe', reason: limit.reason }, request)
+    return NextResponse.json({ success: false, error: 'Too many tries. Please wait a while and try again.' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfter || 60) } })
   }
+  const parsed = Body.safeParse(await request.json().catch(() => null))
+  if (!parsed.success) return NextResponse.json({ success: false, error: parsed.error.issues[0]?.message || 'Enter a valid email address' }, { status: 400 })
 
+  const email = normEmail(parsed.data.email)
+  const supabase = getSupabaseClient()
   try {
-    const body = await request.json()
-    const { email } = body
+    const { data: row } = await supabase.from('newsletter_subscriptions').select('status, confirmed_at, confirmation_sent_at').eq('email', email).maybeSingle()
+    if (row?.status === 'active' && row.confirmed_at) return NextResponse.json(OK) // already confirmed: nothing to send
+    if (row?.status === 'bounced') return NextResponse.json(OK) // address cannot receive mail
+    // don't send confirmation emails over and over to the same address
+    if (row?.confirmation_sent_at && Date.now() - new Date(row.confirmation_sent_at).getTime() < RESEND_AFTER_MS) return NextResponse.json(OK)
 
-    if (!email || !email.includes('@')) {
-      return NextResponse.json(
-        { success: false, error: 'Valid email address is required' },
-        { status: 400 }
-      )
-    }
+    const now = new Date().toISOString()
+    const fields = { status: 'pending', source: parsed.data.source || 'website', consent_ip: clientIp(request) || null, confirmation_sent_at: now, updated_at: now }
+    const { error } = row
+      ? await supabase.from('newsletter_subscriptions').update(fields).eq('email', email)
+      : await supabase.from('newsletter_subscriptions').insert({ email, subscribed_at: now, ...fields })
+    if (error) throw new Error(error.message)
 
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-      {
-        cookies: {
-          get(name: string) {
-            return request.cookies.get(name)?.value
-          },
-          set(name: string, value: string, options: any) {},
-          remove(name: string, options: any) {},
-        },
-      }
-    )
-
-    // Store subscription in database
-    try {
-      const { error: dbError } = await supabase
-        .from('newsletter_subscriptions')
-        .insert({
-          email: email.toLowerCase().trim(),
-          subscribed_at: new Date().toISOString(),
-          status: 'active'
-        })
-      
-      if (dbError) {
-        // If email already exists, that's okay - just log it
-        if (dbError.code === '23505') { // Unique constraint violation
-          } else {
-          }
-      }
-    } catch (dbError) {
-      // Database error - continue without storing
-    }
-
-    // Send notification email to promotion email (from .env.local)
-    const promotionEmail = emailService.getCompanyEmails().promotion
-    const emailSubject = `New Newsletter Subscription: ${email}`
-    const emailBody = `
-New Newsletter Subscription
-
-Email: ${email}
-Subscribed At: ${new Date().toLocaleString()}
-
----
-This is an automated notification from the Newsletter Subscription System.
-    `.trim()
-
-    const emailHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #333;">New Newsletter Subscription</h2>
-        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <p><strong>Email:</strong> ${email}</p>
-          <p><strong>Subscribed At:</strong> ${new Date().toLocaleString()}</p>
-        </div>
-        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-        <p style="color: #666; font-size: 12px;">
-          This is an automated notification from the Newsletter Subscription System.
-        </p>
-      </div>
-    `
-
-    // Get sender email (handle Resend SMTP case where SMTP_USER="resend")
-    const smtpUserAuth = process.env.SMTP_USER
-    const isResendSmtp = process.env.SMTP_HOST?.includes('resend.com') || smtpUserAuth?.toLowerCase() === 'resend'
-    
-    let senderEmail: string
-    if (isResendSmtp || !smtpUserAuth || smtpUserAuth.toLowerCase() === 'resend' || !smtpUserAuth.includes('@')) {
-      // Use sender email configs for Resend SMTP
-      senderEmail = process.env.SMTP_SENDER_EMAIL_INFO || 
-                    process.env.SMTP_SENDER_EMAIL_NOREPLY || 
-                    process.env.SMTP_SENDER_EMAIL_SUPPORT || 
-                    process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || 'noreply@mail.honiccompanystore.com'
-    } else {
-      senderEmail = smtpUserAuth
-    }
-
-    if (!senderEmail || !senderEmail.includes('@')) {
-      // Still return success for subscription, just without email notification
-      return NextResponse.json({
-        success: true,
-        message: 'Successfully subscribed to newsletter!'
-      })
-    }
-
-    // Get sender name
-    const senderName = process.env.SMTP_SENDER_NAME_INFO || 
-                       process.env.SMTP_SENDER_NAME_NOREPLY || 
-                       'Honic Co'
-
-    // Send notification email to company (from .env.local)
-    const emailResult = await sendEmail({
-      to: promotionEmail,
-      subject: emailSubject,
-      text: emailBody,
-      html: emailHtml,
-      from: `${senderName} <${senderEmail}>`,
-    })
-
-    // Send welcome email to subscriber
-    try {
-      const { sendNewsletterWelcomeEmail } = await import('@/lib/user-email-service')
-      const { buildUrl } = await import('@/lib/url-utils')
-      const unsubscribeUrl = buildUrl(`/account/newsletter/unsubscribe?email=${encodeURIComponent(email)}`)
-      await sendNewsletterWelcomeEmail(email, unsubscribeUrl)
-    } catch (welcomeEmailError) {
-      logger.warn('Failed to send newsletter welcome email:', welcomeEmailError)
-      // Don't fail subscription if welcome email fails
-    }
-
-    // Log to console if email service not configured (development)
-    if (!emailResult.success) {
-      }
-
-    return NextResponse.json({
-      success: true,
-      message: 'Successfully subscribed to newsletter!'
-    })
-
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: 'Failed to subscribe. Please try again.' },
-      { status: 500 }
-    )
+    const sent = await sendNewsletterConfirmEmail(email)
+    if (!sent.success) throw new Error(sent.error || 'confirmation email failed')
+    return NextResponse.json(OK)
+  } catch (error) {
+    logger.error('Newsletter subscribe failed:', error)
+    return NextResponse.json({ success: false, error: 'We could not subscribe you right now. Please try again later.' }, { status: 500 })
   }
 }
-
-

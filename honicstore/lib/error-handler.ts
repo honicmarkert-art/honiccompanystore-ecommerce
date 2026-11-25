@@ -93,6 +93,8 @@ export function logError(
     userId?: string
     action?: string
     metadata?: Record<string, unknown>
+    /** Any other detail worth logging (route name, ids…) */
+    [key: string]: unknown
   }
 ): void {
   const isProduction = process.env.NODE_ENV === 'production'
@@ -161,10 +163,13 @@ export async function handleAsyncError<T>(
  */
 export function createErrorResponse(
   error: Error | ProductionError | unknown,
-  statusCode: number = 500
+  statusOrMessage: number | string = 500,
+  status?: number
 ): Response {
-  // Always return generic "Failed" message - never expose error details
-  const userMessage = 'Failed'
+  // Accepts (error, status) and (error, message, status). The message is a safe, user-facing text written
+  // in the route (never the raw error). Passing a message as the status used to make new Response() throw.
+  const statusCode = typeof statusOrMessage === 'number' ? statusOrMessage : (status ?? 500)
+  const userMessage = typeof statusOrMessage === 'string' && statusOrMessage ? statusOrMessage : 'Failed'
   const code = error instanceof ProductionError ? error.code : ErrorCodes.SERVER_ERROR
   
   logError(error)
@@ -177,7 +182,7 @@ export function createErrorResponse(
       timestamp: new Date().toISOString(),
     }),
     {
-      status: error instanceof ProductionError ? error.statusCode : statusCode,
+      status: error instanceof ProductionError ? error.statusCode : (statusCode >= 200 && statusCode <= 599 ? statusCode : 500),
       headers: {
         'Content-Type': 'application/json',
       },

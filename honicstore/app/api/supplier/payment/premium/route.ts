@@ -248,9 +248,7 @@ export async function POST(request: NextRequest) {
       })
     } catch (error: any) {
       logError(error, {
-        context: 'supplier_payment_premium_post',
-        userId: user?.id,
-        planId: body?.planId
+        context: 'supplier_payment_premium_post'
       })
       return createErrorResponse(error, 500)
     }

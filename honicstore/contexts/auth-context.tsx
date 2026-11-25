@@ -40,7 +40,7 @@ interface AuthContextType {
   isAuthenticated: boolean
   isLoggingIn: boolean
   signIn: (email: string, password: string, remember?: boolean, preventRedirect?: boolean, redirectTo?: string) => Promise<{ success: boolean; error?: string; type?: string }>
-  signUp: (name: string, email: string, password: string, confirmPassword: string, phone?: string, isSupplier?: boolean, skipModal?: boolean, planId?: string) => Promise<{ success: boolean; error?: string; type?: string }>
+  signUp: (name: string, email: string, password: string, confirmPassword: string, phone?: string, isSupplier?: boolean, skipModal?: boolean, planId?: string, captchaToken?: string) => Promise<{ success: boolean; error?: string; type?: string; message?: string; autoLoggedIn?: boolean; isVerified?: boolean }>
   signInWithGoogle: (redirectTo?: string) => Promise<{ success: boolean; error?: string }>
   signOut: () => Promise<void>
   checkAuth: () => Promise<void>
@@ -137,15 +137,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const isProfileLoaded = result.isProfileLoaded === true
           
           // If profile wasn't loaded (Supabase connectivity issue), check for admin email
-          let userRole = userData.role
-          if (!isProfileLoaded && userData.email) {
-            // Fallback: Check if email matches known admin emails
-            const adminEmailsStr = process.env.ADMIN_EMAILS || 'admin1@honic.com,admin@honic.com,sieme@honic.com'
-            const adminEmails = adminEmailsStr.split(',').map(email => email.trim().toLowerCase())
-            if (adminEmails.includes(userData.email.toLowerCase())) {
-              userRole = 'admin'
-            }
-          }
+          // Role always comes from the database; never guessed in the browser
+          const userRole = isProfileLoaded ? userData.role : 'user'
           
           // Extract isSupplier from profile
           const isSupplier = userData.profile?.is_supplier || false
@@ -189,12 +182,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
           
-          // Redirect normal users to products page if they're on home page
-          if (!isSupplier && userRole !== 'admin' && currentPath === '/') {
-            setTimeout(() => {
-              routerRef.current.replace('/products')
-            }, 100)
-          }
           
           // Force redirect normal users away from supplier pages
           if (!isSupplier && userRole !== 'admin' && currentPath.startsWith('/supplier')) {
@@ -238,14 +225,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Admin routes removed - admin page shows "Page Not Found"
     // No redirect needed
     // Admin users can access all pages, no redirects needed
-  }, [router])
+  }, [])
 
   // Refresh user data
   const refreshUser = useCallback(async () => {
     // Reset the ref to allow a new check
     checkingAuthRef.current = false
     await checkAuth()
-  }, []) // Empty dependency - checkAuth is stable
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- Empty dependency - checkAuth is stable
 
   const hasCheckedAuthRef = useRef(false)
   useEffect(() => {
@@ -256,10 +243,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Import device fingerprinting utilities
       if (typeof window !== 'undefined') {
-        import('@/lib/device-fingerprint').then(({ isDeviceVerified }) => {
+        import('@/lib/device-fingerprint').then(({ isDeviceVerified, sessionOnlyExpired, clearDeviceVerification }) => {
+          // Pages that receive a session from an email/Google link must keep it
+          const path = window.location.pathname
+          if (path.startsWith('/auth/callback') || path.startsWith('/auth/reset-password')) {
+            setLoading(false)
+            return
+          }
           // SECURITY: Clear Supabase session from localStorage if device is not verified
           // This prevents Supabase from auto-restoring sessions on new devices
           if (!isDeviceVerified()) {
+            // Signed in without "Keep me signed in" and the browser was closed since: end the server session too
+            if (sessionOnlyExpired()) {
+              clearDeviceVerification()
+              fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {})
+            }
             // Clear Supabase's localStorage session to prevent auto-restoration
             localStorage.removeItem('supabase.auth.token')
             // Also clear any other Supabase-related storage
@@ -295,10 +293,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
       } else {
         // Server-side: don't check auth
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only data after mount, so the server render matches
         setLoading(false)
       }
     }
-  }, []) // Empty dependency array - only run once on mount
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- Empty dependency array - only run once on mount
 
   // Secure sign in using HttpOnly cookies
   const signIn = async (email: string, password: string, remember: boolean = false, preventRedirect: boolean = false, redirectTo?: string) => {
@@ -378,16 +377,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           attempts: newAttempts,
           error: result.error 
         })
-        
-            toast({
-          title: "Login Failed",
-          description: "Failed",
-          variant: "destructive"
-        })
 
         return { 
           success: false, 
-          error: result.error,
+          error: result.error || 'Invalid email or password.',
           type: result.type || 'INVALID_CREDENTIALS'
         }
       }
@@ -396,6 +389,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Reset login attempts on successful login
         setLoginAttempts(0)
         setLockoutUntil(null)
+        // "Keep me signed in": remember this device (survives closing the browser), otherwise this browser session only
+        try { (await import('@/lib/device-fingerprint')).markDeviceVerified(remember) } catch { /* not critical */ }
         
         logSecurityEvent('Successful login', undefined, { email })
         
@@ -453,29 +448,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           attempts: newAttempts,
           error: result.error 
         })
-        
-        toast({
-          title: "Login Failed",
-          description: "Failed",
-          variant: "destructive"
-        })
 
         return { 
           success: false, 
-          error: result.error,
+          error: result.error || 'Sign-in failed. Please try again.',
           type: result.type
         }
       }
     } catch (error) {
-      
-      toast({
-        title: "Login Error",
-        description: "Failed",
-        variant: "destructive"
-      })
       return { 
         success: false, 
-        error: "Failed",
+        error: "Couldn't reach the server. Check your connection and try again.",
         type: 'NETWORK_ERROR'
       }
     } finally {
@@ -483,7 +466,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const signUp = async (name: string, email: string, password: string, confirmPassword: string, phone?: string, isSupplier?: boolean, skipModal?: boolean, planId?: string) => {
+  const signUp = async (name: string, email: string, password: string, confirmPassword: string, phone?: string, isSupplier?: boolean, skipModal?: boolean, planId?: string, captchaToken?: string) => {
     try {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => {
@@ -497,15 +480,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           signal: controller.signal,
-          body: JSON.stringify({ name, email, password, confirmPassword, phone, isSupplier, planId })
+          body: JSON.stringify({ name, email, password, confirmPassword, phone, isSupplier, planId, captchaToken })
         })
         clearTimeout(timeoutId)
         result = await response.json()
       } catch (fetchError) {
         clearTimeout(timeoutId)
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-          toast({ title: 'Registration Timeout', description: 'Please try again.', variant: 'destructive' })
-          return { success: false, error: 'TIMEOUT', type: 'TIMEOUT' }
+          return { success: false, error: 'The request timed out. Please try again.', type: 'TIMEOUT' }
         }
         throw fetchError
       }
@@ -517,6 +499,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userData = result.user || result.data?.user
         
         if (session && userData) {
+          try { (await import('@/lib/device-fingerprint')).markDeviceVerified() } catch { /* not critical */ }
           // Set client-side session in Supabase client (for localStorage)
           if (typeof window !== 'undefined' && session) {
             try {
@@ -591,16 +574,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      toast({ title: 'Registration Failed', description: 'Failed', variant: 'destructive' })
-      return { success: false, error: result?.error, type: result?.type }
+      return { success: false, error: result?.error || 'Registration failed. Please try again.', type: result?.type }
     } catch (error) {
-      toast({ title: 'Registration Error', description: 'Failed', variant: 'destructive' })
-      return { success: false, error: 'NETWORK_ERROR', type: 'NETWORK_ERROR' }
+      return { success: false, error: "Couldn't reach the server. Check your connection and try again.", type: 'NETWORK_ERROR' }
     }
   }
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (returnTo?: string) => {
     try {
+      // Remember where to return after Google (same-site paths only; read by /auth/callback)
+      if (typeof window !== 'undefined') {
+        const back = returnTo || window.location.pathname + window.location.search
+        if (back.startsWith('/') && !back.startsWith('//') && !back.startsWith('/auth')) sessionStorage.setItem('oauth_redirect', back)
+      }
       // Use centralized URL utility for production-ready URL resolution
       const { buildUrl } = await import('@/lib/url-utils')
       
@@ -623,24 +609,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
 
       if (error) {
-        toast({
-          title: "Google Sign-In Failed",
-          description: "Failed",
-          variant: "destructive"
-        })
-        return { success: false, error: "Failed" }
+        return { success: false, error: error.message || "Google sign-in couldn't start. Please try again." }
       }
 
       // If successful, the user will be redirected to Google, then back to the callback
       // The callback will handle the session exchange and redirect
       return { success: true }
     } catch (error: any) {
-      toast({
-        title: "Google Sign-In Error",
-        description: "Failed",
-        variant: "destructive"
-      })
-      return { success: false, error: "Failed" }
+      return { success: false, error: "Google sign-in couldn't start. Please try again." }
     }
   }
 
@@ -757,26 +733,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const result = await supabaseAuth.resetPassword(email)
       
       if (result.success) {
-        toast({
-          title: "Email Sent",
-          description: result.message || "Password reset instructions have been sent to your email.",
-        })
         return { success: true }
       } else {
-        toast({
-          title: "Reset Error",
-          description: "Failed",
-          variant: "destructive"
-        })
-        return { success: false, error: result.error }
+        return { success: false, error: result.error || "Couldn't send the reset email. Please try again." }
       }
     } catch (error: any) {
-      toast({
-        title: "Reset Error",
-        description: "Failed",
-        variant: "destructive"
-      })
-      return { success: false, error: "Failed" }
+      return { success: false, error: "Couldn't reach the server. Check your connection and try again." }
     }
   }
 

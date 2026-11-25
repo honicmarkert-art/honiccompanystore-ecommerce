@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAuth } from '@/lib/supabase-auth'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { getSupabaseClient } from '@/lib/supabase-server'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { 
             success: false,
-            error: error.errors[0]?.message || 'Invalid email address'
+            error: error.issues[0]?.message || 'Invalid email address'
           },
           { status: 400 }
         )

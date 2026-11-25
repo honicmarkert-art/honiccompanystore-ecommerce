@@ -25,6 +25,7 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
     
     // Don't open modal if we're on the auth callback page
     if (window.location.pathname === '/auth/callback') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only data after mount, so the server render matches
       setIsOpen(false)
       try {
         sessionStorage.removeItem('auth-modal-open')
@@ -95,6 +96,7 @@ export function GlobalAuthModalProvider({ children }: { children: ReactNode }) {
     
     // Don't auto-close for supplier flows - allow user to switch accounts
     if (isAuthenticated && user && isOpen && !isSupplierFlow) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only data after mount, so the server render matches
       setIsOpen(false)
       setRedirectUrl(undefined)
       if (typeof window !== 'undefined') {

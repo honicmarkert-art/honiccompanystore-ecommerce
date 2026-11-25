@@ -1,393 +1,147 @@
-"use client"
-
-// Note: ISR (revalidate) cannot be used in client components
-// CPU optimization is handled via API route caching and CDN caching instead
-
-import { useState } from 'react'
-import Image from 'next/image'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { 
-  Target,
-  Users,
-  Award,
-  Globe,
-  Heart,
-  Shield,
-  Zap,
-  Lightbulb,
-  Truck,
-  Clock,
-  CheckCircle,
-  Star,
-  ArrowRight,
-  Phone,
-  Mail,
-  MapPin,
-  Facebook,
-  Instagram,
-  Youtube,
-  ArrowLeft
-} from 'lucide-react'
-import { useCompanyContext } from '@/components/company-provider'
-import { useTheme } from '@/hooks/use-theme'
-import { useRouter } from 'next/navigation'
+import type { Metadata } from 'next'
 import Link from 'next/link'
+import { ArrowRight, BadgeCheck, MessageCircle, ShieldCheck, Smartphone, Store, Truck, Sparkles } from 'lucide-react'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
+import { getCategoryTree } from '@/lib/home-data'
+import { whatsappLink } from '@/lib/contact'
+import { getClientShippingPricing } from '@/lib/shipping-calculator'
 
-export default function AboutPage() {
-  const { themeClasses } = useTheme()
-  const router = useRouter()
-  const { 
-    companyName, 
-    companyLogo,
-    companyColor,
-    companyTagline,
-    isLoaded: companyLoaded
-  } = useCompanyContext()
+/**
+ * About Honic. Only facts the store can stand behind: live catalogue numbers, real payment
+ * and delivery options. (The old page showed made-up stats: 10,000+ customers, 99.9% uptime,
+ * a mobile app launch, "global reach".) Contact details live in the shared footer.
+ */
+export const metadata: Metadata = {
+  title: 'About us | Honic Company Store',
+  description: "Honic is Tanzania's online marketplace: the official Honic store and trusted sellers in one place, with mobile money payments and delivery across the country.",
+  alternates: { canonical: '/about' },
+}
 
-  // Fallback logo system
-  const fallbackLogo = "/android-chrome-512x512.png"
-  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
+export const revalidate = 3600
 
-  const stats = [
-    { number: "10,000+", label: "Happy Customers", icon: <Users className="w-6 h-6" /> },
-    { number: "50,000+", label: "Products Sold", icon: <Award className="w-6 h-6" /> },
-    { number: "99.9%", label: "Uptime", icon: <Shield className="w-6 h-6" /> },
-    { number: "24/7", label: "Customer Support", icon: <Clock className="w-6 h-6" /> }
+export default async function AboutPage() {
+  const tree = await getCategoryTree().catch(() => [])
+  const products = tree.reduce((n, c) => n + c.count, 0)
+  const departments = tree.length
+  const open = tree.filter((c) => c.count > 0).length
+  const { freeThresholdTz } = getClientShippingPricing()
+
+  const facts = [
+    { value: products ? `${products}+` : '—', label: 'products listed' },
+    { value: departments ? String(departments) : '—', label: 'departments' },
+    { value: open ? String(open) : '—', label: 'departments open now' },
+    { value: 'TZ', label: 'delivery across Tanzania' },
   ]
 
-  const values = [
-    {
-      icon: <Heart className="w-8 h-8" />,
-      title: "Customer First",
-      description: "We put our customers at the heart of everything we do, ensuring their satisfaction is our top priority."
-    },
-    {
-      icon: <Shield className="w-8 h-8" />,
-      title: "Trust & Security",
-      description: "Your data and transactions are protected with enterprise-grade security measures and privacy controls."
-    },
-    {
-      icon: <Zap className="w-8 h-8" />,
-      title: "Innovation",
-      description: "We continuously innovate to bring you the latest technology and cutting-edge solutions."
-    },
-    {
-      icon: <Globe className="w-8 h-8" />,
-      title: "Global Reach",
-      description: "Serving customers worldwide with fast shipping and localized support in multiple languages."
-    }
-  ]
-
-
-  const milestones = [
-    {
-      year: "2025",
-      title: "Company Founded",
-      description: "Started with a vision to revolutionize online shopping in Tanzania"
-    },
-    {
-      year: "2025",
-      title: "First 1000 Customers",
-      description: "Reached our first major milestone with 1000 satisfied customers"
-    },
-    {
-      year: "2025",
-      title: "Mobile App Launch",
-      description: "Launched our mobile application for iOS and Android"
-    },
-    {
-      year: "2025",
-      title: "Regional Expansion",
-      description: "Expanded operations to cover all major cities in Tanzania"
-    },
-    {
-      year: "2025",
-      title: "AI Integration",
-      description: "Integrated AI-powered features for better product recommendations"
-    }
+  const promises = [
+    { icon: Store, title: 'Official store + trusted sellers', text: 'Honic sells most electronic components itself. Other verified sellers list their products too, so you find more in one place.' },
+    { icon: Smartphone, title: 'Pay with mobile money', text: 'Check out with M-Pesa, Airtel Money, Mixx by Yas or HaloPesa. No card needed.' },
+    { icon: Truck, title: 'Delivered to your door', text: `We deliver across Tanzania and you can track every order. Orders over TSh ${freeThresholdTz.toLocaleString('en-US')} ship free.` },
+    { icon: ShieldCheck, title: 'Buyer protection', text: 'Wrong or faulty item? Tell us and we will make it right.' },
+    { icon: Sparkles, title: 'Smart search', text: 'Search by name, by photo, or describe what you need in English or Swahili and let AI find it.' },
+    { icon: MessageCircle, title: 'Real people to help', text: 'Ask us anything on WhatsApp, by email or through your account messages.' },
   ]
 
   return (
-    <div className={`min-h-screen ${themeClasses.mainBg} ${themeClasses.mainText}`}>
-      {/* Back Button */}
-      <div className="container mx-auto px-4 pt-10">
-        <Button 
-          variant="ghost" 
-          onClick={() => router.back()}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back
-        </Button>
-      </div>
+    <div className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-white">
+      <SiteHeader />
 
-      {/* Hero Section */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-orange-50 to-yellow-50 dark:from-gray-900 dark:to-gray-800">
-        <div className="container mx-auto px-4 py-16 lg:py-24">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            <div className="space-y-8">
-              <div className="flex items-center gap-4">
-                <Image
-                  src={displayLogo}
-                  alt={`${companyName} Logo`}
-                  width={80}
-                  height={80}
-                  className="w-20 h-20 rounded-2xl shadow-lg"
-                />
-                <div>
-                  <h1 className="text-4xl lg:text-5xl font-bold text-gray-900 dark:text-white">
-                    About {companyName}
-                  </h1>
-                  <p className="text-lg text-gray-600 dark:text-gray-300 mt-2">
-                    {companyTagline || "Your trusted partner in online shopping"}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="space-y-4 text-lg text-gray-700 dark:text-gray-300">
-                <p>
-                  Founded in 2025, {companyName} has quickly established itself as Tanzania's leading 
-                  e-commerce platform, serving thousands of customers across the country.
-                </p>
-                <p>
-                  We believe in making quality products accessible to everyone, with fast shipping, 
-                  secure payments, and exceptional customer service that sets us apart.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-4">
-                <Button size="lg" className="bg-orange-500 hover:bg-orange-600 text-white">
-                  Shop Now
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-                <Button variant="outline" size="lg">
-                  <Phone className="w-4 h-4 mr-2" />
-                  Contact Us
-                </Button>
-              </div>
-            </div>
-
-            <div className="relative">
-              <div className="grid grid-cols-2 gap-4">
-                {stats.map((stat, index) => (
-                  <Card key={index} className="text-center p-6 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm">
-                    <div className="flex justify-center mb-3 text-orange-500">
-                      {stat.icon}
-                    </div>
-                    <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {stat.number}
-                    </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
-                      {stat.label}
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Our Story Section */}
-      <div className="py-16 lg:py-24">
-        <div className="container mx-auto px-4">
-          <div className="max-w-4xl mx-auto text-center mb-16">
-            <h2 className="text-3xl lg:text-4xl font-bold mb-6">Our Story</h2>
-            <p className="text-lg text-gray-600 dark:text-gray-300 leading-relaxed">
-              What started as a simple idea to make quality products more accessible has quickly evolved into 
-              a comprehensive e-commerce platform that serves customers across Tanzania. Our journey 
-              in 2025 has been marked by rapid innovation, customer-centric approach, and a commitment 
-              to excellence.
+      <main>
+        {/* hero */}
+        <section className="relative overflow-hidden bg-[radial-gradient(ellipse_at_top_right,#ffedd5_0%,#ffffff_60%)] dark:bg-none">
+          <div className="mx-auto max-w-5xl px-4 py-14 sm:px-6 sm:py-20">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-600">About Honic</p>
+            <h1 className="mt-3 max-w-3xl text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl">
+              Everything you need, from people you can trust.
+            </h1>
+            <p className="mt-5 max-w-2xl text-lg leading-relaxed text-neutral-600 dark:text-neutral-300">
+              Honic is Tanzania&apos;s online marketplace. Our official store sells electronic components, kits and tools,
+              and trusted sellers are joining with more departments. You pay with mobile money and we deliver across the country.
             </p>
-          </div>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link href="/products" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold text-white hover:bg-orange-600">
+                Start shopping <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link href="/become-supplier" className="inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold ring-1 ring-neutral-300 hover:ring-orange-500 dark:ring-neutral-700">
+                Sell on Honic
+              </Link>
+            </div>
 
-          {/* Timeline */}
-          <div className="max-w-4xl mx-auto">
-            <div className="space-y-8">
-              {milestones.map((milestone, index) => (
-                <div key={index} className="flex items-start gap-6">
-                  <div className="flex-shrink-0">
-                    <div className="w-12 h-12 bg-orange-500 text-white rounded-full flex items-center justify-center font-bold">
-                      {milestone.year}
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                      {milestone.title}
-                    </h3>
-                    <p className="text-gray-600 dark:text-gray-300">
-                      {milestone.description}
-                    </p>
-                  </div>
+            <dl className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {facts.map((f) => (
+                <div key={f.label} className="rounded-2xl bg-white/80 p-4 ring-1 ring-neutral-200 dark:bg-neutral-900 dark:ring-neutral-800">
+                  <dt className="sr-only">{f.label}</dt>
+                  <dd className="text-2xl font-black tracking-tight">{f.value}</dd>
+                  <dd className="text-sm text-neutral-500">{f.label}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </section>
+
+        {/* story */}
+        <section className="mx-auto max-w-5xl px-4 py-14 sm:px-6">
+          <div className="grid gap-10 lg:grid-cols-[1fr_1.2fr]">
+            <h2 className="text-2xl font-black tracking-tight sm:text-3xl">Why we built Honic</h2>
+            <div className="space-y-4 text-neutral-600 dark:text-neutral-300">
+              <p>
+                Finding the right part, tool or gadget in Tanzania often means visiting many shops, asking around, and still not
+                being sure about the price or quality. We started Honic Company Limited to make that simple: one place to search,
+                clear prices in shillings, and delivery to your door.
+              </p>
+              <p>
+                We began with electronic components for students, makers and engineers, which is still what our own store does best.
+                Now we are opening Honic to other sellers, so you can buy for home, school and work in the same place, with the same
+                checkout and the same protection.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* promises */}
+        <section className="bg-stone-50 py-14 dark:bg-neutral-900/50">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6">
+            <h2 className="text-2xl font-black tracking-tight sm:text-3xl">What you can expect</h2>
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {promises.map(({ icon: Icon, title, text }) => (
+                <div key={title} className="rounded-2xl bg-white p-5 ring-1 ring-neutral-200 dark:bg-neutral-900 dark:ring-neutral-800">
+                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/40"><Icon className="h-5 w-5" /></span>
+                  <h3 className="mt-4 font-bold">{title}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-neutral-500">{text}</p>
                 </div>
               ))}
             </div>
           </div>
-        </div>
-      </div>
+        </section>
 
-      {/* Our Values Section */}
-      <div className="py-16 lg:py-24 bg-gray-50 dark:bg-gray-900">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl lg:text-4xl font-bold mb-6">Our Values</h2>
-            <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
-              These core values guide everything we do and shape our company culture
-            </p>
+        {/* sellers + help */}
+        <section className="mx-auto grid max-w-5xl gap-4 px-4 py-14 sm:px-6 md:grid-cols-2">
+          <div className="rounded-3xl bg-neutral-950 p-7 text-white">
+            <BadgeCheck className="h-7 w-7 text-orange-400" />
+            <h2 className="mt-4 text-2xl font-black tracking-tight">Have products to sell?</h2>
+            <p className="mt-2 text-sm leading-relaxed text-neutral-300">Open your shop on Honic. We handle checkout and mobile money payments; you list your products and ship.</p>
+            <Link href="/become-supplier" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold hover:bg-orange-600">
+              Become a seller <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {values.map((value, index) => (
-              <Card key={index} className="text-center p-8 hover:shadow-lg transition-shadow">
-                <div className="flex justify-center mb-4 text-orange-500">
-                  {value.icon}
-                </div>
-                <h3 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-                  {value.title}
-                </h3>
-                <p className="text-gray-600 dark:text-gray-300">
-                  {value.description}
-                </p>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </div>
-
-
-      {/* Why Choose Us Section */}
-      <div className="py-16 lg:py-24 bg-gray-50 dark:bg-gray-900">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl lg:text-4xl font-bold mb-6">Why Choose {companyName}?</h2>
-            <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
-              We're committed to providing you with the best shopping experience possible
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <Card className="p-8 text-center">
-              <div className="w-16 h-16 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Truck className="w-8 h-8 text-orange-500" />
-              </div>
-              <h3 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-                Fast & Free Shipping
-              </h3>
-              <p className="text-gray-600 dark:text-gray-300">
-                Get your orders delivered quickly with our reliable shipping partners across Tanzania
-              </p>
-            </Card>
-
-            <Card className="p-8 text-center">
-              <div className="w-16 h-16 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Shield className="w-8 h-8 text-orange-500" />
-              </div>
-              <h3 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-                Secure Payments
-              </h3>
-              <p className="text-gray-600 dark:text-gray-300">
-                Your payment information is protected with bank-level security and encryption
-              </p>
-            </Card>
-
-            <Card className="p-8 text-center">
-              <div className="w-16 h-16 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Heart className="w-8 h-8 text-orange-500" />
-              </div>
-              <h3 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-                Customer Support
-              </h3>
-              <p className="text-gray-600 dark:text-gray-300">
-                Our dedicated support team is here to help you 24/7 with any questions or concerns
-              </p>
-            </Card>
-          </div>
-        </div>
-      </div>
-
-      {/* Contact CTA Section */}
-      <div className="py-16 lg:py-24">
-        <div className="container mx-auto px-4">
-          <Card className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
-            <CardContent className="p-12 text-center">
-              <h2 className="text-3xl lg:text-4xl font-bold mb-6">
-                Ready to Start Shopping?
-              </h2>
-              <p className="text-xl mb-8 opacity-90">
-                Join thousands of satisfied customers and discover amazing products at great prices
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button size="lg" variant="secondary" className="bg-white text-orange-500 hover:bg-gray-100">
-                  <Target className="w-4 h-4 mr-2" />
-                  Browse Products
-                </Button>
-                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10">
-                  <Phone className="w-4 h-4 mr-2" />
-                  Contact Us
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* Footer Info */}
-      <div className="py-12 bg-gray-100 dark:bg-gray-800">
-        <div className="container mx-auto px-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Contact Info</h3>
-              <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
-                <p className="flex items-center justify-center gap-2">
-                  <MapPin className="w-4 h-4" />
-                  NSSF 3-Floor, Dar es Salaam, Tanzania
-                </p>
-                <p className="flex items-center justify-center gap-2">
-                  <Phone className="w-4 h-4" />
-                  +255 763818138
-                </p>
-                <p className="flex items-center justify-center gap-2">
-                  <Mail className="w-4 h-4" />
-                  {process.env.NEXT_PUBLIC_SALES_EMAIL || process.env.SALES_EMAIL || 'sales@honiccompanystore.com'}
-                </p>
-              </div>
-            </div>
-            
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Follow Us</h3>
-              <div className="flex justify-center gap-4">
-                <Link href={process.env.NEXT_PUBLIC_FACEBOOK_URL || '/social/facebook'} target="_blank" rel="noopener noreferrer">
-                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-orange-500">
-                  <Facebook className="w-5 h-5" />
-                </Button>
-                </Link>
-                <Link href={process.env.NEXT_PUBLIC_INSTAGRAM_URL || '/social/instagram'} target="_blank" rel="noopener noreferrer">
-                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-orange-500">
-                  <Instagram className="w-5 h-5" />
-                </Button>
-                </Link>
-              </div>
-            </div>
-            
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Quick Links</h3>
-              <div className="space-y-1 text-sm">
-                <Link href="/products" className="block text-gray-600 dark:text-gray-300 hover:text-orange-500">
-                  Products
-                </Link>
-                <Link href="/contact" className="block text-gray-600 dark:text-gray-300 hover:text-orange-500">
-                  Contact Us
-                </Link>
-                <Link href="/account" className="block text-gray-600 dark:text-gray-300 hover:text-orange-500">
-                  My Account
-                </Link>
-              </div>
+          <div className="rounded-3xl bg-orange-50 p-7 dark:bg-orange-950/30">
+            <MessageCircle className="h-7 w-7 text-orange-600" />
+            <h2 className="mt-4 text-2xl font-black tracking-tight">Questions? Talk to us.</h2>
+            <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-300">We reply on WhatsApp during business hours. You can also write to us from the contact page.</p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a href={whatsappLink('Hello Honic, I have a question')} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-neutral-950 px-5 py-3 text-sm font-bold text-white hover:bg-neutral-800">
+                Chat on WhatsApp
+              </a>
+              <Link href="/contact" className="inline-flex items-center rounded-xl px-5 py-3 text-sm font-bold ring-1 ring-neutral-300 hover:ring-orange-500 dark:ring-neutral-700">
+                Contact page
+              </Link>
             </div>
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
+
+      <SiteFooter />
     </div>
   )
 }

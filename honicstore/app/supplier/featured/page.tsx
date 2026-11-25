@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import Image from 'next/image'
+import { safeImageSrc } from '@/lib/image-optimize'
 
 interface Product {
   id: number
@@ -22,6 +23,7 @@ interface Product {
 }
 
 export default function SupplierFeaturedPage() {
+  const router = useRouter()
   const { themeClasses } = useTheme()
   const { toast } = useToast()
   const [products, setProducts] = useState<Product[]>([])
@@ -31,12 +33,8 @@ export default function SupplierFeaturedPage() {
   const [hasValidPremiumPayment, setHasValidPremiumPayment] = useState<boolean>(false)
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchProducts()
-    fetchCurrentPlan()
-  }, [])
 
-  const fetchCurrentPlan = async () => {
+  async function fetchCurrentPlan() {
     try {
       const response = await fetch('/api/user/current-plan', {
         credentials: 'include'
@@ -52,7 +50,7 @@ export default function SupplierFeaturedPage() {
       }
   }
 
-  const fetchProducts = async () => {
+  async function fetchProducts() {
     try {
       setLoading(true)
       const response = await fetch('/api/supplier/products?limit=1000', {
@@ -75,6 +73,12 @@ export default function SupplierFeaturedPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+    fetchProducts()
+    fetchCurrentPlan()
+  }, [])
 
   const handleToggleFeatured = async (productId: number, currentStatus: boolean) => {
     if (!isPremiumPlan) {
@@ -155,10 +159,10 @@ export default function SupplierFeaturedPage() {
       {!isPremiumPlan ? (
         <>
           {/* Upgrade Prompt */}
-          <Card className={cn("border-2 border-yellow-500", themeClasses.cardBg)}>
+          <Card className={cn("border-2 border-orange-500", themeClasses.cardBg)}>
             <CardContent className="p-4 sm:p-6 lg:p-8">
               <div className="text-center">
-                <Star className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 text-yellow-500" />
+                <Star className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 text-orange-500" />
                 <h2 className={cn("text-xl sm:text-2xl font-bold mb-2", themeClasses.mainText)}>
                   {isPremiumPendingPayment 
                     ? 'Complete Payment to Access Featured Placement'
@@ -232,7 +236,7 @@ export default function SupplierFeaturedPage() {
                       })
                     }
                   }}
-                  className="inline-block px-4 sm:px-6 py-2 sm:py-3 bg-yellow-500 hover:bg-yellow-600 text-black rounded-md font-semibold text-sm sm:text-base"
+                  className="inline-block px-4 sm:px-6 py-2 sm:py-3 bg-orange-500 hover:bg-orange-600 text-black rounded-md font-semibold text-sm sm:text-base"
                 >
                   {isPremiumPendingPayment ? 'Complete Payment' : 'Upgrade Plan'}
                 </button>
@@ -255,7 +259,7 @@ export default function SupplierFeaturedPage() {
                   const Icon = benefit.icon
                   return (
                     <div key={index} className={cn("p-4 rounded-lg border opacity-60", themeClasses.cardBorder, themeClasses.cardBg)}>
-                      <Icon className="w-8 h-8 text-yellow-500 mb-2" />
+                      <Icon className="w-8 h-8 text-orange-500 mb-2" />
                       <h3 className={cn("font-semibold mb-1", themeClasses.mainText)}>{benefit.title}</h3>
                       <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>{benefit.desc}</p>
                     </div>
@@ -269,24 +273,24 @@ export default function SupplierFeaturedPage() {
         <>
           {/* Featured Products */}
           {featuredProducts.length > 0 && (
-            <Card className={cn("border-2 border-yellow-500", themeClasses.cardBg)}>
+            <Card className={cn("border-2 border-orange-500", themeClasses.cardBg)}>
               <CardHeader>
                 <CardTitle className={cn(themeClasses.mainText)}>Currently Featured Products</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {featuredProducts.map((product) => (
-                    <Card key={product.id} className={cn("border-2 border-yellow-500", themeClasses.cardBg)}>
+                    <Card key={product.id} className={cn("border-2 border-orange-500", themeClasses.cardBg)}>
                       <CardContent className="p-4">
                         <div className="relative mb-3">
                           <Image
-                            src={product.image}
+                            src={safeImageSrc(product.image)}
                             alt={product.name}
                             width={200}
                             height={200}
                             className="w-full h-32 object-cover rounded"
                           />
-                          <Badge className="absolute top-2 right-2 bg-yellow-500 text-black">
+                          <Badge className="absolute top-2 right-2 bg-orange-500 text-black">
                             Featured
                           </Badge>
                         </div>
@@ -325,7 +329,7 @@ export default function SupplierFeaturedPage() {
                       <CardContent className="p-4">
                         <div className="relative mb-3">
                           <Image
-                            src={product.image}
+                            src={safeImageSrc(product.image)}
                             alt={product.name}
                             width={200}
                             height={200}
@@ -339,7 +343,7 @@ export default function SupplierFeaturedPage() {
                           </span>
                           <Button
                             size="sm"
-                            className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                            className="bg-orange-500 hover:bg-orange-600 text-black"
                             onClick={() => handleToggleFeatured(product.id, false)}
                           >
                             <Star className="w-4 h-4 mr-1" />

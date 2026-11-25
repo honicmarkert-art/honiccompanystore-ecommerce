@@ -201,6 +201,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     // Prevent duplicate fetches
     if (planFetchedRef.current || !user || !isAuthenticated) {
       if (!user || !isAuthenticated) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
         setLoadingPlan(false)
       }
       return
@@ -227,7 +228,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     }
 
     fetchCurrentPlan()
-  }, [user?.id, isAuthenticated]) // Only depend on user.id, not entire user object
+  }, [user?.id, isAuthenticated]) // eslint-disable-line react-hooks/exhaustive-deps -- Only depend on user.id, not entire user object
 
   // Fetch supplier status, company name, and check if company info is complete
   // This will auto-detect and show modal if info is incomplete (with throttling)
@@ -254,6 +255,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
   // Auto-detect and check company info completeness on mount, route change, and plan change
   useEffect(() => {
     if (!user?.id || !isAuthenticated) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setCompanyInfoComplete(null)
       statusFetchedRef.current = false
       setIsCheckingCompanyInfo(false)
@@ -443,7 +445,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       const tId = (fetchSupplierStatus as any)._lastTimeoutId
       if (tId) clearTimeout(tId)
     }
-  }, [user?.id, isAuthenticated, pathname, currentPlan?.slug]) // Re-check on route change and plan change
+  }, [user?.id, isAuthenticated, pathname, currentPlan?.slug]) // eslint-disable-line react-hooks/exhaustive-deps -- Re-check on route change and plan change
 
   // Track if unread count setup is done
   const unreadCountSetupRef = useRef(false)
@@ -509,7 +511,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
       window.removeEventListener('supplier-orders-visited', handleOrdersVisited)
       unreadCountSetupRef.current = false
     }
-  }, [user?.id, isAuthenticated]) // Only depend on user.id
+  }, [user?.id, isAuthenticated]) // eslint-disable-line react-hooks/exhaustive-deps -- Only depend on user.id
 
   const handleDocumentUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'business_tin_certificate' | 'company_certificate') => {
     const file = event.target.files?.[0]
@@ -746,7 +748,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
     
     // For non-Winga users, show all navigation (payout accounts available to all plans)
     return allNavigation
-  }, [loadingPlan, currentPlan, isWingaPlan, allNavigation])
+  }, [loadingPlan, currentPlan, isWingaPlan, allNavigation]) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
   // Don't block on loading - SupplierRouteGuard handles authentication and loading states
   // The loading check is removed to prevent infinite loading issues
@@ -829,8 +831,8 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     <Icon className={cn(
                       "mr-3 h-5 w-5 transition-colors",
                       isActive 
-                        ? "text-yellow-600 dark:text-yellow-400" 
-                        : "text-gray-600 dark:text-gray-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-400"
+                        ? "text-orange-600 dark:text-orange-400" 
+                        : "text-gray-600 dark:text-gray-400 group-hover:text-orange-600 dark:group-hover:text-orange-400"
                     )} />
                     <span className={cn(
                       isActive 
@@ -856,7 +858,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                   <div className="flex items-center gap-2" suppressHydrationWarning>
                     <Crown className={cn(
                       "h-4 w-4",
-                      isPremiumPlan ? "text-yellow-500" : "text-gray-400"
+                      isPremiumPlan ? "text-orange-500" : "text-gray-400"
                     )} />
                     <span className={cn("text-xs font-medium", themeClasses.mainText)}>
                       {currentPlan.name}
@@ -1013,7 +1015,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                         isFreePlan 
                           ? "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700"
                           : isPremiumPlan
-                          ? "bg-gradient-to-r from-yellow-400 to-orange-400 text-black hover:from-yellow-500 hover:to-orange-500 shadow-md border-0"
+                          ? "bg-gradient-to-r from-orange-400 to-orange-400 text-black hover:from-orange-500 hover:to-orange-500 shadow-md border-0"
                           : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700"
                       )}
                       disabled={!isFreePlan}
@@ -1032,10 +1034,10 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                           "h-7 sm:h-8 lg:h-10 rounded-lg sm:rounded-lg",
                           isPremiumPendingPayment
                             ? "bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600"
-                            : "bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600",
+                            : "bg-gradient-to-r from-orange-500 to-orange-500 hover:from-orange-600 hover:to-orange-600",
                           "text-white font-semibold text-[9px] sm:text-[10px] lg:text-sm",
                           "px-1.5 sm:px-2 lg:px-4 whitespace-nowrap",
-                          "shadow-md shadow-yellow-500/30",
+                          "shadow-md shadow-orange-500/30",
                           "active:scale-95 transition-transform",
                           "border-0"
                         )}
@@ -1224,7 +1226,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                   <Label htmlFor="modal-location" className={cn(themeClasses.mainText)}>
                     <MapPin className="inline w-4 h-4 mr-2" />
                     {isWingaPlan ? 'Operating Location' : t('company.location')} 
-                    {isWingaPlan ? <span className="text-yellow-600 dark:text-yellow-400 ml-1">(Recommended)</span> : <span className="text-red-500">*</span>}
+                    {isWingaPlan ? <span className="text-orange-600 dark:text-orange-400 ml-1">(Recommended)</span> : <span className="text-red-500">*</span>}
                   </Label>
                   <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
                     {isWingaPlan 
@@ -1369,7 +1371,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                         {(companyInfoForm.registrationType === 'business' || companyInfoForm.registrationType === 'tin') && (
                           <div className="space-y-2">
                             <Label htmlFor="modal-business-tin-certificate" className={cn(themeClasses.mainText)}>
-                              Business TIN Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                              Business TIN Certificate <span className="text-orange-600 dark:text-orange-400">(Required for verification)</span>
                             </Label>
                             <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
                               Upload a clear photo or scan of your Business TIN Certificate. This is required for account verification.
@@ -1440,7 +1442,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                         {companyInfoForm.registrationType === 'company' && (
                           <div className="space-y-2">
                             <Label htmlFor="modal-company-certificate" className={cn(themeClasses.mainText)}>
-                              Company Registration Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                              Company Registration Certificate <span className="text-orange-600 dark:text-orange-400">(Required for verification)</span>
                             </Label>
                             <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
                               Upload a clear photo or scan of your Company Registration Certificate. This is required for account verification.
@@ -1561,7 +1563,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     <div className="space-y-2">
                       <Label htmlFor="modal-nida-card-photo" className={cn(themeClasses.mainText)}>
                         <IdCard className="inline w-4 h-4 mr-2" />
-                        NIDA Card Photo <span className="text-yellow-600 dark:text-yellow-400 text-xs">(Optional - can upload later)</span>
+                        NIDA Card Photo <span className="text-orange-600 dark:text-orange-400 text-xs">(Optional - can upload later)</span>
                       </Label>
                       <p className={cn("text-xs mb-1", themeClasses.textNeutralSecondary)}>
                         Upload a clear photo of your NIDA card for verification and comparison purposes
@@ -1655,7 +1657,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                     <div className="space-y-2">
                       <Label htmlFor="modal-self-face-photo" className={cn(themeClasses.mainText)}>
                         <Camera className="inline w-4 h-4 mr-2" />
-                        Self Face Photo <span className="text-yellow-600 dark:text-yellow-400 text-xs">(Optional - can upload later)</span>
+                        Self Face Photo <span className="text-orange-600 dark:text-orange-400 text-xs">(Optional - can upload later)</span>
                       </Label>
                       <p className={cn("text-xs mb-1", themeClasses.textNeutralSecondary)}>
                         Upload a clear photo of yourself for comparison with your NIDA card photo
@@ -1872,7 +1874,7 @@ export default function SupplierLayout({ children }: { children: React.ReactNode
                       (companyInfoForm.registrationType === 'company' && !companyCertificate)
                     ))
                   }
-                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-neutral-950 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-orange-500 hover:bg-orange-600 text-neutral-950 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmittingCompanyInfo ? (
                     <>

@@ -85,6 +85,7 @@ export function HierarchicalCategorySelector({
       // Find which main category this subcategory belongs to
       const subCategory = subCategories.find(sub => sub.name === value)
       if (subCategory && subCategory.parent_name) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
         setSelectedMainCategory(subCategory.parent_name)
       }
     }

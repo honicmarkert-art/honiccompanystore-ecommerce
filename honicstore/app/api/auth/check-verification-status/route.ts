@@ -1,90 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '@/lib/supabase-server'
-import { z } from 'zod'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { z } from '@/lib/zod'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-// Email validation schema
-const emailSchema = z.object({
-  email: z.string().email('Please enter a valid email address').max(255, 'Email address is too long')
-})
+/**
+ * POST /api/auth/check-verification-status { email } -> { isVerified }
+ * Used by the sign-in popup after sign-up ("have you confirmed your email yet?").
+ *
+ * SECURITY: rate-limited; answers only true/false, and unknown emails get the same answer as
+ * unverified ones, so it can't be used to collect account IDs or list who is registered.
+ */
+const Body = z.object({ email: z.string().email().max(255) })
 
 export async function POST(request: NextRequest) {
+  const limit = await enhancedRateLimit(request)
+  if (!limit.allowed) {
+    logSecurityEvent('RATE_LIMIT_EXCEEDED', { endpoint: '/api/auth/check-verification-status', reason: limit.reason }, request)
+    return NextResponse.json({ success: false, isVerified: false, error: 'Too many requests. Please wait and try again.' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfter || 60) } })
+  }
+
+  let email: string
   try {
-    const body = await request.json()
-    
-    // Validate input
-    let validatedData
-    try {
-      validatedData = emailSchema.parse(body)
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return NextResponse.json(
-          { 
-            success: false,
-            error: error.errors[0]?.message || 'Invalid email address',
-            isVerified: false
-          },
-          { status: 400 }
-        )
-      }
-      throw error
-    }
+    const parsed = Body.safeParse(await request.json())
+    if (!parsed.success) return NextResponse.json({ success: false, isVerified: false, error: 'Please enter a valid email address' }, { status: 400 })
+    email = parsed.data.email.toLowerCase().trim()
+  } catch {
+    return NextResponse.json({ success: false, isVerified: false, error: 'Invalid request' }, { status: 400 })
+  }
 
-    const { email } = validatedData
-    const sanitizedEmail = email.toLowerCase().trim()
-
-    // Check if email is verified
-    try {
-      const adminSupabase = getSupabaseClient()
-      
-      // Check auth users list
-      const { data: authUsers, error: listError } = await adminSupabase.auth.admin.listUsers()
-      
-      if (!listError && authUsers?.users) {
-        const authUser = authUsers.users.find(u => u.email?.toLowerCase() === sanitizedEmail)
-        
-        if (authUser) {
-          const isVerified = !!authUser.email_confirmed_at
-          
-          return NextResponse.json({
-            success: true,
-            isVerified: isVerified,
-            email: sanitizedEmail,
-            userId: authUser.id,
-            emailConfirmedAt: authUser.email_confirmed_at
-          })
-        }
-      }
-      
-      // User not found
-      return NextResponse.json({
-        success: true,
-        isVerified: false,
-        email: sanitizedEmail,
-        message: 'User not found'
-      })
-    } catch (checkError: any) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Failed to check verification status',
-          isVerified: false
-        },
-        { status: 500 }
-      )
+  try {
+    const supabase = getSupabaseClient()
+    // direct lookup (listUsers only returns the first page of accounts)
+    const { data: profile } = await supabase.from('profiles').select('id').eq('email', email).limit(1).maybeSingle()
+    let isVerified = false
+    if (profile?.id) {
+      const { data } = await supabase.auth.admin.getUserById(profile.id)
+      isVerified = !!data?.user?.email_confirmed_at
     }
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'An unexpected error occurred',
-        isVerified: false
-      },
-      { status: 500 }
-    )
+    return NextResponse.json({ success: true, isVerified }, { headers: { 'Cache-Control': 'no-store' } })
+  } catch {
+    return NextResponse.json({ success: false, isVerified: false, error: 'Could not check right now' }, { status: 500 })
   }
 }
-
-

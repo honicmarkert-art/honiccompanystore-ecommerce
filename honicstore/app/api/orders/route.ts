@@ -6,9 +6,9 @@ import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { securityUtils } from '@/lib/secure-config'
 import { validateAuth } from '@/lib/auth-server'
 import { emailService } from '@/lib/email-service'
-import { getAdminNoticeEmails, sendOrderPlacedWelcomeEmail } from '@/lib/user-email-service'
+import { getAdminNoticeEmails } from '@/lib/user-email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
-import { calculateShippingFee, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
+import { calculateShippingFee, getShippingSizes, largestSize, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
 import { ShortTtlCache } from '@/lib/short-ttl-cache'
 
 
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
       .filter((id: number) => !isNaN(id))
 
     // Fetch products from database (short cache to cut repeated read latency under load)
-    const productsCacheKey = [...productIds].sort((a, b) => a - b).join(',')
+    const productsCacheKey = [...productIds].sort((a, b) => Number(a) - Number(b)).join(',')
     let products = orderProductsCache.get(productsCacheKey)
     let productsError: any = null
     if (!products) {
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       if (p.id != null && !productMap.has(String(p.id))) productMap.set(String(p.id), p)
     })
     // Fetch variants if any exist. Try with price/primary_values first; if that fails (e.g. column missing), try id+product_id only.
-    let variantMap = new Map<string | number, any>()
+    const variantMap = new Map<string | number, any>()
     if (variantIds.length > 0) {
       try {
         let variants: any[] | null = null
@@ -240,6 +240,16 @@ export async function POST(request: NextRequest) {
           { error: `Product ${product.name || clientItem.productId} is out of stock` },
           { status: 400 }
         )
+      }
+      // SECURITY: never accept more than the stock on hand (stock_quantity null = not tracked)
+      if (product.stock_quantity != null && Number.isFinite(Number(product.stock_quantity)) && quantity > Number(product.stock_quantity)) {
+        return NextResponse.json(
+          { error: `Only ${Number(product.stock_quantity)} of ${product.name || 'this product'} left in stock` },
+          { status: 400 }
+        )
+      }
+      if (quantity > 10000) {
+        return NextResponse.json({ error: `Quantity too large for product ${clientItem.productId}` }, { status: 400 })
       }
 
       // Determine actual price: use variant price if variant exists, otherwise product price
@@ -357,14 +367,20 @@ export async function POST(request: NextRequest) {
 
     if (orderData.deliveryOption !== 'pickup') {
       const shippingAddress = orderData.shippingAddress || {}
-      const shippingLocation = orderData.shippingLocation || {}
+      // Delivery is Tanzania-only: fees are priced per Tanzanian region, so a foreign address would be under-charged
+      const shipCountry = String(shippingAddress.country || 'Tanzania').trim().toLowerCase()
+      if (shipCountry && shipCountry !== 'tanzania') {
+        return NextResponse.json({ error: 'We currently deliver within Tanzania only. For orders abroad, please contact us on WhatsApp.' }, { status: 400 })
+      }
       const allProductsHaveFreeDelivery = validatedItems.length > 0 && validatedItems.every((item: any) => {
         const product = productMap.get(item.product_id)
         return product && (product as any).free_delivery === true
       })
       const resolvedCoords = await resolveShippingCoordinatesFromAddress({
-        lat: typeof shippingLocation.lat === 'number' ? shippingLocation.lat : undefined,
-        lon: typeof shippingLocation.lon === 'number' ? shippingLocation.lon : undefined,
+        // SECURITY: coordinates sent by the browser are ignored; a tamperer could send the store's own
+        // location to get the cheapest delivery. The fee comes from the address (geocoded server-side).
+        lat: undefined,
+        lon: undefined,
         ward: shippingAddress.ward,
         district: shippingAddress.district,
         region: shippingAddress.region || shippingAddress.state,
@@ -375,10 +391,13 @@ export async function POST(request: NextRequest) {
         country: shippingAddress.country,
       })
 
+      const sizes = await getShippingSizes(supabase, validatedItems.map((item: any) => Number(item.product_id)))
       const shippingCalc = calculateShippingFee({
         deliveryOption: orderData.deliveryOption || 'shipping',
         region: shippingAddress.region || shippingAddress.state,
+        district: shippingAddress.district,
         ward: shippingAddress.ward,
+        size: largestSize(validatedItems.map((item: any) => sizes.get(Number(item.product_id)))),
         lat: resolvedCoords?.lat ?? null,
         lon: resolvedCoords?.lon ?? null,
         country: shippingAddress.country,
@@ -540,7 +559,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate server-side total
-    const serverCalculatedTotal = serverCalculatedSubtotal + serverShippingFee - serverPromotionDiscount
+    // Whole shillings: Snippe only accepts integer TZS amounts (a % discount can leave decimals)
+    const serverCalculatedTotal = Math.round(serverCalculatedSubtotal + serverShippingFee - serverPromotionDiscount)
+    if (serverCalculatedTotal < 500) {
+      return NextResponse.json(
+        { error: 'Minimum order is TSh 500 (mobile money limit). Add more items to continue.' },
+        { status: 400 }
+      )
+    }
 
     // SECURITY: Compare client-provided total with server-calculated total
     const clientTotal = parseFloat(orderData.totalAmount || '0')
@@ -605,11 +631,11 @@ export async function POST(request: NextRequest) {
       billing_address: orderData.sameAsShipping ? orderData.shippingAddress : (orderData.billingAddress || {}),
       delivery_option: orderData.deliveryOption || 'shipping',
       total_amount: serverCalculatedTotal,
-      currency: orderData.currency || 'TZS',
+      currency: 'TZS', // SECURITY: Snippe settles TZS only; never taken from the client
       payment_method: 'snippe',
       payment_status: 'pending',
       status: 'pending',
-      created_at: orderData.timestamp || new Date().toISOString(),
+      created_at: new Date().toISOString(), // server time, not client-supplied
       updated_at: new Date().toISOString(),
     } as any
     
@@ -624,7 +650,7 @@ export async function POST(request: NextRequest) {
     // Use secure order creation with reference_id validation
     const clientIP = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
     
-    const creationResult = await secureOrderCreation(basicOrderData, null, clientIP)
+    const creationResult = await secureOrderCreation(basicOrderData, undefined, clientIP ?? undefined)
     
     if (!creationResult.success) {
       const errMsg = creationResult.error || 'Unknown'
@@ -707,7 +733,7 @@ export async function POST(request: NextRequest) {
         // Get sender email
         const smtpUser = process.env.SMTP_USER
         const isResendSmtp = process.env.SMTP_HOST?.includes('resend.com') || smtpUser?.toLowerCase() === 'resend'
-        let senderEmail = process.env.SMTP_SENDER_EMAIL_NOREPLY || 
+        const senderEmail = process.env.SMTP_SENDER_EMAIL_NOREPLY || 
                           process.env.NOREPLY_EMAIL || 
                           (isResendSmtp ? (process.env.SMTP_SENDER_EMAIL_INFO || 'noreply@mail.honiccompanystore.com') : smtpUser) ||
                           'noreply@mail.honiccompanystore.com'
@@ -849,29 +875,8 @@ Order ID: ${order.id}
           orderNumber: order.order_number,
         })
       }
-      if (customerEmailAddress.includes('@')) {
-        try {
-          const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'
-          const customerResult = await sendOrderPlacedWelcomeEmail(customerEmailAddress, {
-            orderNumber: order.order_number,
-            orderDate: new Date(order.created_at).toLocaleString('en-TZ', { timeZone: 'Africa/Dar_es_Salaam' }),
-            totalAmount: Number(order.total_amount) || 0,
-            itemsCount: orderItemsData.length,
-            orderUrl: `${siteUrl}/checkout/success?orderReference=${encodeURIComponent(order.reference_id || '')}`,
-          })
-          if (!customerResult.success) {
-            logger.error('Failed to send customer order email', new Error(customerResult.error || 'Unknown error'), {
-              orderId: order.id,
-              orderNumber: order.order_number,
-            })
-          }
-        } catch (customerEmailError) {
-          logger.error('Failed to send customer order email', customerEmailError, {
-            orderId: order.id,
-            userId: orderData.userId,
-          })
-        }
-      }
+      // No customer email here: the order is not paid yet (the shopper is approving the payment prompt).
+      // The one customer email goes out when payment is confirmed (lib/customer-emails.ts sendPaidOrderEmails).
     })()
 
     return NextResponse.json({

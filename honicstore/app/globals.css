@@ -427,6 +427,13 @@
     overflow-x: hidden;
     max-width: 100vw;
   }
+  /* `clip` stops sideways scrolling like `hidden`, but doesn't turn <body> into a scroll container,
+     so `position: sticky` (cart/checkout summaries, product info) keeps working. */
+  @supports (overflow: clip) {
+    html, body {
+      overflow-x: clip;
+    }
+  }
   
   /* Ensure flexible layouts */
   .flex-container {
@@ -612,33 +619,33 @@
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
+    --primary: 24.6 95% 53.1%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
     --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --accent: 33.3 100% 96.5%;
+    --accent-foreground: 20.5 90.2% 48.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    --ring: 24.6 95% 53.1%;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
+    --radius: 0.75rem;
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary: 24.6 95% 53.1%;
     --sidebar-primary-foreground: 0 0% 98%;
     --sidebar-accent: 240 4.8% 95.9%;
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-ring: 24.6 95% 53.1%;
   }
   .dark {
     --background: 0 0% 3.9%;
@@ -647,8 +654,8 @@
     --card-foreground: 0 0% 98%;
     --popover: 0 0% 3.9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
+    --primary: 20.5 90.2% 48.2%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 14.9%;
     --secondary-foreground: 0 0% 98%;
     --muted: 0 0% 14.9%;
@@ -659,7 +666,7 @@
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 14.9%;
     --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --ring: 20.5 90.2% 48.2%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -667,12 +674,12 @@
     --chart-5: 340 75% 55%;
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary: 20.5 90.2% 48.2%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 240 3.7% 15.9%;
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-ring: 20.5 90.2% 48.2%;
   }
 }
 
@@ -688,4 +695,64 @@
     --font-sans: 'GeistSans', 'GeistSans Fallback', system-ui, sans-serif;
     --font-mono: 'GeistMono', 'GeistMono Fallback', 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
   }
+}
+
+/* ---- Modern style: site-wide polish (orange theme) ---- */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    background: hsl(24.6 95% 53.1% / 0.25);
+  }
+  :focus-visible {
+    outline: 2px solid hsl(24.6 95% 53.1%);
+    outline-offset: 2px;
+  }
+  @media (pointer: fine) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: hsl(0 0% 75%) transparent;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+}
+
+/* Honic Lens: scanning line over the photo while searching */
+@keyframes lens-scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(300%); }
+}
+
+/* AI search "thinking" animation (Marketplace) */
+@keyframes ai-orbit {
+  from { transform: rotate(0deg) translateX(30px) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(30px) rotate(-360deg); }
+}
+@keyframes ai-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes ai-step-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ai-shimmer {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: ai-shimmer 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer { animation: none; }
+}
+
+/* top navigation progress bar (components/route-progress.tsx) */
+@keyframes route-progress {
+  0% { transform: scaleX(0); }
+  10% { transform: scaleX(0.35); }
+  40% { transform: scaleX(0.7); }
+  100% { transform: scaleX(0.95); }
 }

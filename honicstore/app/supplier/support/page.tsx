@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
+import { STORE_WHATSAPP, phoneLabel, whatsappLink } from '@/lib/contact'
 
 export default function SupplierSupportPage() {
   const { themeClasses } = useTheme()
@@ -29,11 +30,8 @@ export default function SupplierSupportPage() {
   const [hasValidPremiumPayment, setHasValidPremiumPayment] = useState<boolean>(false)
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchCurrentPlan()
-  }, [])
 
-  const fetchCurrentPlan = async () => {
+  async function fetchCurrentPlan() {
     try {
       const response = await fetch('/api/user/current-plan', {
         credentials: 'include'
@@ -48,6 +46,11 @@ export default function SupplierSupportPage() {
     } catch (error) {
       }
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+    fetchCurrentPlan()
+  }, [])
 
   const isFreePlan = currentPlan?.slug === 'free'
   // Check if premium plan payment is pending - use payment_status directly
@@ -123,15 +126,17 @@ export default function SupplierSupportPage() {
       description: 'Get help via email',
       available: true,
       responseTime: '24-48 hours',
-      contact: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'
+      contact: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com',
+      href: `mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'}`
     },
     {
       icon: MessageCircle,
-      title: 'Live Chat',
-      description: 'Chat with our support team',
-      available: false,
-      responseTime: 'Instant',
-      premium: true
+      title: 'WhatsApp',
+      description: 'Message our team on WhatsApp',
+      available: true,
+      responseTime: 'Business hours',
+      contact: phoneLabel(STORE_WHATSAPP),
+      href: whatsappLink('Hello Honic, I am a seller and need help')
     },
     {
       icon: HelpCircle,
@@ -185,7 +190,7 @@ export default function SupplierSupportPage() {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <h3 className={cn("font-semibold", themeClasses.mainText)}>{option.title}</h3>
                       {option.premium && (
-                        <Badge className="bg-yellow-500 text-black text-xs font-semibold">Premium</Badge>
+                        <Badge className="bg-orange-500 text-black text-xs font-semibold">Premium</Badge>
                       )}
                       {!option.available && option.premium && (
                         <Badge variant="outline" className="text-xs border-orange-500 text-orange-600 dark:text-orange-400">
@@ -206,7 +211,8 @@ export default function SupplierSupportPage() {
                 </div>
                 {option.available && option.contact && (
                   <a
-                    href={`mailto:${option.contact}`}
+                    href={option.href || `mailto:${option.contact}`}
+                    {...(option.href?.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                     className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
                   >
                     {option.contact}
@@ -339,7 +345,7 @@ export default function SupplierSupportPage() {
             </div>
             <Button 
               type="submit" 
-              className="w-full bg-yellow-500 hover:bg-yellow-600 text-black"
+              className="w-full bg-orange-500 hover:bg-orange-600 text-black"
               disabled={isSubmitting}
             >
               {isSubmitting ? 'Sending...' : 'Send Request'}

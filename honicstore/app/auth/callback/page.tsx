@@ -1,517 +1,178 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+/**
+ * Landing page for links that come back from Supabase:
+ *  - Google sign-in            (#access_token=…  or ?code=…)
+ *  - "Confirm your email" link (#access_token=…&type=signup)
+ *  - Password recovery link    (type=recovery  -> forwarded to /auth/reset-password)
+ *
+ * Runs exactly once (the old page re-ran on every state change and could use a one-time code twice,
+ * turning a successful verification into "Authentication failed"). On success it stores the session
+ * in the server cookies, remembers this device, refreshes the account and returns the shopper to
+ * where they started (or the supplier dashboard for suppliers).
+ */
+
+import { Suspense, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { CheckCircle2, Loader2, MailCheck, XCircle } from 'lucide-react'
 import { supabaseClient } from '@/lib/supabase-client'
 import { useAuth } from '@/contexts/auth-context'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { CheckCircle, XCircle, Loader2 } from 'lucide-react'
-import Link from 'next/link'
+import { AuthShell, StatusIcon, authButton } from '../_components/auth-shell'
 
-function AuthCallbackContent() {
+type State =
+  | { kind: 'working'; text: string }
+  | { kind: 'signed-in'; verified: boolean; to: string }
+  | { kind: 'error'; text: string }
+
+const safePath = (p: string | null) => (p && p.startsWith('/') && !p.startsWith('//') && !p.startsWith('/auth') ? p : null)
+
+function CallbackInner() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const { refreshUser, isAuthenticated } = useAuth()
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
-  const [message, setMessage] = useState('Processing authentication...')
-  
-  // Store hash immediately on mount (before React hydration might affect it)
-  const [initialHash, setInitialHash] = useState<string>('')
-  
-  // Capture hash immediately on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash
-      setInitialHash(hash)
-    }
-  }, [])
-
-  // Log for debugging - run immediately on mount
-  useEffect(() => {
-    const fullUrl = window.location.href
-    const hash = window.location.hash
-    const code = searchParams.get('code')
-    
-    // Callback logging disabled for production cleanliness
-  }, []) // Empty deps - run once on mount
+  const { refreshUser } = useAuth()
+  const [state, setState] = useState<State>({ kind: 'working', text: 'Signing you in…' })
+  const ran = useRef(false)
 
   useEffect(() => {
-    const handleCallback = async () => {
-      try {
-        // Check if we've already processed this callback (prevent loops)
-        const callbackProcessed = typeof window !== 'undefined' ? sessionStorage.getItem('callback_processed') : null
-        if (callbackProcessed === 'true') {
-          // Google OAuth always redirects to home page
-          if (typeof window !== 'undefined') {
-            sessionStorage.removeItem('oauth_redirect')
-            sessionStorage.removeItem('supplier_registration')
-          }
-          router.push('/')
+    if (ran.current) return
+    ran.current = true
+
+    const run = async () => {
+      const url = new URL(window.location.href)
+      const hash = new URLSearchParams(url.hash.replace(/^#/, ''))
+      const q = url.searchParams
+      const type = hash.get('type') || q.get('type')
+      const err = hash.get('error_description') || hash.get('error') || q.get('error_description') || q.get('error')
+
+      if (err) {
+        setState({ kind: 'error', text: decodeURIComponent(err.replace(/\+/g, ' ')) })
+        return
+      }
+
+      // 1. Get the session from whichever form the link used
+      let session = null
+      const code = q.get('code')
+      const accessToken = hash.get('access_token')
+      if (code) {
+        const { data, error } = await supabaseClient.auth.exchangeCodeForSession(code)
+        if (error && !/already|used|verifier/i.test(error.message)) {
+          setState({ kind: 'error', text: error.message })
           return
         }
-        
-        // Use initial hash if available, otherwise try current hash
-        // This ensures we capture the hash even if it gets cleared
-        const hash = initialHash || window.location.hash
-        
-        // If user is already authenticated and there's no hash/code, redirect away
-        if (isAuthenticated && !hash && !searchParams.get('code')) {
-          // Google OAuth always redirects to home page
-          if (typeof window !== 'undefined') {
-            sessionStorage.removeItem('oauth_redirect')
-            sessionStorage.removeItem('supplier_registration')
-          }
-          router.push('/')
-          return
-        }
-        const fullUrl = window.location.href
-        
-        // Callback logging disabled for production cleanliness
-
-        // Check for hash fragments first (OAuth tokens)
-        const hashWithoutHash = hash.substring(1) // Remove the #
-        let hashParams: URLSearchParams | null = null
-        let accessToken: string | null = null
-        let refreshToken: string | null = null
-        
-        if (hashWithoutHash) {
-          try {
-            hashParams = new URLSearchParams(hashWithoutHash)
-            accessToken = hashParams.get('access_token')
-            refreshToken = hashParams.get('refresh_token')
-          } catch (e) {
-            }
-        }
-        
-        const error = hashParams?.get('error') || searchParams.get('error')
-        const errorDescription = hashParams?.get('error_description') || searchParams.get('error_description')
-
-        // Callback logging disabled for production cleanliness
-
-        // Handle OAuth errors
+        session = data?.session ?? null
+      } else if (accessToken) {
+        const { data, error } = await supabaseClient.auth.setSession({ access_token: accessToken, refresh_token: hash.get('refresh_token') || '' })
         if (error) {
-          setStatus('error')
-          setMessage(errorDescription || error || 'Authentication failed. Please try again.')
+          setState({ kind: 'error', text: error.message })
           return
         }
-
-        // If we have tokens in the hash, Supabase has already authenticated the user
-        if (accessToken) {
-          try {
-            // Set the session using the tokens from the hash
-            const { data: { session }, error: sessionError } = await supabaseClient.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken || '',
-            })
-
-            if (sessionError) {
-              setStatus('error')
-              setMessage(sessionError.message || 'Failed to create session. Please try again.')
-              return
-            }
-
-            if (session && session.user) {
-              // Set cookies server-side so API routes can access the session
-              // Use the refresh_token from the hash if session.refresh_token is missing
-              const refreshTokenToUse = session.refresh_token || refreshToken || ''
-              
-              if (!refreshTokenToUse) {
-                }
-              
-              try {
-                const cookieResponse = await fetch('/api/auth/session', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  credentials: 'include',
-                  body: JSON.stringify({
-                    access_token: session.access_token,
-                    refresh_token: refreshTokenToUse,
-                  }),
-                })
-
-                if (!cookieResponse.ok) {
-                  const errorText = await cookieResponse.text()
-                  } else {
-                  }
-              } catch (cookieError) {
-                // Continue anyway - session is still valid in localStorage
-              }
-
-              setStatus('success')
-              setMessage('Successfully signed in!')
-              
-              // SECURITY: Mark device as verified after successful OAuth login
-              if (typeof window !== 'undefined') {
-                import('@/lib/device-fingerprint').then(({ markDeviceVerified }) => {
-                  markDeviceVerified()
-                }).catch(() => {
-                  // Ignore errors - device verification is not critical
-                })
-              }
-              
-              // Google OAuth always redirects to home page (no supplier redirects)
-              // Remove any supplier-related flags
-              if (typeof window !== 'undefined') {
-                sessionStorage.removeItem('oauth_redirect')
-                sessionStorage.removeItem('supplier_registration')
-              }
-              
-              // Refresh auth context to update user state (don't wait for it)
-              refreshUser().then(() => {
-                }).catch((refreshError) => {
-                // Continue anyway - session is valid
-              })
-              
-              // Mark callback as processed to prevent loops
-              if (typeof window !== 'undefined') {
-                sessionStorage.setItem('callback_processed', 'true')
-                // Clear after 5 seconds to allow re-authentication if needed
-                setTimeout(() => {
-                  sessionStorage.removeItem('callback_processed')
-                }, 5000)
-              }
-              
-              // Clear the hash from URL
-              window.history.replaceState(null, '', window.location.pathname)
-              
-              // Don't auto-redirect - let user click "Go to Dashboard" button
-              return
-            } else {
-              setStatus('error')
-              setMessage('Session created but user data is missing. Please try again.')
-              return
-            }
-          } catch (sessionErr: any) {
-            setStatus('error')
-            setMessage(sessionErr.message || 'Failed to create session. Please try again.')
-            return
-          }
-        }
-
-        // Check for code parameter (PKCE flow)
-        const code = searchParams.get('code')
-        const type = searchParams.get('type')
-        const token = searchParams.get('token')
-
-        if (code) {
-          // Handle OAuth callback or email verification callback
-          // Optimize: Set status to loading immediately for better UX
-          setStatus('loading')
-          setMessage('Verifying email...')
-          
-          const { data, error: exchangeError } = await supabaseClient.auth.exchangeCodeForSession(code)
-
-          if (exchangeError) {
-            setStatus('error')
-            setMessage(exchangeError.message || 'Failed to verify. Please try again.')
-            return
-          }
-
-          if (data.user) {
-            setStatus('success')
-            // Check if this is an OAuth sign-in (user already authenticated)
-            if (data.session) {
-              // Set cookies server-side so API routes can access the session
-              try {
-                const cookieResponse = await fetch('/api/auth/session', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  credentials: 'include',
-                  body: JSON.stringify({
-                    access_token: data.session.access_token,
-                    refresh_token: data.session.refresh_token,
-                  }),
-                })
-
-                if (!cookieResponse.ok) {
-                  } else {
-                  }
-              } catch (cookieError) {
-                // Continue anyway - session is still valid
-              }
-
-              setMessage('Successfully signed in!')
-            
-              // Check if user is supplier and redirect accordingly
-              if (typeof window !== 'undefined') {
-                sessionStorage.removeItem('oauth_redirect')
-                const isSupplierRegistration = sessionStorage.getItem('supplier_registration') === 'true'
-                sessionStorage.removeItem('supplier_registration')
-                
-                // Fetch profile to check if user is supplier
-                try {
-                  const { data: profile } = await supabaseClient
-                    .from('profiles')
-                    .select('is_supplier')
-                    .eq('id', data.user.id)
-                    .single()
-                  
-                  const isSupplier = profile?.is_supplier || isSupplierRegistration || false
-                  
-                  // Refresh auth context to update user state (don't wait for it)
-                  refreshUser().then(() => {
-                    // Redirect based on user type after auth context is refreshed
-                    setTimeout(() => {
-                      if (isSupplier) {
-                        router.push('/supplier/dashboard')
-                      } else {
-                        router.push('/products')
-                      }
-                    }, 500) // Small delay to ensure context is updated
-                  }).catch((refreshError) => {
-                    // Still redirect based on user type
-                    if (isSupplier) {
-                      router.push('/supplier/dashboard')
-                    } else {
-                      router.push('/products')
-                    }
-                  })
-                } catch (profileError) {
-                  // Refresh auth context anyway
-                  refreshUser().catch((refreshError) => {
-                    })
-                }
-              } else {
-                // Refresh auth context to update user state (don't wait for it)
-                refreshUser().then(() => {
-                  }).catch((refreshError) => {
-                  })
-              }
-              
-              // Don't auto-redirect - let user click "Go to Dashboard" button or wait for redirect
-            } else {
-              // Email verification successful - show success message instead of auto-redirecting
-              setStatus('success')
-              setMessage('Email verified successfully! You can now log in to your account.')
-              
-              // Check if email is actually verified
-              const isEmailVerified = !!data.user?.email_confirmed_at
-              
-              if (!isEmailVerified) {
-                setStatus('error')
-                setMessage('Email verification is still processing. Please wait a moment and try logging in.')
-                return
-              }
-              
-              // Do background tasks without blocking UI
-              // Run these asynchronously without waiting
-              Promise.all([
-                // Refresh user context in background
-                refreshUser().catch(() => {}),
-                
-                // Send welcome email for new users (fire and forget)
-                (async () => {
-                  try {
-                    const isSupplierRegistration = typeof window !== 'undefined' ? sessionStorage.getItem('supplier_registration') === 'true' : false
-                    let isNewUser = false
-                    if (data.user?.created_at) {
-                      const createdAt = new Date(data.user.created_at)
-                      const now = new Date()
-                      const timeDiff = now.getTime() - createdAt.getTime()
-                      isNewUser = timeDiff < 5 * 60 * 1000
-                    }
-                    
-                    if (isNewUser && data.user?.email && !data.user.user_metadata?.account_notice_sent) {
-                      const response = await fetch('/api/auth/send-welcome-email', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          email: data.user.email,
-                          name: data.user.user_metadata?.full_name || data.user.email.split('@')[0],
-                          isSupplier: isSupplierRegistration
-                        })
-                      })
-                      if (response.ok) {
-                        }
-                      
-                      // Create welcome notification for new suppliers
-                      if (isSupplierRegistration) {
-                        const welcomeResponse = await fetch('/api/notifications/welcome-supplier', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            supplierId: data.user?.id,
-                            companyName: data.user?.user_metadata?.full_name || data.user?.email,
-                            planSlug: null
-                          })
-                        })
-                        if (welcomeResponse.ok) {
-                          }
-                      }
-                    }
-                  } catch (error) {
-                    // Don't block user flow
-                  }
-                })()
-              ]).catch(() => {})
-              
-              // Mark callback as processed
-              if (typeof window !== 'undefined') {
-                sessionStorage.setItem('callback_processed', 'true')
-                setTimeout(() => {
-                  sessionStorage.removeItem('callback_processed')
-                }, 5000)
-              }
-              
-              // Don't auto-redirect - let user click "Go to Login" button
-              return
-            }
-          }
-        } else if (token && type === 'recovery') {
-          // Handle password reset callback
-          setStatus('success')
-          setMessage('Password reset link verified. Redirecting to reset page...')
-          router.push(`/auth/reset-password?token=${token}`)
-        } else if (!accessToken && !code) {
-          // No tokens or code - check if user is already authenticated
-          // If so, redirect to appropriate page
-          try {
-            const { data: { session } } = await supabaseClient.auth.getSession()
-            if (session?.user) {
-              // Check if user is supplier by fetching profile
-              try {
-                const { data: profile } = await supabaseClient
-                  .from('profiles')
-                  .select('is_supplier')
-                  .eq('id', session.user.id)
-                  .single()
-                
-                const isSupplier = profile?.is_supplier || false
-                
-                if (typeof window !== 'undefined') {
-                  sessionStorage.removeItem('oauth_redirect')
-                  sessionStorage.removeItem('supplier_registration')
-                }
-                
-                // Redirect suppliers to dashboard, others to products page
-                if (isSupplier) {
-                  router.push('/supplier/dashboard')
-                } else {
-                  router.push('/products')
-                }
-                return
-              } catch (profileError) {
-                // Fallback to home if profile check fails
-                router.push('/')
-                return
-              }
-            }
-          } catch (checkError) {
-            }
-          
-          setStatus('error')
-          setMessage('No authentication data found in URL. The OAuth callback may have failed. Please try signing in again.')
-        }
-      } catch (error: any) {
-        setStatus('error')
-        setMessage(error?.message || 'An unexpected error occurred. Please try again.')
+        session = data.session
       }
+      // The Supabase client may already have read the tokens from the URL itself
+      if (!session) session = (await supabaseClient.auth.getSession()).data.session
+
+      // clean the tokens out of the address bar
+      window.history.replaceState(null, '', url.pathname)
+
+      if (!session?.user) {
+        setState({ kind: 'error', text: 'This link has expired or was already used. Sign in, or request a new link.' })
+        return
+      }
+
+      // 2. Password recovery -> set a new password
+      if (type === 'recovery') {
+        router.replace('/auth/reset-password')
+        return
+      }
+
+      // 3. Store the session in server cookies so the API (orders, account) sees the shopper
+      try {
+        await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ access_token: session.access_token, refresh_token: session.refresh_token }),
+        })
+      } catch { /* the browser session still works */ }
+      try { (await import('@/lib/device-fingerprint')).markDeviceVerified() } catch { /* not critical */ }
+
+      // 4. Where to go next
+      const user = session.user
+      const supplierFlag = sessionStorage.getItem('supplier_registration') === 'true'
+      let isSupplier = supplierFlag
+      try {
+        const { data: profile } = await supabaseClient.from('profiles').select('is_supplier').eq('id', user.id).single()
+        isSupplier = !!profile?.is_supplier || supplierFlag
+      } catch { /* default: buyer */ }
+      const to = isSupplier ? '/supplier/dashboard' : safePath(sessionStorage.getItem('oauth_redirect')) || '/'
+      sessionStorage.removeItem('oauth_redirect')
+      sessionStorage.removeItem('supplier_registration')
+      sessionStorage.removeItem('pending_verification_email')
+
+      // 5. New email-verified accounts get the welcome email once (fire and forget)
+      const verifiedEmail = type === 'signup' || type === 'email'
+      const isNew = user.created_at && Date.now() - new Date(user.created_at).getTime() < 24 * 60 * 60 * 1000
+      if (verifiedEmail && isNew && user.email && !user.user_metadata?.account_notice_sent) {
+        fetch('/api/auth/send-welcome-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: user.email, name: user.user_metadata?.full_name || user.email.split('@')[0], isSupplier }),
+        }).catch(() => {})
+        if (supplierFlag) {
+          fetch('/api/notifications/welcome-supplier', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ supplierId: user.id, companyName: user.user_metadata?.full_name || user.email, planSlug: null }),
+          }).catch(() => {})
+        }
+      }
+
+      await refreshUser().catch(() => {})
+      setState({ kind: 'signed-in', verified: verifiedEmail, to })
+      setTimeout(() => router.replace(to), verifiedEmail ? 2200 : 900)
     }
 
-    // Add timeout to prevent infinite loading (increased to 30 seconds for email verification)
-    const timeoutId = setTimeout(() => {
-      if (status === 'loading') {
-        setStatus('error')
-        setMessage('Authentication is taking too long. Please try again or contact support if the issue persists.')
-      }
-    }, 30000) // 30 second timeout (increased for email verification flow)
+    run().catch((e) => setState({ kind: 'error', text: e?.message || 'Something went wrong. Please try again.' }))
+  }, [refreshUser, router])
 
-    handleCallback()
+  if (state.kind === 'working') {
+    return (
+      <AuthShell back={null} icon={<StatusIcon tone="orange"><Loader2 className="h-7 w-7 animate-spin" /></StatusIcon>} title="One moment…" subtitle={state.text}>
+        <div className="h-1.5 overflow-hidden rounded-full bg-neutral-100"><div className="h-full w-1/2 animate-pulse rounded-full bg-orange-400" /></div>
+      </AuthShell>
+    )
+  }
 
-    return () => clearTimeout(timeoutId)
-  }, [searchParams, router, status, initialHash, isAuthenticated, refreshUser])
+  if (state.kind === 'signed-in') {
+    return (
+      <AuthShell
+        back={null}
+        icon={<StatusIcon tone="green">{state.verified ? <MailCheck className="h-7 w-7" /> : <CheckCircle2 className="h-7 w-7" />}</StatusIcon>}
+        title={state.verified ? 'Email verified, welcome!' : 'You’re signed in'}
+        subtitle={state.verified ? 'Your account is active. Taking you to the store…' : 'Taking you back…'}
+      >
+        <Link href={state.to} className={authButton}>Continue</Link>
+      </AuthShell>
+    )
+  }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-center">
-            {status === 'loading' && 'Processing...'}
-            {status === 'success' && (message.includes('verified') ? 'Email Verified!' : 'Successfully Signed In!')}
-            {status === 'error' && 'Authentication Failed'}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex justify-center">
-            {status === 'loading' && (
-              <Loader2 className="w-12 h-12 animate-spin text-blue-500" />
-            )}
-            {status === 'success' && (
-              <CheckCircle className="w-12 h-12 text-green-500" />
-            )}
-            {status === 'error' && (
-              <XCircle className="w-12 h-12 text-red-500" />
-            )}
-          </div>
-          <p className="text-center text-gray-600 dark:text-gray-400">
-            {message}
-          </p>
-          {status === 'success' && (
-            <div className="flex flex-col items-center gap-3">
-              {message.includes('verified') && !message.includes('signed in') ? (
-                <>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
-                    Your email has been verified successfully. You can now log in to your account.
-                  </p>
-                  <Button asChild className="w-full sm:w-auto">
-                    <Link href="/auth/login">Go to Login</Link>
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
-                    You have been successfully authenticated. Click below to continue.
-                  </p>
-                  <Button asChild className="w-full sm:w-auto">
-                    <Link href="/">Go to Dashboard</Link>
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
-          {status === 'error' && (
-            <div className="flex justify-center gap-2">
-              <Button variant="outline" asChild>
-                <Link href="/">Go Home</Link>
-              </Button>
-              <Button asChild>
-                <Link href="/auth/resend-verification">Resend Verification Email</Link>
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <AuthShell icon={<StatusIcon tone="red"><XCircle className="h-7 w-7" /></StatusIcon>} title="That link didn’t work" subtitle={state.text}>
+      <div className="space-y-3">
+        <Link href="/auth/login" className={authButton}>Sign in</Link>
+        <p className="text-center text-xs text-neutral-500">
+          Need a new verification email? Sign in with your email and password; the form offers to resend it.
+          Forgot your password? <Link href="/auth/forgot-password" className="font-semibold text-orange-600 hover:underline">Reset it</Link>.
+        </p>
+      </div>
+    </AuthShell>
   )
 }
 
 export default function AuthCallbackPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-center">Processing...</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-center">
-              <Loader2 className="w-12 h-12 animate-spin text-blue-500" />
-            </div>
-            <p className="text-center text-gray-600 dark:text-gray-400">
-              Loading authentication...
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    }>
-      <AuthCallbackContent />
+    <Suspense fallback={<div className="min-h-screen bg-white" />}>
+      <CallbackInner />
     </Suspense>
   )
 }
-
-

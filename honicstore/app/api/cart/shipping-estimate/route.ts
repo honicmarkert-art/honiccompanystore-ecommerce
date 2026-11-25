@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '@/lib/supabase-server'
-import { calculateShippingFee, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
+import { calculateShippingFee, getShippingSizes, largestSize, resolveShippingCoordinatesFromAddress, type ShippingQuote } from '@/lib/shipping-pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     const productMap = new Map<number, any>()
     products.forEach((p: any) => productMap.set(p.id, p))
 
-    let variantMap = new Map<number, any>()
+    const variantMap = new Map<number, any>()
     if (variantIds.length > 0) {
       const { data: variants } = await supabase
         .from('product_variants')
@@ -126,6 +126,7 @@ export async function POST(request: NextRequest) {
 
     const deliveryOption = body.deliveryOption === 'pickup' ? 'pickup' : 'shipping'
     let shipping = 0
+    let quote: ShippingQuote | null = null
 
     if (deliveryOption !== 'pickup') {
       const resolvedCoords = await resolveShippingCoordinatesFromAddress({
@@ -141,10 +142,13 @@ export async function POST(request: NextRequest) {
         country: body.country,
       })
       const allFreeDelivery = validatedItems.length > 0 && validatedItems.every((i) => i.free_delivery)
+      const sizes = await getShippingSizes(supabase, validatedItems.map((i) => i.product_id))
       const shippingCalc = calculateShippingFee({
         deliveryOption,
         region: body.region,
+        district: body.district,
         ward: body.ward,
+        size: largestSize(validatedItems.map((i) => sizes.get(i.product_id))),
         lat: resolvedCoords?.lat ?? null,
         lon: resolvedCoords?.lon ?? null,
         country: body.country,
@@ -152,6 +156,7 @@ export async function POST(request: NextRequest) {
         allProductsHaveFreeDelivery: allFreeDelivery,
       })
       shipping = shippingCalc.shippingFee
+      quote = shippingCalc
     }
 
     const total = subtotal + shipping
@@ -161,6 +166,8 @@ export async function POST(request: NextRequest) {
       shipping,
       total,
       currency: 'TZS',
+      // shown at checkout: where it goes, how long, why it costs what it costs
+      delivery: quote ? { zone: quote.zone, eta: quote.eta, baseFee: quote.baseFee, sizeSurcharge: quote.sizeSurcharge, size: quote.size, freeReason: quote.freeReason } : null,
     })
   } catch (e) {
     return NextResponse.json({ error: 'Failed to compute estimate' }, { status: 500 })

@@ -41,7 +41,7 @@ class DatabaseOptimizer {
     const ttl = options.cacheTTL || CACHE_TTL.PRODUCT
 
     if (options.useCache !== false) {
-      const cached = cache.get(cacheKey)
+      const cached = cache.get(cacheKey) as any
       if (cached) {
         return cached
       }
@@ -98,7 +98,7 @@ class DatabaseOptimizer {
     const ttl = options.cacheTTL || CACHE_TTL.PRODUCTS_LIST
 
     if (options.useCache !== false) {
-      const cached = cache.get(cacheKey)
+      const cached = cache.get(cacheKey) as any
       if (cached) {
         return cached
       }
@@ -179,7 +179,7 @@ class DatabaseOptimizer {
     const ttl = options.cacheTTL || CACHE_TTL.USER_CART
 
     if (options.useCache !== false) {
-      const cached = cache.get(cacheKey)
+      const cached = cache.get(cacheKey) as any
       if (cached) {
         return cached
       }
@@ -254,7 +254,7 @@ class DatabaseOptimizer {
       const ttl = CACHE_TTL.STOCK_INFO
 
       if (options.useCache !== false) {
-        const cached = cache.get(cacheKey)
+        const cached = cache.get(cacheKey) as any
         if (cached) {
           return {
             product_id: item.product_id,
@@ -312,7 +312,7 @@ class DatabaseOptimizer {
     const ttl = options.cacheTTL || CACHE_TTL.ORDER
 
     if (options.useCache !== false) {
-      const cached = cache.get(cacheKey)
+      const cached = cache.get(cacheKey) as any
       if (cached) {
         return cached
       }
@@ -371,7 +371,7 @@ class DatabaseOptimizer {
     const ttl = options.cacheTTL || CACHE_TTL.USER_PROFILE
 
     if (options.useCache !== false) {
-      const cached = cache.get(cacheKey)
+      const cached = cache.get(cacheKey) as any
       if (cached) {
         return cached
       }

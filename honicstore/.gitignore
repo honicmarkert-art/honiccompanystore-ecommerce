@@ -35,6 +35,8 @@ credentials/
 *.log
 logs/
 *.sql
+# ...but keep schema/migration scripts (no data) in database/
+!database/*.sql
 *.db
 *.sqlite
 *.sqlite3
@@ -75,3 +77,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# local data snapshots taken before database fixes (never commit)
+database/backups/

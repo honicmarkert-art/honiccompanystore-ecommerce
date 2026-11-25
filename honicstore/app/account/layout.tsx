@@ -1,239 +1,166 @@
 "use client"
 
-import { useState } from 'react'
-import { UserRoute } from '@/components/protected-route'
+/**
+ * Account area frame: site header/footer, a sticky side panel on desktop (who you are, grouped links
+ * with counts, sign out) and a swipeable link strip on phones. Each page renders its own heading.
+ * (Replaces a floating overlay sidebar + tab row + two "Back to Products" links + a duplicate h1.)
+ */
+import { useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { ShoppingBag, MessageCircle, CreditCard, Heart, Settings, User, ChevronRight, Clock, X, ArrowLeft, Package, ShoppingCart, Menu, Bell, Ticket } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import { Bell, Clock, CreditCard, Heart, History, LayoutDashboard, LogOut, MessageCircle, Package, Settings, Ticket } from 'lucide-react'
+import { UserRoute } from '@/components/protected-route'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
 import { useAuth } from '@/contexts/auth-context'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { useCart } from '@/hooks/use-cart'
 import { useWishlist } from '@/hooks/use-wishlist'
 import { useSavedLater } from '@/hooks/use-saved-later'
 import { useOrders } from '@/hooks/use-orders'
 
+type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }
+
 export default function AccountLayout({ children }: { children: React.ReactNode }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const pathname = usePathname()
-  const { cartTotalItems } = useCart()
+  const router = useRouter()
+  const { user, signOut } = useAuth()
   const { items: wishlistItems } = useWishlist()
   const { items: savedLaterItems } = useSavedLater()
   const { orders } = useOrders()
-  
-  const wishlistCount = wishlistItems.length
-  const savedLaterCount = savedLaterItems.length
-  // Only count active orders (not received/completed)
-  const ordersCount = orders.filter(order => order.isReceived !== true).length
-  const nav = [
-    { href: '/account', label: 'Overview', icon: User },
-    { href: '/account/orders', label: 'Orders', icon: ShoppingBag },
-    { href: '/account/orders/history', label: 'Order History', icon: Clock },
-    { href: '/cart', label: 'Cart', icon: ShoppingCart },
-    { href: '/account/messages', label: 'Messages', icon: MessageCircle },
-    { href: '/account/price-alerts', label: 'Price alerts', icon: Bell },
-    { href: '/account/coupons', label: 'Coupons', icon: Ticket },
-    { href: '/account/payment', label: 'Payment', icon: CreditCard },
-    { href: '/account/wishlist', label: 'Wishlist', icon: Heart },
-    { href: '/account/saved-later', label: 'Saved for Later', icon: Clock },
-    { href: '/account/settings', label: 'Settings', icon: Settings },
-  ]
 
-  const current = nav.find(n => n.href === pathname) || nav[0]
-  const { user } = useAuth()
-  const userName = (user?.user_metadata?.full_name as string) || (user?.email?.split('@')[0] ?? 'User')
-  const initials = userName.split(' ').map(s => s[0]).join('').toUpperCase()
-  const segments = pathname
-    .split('/')
-    .filter(Boolean)
-    .map((seg, idx, arr) => ({
-      label: seg.charAt(0).toUpperCase() + seg.slice(1),
-      href: '/' + arr.slice(0, idx + 1).join('/'),
-      isLast: idx === arr.length - 1,
-    }))
+  // active = orders not yet received / completed
+  const activeOrders = orders.filter((o) => o.isReceived !== true && o.status !== 'cancelled').length
+
+  const groups: { title: string; items: NavItem[] }[] = [
+    {
+      title: 'Shopping',
+      items: [
+        { href: '/account/orders', label: 'My orders', icon: Package, count: activeOrders },
+        { href: '/account/orders/history', label: 'Order history', icon: History },
+        { href: '/account/wishlist', label: 'Wishlist', icon: Heart, count: wishlistItems.length },
+        { href: '/account/saved-later', label: 'Saved for later', icon: Clock, count: savedLaterItems.length },
+        { href: '/account/price-alerts', label: 'Price alerts', icon: Bell },
+        { href: '/account/coupons', label: 'Coupons', icon: Ticket },
+      ],
+    },
+    {
+      title: 'Account',
+      items: [
+        { href: '/account', label: 'Overview', icon: LayoutDashboard },
+        { href: '/account/messages', label: 'Messages', icon: MessageCircle },
+        { href: '/account/payment', label: 'Payments & addresses', icon: CreditCard },
+        { href: '/account/settings', label: 'Settings', icon: Settings },
+      ],
+    },
+  ]
+  const all = groups.flatMap((g) => g.items)
+  // most specific match wins (/account/orders/history over /account/orders, /account/orders/123 -> My orders)
+  const activeHref = all
+    .filter((i) => pathname === i.href || (i.href !== '/account' && pathname.startsWith(i.href + '/')))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href ?? (pathname === '/account' ? '/account' : '')
+
+  const name = user?.name || user?.email?.split('@')[0] || 'there'
+  const initials = name.split(/\s+/).map((s) => s[0]).join('').slice(0, 2).toUpperCase()
+
+  // keep the active chip visible in the phone strip
+  const stripRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    stripRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' })
+  }, [activeHref])
+
+  const logout = async () => {
+    try { await signOut() } finally { router.push('/') }
+  }
 
   return (
     <UserRoute>
-      <div className="container mx-auto px-2 sm:px-4 py-4 lg:py-6">
-        <style jsx>{`
-          @media (max-width: 1023px) {
-            .account-sidebar {
-              position: fixed !important;
-              top: 1rem;
-              left: 1rem;
-              right: 1rem;
-              z-index: 40;
-              max-height: calc(100vh - 2rem);
-              overflow-y: auto;
-            }
-          }
-          @media (min-width: 1024px) {
-            .account-sidebar {
-              position: fixed !important;
-              top: 1rem;
-              left: 1rem !important;
-              width: 280px;
-              max-height: calc(100vh - 2rem);
-              overflow-y: auto;
-            }
-            .account-content {
-              margin-left: 296px;
-            }
-          }
-        `}</style>
-        {/* Mobile backdrop */}
-        {isSidebarOpen && (
-          <div
-            className="fixed inset-0 bg-black/50 z-30 lg:hidden"
-            onClick={() => setIsSidebarOpen(false)}
-          />
-        )}
-        
-        <div className="relative">
-          {/* Sidebar */}
-          <aside className="lg:block">
-            <div className={`account-sidebar fixed top-4 left-4 right-4 lg:left-4 lg:right-auto lg:top-4 z-40 rounded-xl border bg-white/95 dark:bg-gray-900/95 backdrop-blur-md shadow-lg p-4 max-h-[calc(100vh-2rem)] overflow-y-auto transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-[-100%] lg:translate-x-0'}`}>
-              {/* Back to Products Button */}
-              <div className="mb-4">
+      <div className="min-h-screen bg-stone-50 text-neutral-900 dark:bg-neutral-950 dark:text-white">
+        <SiteHeader />
+
+        {/* phones: who you are + swipeable links */}
+        <div className="border-b border-neutral-200 bg-white lg:hidden dark:border-neutral-800 dark:bg-neutral-900">
+          <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 pt-4">
+            <Avatar className="h-10 w-10 ring-2 ring-orange-100">
+              <AvatarImage src={user?.profile?.avatar || undefined} alt="" />
+              <AvatarFallback className="bg-orange-500 font-bold text-white">{initials}</AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-bold">Hi, {name.split(' ')[0]}</p>
+              <p className="truncate text-xs text-neutral-500">{user?.email}</p>
+            </div>
+            <button onClick={logout} className="-mr-2 flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-semibold text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800">
+              <LogOut className="h-4 w-4" /> Sign out
+            </button>
+          </div>
+          <div ref={stripRef} className="mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none]">
+            {all.map(({ href, label, icon: Icon, count }) => {
+              const active = href === activeHref
+              return (
                 <Link
-                  href="/products"
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  key={href}
+                  href={href}
+                  aria-current={active ? 'page' : undefined}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-semibold ${active ? 'bg-orange-500 text-white' : 'bg-stone-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'}`}
                 >
-                  <ArrowLeft className="w-4 h-4" />
-                  <Package className="w-4 h-4" />
-                  <span>Back to Products</span>
+                  <Icon className="h-4 w-4" />
+                  {label}
+                  {!!count && <span className={`rounded-full px-1.5 text-[11px] font-bold ${active ? 'bg-white/25' : 'bg-orange-500 text-white'}`}>{count}</span>}
                 </Link>
-              </div>
-              
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">My Account</h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Manage your account settings</p>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:py-8 lg:grid-cols-[260px_minmax(0,1fr)]">
+          {/* desktop side panel */}
+          <aside className="hidden lg:block">
+            <div className="sticky top-24 space-y-4">
+              <div className="flex items-center gap-3 rounded-2xl bg-white p-4 ring-1 ring-neutral-200 dark:bg-neutral-900 dark:ring-neutral-800">
+                <Avatar className="h-12 w-12 ring-2 ring-orange-100">
+                  <AvatarImage src={user?.profile?.avatar || undefined} alt="" />
+                  <AvatarFallback className="bg-orange-500 text-lg font-bold text-white">{initials}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="truncate font-bold">{name}</p>
+                  <p className="truncate text-xs text-neutral-500">{user?.email}</p>
                 </div>
-                <button
-                  onClick={() => setIsSidebarOpen(false)}
-                  className="lg:hidden p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 ml-auto mr-0"
-                  aria-label="Close sidebar"
-                >
-                  <X className="w-5 h-5" />
-                </button>
               </div>
-              <nav className="space-y-1">
-                {nav.map(({ href, label, icon: Icon }) => {
-                  const active = pathname === href
-                  let count = 0
-                  if (href === '/cart') count = cartTotalItems
-                  else if (href === '/account/wishlist') count = wishlistCount
-                  else if (href === '/account/saved-later') count = savedLaterCount
-                  else if (href === '/account/orders') count = ordersCount
-                  
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={() => setIsSidebarOpen(false)}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-                        active
-                          ? 'bg-orange-500 text-white shadow-sm transform scale-[1.02]'
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-800 hover:transform hover:scale-[1.01]'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4 flex-shrink-0" />
-                      <span className="truncate">{label}</span>
-                      {count > 0 && (
-                        <span className="ml-auto inline-flex items-center justify-center rounded-full bg-orange-500 text-white text-xs font-semibold min-w-[20px] h-5 px-1">
-                          {count}
-                        </span>
-                      )}
-                    </Link>
-                  )
-                })}
+
+              <nav aria-label="Account" className="rounded-2xl bg-white p-2 ring-1 ring-neutral-200 dark:bg-neutral-900 dark:ring-neutral-800">
+                {groups.map((g) => (
+                  <div key={g.title} className="py-1">
+                    <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-400">{g.title}</p>
+                    {g.items.map(({ href, label, icon: Icon, count }) => {
+                      const active = href === activeHref
+                      return (
+                        <Link
+                          key={href}
+                          href={href}
+                          aria-current={active ? 'page' : undefined}
+                          className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${active ? 'bg-orange-50 font-semibold text-orange-700 dark:bg-orange-950/40 dark:text-orange-300' : 'text-neutral-700 hover:bg-stone-100 dark:text-neutral-300 dark:hover:bg-neutral-800'}`}
+                        >
+                          <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-orange-600' : 'text-neutral-400'}`} />
+                          <span className="truncate">{label}</span>
+                          {!!count && <span className="ml-auto rounded-full bg-orange-500 px-2 text-xs font-bold text-white">{count}</span>}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                ))}
+                <div className="mt-1 border-t border-neutral-100 pt-1 dark:border-neutral-800">
+                  <button onClick={logout} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-neutral-700 hover:bg-red-50 hover:text-red-700 dark:text-neutral-300 dark:hover:bg-red-950/30">
+                    <LogOut className="h-4 w-4 text-neutral-400" /> Sign out
+                  </button>
+                </div>
               </nav>
             </div>
           </aside>
 
-          {/* Content */}
-          <main className="account-content min-h-[60vh] mt-3 lg:mt-2">
-            {/* Back to Products button */}
-            <div className="mb-2 pl-2 sm:pl-0">
-              <Link 
-                href="/products"
-                className="inline-flex items-center gap-1 text-sm text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300 transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                Back to Products
-              </Link>
-            </div>
-
-            {/* Header row: left title, center welcome, right email + avatar */}
-            <div className="mb-3 sm:mb-4 grid grid-cols-2 sm:grid-cols-3 items-center">
-              <div className="col-span-1 flex items-center gap-2 sm:gap-3 pl-2 sm:pl-0">
-                <button
-                  onClick={() => setIsSidebarOpen(v => !v)}
-                  className="lg:hidden p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
-                  aria-label="Toggle sidebar"
-                >
-                  <Menu className="w-5 h-5" />
-                </button>
-                <h1 className="text-lg sm:text-xl font-semibold tracking-tight">{current.label}</h1>
-              </div>
-              <div className="hidden sm:block text-center">
-                <div className="text-base sm:text-lg font-semibold">Welcome back, {userName}!</div>
-              </div>
-              <div className="col-span-1 sm:col-span-1 flex items-center justify-end gap-1 sm:gap-2 pr-0 ml-auto">
-                <span className="hidden md:block text-sm text-gray-600 dark:text-gray-300 truncate max-w-[140px]">{user?.email}</span>
-                <Avatar className="w-8 h-8 ring-2 ring-gray-300 dark:ring-gray-700 flex-shrink-0 ml-1">
-                  <AvatarImage src={user?.user_metadata?.avatar_url as string | undefined} />
-                  <AvatarFallback>{initials}</AvatarFallback>
-                </Avatar>
-              </div>
-            </div>
-            <nav aria-label="Breadcrumb" className="mb-6 text-sm text-gray-500 dark:text-gray-400 pl-4 sm:pl-2">
-              <ol className="flex items-center gap-1">
-                <li>
-                  <Link href="/home" className="hover:text-orange-600">Home</Link>
-                </li>
-                <li className="mx-1 text-gray-400"><ChevronRight className="w-4 h-4" /></li>
-                <li>
-                  <Link href="/account" className={`hover:text-orange-600 ${segments.length === 1 ? 'text-gray-900 dark:text-gray-100' : ''}`}>Account</Link>
-                </li>
-                {segments.slice(1).map((s, i) => (
-                  <li key={s.href} className="flex items-center gap-1">
-                    <ChevronRight className="w-4 h-4 text-gray-400" />
-                    {s.isLast ? (
-                      <span className="text-gray-900 dark:text-gray-100">{s.label}</span>
-                    ) : (
-                      <Link href={s.href} className="hover:text-orange-600">{s.label}</Link>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </nav>
-
-            {/* Top navigation tabs (consistent across account pages) */}
-            <div className="mb-4 sm:mb-6 border-b">
-              <div className="flex flex-wrap gap-2">
-                {[ '/account', '/account/orders', '/account/orders/history', '/account/messages', '/account/price-alerts', '/account/coupons', '/account/payment', '/account/wishlist', '/account/saved-later' ].map((href) => {
-                  const cfg = nav.find(n => n.href === href)!
-                  const active = pathname === href
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      className={`px-3 py-1.5 sm:px-4 sm:py-2 text-sm rounded-t-md border ${active ? 'border-b-white bg-white text-gray-900 dark:text-gray-900 border-gray-300 dark:border-gray-700' : 'bg-gray-50 hover:bg-white text-gray-900 dark:text-gray-900 border-transparent'}`}
-                    >
-                      {cfg.label}
-                    </Link>
-                  )
-                })}
-              </div>
-            </div>
-
-            {children}
-          </main>
+          <main className="min-w-0">{children}</main>
         </div>
+
+        <SiteFooter />
       </div>
     </UserRoute>
   )
 }
-
-

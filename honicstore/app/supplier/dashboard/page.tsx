@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import Link from 'next/link'
 import Image from 'next/image'
+import { safeImageSrc } from '@/lib/image-optimize'
 
 function SupplierDashboardContent() {
   const { themeClasses } = useTheme()
@@ -59,68 +60,8 @@ function SupplierDashboardContent() {
   }>>([])
   const [loadingSections, setLoadingSections] = useState(true)
 
-  useEffect(() => {
-    // Abort controllers for cleanup
-    const abortControllers: AbortController[] = []
-    
-    // Check for payment return parameters first (before fetching data)
-    const paymentParam = searchParams.get('payment')
-    const referenceId = searchParams.get('referenceId')
-    
-    if (paymentParam && referenceId) {
-      setPaymentStatus(paymentParam as 'success' | 'cancelled')
-      setPaymentReferenceId(referenceId)
-      setShowPaymentAlert(true)
-      
-      // Show toast notification
-      if (paymentParam === 'success') {
-        toast({
-          title: 'Payment Successful!',
-          description: 'Your plan has been updated successfully. Enjoy your new features!',
-          duration: 5000
-        })
-        // Refresh plan data after a short delay to allow webhook to process
-        setTimeout(() => {
-          fetchCurrentPlan()
-        }, 2000)
-      } else if (paymentParam === 'cancelled') {
-        toast({
-          title: 'Payment Cancelled',
-          description: 'Your payment was cancelled. You can try again anytime.',
-          variant: 'destructive',
-          duration: 5000
-        })
-      }
-      
-      // Remove query parameters from URL after showing alert
-      setTimeout(() => {
-        router.replace('/supplier/dashboard', { scroll: false })
-        setShowPaymentAlert(false)
-      }, 10000) // Show alert for 10 seconds
-    }
-    
-    // Fetch data in parallel for faster loading
-    Promise.all([
-      fetchDashboardStats(abortControllers),
-      fetchTopProductsAndOrders(abortControllers),
-      fetchCurrentPlan()
-    ]).catch(error => {
-      // Ignore AbortError - it's expected when component unmounts or requests are cancelled
-      if (error.name !== 'AbortError') {
-        }
-    })
-    
-    // Cleanup: abort all pending requests when component unmounts or effect re-runs
-    return () => {
-      abortControllers.forEach(controller => {
-        if (!controller.signal.aborted) {
-          controller.abort()
-        }
-      })
-    }
-  }, [searchParams, router, toast])
 
-  const fetchCurrentPlan = async () => {
+  async function fetchCurrentPlan() {
     try {
       const response = await fetch('/api/user/current-plan', {
         credentials: 'include'
@@ -143,7 +84,7 @@ function SupplierDashboardContent() {
   // Check if user has pending premium plan (only show if payment is not completed)
   const hasPendingPremiumPlan = !!pendingPlanId && !hasValidPremiumPayment
 
-  const fetchDashboardStats = async (abortControllers?: AbortController[]) => {
+  async function fetchDashboardStats(abortControllers?: AbortController[]) {
     const controller = new AbortController()
     if (abortControllers) {
       abortControllers.push(controller)
@@ -199,7 +140,7 @@ function SupplierDashboardContent() {
     }
   }
 
-  const fetchTopProductsAndOrders = async (abortControllers?: AbortController[]) => {
+  async function fetchTopProductsAndOrders(abortControllers?: AbortController[]) {
     const controller = new AbortController()
     if (abortControllers) {
       abortControllers.push(controller)
@@ -314,6 +255,68 @@ function SupplierDashboardContent() {
     }
   }
 
+  useEffect(() => {
+    // Abort controllers for cleanup
+    const abortControllers: AbortController[] = []
+    
+    // Check for payment return parameters first (before fetching data)
+    const paymentParam = searchParams.get('payment')
+    const referenceId = searchParams.get('referenceId')
+    
+    if (paymentParam && referenceId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+      setPaymentStatus(paymentParam as 'success' | 'cancelled')
+      setPaymentReferenceId(referenceId)
+      setShowPaymentAlert(true)
+      
+      // Show toast notification
+      if (paymentParam === 'success') {
+        toast({
+          title: 'Payment Successful!',
+          description: 'Your plan has been updated successfully. Enjoy your new features!',
+          duration: 5000
+        })
+        // Refresh plan data after a short delay to allow webhook to process
+        setTimeout(() => {
+          fetchCurrentPlan()
+        }, 2000)
+      } else if (paymentParam === 'cancelled') {
+        toast({
+          title: 'Payment Cancelled',
+          description: 'Your payment was cancelled. You can try again anytime.',
+          variant: 'destructive',
+          duration: 5000
+        })
+      }
+      
+      // Remove query parameters from URL after showing alert
+      setTimeout(() => {
+        router.replace('/supplier/dashboard', { scroll: false })
+        setShowPaymentAlert(false)
+      }, 10000) // Show alert for 10 seconds
+    }
+    
+    // Fetch data in parallel for faster loading
+    Promise.all([
+      fetchDashboardStats(abortControllers),
+      fetchTopProductsAndOrders(abortControllers),
+      fetchCurrentPlan()
+    ]).catch(error => {
+      // Ignore AbortError - it's expected when component unmounts or requests are cancelled
+      if (error.name !== 'AbortError') {
+        }
+    })
+    
+    // Cleanup: abort all pending requests when component unmounts or effect re-runs
+    return () => {
+      abortControllers.forEach(controller => {
+        if (!controller.signal.aborted) {
+          controller.abort()
+        }
+      })
+    }
+  }, [searchParams, router, toast])
+
   const statsCards = [
     {
       title: 'Total Products',
@@ -333,7 +336,7 @@ function SupplierDashboardContent() {
       title: 'Total Revenue',
       value: loading ? '...' : formatPrice(stats.totalRevenue),
       icon: DollarSign,
-      color: 'text-yellow-600 dark:text-yellow-400',
+      color: 'text-orange-600 dark:text-orange-400',
       bgColor: 'bg-yellow-100 dark:bg-yellow-900/20'
     },
     {
@@ -365,7 +368,7 @@ function SupplierDashboardContent() {
       description: isWingaPlan ? 'See orders from customers you helped' : 'Check your orders',
       icon: ShoppingCart,
       href: '/supplier/orders',
-      color: 'bg-yellow-500 hover:bg-yellow-600'
+      color: 'bg-orange-500 hover:bg-orange-600'
     },
     {
       title: isWingaPlan ? 'Winga Business Info' : 'Company Info',
@@ -529,7 +532,7 @@ function SupplierDashboardContent() {
                     <div className={cn("flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-opacity-50 transition-colors cursor-pointer", themeClasses.cardBg)}>
                       <div className="relative w-12 h-12 sm:w-16 sm:h-16 flex-shrink-0 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-800">
                         <Image
-                          src={product.image}
+                          src={safeImageSrc(product.image)}
                           alt={product.name}
                           fill
                           className="object-cover"
@@ -652,7 +655,7 @@ export default function SupplierDashboardPage() {
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
           <p className="mt-4 text-gray-600 dark:text-gray-400">Loading dashboard...</p>
         </div>
       </div>

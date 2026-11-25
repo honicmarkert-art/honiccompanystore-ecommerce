@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { ShortTtlCache } from '@/lib/short-ttl-cache'
+import { getSupabaseClient } from '@/lib/supabase-server'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -74,8 +75,9 @@ export async function GET(
         { status: 200 }
       )
     }
-    // Fetch supplier profile data
-    const { data: supplierData, error: supplierError } = await supabase
+    // Fetch supplier profile data — admin client because `profiles` is private (RLS: own row only).
+    // Only public, non-personal columns are selected here; never add email/phone/ID fields.
+    const { data: supplierData, error: supplierError } = await getSupabaseClient()
       .from('profiles')
       .select('company_name, full_name, is_verified, detail_sentence, supplier_rating, supplier_review_count, company_logo, region')
       .eq('id', supplierId)

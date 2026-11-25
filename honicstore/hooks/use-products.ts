@@ -283,7 +283,7 @@ export function useProducts(): UseProductsReturn {
     } finally {
       setIsLoading(false)
     }
-  }, [lastFetchTime, isRateLimited])
+  }, [lastFetchTime, isRateLimited, pathname])
 
   const retry = useCallback(() => {
     setIsRetrying(true)
@@ -399,7 +399,7 @@ export function useProducts(): UseProductsReturn {
       setProducts(prevProducts)
       throw err
     }
-  }, [])
+  }, [products])
 
   const updateProduct = useCallback(async (id: number, productData: Partial<Product>) => {
     // Optimistic update; rollback on failure
@@ -452,7 +452,7 @@ export function useProducts(): UseProductsReturn {
       setProducts(prevProducts)
       throw err
     }
-  }, [])
+  }, [products])
 
   const deleteProduct = useCallback(async (id: number) => {
     try {

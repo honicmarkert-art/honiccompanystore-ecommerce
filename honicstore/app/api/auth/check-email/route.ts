@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '@/lib/supabase-server'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 import { logger } from '@/lib/logger'
+import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 export const runtime = 'nodejs'
 
@@ -12,6 +13,12 @@ const emailCheckSchema = z.object({
 
 // GET /api/auth/check-email?email=... - Check if email already exists
 export async function GET(request: NextRequest) {
+  // SECURITY: rate-limited so the "already registered?" answer can't be used to harvest emails
+  const limit = await enhancedRateLimit(request)
+  if (!limit.allowed) {
+    logSecurityEvent('RATE_LIMIT_EXCEEDED', { endpoint: '/api/auth/check-email', reason: limit.reason }, request)
+    return NextResponse.json({ exists: false, error: 'Too many requests. Please wait and try again.' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfter || 60) } })
+  }
   try {
     const searchParams = request.nextUrl.searchParams
     const email = searchParams.get('email')
@@ -35,7 +42,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json(
           { 
             exists: false,
-            error: error.errors[0]?.message || 'Invalid email address'
+            error: error.issues[0]?.message || 'Invalid email address'
           },
           { status: 400 }
         )

@@ -130,6 +130,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
 
   // Fetch notifications on mount and when popover opens
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
     fetchNotifications()
     
     // Set up polling as a fallback in case real-time doesn't work immediately
@@ -145,6 +146,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
 
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       fetchNotifications()
     }
   }, [isOpen, fetchNotifications])
@@ -438,7 +440,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
       case 'plan_expired':
         return <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
       case 'system':
-        return <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+        return <AlertTriangle className="w-4 h-4 text-orange-600 dark:text-orange-400" />
       default:
         return <Info className="w-4 h-4 text-gray-600 dark:text-gray-400" />
     }
@@ -549,7 +551,7 @@ export function SupplierNotificationCenter({ className }: SupplierNotificationCe
         <div className="max-h-96 overflow-y-auto">
           {loading ? (
             <div className="p-6 text-center">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-500 mx-auto"></div>
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500 mx-auto"></div>
               <p className={cn("text-xs sm:text-sm mt-2", themeClasses.textNeutralSecondary)}>Loading...</p>
             </div>
           ) : notifications.length === 0 ? (

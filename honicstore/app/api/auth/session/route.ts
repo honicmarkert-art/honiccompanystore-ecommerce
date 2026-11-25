@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     
     
     // Create response to handle cookie updates
-    let response = NextResponse.next()
+    const response = NextResponse.next()
     
     // Create Supabase client with proper cookie handling
     const supabase = createServerClient(
@@ -129,14 +129,9 @@ export async function GET(request: NextRequest) {
       // This prevents auto-login on new devices
     }
     
-    // Get user from session or directly
-    let { data: { user }, error: userError } = await supabase.auth.getUser()
-    
-    // If getUser fails but we have a session, use session.user
-    if ((userError || !user) && session?.user) {
-      user = session.user
-      userError = null
-    }
+    // SECURITY: the user must be verified by the auth server. getSession() only decodes the cookie,
+    // so its user is never trusted on its own (a hand-made cookie could claim any user).
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
     
     if (userError || !user) {
       // Log the error for debugging
@@ -158,24 +153,11 @@ export async function GET(request: NextRequest) {
       return errorResponse
     }
 
-    // If we still don't have a session but have a user, try to get it
     if (!session) {
-      const { data: { session: sessionData }, error: sessionErr } = await supabase.auth.getSession()
-      if (!sessionErr && sessionData) {
-        session = sessionData
-        // Update user from session if we got one
-        if (sessionData.user && !user) {
-          user = sessionData.user
-        }
-      }
+      const { data: { session: sessionData } } = await supabase.auth.getSession()
+      if (sessionData && sessionData.user?.id === user.id) session = sessionData
     }
 
-    // Get user from session if we still don't have one
-    if (!user && session) {
-      user = session.user
-    }
-    
-    
     if (!user) {
       const errorResponse = NextResponse.json({
         success: false,

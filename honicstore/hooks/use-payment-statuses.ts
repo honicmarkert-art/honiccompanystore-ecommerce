@@ -91,6 +91,7 @@ export function usePaymentStatuses(): UsePaymentStatusesReturn {
   }, [isAuthenticated])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
     fetchPaymentStatuses()
   }, [fetchPaymentStatuses])
 

@@ -25,13 +25,8 @@ function SupplierEditProductContent() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [productKey, setProductKey] = useState(0) // Key to force form re-render when product updates
 
-  useEffect(() => {
-    if (productId) {
-      fetchProduct()
-    }
-  }, [productId])
 
-  const fetchProduct = async (silent = false) => {
+  async function fetchProduct(silent = false) {
     try {
       if (!silent) {
         setLoading(true)
@@ -110,6 +105,13 @@ function SupplierEditProductContent() {
       }
     }
   }
+
+  useEffect(() => {
+    if (productId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+      fetchProduct()
+    }
+  }, [productId]) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
   const handleSave = async (productData: any) => {
     try {
@@ -240,7 +242,7 @@ function SupplierEditProductContent() {
     return (
       <div className={cn("min-h-screen flex items-center justify-center", themeClasses.mainBg)}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
           <p className={cn("mt-4", themeClasses.mainText)}>Loading product...</p>
         </div>
       </div>
@@ -282,7 +284,6 @@ function SupplierEditProductContent() {
               autoCloseOnSave={false}
               hideImportChina={true}
               restrictVariantType={true}
-              hideAttributesAndVariants={true}
             />
           )}
         </div>

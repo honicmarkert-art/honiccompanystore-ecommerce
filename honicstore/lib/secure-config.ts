@@ -4,7 +4,7 @@
  * Centralized configuration with proper validation and security checks
  */
 
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 import { logger } from '@/lib/logger'
 
 // Environment variable validation schema
@@ -19,7 +19,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url('Invalid app URL').optional(),
   NEXT_PUBLIC_SITE_URL: z.string().url('Invalid site URL').optional(),
   NEXT_PUBLIC_WEBSITE_URL: z.string().url('Invalid website URL').optional(),
-  LOCALHOST_PORT: z.string().transform(Number).default('3000'),
+  LOCALHOST_PORT: z.string().transform(Number).default(3000),
   
   // Security Configuration
   NEXTAUTH_SECRET: z.string().min(32, 'NextAuth secret must be at least 32 characters').optional(),
@@ -47,13 +47,13 @@ const envSchema = z.object({
   ADMIN_EMAILS: z.string().optional(), // Comma-separated list of admin emails
   
   // Rate Limiting
-  RATE_LIMIT_MAX: z.string().transform(Number).default('100'),
-  RATE_LIMIT_WINDOW: z.string().transform(Number).default('900000'), // 15 minutes
+  RATE_LIMIT_MAX: z.string().transform(Number).default(100),
+  RATE_LIMIT_WINDOW: z.string().transform(Number).default(900000), // 15 minutes
   
   // Cache Configuration
-  CACHE_TTL_PRODUCTS: z.string().transform(Number).default('300000'), // 5 minutes
-  CACHE_TTL_CATEGORIES: z.string().transform(Number).default('1800000'), // 30 minutes
-  CACHE_TTL_ADVERTISEMENTS: z.string().transform(Number).default('600000'), // 10 minutes
+  CACHE_TTL_PRODUCTS: z.string().transform(Number).default(300000), // 5 minutes
+  CACHE_TTL_CATEGORIES: z.string().transform(Number).default(1800000), // 30 minutes
+  CACHE_TTL_ADVERTISEMENTS: z.string().transform(Number).default(600000), // 10 minutes
 })
 
 // Validate environment variables
@@ -62,7 +62,7 @@ function validateEnvironment() {
     return envSchema.parse(process.env)
   } catch (error) {
     if (error instanceof z.ZodError) {
-      const missingVars = error.errors.map(err => err.path.join('.'))
+      const missingVars = error.issues.map(err => err.path.join('.'))
       throw new Error(`Missing or invalid environment variables: ${missingVars.join(', ')}`)
     }
     throw error
@@ -84,7 +84,7 @@ export const securityConfig = {
   cors: {
     origin: env.NODE_ENV === 'production' 
       ? [env.NEXT_PUBLIC_APP_URL || env.NEXT_PUBLIC_SITE_URL || env.NEXT_PUBLIC_WEBSITE_URL || 'https://yourdomain.com']
-      : [`http://localhost:${env.LOCALHOST_PORT}`, `http://localhost:${parseInt(env.LOCALHOST_PORT) + 1}`],
+      : [`http://localhost:${env.LOCALHOST_PORT}`, `http://localhost:${Number(env.LOCALHOST_PORT) + 1}`],
     credentials: true,
   },
   

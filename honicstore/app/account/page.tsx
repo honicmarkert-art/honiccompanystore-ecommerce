@@ -1,655 +1,148 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+/**
+ * Account overview: a quick look at orders, saved items, messages and coupons.
+ * (Profile and password live in Settings; navigation lives in the account layout.)
+ */
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { 
-  User, 
-  ShoppingBag, 
-  Heart, 
-  MessageCircle, 
-  CreditCard, 
-  Ticket,
-  Settings,
-  LogOut,
-  Package,
-  Truck,
-  CheckCircle,
-  Clock,
-  AlertCircle,
-  Menu,
-  X,
-  ChevronRight,
-  ShoppingCart
-} from 'lucide-react'
+import { ArrowRight, Clock, Heart, MessageCircle, Package, PackageSearch, ShoppingBag, Ticket } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
-import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
-import { useCompanyContext } from '@/components/company-provider'
-import { useCart } from '@/hooks/use-cart'
 import { useOrders } from '@/hooks/use-orders'
 import { useWishlist } from '@/hooks/use-wishlist'
 import { useSavedLater } from '@/hooks/use-saved-later'
-import { useRouter } from 'next/navigation'
-import { useToast } from '@/hooks/use-toast'
-import { ProtectedRoute } from '@/components/protected-route'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { getAuthToken } from '@/lib/auth-utils'
-import { supabaseClient } from '@/lib/supabase-client'
+import { useCurrency } from '@/contexts/currency-context'
+import { OrderStatusChip } from '@/components/account/order-status'
+import { whatsappLink } from '@/lib/contact'
 
-// Remove local Order mock interface; we use real orders from useOrders
+type Coupon = { id: string; code: string; type: 'percentage' | 'fixed'; value: number; endsAt: string | null }
 
-interface Coupon {
-  id: string
-  code: string
-  discount: number
-  type: 'percentage' | 'fixed'
-  validUntil: Date
-  isUsed: boolean
-}
+const date = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 
-function AccountPageContent() {
-  const { user, signOut } = useAuth()
-  const { openAuthModal } = useGlobalAuthModal()
-  const { companyName, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
-  const { cartTotalItems } = useCart()
-  const router = useRouter()
-  const { toast } = useToast()
-  const { orders } = useOrders()
-  const { items: wishlistItems } = useWishlist()
-  const { items: savedLaterItems } = useSavedLater()
-  const [activeCoupons, setActiveCoupons] = useState<Coupon[]>([])
-  const [isHamburgerMenuOpen, setIsHamburgerMenuOpen] = useState(false)
-  const [unreadMessages, setUnreadMessages] = useState(0)
-  const [profileLoading, setProfileLoading] = useState(false)
-  const [profileSaving, setProfileSaving] = useState(false)
-  const [fullName, setFullName] = useState('')
-
-  // Fallback logo system
-  const fallbackLogo = "/android-chrome-512x512.png"
-  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
-  const [phone, setPhone] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState('')
-  const [password1, setPassword1] = useState('')
-  const [password2, setPassword2] = useState('')
-  const [isChangingPassword, setIsChangingPassword] = useState(false)
+export default function AccountOverviewPage() {
+  const { user } = useAuth()
+  const { orders, loading: ordersLoading } = useOrders()
+  const { items: wishlist } = useWishlist()
+  const { items: saved } = useSavedLater()
+  const { formatPrice } = useCurrency()
+  const [coupons, setCoupons] = useState<Coupon[]>([])
+  const [unread, setUnread] = useState(0)
 
   useEffect(() => {
+    let cancelled = false
     fetch('/api/promotions', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data) => {
-        const rows = Array.isArray(data.promotions) ? data.promotions : []
-        setActiveCoupons(rows.slice(0, 4).map((row: { id: string; code: string; discount_type: string; discount_value: number; end_date: string }) => ({
-          id: String(row.id),
-          code: row.code,
-          discount: Number(row.discount_value) || 0,
-          type: row.discount_type === 'percentage' ? 'percentage' as const : 'fixed' as const,
-          validUntil: new Date(row.end_date),
-          isUsed: false,
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return
+        const rows = Array.isArray(d?.promotions) ? d.promotions : []
+        setCoupons(rows.slice(0, 4).map((row: { id: string; code: string; discount_type: string; discount_value: number; end_date?: string | null }) => ({
+          id: String(row.id), code: row.code, type: row.discount_type === 'percentage' ? 'percentage' : 'fixed',
+          value: Number(row.discount_value) || 0, endsAt: row.end_date || null,
         })))
       })
-      .catch(() => setActiveCoupons([]))
+      .catch(() => {})
     fetch('/api/notifications?unread_only=true', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data) => setUnreadMessages(Number(data.unreadCount) || 0))
-      .catch(() => setUnreadMessages(0))
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setUnread(Number(d?.unreadCount) || 0) })
+      .catch(() => {})
+    return () => { cancelled = true }
   }, [])
 
-  // Load profile from API (requires supabase access token)
-  useEffect(() => {
-    const loadProfile = async () => {
-      if (!user) return
-      setProfileLoading(true)
-      try {
-        const token = await getAuthToken()
-        if (!token) { setProfileLoading(false); return }
-        const res = await fetch('/api/user/profile', {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        const json = await res.json()
-        if (res.ok && json?.profile) {
-          setFullName(json.profile.full_name || user?.name || '')
-          setPhone(json.profile.phone || user?.profile?.phone || '')
-          setAvatarUrl(user?.profile?.avatar || '')
-        } else {
-          setFullName(user?.name || '')
-          setPhone(user?.profile?.phone || '')
-          setAvatarUrl(user?.profile?.avatar || '')
-        }
-      } catch {}
-      setProfileLoading(false)
-    }
-    loadProfile()
-  }, [user])
+  const first = (user?.name || user?.email?.split('@')[0] || 'there').split(' ')[0]
+  const active = orders.filter((o) => o.isReceived !== true && o.status !== 'cancelled')
+  const recent = [...orders].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 3)
 
-  const saveProfile = async () => {
-    try {
-      setProfileSaving(true)
-      const token = await getAuthToken()
-      if (!token) {
-        toast({ title: 'Not authenticated', description: 'Please login again', variant: 'destructive' })
-        setProfileSaving(false)
-        return
-      }
-      const res = await fetch('/api/user/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ full_name: fullName, phone, avatar_url: avatarUrl })
-      })
-      const json = await res.json()
-      if (res.ok) {
-        toast({ title: 'Profile saved', description: 'Your details were updated.' })
-      } else {
-        toast({ title: 'Failed to save', description: json?.error || 'Try again', variant: 'destructive' })
-      }
-    } catch (e) {
-      toast({ title: 'Error', description: 'Could not save profile', variant: 'destructive' })
-    } finally {
-      setProfileSaving(false)
-    }
-  }
-
-  const uploadAvatar = async (file: File) => {
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      form.append('type', 'image')
-      form.append('context', 'profile')
-      const resp = await fetch('/api/media/upload', { method: 'POST', body: form })
-      const data = await resp.json()
-      if (!resp.ok) throw new Error(data?.error || 'Upload failed')
-      setAvatarUrl(data.url)
-      toast({ title: 'Avatar uploaded' })
-    } catch (e) {
-      toast({ title: 'Upload failed', description: 'Please try another image', variant: 'destructive' })
-    }
-  }
-
-  const changePassword = async () => {
-    if (!password1 || password1.length < 8 || password1 !== password2) {
-      toast({ title: 'Invalid password', description: 'Ensure passwords match and are 8+ chars', variant: 'destructive' })
-      return
-    }
-    try {
-      setIsChangingPassword(true)
-      const { error } = await supabaseClient.auth.updateUser({ password: password1 })
-      if (error) throw error
-      setPassword1(''); setPassword2('')
-      toast({ title: 'Password updated' })
-    } catch (e) {
-      toast({ title: 'Failed to update password', variant: 'destructive' })
-    } finally {
-      setIsChangingPassword(false)
-    }
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'delivered':
-        return <Badge className="bg-green-100 text-green-800">Delivered</Badge>
-      case 'shipped':
-        return <Badge className="bg-blue-100 text-blue-800">Shipped</Badge>
-      case 'processing':
-        return <Badge className="bg-yellow-100 text-yellow-800">Processing</Badge>
-      case 'pending':
-        return <Badge className="bg-gray-100 text-gray-800">Pending</Badge>
-      case 'cancelled':
-        return <Badge className="bg-red-100 text-red-800">Cancelled</Badge>
-      default:
-        return <Badge variant="outline">{status}</Badge>
-    }
-  }
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'delivered':
-        return <CheckCircle className="w-4 h-4 text-green-600" />
-      case 'shipped':
-        return <Truck className="w-4 h-4 text-blue-600" />
-      case 'processing':
-        return <Package className="w-4 h-4 text-yellow-600" />
-      case 'pending':
-        return <Clock className="w-4 h-4 text-gray-600" />
-      case 'cancelled':
-        return <AlertCircle className="w-4 h-4 text-red-600" />
-      default:
-        return <Package className="w-4 h-4" />
-    }
-  }
-
-  const handleLogout = async () => {
-    try {
-      await signOut()
-      toast({
-        title: 'Success',
-        description: 'Logged out successfully',
-      })
-      router.push('/home')
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to logout',
-        variant: 'destructive'
-      })
-    }
-  }
-
-  const getUserName = () => {
-    if (user?.name) {
-      return user.name
-    }
-    return user?.email?.split('@')[0] || 'User'
-  }
-
-  const getUserInitials = () => {
-    const name = getUserName()
-    return name.split(' ').map(n => n[0]).join('').toUpperCase()
-  }
+  const tiles = [
+    { href: '/account/orders', label: 'Active orders', value: active.length, icon: Package },
+    { href: '/account/wishlist', label: 'Wishlist', value: wishlist.length, icon: Heart },
+    { href: '/account/saved-later', label: 'Saved for later', value: saved.length, icon: Clock },
+    { href: '/account/messages', label: 'Unread messages', value: unread, icon: MessageCircle },
+  ]
 
   return (
-    <div className="container mx-auto px-4 py-8 min-h-screen bg-background">
-      
-
-      {/* Header */}
-      <div className="mb-8">
-        {/* Remove avatar/email and welcome headline from Overview header */}
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-black tracking-tight sm:text-3xl">Hi, {first}</h1>
+        <p className="mt-1 text-sm text-neutral-500">Your orders, saved items and messages in one place.</p>
       </div>
 
-      {/* Profile editing moved to Settings page - removed from Overview */}
-
-      {/* Security moved to Settings page */}
-
-      {/* Quick Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4 mb-4 sm:mb-8">
-        <Card>
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <ShoppingBag className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Total Orders</p>
-                <p className="text-lg sm:text-2xl font-bold">{orders?.length || 0}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-red-100 rounded-lg">
-                <Heart className="w-6 h-6 text-red-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Wishlist</p>
-                <p className="text-lg sm:text-2xl font-bold">{wishlistItems.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <MessageCircle className="w-6 h-6 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Messages</p>
-                <p className="text-lg sm:text-2xl font-bold">{unreadMessages}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-orange-100 rounded-lg">
-                <Clock className="w-6 h-6 text-orange-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Saved for Later</p>
-                <p className="text-lg sm:text-2xl font-bold">{savedLaterItems.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {tiles.map(({ href, label, value, icon: Icon }) => (
+          <Link key={href} href={href} className="group rounded-2xl bg-white p-4 ring-1 ring-neutral-200 transition hover:ring-orange-400 dark:bg-neutral-900 dark:ring-neutral-800">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/40"><Icon className="h-5 w-5" /></span>
+            <p className="mt-3 text-2xl font-black tabular-nums">{value}</p>
+            <p className="text-sm text-neutral-500">{label}</p>
+          </Link>
+        ))}
       </div>
 
-      {/* Recent Orders */}
-      <Card className="mb-4 sm:mb-8">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-2 text-base sm:text-lg">
-              <ShoppingBag className="w-5 h-5" />
-              <span>Recent Orders</span>
-            </CardTitle>
-            <Button size="sm" variant="outline" onClick={() => router.push('/account/orders')}>
-              View All Orders
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {(orders || []).slice(0, 3).map((order: any) => (
-              <div key={order.orderNumber || order.referenceId} className="flex items-center justify-between p-3 sm:p-4 border rounded-lg">
-                <div className="flex items-center space-x-3 sm:space-x-4">
-                  {getStatusIcon(order.status)}
-                  <div>
-                    <p className="font-medium text-sm sm:text-base">Order #{order.orderNumber}</p>
-                    <p className="text-xs sm:text-sm text-muted-foreground">
-                      {order.totalItems} items • TZS {Number(order.totalAmount || 0).toLocaleString()}
-                    </p>
-                    <p className="text-[11px] sm:text-xs text-muted-foreground">
-                      {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : ''}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2 sm:space-x-4">
-                  {getStatusBadge(order.status)}
-                  <Button variant="outline" size="sm" onClick={() => router.push(`/account/orders/${order.orderNumber}`)}>
-                    View Details
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {(!orders || orders.length === 0) && (
-              <div className="text-sm text-muted-foreground">No orders yet.</div>
+      <section className="rounded-2xl bg-white ring-1 ring-neutral-200 dark:bg-neutral-900 dark:ring-neutral-800">
+        <div className="flex items-center justify-between gap-3 border-b border-neutral-100 px-5 py-4 dark:border-neutral-800">
+          <h2 className="font-bold">Recent orders</h2>
+          {orders.length > 0 && (
+            <Link href="/account/orders" className="-my-2 inline-flex items-center gap-1 py-2 text-sm font-semibold text-orange-600 hover:underline">All orders <ArrowRight className="h-4 w-4" /></Link>
+          )}
+        </div>
+        {recent.length === 0 ? (
+          <div className="px-5 py-10 text-center">
+            <ShoppingBag className="mx-auto h-10 w-10 text-neutral-300" />
+            <p className="mt-3 font-semibold">{ordersLoading ? 'Loading your orders…' : 'No orders yet'}</p>
+            {!ordersLoading && <p className="mt-1 text-sm text-neutral-500">When you buy something, you can follow it here.</p>}
+            {!ordersLoading && (
+              <Link href="/products" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-2.5 text-sm font-bold text-white hover:bg-orange-600">Start shopping <ArrowRight className="h-4 w-4" /></Link>
             )}
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Active Coupons */}
-      <Card className="mb-8">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-2">
-              <Ticket className="w-5 h-5" />
-              <span>My Coupons</span>
-            </CardTitle>
-            <Button variant="outline" onClick={() => router.push('/account/coupons')}>
-              View All Coupons
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {activeCoupons.map((coupon) => (
-              <div key={coupon.id} className="p-4 border rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono font-bold text-lg">{coupon.code}</span>
-            {activeCoupons.length === 0 ? <p className="text-sm text-muted-foreground">No active coupons.</p> : null}
-                  <Badge variant="outline">
-                    {coupon.type === 'percentage' ? `${coupon.discount}%` : `$${coupon.discount}`}
-                  </Badge>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Valid until {coupon.validUntil.toLocaleDateString()}
-                </p>
-              </div>
+        ) : (
+          <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+            {recent.map((o) => (
+              <li key={o.orderNumber}>
+                <Link href={`/account/orders/${o.orderNumber}`} className="flex items-center gap-3 px-5 py-4 hover:bg-stone-50 dark:hover:bg-neutral-800/50">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-stone-100 text-neutral-500 dark:bg-neutral-800"><Package className="h-5 w-5" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold">{o.orderNumber}</span>
+                    <span className="block text-xs text-neutral-500">{date(o.createdAt)} · {o.totalItems || o.itemCount || o.items?.length || 0} item(s) · {formatPrice(Number(o.totalAmount) || 0)}</span>
+                  </span>
+                  <OrderStatusChip status={o.status} paymentStatus={o.paymentStatus} />
+                </Link>
+              </li>
             ))}
+          </ul>
+        )}
+      </section>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <section className="rounded-2xl bg-white p-5 ring-1 ring-neutral-200 dark:bg-neutral-900 dark:ring-neutral-800">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-bold"><Ticket className="h-5 w-5 text-orange-600" /> Coupons</h2>
+            {coupons.length > 0 && <Link href="/account/coupons" className="-my-2 py-2 text-sm font-semibold text-orange-600 hover:underline">See all</Link>}
           </div>
-        </CardContent>
-      </Card>
+          {coupons.length === 0 ? (
+            <p className="mt-3 text-sm text-neutral-500">No coupons right now. We&apos;ll show them here when there are offers.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {coupons.map((c) => (
+                <li key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-orange-300 px-3 py-2.5 dark:border-orange-800">
+                  <span className="font-mono font-bold tracking-wide">{c.code}</span>
+                  <span className="text-right text-xs text-neutral-500">
+                    <span className="block text-sm font-bold text-orange-700 dark:text-orange-300">{c.type === 'percentage' ? `${c.value}% off` : `${formatPrice(c.value)} off`}</span>
+                    {c.endsAt ? `until ${date(c.endsAt)}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/orders')}
-        >
-          <ShoppingBag className="w-6 h-6" />
-          <span>My Orders</span>
-        </Button>
-
-        
-
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/messages')}
-        >
-          <MessageCircle className="w-6 h-6" />
-          <span>Message Center</span>
-        </Button>
-
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/payment')}
-        >
-          <CreditCard className="w-6 h-6" />
-          <span>Payment</span>
-        </Button>
-
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/wishlist')}
-        >
-          <Heart className="w-6 h-6" />
-          <span>Wish List</span>
-        </Button>
-
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/saved-later')}
-        >
-          <Clock className="w-6 h-6" />
-          <span>Saved for Later</span>
-        </Button>
-
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/coupons')}
-        >
-          <Ticket className="w-6 h-6" />
-          <span>My Coupons</span>
-        </Button>
-
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2"
-          onClick={() => router.push('/account/settings')}
-        >
-          <Settings className="w-6 h-6" />
-          <span>Settings</span>
-        </Button>
-
-        <Button 
-          variant="outline" 
-          className="h-20 flex-col space-y-2 text-red-600 hover:text-red-700"
-          onClick={handleLogout}
-        >
-          <LogOut className="w-6 h-6" />
-          <span>Sign Out</span>
-        </Button>
-      </div>
-
-      {/* Mobile Hamburger Menu */}
-      <div className={`hamburger-overlay ${isHamburgerMenuOpen ? 'open' : ''}`} onClick={() => setIsHamburgerMenuOpen(false)} />
-      <div className={`hamburger-menu ${isHamburgerMenuOpen ? 'open' : ''}`}>
-        {/* Header with Logo and Close */}
-        <div className="relative flex items-center justify-between p-6 border-b border-white/10 bg-gradient-to-r from-yellow-500/10 to-orange-500/10">
-          <div className="flex items-center gap-3">
-            <Image
-              src={displayLogo}
-              alt={`${companyName} Logo`}
-              width={32}
-              height={32}
-              className="w-8 h-8 rounded-lg"
-            />
-            <div>
-              <h2 className="text-lg font-bold text-white">{companyName}</h2>
-              <p className="text-xs text-white/70">Menu</p>
-            </div>
+        <section className="rounded-2xl bg-white p-5 ring-1 ring-neutral-200 dark:bg-neutral-900 dark:ring-neutral-800">
+          <h2 className="flex items-center gap-2 font-bold"><PackageSearch className="h-5 w-5 text-orange-600" /> Need help with an order?</h2>
+          <p className="mt-2 text-sm text-neutral-500">Track a delivery, return an item, or ask us anything.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/support/order-tracking" className="rounded-xl bg-stone-100 px-4 py-2.5 text-sm font-semibold hover:bg-stone-200 dark:bg-neutral-800">Track an order</Link>
+            <Link href="/support/returns-refunds" className="rounded-xl bg-stone-100 px-4 py-2.5 text-sm font-semibold hover:bg-stone-200 dark:bg-neutral-800">Returns</Link>
+            <a href={whatsappLink('Hello Honic, I need help with my order')} target="_blank" rel="noopener noreferrer" className="rounded-xl bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-950">WhatsApp us</a>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsHamburgerMenuOpen(false)}
-            className="text-white hover:bg-white/20 rounded-full absolute right-2 top-2 h-8 w-8"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-        
-        <div className="flex flex-col h-full">
-          {/* Main Navigation */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-6 space-y-6">
-              {/* Quick Actions */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Quick Actions</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <Link 
-                    href="/products"
-                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <Package className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-xs font-medium text-white">Products</span>
-                  </Link>
-                  
-                  <Link 
-                    href="/cart"
-                    className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <div className="relative">
-                      <ShoppingCart className="w-6 h-6 text-white group-hover:text-yellow-400 transition-colors" />
-                      {cartTotalItems > 0 && (
-                        <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-black">
-                          {cartTotalItems}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs font-medium text-white">Cart</span>
-                  </Link>
-                </div>
-              </div>
-
-              {/* Account Section */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Account</h3>
-                <div className="space-y-2">
-                  <Link 
-                    href="/account"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <User className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">My Account</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                  <Link 
-                    href="/account/orders"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <ShoppingBag className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">My Orders</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                  <Link 
-                    href="/account/wishlist"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <Heart className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">Wishlist</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                  <Link 
-                    href="/account/saved-later"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <Clock className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">Saved for Later</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                  <Link 
-                    href="/account/messages"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <MessageCircle className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">Messages</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                  <Link 
-                    href="/account/payment"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <CreditCard className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">Payment</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                  
-                  <Link 
-                    href="/account/coupons"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <Ticket className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">My Coupons</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                  <Link 
-                    href="/account/settings"
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-white/10 hover:bg-white/20 transition-all duration-200 group"
-                    onClick={() => setIsHamburgerMenuOpen(false)}
-                  >
-                    <Settings className="w-5 h-5 text-white group-hover:text-yellow-400 transition-colors" />
-                    <span className="text-white font-medium">Settings</span>
-                    <ChevronRight className="w-4 h-4 text-white/60 group-hover:text-yellow-400 transition-colors ml-auto" />
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer with User Info */}
-          <div className="p-6 border-t border-white/10 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-white/10">
-              <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center">
-                <span className="text-black font-bold text-sm">
-                  {user?.email?.charAt(0).toUpperCase() || 'U'}
-                </span>
-              </div>
-              <div className="flex-1">
-                <p className="text-white font-medium text-sm">{user?.email}</p>
-                <p className="text-white/60 text-xs">Welcome back!</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        </section>
       </div>
     </div>
-  )
-}
-
-import { BuyerRouteGuard } from '@/components/buyer-route-guard'
-
-export default function AccountPage() {
-  return (
-    <BuyerRouteGuard>
-      <ProtectedRoute>
-        <AccountPageContent />
-      </ProtectedRoute>
-    </BuyerRouteGuard>
   )
 }

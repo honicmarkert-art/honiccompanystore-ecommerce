@@ -313,7 +313,7 @@ export async function POST(request: NextRequest) {
       // Only send welcome email on first-time company info submission
       if (isFirstTimeSubmission && appUrl && user.email && data?.is_supplier) {
         // Get supplier plan for commission rate
-        let commissionRate = '15%' // Default
+        let commissionRate = '' // only from the seller's plan; left out of the email when unknown
         if (data?.supplier_plan_id) {
           const { data: plan } = await adminSupabase
             .from('supplier_plans')
@@ -321,7 +321,7 @@ export async function POST(request: NextRequest) {
             .eq('id', data.supplier_plan_id)
             .single()
           if (plan?.commission_rate !== null) {
-            commissionRate = `${plan.commission_rate}%`
+            commissionRate = `${plan?.commission_rate ?? 0}%`
           }
         } else if (pendingPremiumPlan?.commission_rate !== null && pendingPremiumPlan?.commission_rate !== undefined) {
           commissionRate = `${pendingPremiumPlan.commission_rate}%`

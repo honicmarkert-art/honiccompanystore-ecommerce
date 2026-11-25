@@ -21,6 +21,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY) as Language | null
     const next: Language = saved === 'en' || saved === 'sw' ? saved : 'en'
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only data after mount, so the server render matches
     setLanguageState(next)
     localStorage.setItem(LANGUAGE_STORAGE_KEY, next)
     document.documentElement.lang = next

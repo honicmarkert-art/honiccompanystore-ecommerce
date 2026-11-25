@@ -159,7 +159,7 @@ export default function WingaSupportPage() {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <h3 className={cn("font-semibold", themeClasses.mainText)}>{option.title}</h3>
                       {option.premium && (
-                        <Badge className="bg-yellow-500 text-black text-xs font-semibold">Premium</Badge>
+                        <Badge className="bg-orange-500 text-black text-xs font-semibold">Premium</Badge>
                       )}
                       {!option.available && option.premium && (
                         <Badge variant="outline" className="text-xs border-orange-500 text-orange-600 dark:text-orange-400">

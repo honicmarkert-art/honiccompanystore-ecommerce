@@ -27,6 +27,7 @@ import {
 import Link from 'next/link'
 import Image from 'next/image'
 import { ProductForm } from './product-form'
+import { safeImageSrc } from '@/lib/image-optimize'
 
 interface Product {
   id: number
@@ -67,12 +68,7 @@ function SupplierProductsContent() {
   const [currentPlan, setCurrentPlan] = useState<{ slug: string; max_products: number | null } | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  useEffect(() => {
-    fetchProducts()
-    fetchCurrentPlan()
-  }, [])
-
-  const fetchCurrentPlan = async () => {
+  async function fetchCurrentPlan() {
     try {
       const response = await fetch('/api/user/current-plan', {
         credentials: 'include'
@@ -115,7 +111,7 @@ function SupplierProductsContent() {
   }
 
   // Security: Debounce function to prevent excessive API calls
-  const fetchTimeoutRef = useRef<NodeJS.Timeout>()
+  const fetchTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
   
   const fetchProducts = useCallback(async (showLoading = true) => {
     // Clear any pending fetch
@@ -172,6 +168,13 @@ function SupplierProductsContent() {
       await executeFetch()
     }
   }, [toast])
+
+  // load once on mount (after fetchProducts is defined)
+  useEffect(() => {
+    fetchProducts()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+    fetchCurrentPlan()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- load once on mount
 
   const handleRefresh = async () => {
     setIsRefreshing(true)
@@ -332,7 +335,7 @@ function SupplierProductsContent() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <div className="w-8 h-8 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className={cn("text-lg", themeClasses.mainText)}>Loading products...</p>
         </div>
       </div>
@@ -384,7 +387,7 @@ function SupplierProductsContent() {
           </div>
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <Button 
-              className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-neutral-950 text-sm sm:text-base w-full sm:w-auto justify-center"
+              className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-neutral-950 text-sm sm:text-base w-full sm:w-auto justify-center"
               onClick={() => {
                 setEditingProduct(null)
                 setIsAddDialogOpen(true)
@@ -786,7 +789,7 @@ function SupplierProductsContent() {
                           {product.image ? (
                             <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-md overflow-hidden bg-gray-100">
                               <Image
-                                src={product.image}
+                                src={safeImageSrc(product.image)}
                                 alt={product.name}
                                 fill
                                 sizes="(max-width: 640px) 64px, 80px"
@@ -886,7 +889,7 @@ function SupplierProductsContent() {
                           <div className="flex items-center space-x-2 sm:space-x-3">
                             {product.image ? (
                               <Image
-                                src={product.image}
+                                src={safeImageSrc(product.image)}
                                 alt={product.name}
                                 width={32}
                                 height={32}

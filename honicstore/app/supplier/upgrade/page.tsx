@@ -109,6 +109,7 @@ export default function SupplierUpgradePage() {
 
     // Only fetch plans once when authenticated and plans haven't been fetched yet
     if (isAuthenticated && user && !currentPlan && !premiumPlan) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       fetchPlans()
     }
   }, [user, isAuthenticated, authLoading, currentPlan, premiumPlan, fetchPlans])
@@ -281,7 +282,7 @@ export default function SupplierUpgradePage() {
           <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
             <CardContent className="pt-6">
               <div className="text-center space-y-4">
-                <div className="inline-block p-4 rounded-full bg-gradient-to-r from-yellow-400 to-orange-500">
+                <div className="inline-block p-4 rounded-full bg-gradient-to-r from-orange-400 to-orange-500">
                   <Crown className="w-12 h-12 text-white" />
                 </div>
                 <h1 className={cn("text-3xl font-bold", themeClasses.mainText)}>
@@ -322,7 +323,7 @@ export default function SupplierUpgradePage() {
       <div className="container mx-auto px-4 max-w-6xl">
         {/* Header */}
         <div className="text-center mb-12">
-          <div className="inline-block p-4 rounded-full bg-gradient-to-r from-yellow-400 to-orange-500 mb-6">
+          <div className="inline-block p-4 rounded-full bg-gradient-to-r from-orange-400 to-orange-500 mb-6">
             <ArrowUp className="w-12 h-12 text-white" />
           </div>
           <h1 className={cn("text-4xl md:text-5xl font-bold mb-4", themeClasses.mainText)}>
@@ -457,7 +458,7 @@ export default function SupplierUpgradePage() {
                 ) : null}
                 {canUpgradeToPremium && premiumPlan ? (
                   <Button
-                    className="w-full mt-2 bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
+                    className="w-full mt-2 bg-orange-500 hover:bg-orange-600 text-black font-semibold"
                     onClick={() => handlePlanChange(premiumPlan, requiresRegistrationForPremium)}
                     disabled={isUpgrading}
                   >
@@ -470,7 +471,7 @@ export default function SupplierUpgradePage() {
           </Card>
 
           {/* Premium Plan */}
-          <Card className={cn("border-2 border-yellow-500", themeClasses.cardBg, themeClasses.cardBorder)}>
+          <Card className={cn("border-2 border-orange-500", themeClasses.cardBg, themeClasses.cardBorder)}>
             <CardHeader>
               <CardTitle className={cn(themeClasses.mainText)}>Premium Plan</CardTitle>
             </CardHeader>
@@ -478,14 +479,14 @@ export default function SupplierUpgradePage() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="p-3 rounded-lg bg-gradient-to-r from-yellow-400 to-orange-500">
+                    <div className="p-3 rounded-lg bg-gradient-to-r from-orange-400 to-orange-500">
                       <Crown className="w-6 h-6 text-white" />
                     </div>
                     <div>
                       <h3 className={cn("text-xl font-semibold", themeClasses.mainText)}>
                         {premiumPlan?.name || 'Premium Plan'}
                       </h3>
-                      <p className={cn("text-2xl font-bold text-yellow-600", themeClasses.mainText)}>
+                      <p className={cn("text-2xl font-bold text-orange-600", themeClasses.mainText)}>
                         {premiumPlan ? formatPrice(premiumPlan.price) : 'Loading...'}
                         {premiumPlan?.term && (
                           <span className={cn("text-sm font-normal ml-1", themeClasses.textNeutralSecondary)}>
@@ -513,7 +514,7 @@ export default function SupplierUpgradePage() {
                 </div>
                 {canUpgradeToPremium ? (
                   <Button
-                    className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-semibold py-6 text-lg"
+                    className="w-full bg-orange-500 hover:bg-orange-600 text-black font-semibold py-6 text-lg"
                     onClick={() => handlePlanChange(premiumPlan!, requiresRegistrationForPremium)}
                     disabled={isUpgrading || !premiumPlan}
                   >
@@ -555,7 +556,7 @@ export default function SupplierUpgradePage() {
                   <CardContent className="pt-6">
                     <div className="flex items-start gap-4">
                       <div className="p-2 rounded-lg bg-yellow-100 dark:bg-yellow-900/20">
-                        <Icon className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+                        <Icon className="w-6 h-6 text-orange-600 dark:text-orange-400" />
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -597,34 +598,34 @@ export default function SupplierUpgradePage() {
                   <tr className={cn("border-b", themeClasses.cardBorder)}>
                     <th className={cn("text-left py-3 px-4 font-semibold", themeClasses.mainText)}>Feature</th>
                     <th className={cn("text-center py-3 px-4 font-semibold", themeClasses.mainText)}>Free</th>
-                    <th className={cn("text-center py-3 px-4 font-semibold text-yellow-600", themeClasses.mainText)}>Premium</th>
+                    <th className={cn("text-center py-3 px-4 font-semibold text-orange-600", themeClasses.mainText)}>Premium</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr className={cn("border-b", themeClasses.cardBorder)}>
                     <td className={cn("py-3 px-4", themeClasses.mainText)}>Product Listings</td>
                     <td className={cn("text-center py-3 px-4", themeClasses.textNeutralSecondary)}>Limited</td>
-                    <td className={cn("text-center py-3 px-4 text-yellow-600 font-semibold", themeClasses.mainText)}>Unlimited</td>
+                    <td className={cn("text-center py-3 px-4 text-orange-600 font-semibold", themeClasses.mainText)}>Unlimited</td>
                   </tr>
                   <tr className={cn("border-b", themeClasses.cardBorder)}>
                     <td className={cn("py-3 px-4", themeClasses.mainText)}>Support</td>
                     <td className={cn("text-center py-3 px-4", themeClasses.textNeutralSecondary)}>Standard</td>
-                    <td className={cn("text-center py-3 px-4 text-yellow-600 font-semibold", themeClasses.mainText)}>Priority</td>
+                    <td className={cn("text-center py-3 px-4 text-orange-600 font-semibold", themeClasses.mainText)}>Priority</td>
                   </tr>
                   <tr className={cn("border-b", themeClasses.cardBorder)}>
                     <td className={cn("py-3 px-4", themeClasses.mainText)}>Analytics</td>
                     <td className={cn("text-center py-3 px-4", themeClasses.textNeutralSecondary)}>Basic</td>
-                    <td className={cn("text-center py-3 px-4 text-yellow-600 font-semibold", themeClasses.mainText)}>Advanced</td>
+                    <td className={cn("text-center py-3 px-4 text-orange-600 font-semibold", themeClasses.mainText)}>Advanced</td>
                   </tr>
                   <tr className={cn("border-b", themeClasses.cardBorder)}>
                     <td className={cn("py-3 px-4", themeClasses.mainText)}>Search Visibility</td>
                     <td className={cn("text-center py-3 px-4", themeClasses.textNeutralSecondary)}>Standard</td>
-                    <td className={cn("text-center py-3 px-4 text-yellow-600 font-semibold", themeClasses.mainText)}>Enhanced</td>
+                    <td className={cn("text-center py-3 px-4 text-orange-600 font-semibold", themeClasses.mainText)}>Enhanced</td>
                   </tr>
                   <tr>
                     <td className={cn("py-3 px-4", themeClasses.mainText)}>Featured Listings</td>
                     <td className={cn("text-center py-3 px-4", themeClasses.textNeutralSecondary)}>✗</td>
-                    <td className={cn("text-center py-3 px-4 text-yellow-600 font-semibold", themeClasses.mainText)}>✓</td>
+                    <td className={cn("text-center py-3 px-4 text-orange-600 font-semibold", themeClasses.mainText)}>✓</td>
                   </tr>
                 </tbody>
               </table>

@@ -1,198 +1,77 @@
-"use client"
-
-// Note: ISR (revalidate) cannot be used in client components
-// CPU optimization is handled via API route caching and CDN caching instead
-
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { 
-  HelpCircle,
-  Package,
-  ArrowRight,
-  ArrowLeft,
-  Phone,
-  Mail,
-  MessageCircle,
-  FileText,
-  Truck,
-  Shield,
-  RefreshCw
-} from 'lucide-react'
-import { useTheme } from '@/hooks/use-theme'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { ArrowRight, HelpCircle, Mail, MessageCircle, PackageSearch, RotateCcw, Truck, Wrench } from 'lucide-react'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
+import { getFaqs } from '@/lib/help-faqs'
+import { STORE_WHATSAPP, phoneLabel, whatsappLink } from '@/lib/contact'
+
+/** Help centre hub: the main topics, popular questions, and how to reach us. Title from ./layout.tsx */
+const SUPPORT_EMAIL = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@honiccompanystore.com'
+
+const TOPICS = [
+  { href: '/support/order-tracking', icon: PackageSearch, title: 'Track an order', text: 'Where is my order? Check its status.' },
+  { href: '/support/shipping-info', icon: Truck, title: 'Delivery & shipping', text: 'Prices, times and free delivery.' },
+  { href: '/support/returns-refunds', icon: RotateCcw, title: 'Returns & refunds', text: 'Wrong or faulty item? We fix it.' },
+  { href: '/support/help-center', icon: HelpCircle, title: 'Questions & answers', text: 'Payments, account and more.' },
+  { href: '/support/technical-support', icon: Wrench, title: 'Website help', text: 'Quick fixes if something doesn’t work.' },
+]
 
 export default function SupportPage() {
-  const { themeClasses } = useTheme()
-  const router = useRouter()
-
-  const supportPages = [
-    {
-      title: 'Help Center',
-      description: 'Find answers to common questions and browse our comprehensive FAQ section',
-      href: '/support/help-center',
-      icon: <HelpCircle className="w-8 h-8" />,
-      color: 'bg-blue-500',
-      features: ['Search FAQs', 'Browse by category', 'Popular questions', 'Contact support']
-    },
-    {
-      title: 'Order Tracking',
-      description: 'Track your orders and stay updated on delivery status',
-      href: '/support/order-tracking',
-      icon: <Package className="w-8 h-8" />,
-      color: 'bg-green-500',
-      features: ['Track by order number', 'View order history', 'Status updates', 'Delivery timeline']
-    },
-    {
-      title: 'Returns & Refunds',
-      description: 'Learn about our return policy and process refunds',
-      href: '/support/returns-refunds',
-      icon: <RefreshCw className="w-8 h-8" />,
-      color: 'bg-orange-500',
-      features: ['Return policy', 'Refund process', 'Return shipping', 'Status tracking']
-    },
-    {
-      title: 'Shipping Info',
-      description: 'Information about shipping options, costs, and delivery times',
-      href: '/support/shipping-info',
-      icon: <Truck className="w-8 h-8" />,
-      color: 'bg-purple-500',
-      features: ['Shipping options', 'Delivery times', 'Shipping costs', 'International shipping']
-    },
-    {
-      title: 'Technical Support',
-      description: 'Get help with technical issues and platform problems',
-      href: '/support/technical-support',
-      icon: <Shield className="w-8 h-8" />,
-      color: 'bg-red-500',
-      features: ['Website issues', 'Mobile app support', 'Browser compatibility', 'Account problems']
-    }
-  ]
-
+  const popular = getFaqs().filter((f) => f.popular).slice(0, 6)
   return (
-    <div className={`min-h-screen ${themeClasses.mainBg} ${themeClasses.mainText}`}>
-      <div className="container mx-auto px-4 py-8">
-        {/* Back Button */}
-        <div className="mb-6">
-          <Button 
-            variant="ghost" 
-            onClick={() => router.back()}
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
-        </div>
+    <div className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-white">
+      <SiteHeader />
+      <main className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-600">Help centre</p>
+        <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">How can we help?</h1>
 
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4">Support Center</h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Get the help you need to make the most of our platform
-          </p>
-        </div>
-
-        {/* Quick Contact */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-            <CardContent className="p-6 text-center">
-              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Phone className="w-6 h-6 text-orange-500" />
-              </div>
-              <h3 className="font-semibold mb-2">Call Support</h3>
-              <p className="text-sm text-muted-foreground mb-4">Speak directly with our support team</p>
-              <Button variant="outline" size="sm">
-                +255 763818138
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-            <CardContent className="p-6 text-center">
-              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Mail className="w-6 h-6 text-orange-500" />
-              </div>
-              <h3 className="font-semibold mb-2">Email Support</h3>
-              <p className="text-sm text-muted-foreground mb-4">Get help via email</p>
-              <Button variant="outline" size="sm">
-                {process.env.NEXT_PUBLIC_SUPPORT_EMAIL || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'}
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-            <CardContent className="p-6 text-center">
-              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <MessageCircle className="w-6 h-6 text-orange-500" />
-              </div>
-              <h3 className="font-semibold mb-2">Live Chat</h3>
-              <p className="text-sm text-muted-foreground mb-4">Chat with us in real-time</p>
-              <Button variant="outline" size="sm">
-                Start Chat
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Support Pages Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-          {supportPages.map((page, index) => (
-            <Card key={index} className="hover:shadow-lg transition-shadow group">
-              <CardHeader>
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 ${page.color} rounded-lg flex items-center justify-center text-white`}>
-                    {page.icon}
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">{page.title}</CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {page.description}
-                    </p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 mb-4">
-                  {page.features.map((feature, featureIndex) => (
-                    <div key={featureIndex} className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <div className="w-1.5 h-1.5 bg-orange-500 rounded-full" />
-                      <span>{feature}</span>
-                    </div>
-                  ))}
-                </div>
-                <Link href={page.href}>
-                  <Button className="w-full group-hover:bg-orange-600 transition-colors">
-                    Access {page.title}
-                    <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
+        <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {TOPICS.map(({ href, icon: Icon, title, text }) => (
+            <Link key={href} href={href} className="group flex items-start gap-4 rounded-2xl p-5 ring-1 ring-neutral-200 transition hover:ring-orange-400 dark:ring-neutral-800">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/40"><Icon className="h-5 w-5" /></span>
+              <span className="min-w-0">
+                <span className="flex items-center gap-1 font-bold">{title}<ArrowRight className="h-4 w-4 opacity-0 transition group-hover:opacity-100" /></span>
+                <span className="mt-0.5 block text-sm text-neutral-500">{text}</span>
+              </span>
+            </Link>
           ))}
+          <a href={whatsappLink('Hello Honic, I need help')} target="_blank" rel="noopener noreferrer" className="flex items-start gap-4 rounded-2xl bg-neutral-950 p-5 text-white transition hover:bg-neutral-800">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-orange-500"><MessageCircle className="h-5 w-5" /></span>
+            <span>
+              <span className="block font-bold">Chat on WhatsApp</span>
+              <span className="mt-0.5 block text-sm text-neutral-300">{phoneLabel(STORE_WHATSAPP)} · business hours</span>
+            </span>
+          </a>
         </div>
 
-        {/* Contact Support CTA */}
-        <div className="mt-16">
-          <Card className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
-            <CardContent className="p-12 text-center">
-              <h2 className="text-3xl font-bold mb-4">Still need help?</h2>
-              <p className="text-xl mb-8 opacity-90">
-                Our support team is here to help you 24/7
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button size="lg" variant="secondary" className="bg-white text-orange-500 hover:bg-gray-100">
-                  <Phone className="w-4 h-4 mr-2" />
-                  Call Support
-                </Button>
-                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10">
-                  <Mail className="w-4 h-4 mr-2" />
-                  Email Support
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        <section className="mt-12">
+          <h2 className="text-xl font-black tracking-tight">Popular questions</h2>
+          <div className="mt-4 divide-y divide-neutral-200 rounded-2xl ring-1 ring-neutral-200 dark:divide-neutral-800 dark:ring-neutral-800">
+            {popular.map((f) => (
+              <details key={f.id} className="group px-5 py-4">
+                <summary className="cursor-pointer list-none font-semibold marker:hidden">
+                  <span className="flex items-center justify-between gap-4">{f.question}<span aria-hidden className="text-lg text-orange-600 transition group-open:rotate-45">+</span></span>
+                </summary>
+                <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-300">{f.answer}</p>
+                {f.link && <Link href={f.link.href} className="mt-1 inline-flex items-center gap-1 py-1.5 text-sm font-semibold text-orange-600 hover:underline">{f.link.label} <ArrowRight className="h-4 w-4" /></Link>}
+              </details>
+            ))}
+          </div>
+          <Link href="/support/help-center" className="mt-1 inline-flex items-center gap-1 py-2 text-sm font-semibold text-orange-600 hover:underline">All questions <ArrowRight className="h-4 w-4" /></Link>
+        </section>
+
+        <section className="mt-10 grid gap-3 sm:grid-cols-2">
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="flex items-center gap-3 rounded-2xl p-5 ring-1 ring-neutral-200 hover:ring-orange-400 dark:ring-neutral-800">
+            <Mail className="h-5 w-5 text-orange-600" />
+            <span><span className="block font-bold">Email us</span><span className="text-sm text-neutral-500">{SUPPORT_EMAIL}</span></span>
+          </a>
+          <Link href="/contact" className="flex items-center gap-3 rounded-2xl p-5 ring-1 ring-neutral-200 hover:ring-orange-400 dark:ring-neutral-800">
+            <HelpCircle className="h-5 w-5 text-orange-600" />
+            <span><span className="block font-bold">Contact form</span><span className="text-sm text-neutral-500">Write to us from the website</span></span>
+          </Link>
+        </section>
+      </main>
+      <SiteFooter />
     </div>
   )
 }

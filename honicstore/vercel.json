@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    { "path": "/api/cron/cleanup-orders", "schedule": "0 1 * * *" },
+    { "path": "/api/cron/check-premium-expiration", "schedule": "30 1 * * *" },
+    { "path": "/api/cron/check-price-alerts", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/check-back-in-stock", "schedule": "15 6 * * *" },
+    { "path": "/api/cron/check-review-requests", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/check-abandoned-carts", "schedule": "0 15 * * *" }
+  ]
+}

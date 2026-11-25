@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { validateAuth, getUserAndRole } from '@/lib/auth-server'
+import { sniffImage, sameImageType } from '@/lib/image-sniff'
 
 
 
@@ -54,10 +55,15 @@ export async function POST(request: NextRequest) {
     const context = formData.get('context') as string || 'product'
     const productId = formData.get('productId') as string
 
-    if (!productId && role !== 'admin') {
+    // Profile photos: any signed-in user, images only, stored under avatars/<their id>/
+    const isAvatar = context === 'avatar'
+    if (isAvatar && type !== 'image') {
+      return NextResponse.json({ error: 'Profile photos must be images' }, { status: 400 })
+    }
+    if (!isAvatar && !productId && role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: productId required for non-admin upload' }, { status: 403 })
     }
-    if (productId) {
+    if (productId && !isAvatar) {
       const pid = Number.parseInt(productId, 10)
       if (Number.isNaN(pid)) {
         return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
@@ -96,7 +102,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file MIME type based on declared type
-    const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']
+    const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'] // no SVG: it can carry scripts
     const allowedVideoTypes = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime']
     const allowedModelTypes = ['model/gltf-binary', 'model/gltf+json', 'application/octet-stream']
     
@@ -139,7 +145,7 @@ export async function POST(request: NextRequest) {
     // Validate file extension matches MIME type
     const fileExtension = file.name.split('.').pop()?.toLowerCase()
     const extensionMap: Record<string, string[]> = {
-      'image': ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp', 'svg'],
+      'image': ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp'],
       'video': ['mp4', 'webm', 'ogg', 'mov'],
       'model3d': ['glb', 'gltf', 'obj']
     }
@@ -163,7 +169,9 @@ export async function POST(request: NextRequest) {
     
     // Generate product-specific filename if productId is provided
     let fileName: string
-    if (productId && (context === 'product' || context === 'variant' || context === 'specification')) {
+    if (isAvatar) {
+      fileName = `avatars/${user.id}/${timestamp}_${randomString}.${fileExt}`
+    } else if (productId && (context === 'product' || context === 'variant' || context === 'specification')) {
       fileName = `product_${productId}_${type}_${timestamp}.${fileExt}`
     } else {
       fileName = `${type}_${timestamp}_${randomString}.${fileExt}`
@@ -174,6 +182,15 @@ export async function POST(request: NextRequest) {
     // Convert file to buffer
     const fileBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(fileBuffer)
+
+    // The browser-supplied type and name can be faked: check the file really is the image format it claims
+    if (type === 'image') {
+      const real = sniffImage(buffer)
+      if (!real || !sameImageType(file.type, real)) {
+        logSecurityEvent('UPLOAD_TYPE_MISMATCH', { endpoint: '/api/media/upload', claimed: file.type, real: real?.mime }, request)
+        return NextResponse.json({ error: 'This file isn’t a valid JPG, PNG, GIF or WebP image.' }, { status: 400 })
+      }
+    }
 
     // Determine bucket based on type and context
     const bucketName = getBucketName(type, context)
@@ -197,17 +214,15 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase.storage
       .from(bucketName)
       .upload(fileName, buffer, {
-        contentType: file.type,
+        contentType: file.type === 'image/jpg' ? 'image/jpeg' : file.type,
         upsert: false
       })
 
     if (error) {
       return NextResponse.json({ 
         error: 'Upload failed', 
-        details: error.message,
-        bucket: bucketName,
-        statusCode: error.statusCode
-      }, { status: error.statusCode === 404 ? 400 : 500 })
+        bucket: bucketName
+      }, { status: /not.?found/i.test(error.message) ? 400 : 500 })
     }
 
     logger.log('✅ Upload successful:', data)
@@ -322,6 +337,8 @@ function getBucketName(type: string, context: string = 'product'): string {
   // For images, use different buckets based on context
   if (type === 'image') {
     switch (context) {
+      case 'avatar':
+        return 'product-images' // under avatars/<user id>/
       case 'category':
         return 'category-images'
       case 'variant':
@@ -342,109 +359,5 @@ function getBucketName(type: string, context: string = 'product'): string {
       return 'product-models'
     default:
       return 'media'
-  }
-}
-
-// GET endpoint to list media files
-export async function GET(request: NextRequest) {
-  try {
-    if (!supabase) {
-      return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
-    }
-    
-    const { searchParams } = new URL(request.url)
-    const type = searchParams.get('type')
-    const bucket = searchParams.get('bucket')
-    const context = searchParams.get('context') || 'product'
-    const productId = searchParams.get('productId')
-
-    if (!type && !bucket) {
-      return NextResponse.json({ error: 'Type or bucket required' }, { status: 400 })
-    }
-
-    const bucketName = bucket || getBucketName(type || 'image', context)
-
-    const { data, error } = await supabase.storage
-      .from(bucketName)
-      .list('', {
-        limit: 100,
-        offset: 0
-      })
-
-    if (error) {
-      return NextResponse.json({ error: 'Failed to list files' }, { status: 500 })
-    }
-
-    // Get public URLs for each file
-    let filesWithUrls = data.map(file => {
-      const { data: urlData } = supabase.storage
-        .from(bucketName)
-        .getPublicUrl(file.name)
-
-      return {
-        name: file.name,
-        size: file.metadata?.size,
-        lastModified: file.updated_at,
-        url: urlData.publicUrl,
-        productId: extractProductIdFromFilename(file.name)
-      }
-    })
-
-    // Filter by productId if provided
-    if (productId) {
-      filesWithUrls = filesWithUrls.filter(file => 
-        file.productId === productId || file.name.startsWith(`product_${productId}_`)
-      )
-    }
-
-    return NextResponse.json({
-      success: true,
-      files: filesWithUrls
-    })
-
-  } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
-}
-
-// Helper function to extract product ID from filename
-function extractProductIdFromFilename(filename: string): string | null {
-  const match = filename.match(/^product_(\d+)_/)
-  return match ? match[1] : null
-}
-
-// DELETE endpoint to remove media files
-export async function DELETE(request: NextRequest) {
-  try {
-    if (!supabase) {
-      return NextResponse.json({ error: 'Supabase client not initialized' }, { status: 500 })
-    }
-    
-    const { searchParams } = new URL(request.url)
-    const fileName = searchParams.get('fileName')
-    const type = searchParams.get('type')
-    const context = searchParams.get('context') || 'product'
-
-    if (!fileName) {
-      return NextResponse.json({ error: 'File name required' }, { status: 400 })
-    }
-
-    const bucketName = getBucketName(type || 'image', context)
-
-    const { error } = await supabase.storage
-      .from(bucketName)
-      .remove([fileName])
-
-    if (error) {
-      return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: 'File deleted successfully'
-    })
-
-  } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

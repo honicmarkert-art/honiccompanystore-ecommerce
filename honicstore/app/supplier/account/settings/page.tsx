@@ -282,7 +282,7 @@ export default function AccountSettingsPage() {
   }
 
   return (
-    <div className={cn("min-h-screen p-4 md:p-8", themeClasses.backgroundColor)}>
+    <div className={cn("min-h-screen p-4 md:p-8", themeClasses.mainBg)}>
       <div className="max-w-4xl mx-auto space-y-6">
         <Link 
           href="/supplier/dashboard"

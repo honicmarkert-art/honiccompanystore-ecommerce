@@ -450,7 +450,7 @@ export function robustFuzzySearch(
     // Scoring components (0-100 scale)
     let exactScore = 0
     let partialScore = 0
-    let typoScore = 0
+    const typoScore = 0
     let matchType = 'custom'
     
     // Exact matches get highest scores

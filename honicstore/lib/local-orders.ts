@@ -70,32 +70,5 @@ export function takePendingOrder(referenceId: string): LocalOrder | null {
   return pending
 }
 
-export function downloadOrderReceipt(order: LocalOrder) {
-  const lines = [
-    "Honic Company Limited",
-    "Order receipt",
-    "",
-    `Order: ${order.referenceId}`,
-    `Status: ${order.status}`,
-    `Date: ${new Date(order.createdAt).toLocaleString("en-TZ")}`,
-    `Name: ${order.customerName || "-"}`,
-    `Phone: ${order.phone || "-"}`,
-    `Email: ${order.email || "-"}`,
-    "",
-    "Items",
-    ...(order.items.length
-      ? order.items.map((item) => `${item.quantity} x ${item.name} — ${item.total} ${order.currency}`)
-      : ["Details are on the order page"]),
-    "",
-    `Total: ${order.total} ${order.currency}`,
-  ]
-  const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = `honic-order-${order.referenceId}.txt`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-}
+/** sessionStorage key: what the current checkout is buying, so the result page can remove it from the cart once paid */
+export const BOUGHT_ITEMS_KEY = "honic-bought-items"

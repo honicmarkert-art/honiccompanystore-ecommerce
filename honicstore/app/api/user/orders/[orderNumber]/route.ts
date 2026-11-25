@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { logger } from '@/lib/logger'
@@ -153,8 +154,8 @@ export async function GET(
     
     // Fetch product images and supplier information
     const productIds = orderItems.map((item: any) => item.product_id).filter(Boolean) || []
-    let productImagesMap = new Map<number, string>()
-    let productSuppliersMap = new Map<number, { supplierId: string | null, supplierName: string | null }>()
+    const productImagesMap = new Map<number, string>()
+    const productSuppliersMap = new Map<number, { supplierId: string | null, supplierName: string | null }>()
     
     if (productIds.length > 0) {
       const { data: products, error: productsError } = await supabase
@@ -167,7 +168,7 @@ export async function GET(
         const supplierIds = [...new Set(products.map(p => p.supplier_id || p.user_id).filter(Boolean))]
         
         // Fetch supplier names
-        let suppliersMap = new Map<string, string>()
+        const suppliersMap = new Map<string, string>()
         if (supplierIds.length > 0) {
           const { data: suppliers } = await supabase
             .from('profiles')
@@ -364,14 +365,16 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
-    // Update the order
-    const { error: updateError } = await supabase
+    // Update the order — admin client (RLS lets customers only READ orders). Ownership was checked
+    // above; the user_id filter is a second guard. updateData only contains allowed fields (notes).
+    const { error: updateError } = await getSupabaseClient()
       .from('orders')
       .update({
         ...updateData,
         updated_at: new Date().toISOString()
       })
       .eq('id', order.id) // Use internal ID for update
+      .eq('user_id', user.id)
 
     if (updateError) {
       return NextResponse.json(

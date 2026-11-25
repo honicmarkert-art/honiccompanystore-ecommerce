@@ -55,9 +55,9 @@ export default function PayoutAccountsPage() {
   useEffect(() => {
     fetchAccounts()
     checkCompanyInfo()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
-  const checkCompanyInfo = async () => {
+  async function checkCompanyInfo() {
     try {
       const response = await fetch('/api/user/profile')
       if (response.ok) {
@@ -93,7 +93,7 @@ export default function PayoutAccountsPage() {
     }
   }
 
-  const fetchAccounts = async () => {
+  async function fetchAccounts() {
     try {
       const response = await fetch('/api/supplier/payout-accounts')
       const data = await response.json()
@@ -327,7 +327,7 @@ export default function PayoutAccountsPage() {
 
   if (loading) {
     return (
-      <div className={cn("min-h-screen p-4 md:p-8", themeClasses.backgroundColor)}>
+      <div className={cn("min-h-screen p-4 md:p-8", themeClasses.mainBg)}>
         <div className="max-w-6xl mx-auto">
           <div className={cn("text-center py-12", themeClasses.textNeutralSecondary)}>
             Loading payout accounts...
@@ -338,14 +338,14 @@ export default function PayoutAccountsPage() {
   }
 
   return (
-    <div className={cn("min-h-screen p-4 md:p-8", themeClasses.backgroundColor)}>
+    <div className={cn("min-h-screen p-4 md:p-8", themeClasses.mainBg)}>
       <div className="max-w-6xl mx-auto">
         {/* Warning Banner */}
         {companyInfoComplete === false && (
           <Card className={cn("mb-6 border-yellow-200 dark:border-yellow-800", themeClasses.cardBg, themeClasses.cardBorder)}>
             <CardContent className="pt-6">
               <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                <AlertTriangle className="w-5 h-5 text-orange-600 dark:text-orange-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <h3 className={cn("font-semibold mb-1", themeClasses.mainText)}>
                     Complete Your Account Information

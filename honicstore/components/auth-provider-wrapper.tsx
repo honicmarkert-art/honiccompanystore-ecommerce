@@ -1,21 +1,11 @@
 "use client"
 
-import dynamic from 'next/dynamic'
+import { AuthProvider } from '@/contexts/auth-context'
 
-// Client Component wrapper for AuthProvider with dynamic import
-// This prevents chunk loading issues by code-splitting the auth context
-const AuthProvider = dynamic(
-  () => import('@/contexts/auth-context').then((mod) => ({ default: mod.AuthProvider })),
-  { 
-    ssr: false,
-    loading: () => (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
-      </div>
-    )
-  }
-)
-
+// AuthProvider is imported directly. It used to be loaded with
+// `dynamic(..., { ssr: false })`, which wrapped the whole app and made every page
+// skip server rendering (shoppers saw a spinner until all JS had loaded).
+// The provider only touches window/localStorage inside effects, so it is SSR-safe.
 export function AuthProviderWrapper({ children }: { children: React.ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>
 }

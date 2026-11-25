@@ -44,32 +44,8 @@ function SupplierPaymentPageContent() {
   const [paymentFailureReason, setPaymentFailureReason] = useState<string | null>(null)
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly')
 
-  useEffect(() => {
-    // Wait a bit for auth check to complete before redirecting
-    if (authLoading) {
-      return // Still checking auth, wait
-    }
 
-    if (!isAuthenticated) {
-      // Add small delay to ensure auth check has fully completed
-      const redirectTimer = setTimeout(() => {
-        // Only redirect if still not authenticated after delay
-        if (!isAuthenticated) {
-          const redirectUrl = `/supplier/payment${planId ? `?planId=${planId}` : ''}`
-          router.push(`/auth/login?redirect=${encodeURIComponent(redirectUrl)}`)
-        }
-      }, 1000) // Wait 1 second for auth to stabilize
-      
-      return () => clearTimeout(redirectTimer)
-    }
-
-    // User is authenticated, fetch plan details if planId is present
-    if (isAuthenticated && planId) {
-      fetchPlanDetails()
-    }
-  }, [authLoading, isAuthenticated, planId, router])
-
-  const fetchPlanDetails = async () => {
+  async function fetchPlanDetails() {
     try {
       setLoading(true)
       setError(null)
@@ -161,6 +137,32 @@ function SupplierPaymentPageContent() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    // Wait a bit for auth check to complete before redirecting
+    if (authLoading) {
+      return // Still checking auth, wait
+    }
+
+    if (!isAuthenticated) {
+      // Add small delay to ensure auth check has fully completed
+      const redirectTimer = setTimeout(() => {
+        // Only redirect if still not authenticated after delay
+        if (!isAuthenticated) {
+          const redirectUrl = `/supplier/payment${planId ? `?planId=${planId}` : ''}`
+          router.push(`/auth/login?redirect=${encodeURIComponent(redirectUrl)}`)
+        }
+      }, 1000) // Wait 1 second for auth to stabilize
+      
+      return () => clearTimeout(redirectTimer)
+    }
+
+    // User is authenticated, fetch plan details if planId is present
+    if (isAuthenticated && planId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+      fetchPlanDetails()
+    }
+  }, [authLoading, isAuthenticated, planId, router]) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
   
   const checkPaymentStatus = async () => {
     if (!paymentReferenceId) return
@@ -266,7 +268,7 @@ function SupplierPaymentPageContent() {
 
   if (authLoading || loading) {
     return (
-      <div className={cn("min-h-screen flex items-center justify-center", themeClasses.bg)}>
+      <div className={cn("min-h-screen flex items-center justify-center", themeClasses.mainBg)}>
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-orange-500" />
           <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Loading payment page...</p>
@@ -281,7 +283,7 @@ function SupplierPaymentPageContent() {
 
   if (error && !plan) {
     return (
-      <div className={cn("min-h-screen flex items-center justify-center p-4", themeClasses.bg)}>
+      <div className={cn("min-h-screen flex items-center justify-center p-4", themeClasses.mainBg)}>
         <Card className={cn("max-w-md w-full", themeClasses.cardBg, themeClasses.cardBorder)}>
           <CardHeader>
             <CardTitle className={cn(themeClasses.mainText)}>Payment Error</CardTitle>
@@ -302,7 +304,7 @@ function SupplierPaymentPageContent() {
 
   if (!plan) {
     return (
-      <div className={cn("min-h-screen flex items-center justify-center p-4", themeClasses.bg)}>
+      <div className={cn("min-h-screen flex items-center justify-center p-4", themeClasses.mainBg)}>
         <Card className={cn("max-w-md w-full", themeClasses.cardBg, themeClasses.cardBorder)}>
           <CardHeader>
             <CardTitle className={cn(themeClasses.mainText)}>No Plan Selected</CardTitle>
@@ -488,7 +490,7 @@ function SupplierPaymentPageContent() {
                 <div className="space-y-3">
                   <div className="flex flex-col items-center text-center">
                     <span className="text-3xl md:text-4xl font-extrabold text-orange-500">
-                      {formatPrice(displayPrice, plan.currency)}
+                      {formatPrice(displayPrice)}
                     </span>
                     {isYearly && (
                       <p className="mt-1 text-[11px] md:text-xs text-emerald-600 dark:text-emerald-400">
@@ -562,7 +564,7 @@ function SupplierPaymentPageContent() {
                 <Button
                   onClick={checkPaymentStatus}
                   disabled={processing}
-                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
+                  className="w-full bg-orange-500 hover:bg-orange-600 text-white"
                   size="lg"
                 >
                   {processing ? (

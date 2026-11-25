@@ -75,12 +75,10 @@ export function HydrationFix() {
       attributeFilter: extensionAttributes
     })
 
-    // Also run a periodic cleanup to catch any missed attributes
-    const cleanupInterval = setInterval(removeExtensionAttributes, 100)
+    // (A 100ms cleanup timer used to run here forever; the MutationObserver above already catches new attributes.)
 
     return () => {
       observer.disconnect()
-      clearInterval(cleanupInterval)
     }
   }, [])
 

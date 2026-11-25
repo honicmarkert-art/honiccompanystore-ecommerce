@@ -164,6 +164,10 @@ export type SnippePaymentRecord = {
   amount: number | null
   currency: string
   orderReference: string
+  /** Reason given by the network, e.g. "Insufficient balance on customer's account." */
+  failureReason: string
+  /** Network Snippe detected from the number, e.g. "halopesa", "mpesa", "airtel", "tigo". */
+  provider: string
 }
 
 export async function getSnippePayment(reference: string): Promise<SnippePaymentRecord | null> {
@@ -182,6 +186,8 @@ export async function getSnippePayment(reference: string): Promise<SnippePayment
     amount: tzsAmount(rawAmount),
     currency: String(data.amount?.currency || data.currency || "TZS").toUpperCase(),
     orderReference: String(data.metadata?.order_reference || data.metadata?.order_id || ""),
+    failureReason: String(data.failure_reason || "").replace(/[<>]/g, "").slice(0, 200),
+    provider: String(data.channel?.provider || "").toLowerCase(),
   }
 }
 

@@ -44,7 +44,7 @@ export async function GET(
     // Find order by order_number
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id, user_id, status, created_at, updated_at')
+      .select('id, user_id, status, created_at, updated_at, shipping_address')
       .eq('order_number', orderNumber)
       .single()
     

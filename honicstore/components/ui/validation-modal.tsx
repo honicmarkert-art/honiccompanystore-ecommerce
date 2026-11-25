@@ -37,6 +37,7 @@ export function ValidationModal({
 
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setIsVisible(true)
     } else {
       setIsVisible(false)
@@ -71,7 +72,7 @@ export function ValidationModal({
       case 'error':
         return <AlertTriangle className="w-6 h-6 text-red-600" />
       case 'warning':
-        return <AlertTriangle className="w-6 h-6 text-yellow-600" />
+        return <AlertTriangle className="w-6 h-6 text-orange-600" />
       case 'info':
         return <Info className="w-6 h-6 text-blue-600" />
       case 'success':
@@ -101,7 +102,7 @@ export function ValidationModal({
       case 'error':
         return "bg-red-600 hover:bg-red-700 text-white"
       case 'warning':
-        return "bg-yellow-600 hover:bg-yellow-700 text-white"
+        return "bg-orange-600 hover:bg-yellow-700 text-white"
       case 'info':
         return "bg-blue-600 hover:bg-blue-700 text-white"
       case 'success':

@@ -90,9 +90,9 @@ export default function SupplierOrdersPage() {
     }
     
     clearUnreadCount()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
-  const fetchSupplierStatus = async () => {
+  async function fetchSupplierStatus() {
     try {
       const { data: { user } } = await supabaseClient.auth.getUser()
       if (!user) return
@@ -202,9 +202,9 @@ export default function SupplierOrdersPage() {
         }
       }
     }
-  }, [toast])
+  }, [toast]) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
-  const fetchOrders = async (isRealTimeUpdate = false, markAsSeen = true, showRefreshLoading = false): Promise<Order[]> => {
+  async function fetchOrders(isRealTimeUpdate = false, markAsSeen = true, showRefreshLoading = false): Promise<Order[]> {
     try {
       if (!isRealTimeUpdate) {
         if (showRefreshLoading) {
@@ -430,7 +430,7 @@ export default function SupplierOrdersPage() {
     <>
       {/* New Order Notification Banner */}
       {newOrderNotification && (
-        <div className={cn("mb-4 p-4 rounded-lg border-2 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-500 animate-pulse", themeClasses.cardBg)}>
+        <div className={cn("mb-4 p-4 rounded-lg border-2 bg-yellow-50 dark:bg-yellow-900/20 border-orange-500 animate-pulse", themeClasses.cardBg)}>
           <p className={cn("text-center font-semibold", themeClasses.mainText)}>
             {newOrderNotification}
           </p>
@@ -497,7 +497,7 @@ export default function SupplierOrdersPage() {
       {/* Orders List */}
       {loading ? (
         <div className={cn("text-center py-12", themeClasses.textNeutralSecondary)}>
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
           <p className="mt-4">Loading orders...</p>
         </div>
       ) : filteredOrders.length === 0 ? (

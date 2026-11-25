@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { useToast } from '@/hooks/use-toast'
+import { announceCartCount } from '@/hooks/use-cart-count'
 
 // Safe logging helpers - no-op functions for production cleanliness
 const safeLog = function(...args: any[]) {
@@ -154,6 +155,8 @@ export function useCart() {
 
   const [cart, setCart] = useState<CartItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  /** True once the cart has been read at least once (guest storage or server), so pages can tell "loading" from "empty". */
+  const [hasLoaded, setHasLoaded] = useState(false)
   const [cartSubtotal, setCartSubtotal] = useState(0)
   const [cartTotalItems, setCartTotalItems] = useState(0)
   const [cartUniqueProducts, setCartUniqueProducts] = useState(0)
@@ -330,6 +333,7 @@ export function useCart() {
       safeError('🛒 [USE-CART] Error loading cart:', error)
     } finally {
       setIsLoading(false)
+      setHasLoaded(true)
       cartAbortRef.current = null
     }
   }, [isAuthenticated, migrateCartItem])
@@ -355,7 +359,7 @@ export function useCart() {
     )]
 
     // Batch fetch products if needed
-    let productsMap: { [key: number]: any } = {}
+    const productsMap: { [key: number]: any } = {}
     if (productIdsToFetch.length > 0) {
       try {
         // Fetch all products in parallel (non-blocking)
@@ -431,7 +435,7 @@ export function useCart() {
 
             // Update variants with variant_name and price from database
             const updatedVariants = finalProductData ? item.variants.map((v: any) => {
-              let updatedVariant = { ...v }
+              const updatedVariant = { ...v }
               if (v.variantId && v.variantId !== 'default' && !isNaN(Number(v.variantId))) {
                 const variant = finalProductData.variants?.find((pv: any) => pv.id === Number(v.variantId))
                 if (variant) {
@@ -488,6 +492,8 @@ export function useCart() {
       }
     } catch (error) {
       safeError('🛒 [USE-CART] Error loading guest cart:', error)
+    } finally {
+      setHasLoaded(true)
     }
   }, [isAuthenticated, migrateCartItem, loadProductDataForCartItems])
 
@@ -589,6 +595,7 @@ export function useCart() {
       // First merge guest cart if it exists and hasn't been attempted yet, then load server cart
       const hasGuestCart = localStorage.getItem(CART_STORAGE_KEY)
       if (hasGuestCart && !hasAttemptedMerge) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only data after mount, so the server render matches
         setHasAttemptedMerge(true)
         mergeGuestCart().then(() => {
           // After merging, load the server cart
@@ -604,6 +611,12 @@ export function useCart() {
       setHasAttemptedMerge(false)
     }
   }, [isAuthenticated, loadServerCart, loadGuestCart, mergeGuestCart, hasAttemptedMerge])
+
+  // Tell lightweight cart badges (site header) about the new count, once the cart has been read
+  useEffect(() => {
+    if (!hasLoaded) return
+    announceCartCount(cart.reduce((n, i) => n + (i.variants?.length || 1), 0))
+  }, [cart, hasLoaded])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -766,7 +779,7 @@ export function useCart() {
           // Check for duplicate request
           if (addItemRequestMap.current.has(requestKey)) {
             // Don't await - let it happen in background
-            addItemRequestMap.current.get(requestKey)
+            addItemRequestMap.current.get(requestKey)!
               .then(data => {
                 if (data) {
                   productDataToUse = data
@@ -900,7 +913,7 @@ export function useCart() {
       }
     } else {
       // Use provided product data or fetch it (for both guest and authenticated users to get variant_name and price from DB)
-      let productDataToUse = productData
+      const productDataToUse = productData
       let variantName: string | null = null
       let variantPriceFromDB: number | null = null
 
@@ -913,7 +926,7 @@ export function useCart() {
         // Check for duplicate request
         if (addItemRequestMap.current.has(requestKey)) {
           // Don't await - let it happen in background
-          addItemRequestMap.current.get(requestKey)
+          addItemRequestMap.current.get(requestKey)!
             .then(data => {
               if (data) {
                 // Update cart with product data in background
@@ -1012,7 +1025,7 @@ export function useCart() {
         image: variantImage
       }
       // Fetch supplier info for guest users in background (non-blocking)
-      let supplierInfo: any = null
+      const supplierInfo: any = null
       if (!isAuthenticated) {
         // Fetch supplier info in background without blocking
         fetch(`/api/products/${productId}/supplier-info`)
@@ -1305,7 +1318,7 @@ export function useCart() {
       }
     }
     // For guest users, the optimistic update is sufficient
-  }, [cart, loadServerCart, toast])
+  }, [cart, isAuthenticated, loadServerCart, toast])
 
   // Remove item from cart
   const removeItem = useCallback(async (productId: number, variantId?: string) => {
@@ -1410,7 +1423,7 @@ export function useCart() {
         duration: 500,
       })
     }
-  }, [cart, loadServerCart, toast])
+  }, [cart, isAuthenticated, toast])
 
   // Clear entire cart
   const clearCart = useCallback(async () => {
@@ -1464,7 +1477,7 @@ export function useCart() {
         duration: 500, // Success message: 500ms (within 300-1000ms range)
       })
     }
-  }, [isAuthenticated, loadServerCart, toast, cart.length])
+  }, [isAuthenticated, loadServerCart, toast])
 
   // Check if item is in cart
   const isInCart = useCallback((productId: number, variantId?: string) => {
@@ -1495,6 +1508,7 @@ export function useCart() {
       const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0)
       const totalItems = cart.reduce((sum, item) => sum + item.totalQuantity, 0)
       const uniqueProducts = cart.length // Count unique products (cart items)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setCartSubtotal(subtotal)
       setCartTotalItems(totalItems)
       setCartUniqueProducts(uniqueProducts)
@@ -1506,6 +1520,7 @@ export function useCart() {
   useEffect(() => {
     if (isAuthenticated) {
       const uniqueProducts = cart.length
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setCartUniqueProducts(uniqueProducts)
     }
   }, [cart, isAuthenticated])
@@ -1514,6 +1529,7 @@ export function useCart() {
   return {
     cart,
     isLoading,
+    hasLoaded,
     cartSubtotal,
     cartTotalItems,
     cartUniqueProducts,

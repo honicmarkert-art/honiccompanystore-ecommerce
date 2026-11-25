@@ -132,31 +132,6 @@ export function useOrders() {
     }
   }, [isAuthenticated])
 
-  const createOrder = useCallback(async (orderData: Partial<Order>): Promise<Order | null> => {
-    if (!isAuthenticated) {
-      throw new Error('Must be authenticated to create order')
-    }
-
-    try {
-      const response = await fetch('/api/user/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(orderData),
-      })
-      
-      if (!response.ok) {
-        throw new Error('Failed to create order')
-      }
-      
-      const data = await response.json()
-      return data.order
-    } catch (err) {
-      throw err
-    }
-  }, [isAuthenticated])
-
   const updateOrder = useCallback(async (orderNumber: string, updates: Partial<Order>): Promise<Order | null> => {
     if (!isAuthenticated) {
       throw new Error('Must be authenticated to update order')
@@ -224,6 +199,7 @@ export function useOrders() {
   }, [isAuthenticated])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
     fetchOrders()
   }, [fetchOrders])
 
@@ -234,7 +210,6 @@ export function useOrders() {
     fetchOrders,
     fetchOrderById,
     fetchOrderByNumber,
-    createOrder,
     updateOrder,
     getOrderStatusHistory,
     refetch: fetchOrders

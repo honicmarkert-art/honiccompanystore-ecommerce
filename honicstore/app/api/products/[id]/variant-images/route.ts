@@ -36,7 +36,7 @@ export async function GET(
 ) {
   try {
     // Rate limiting check
-    const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown'
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
     if (!checkRateLimit(ip)) {
       return NextResponse.json({
         error: 'Too many requests. Please try again later.'
@@ -92,7 +92,7 @@ export async function GET(
     logger.log(`📊 Found ${allVariantImages.length} total variant images, normalized to ${normalizedVariantImages.length}, returning first ${variantImages.length}`)
 
     // Set appropriate cache headers
-    const cacheHeaders = cacheBust ? {
+    const cacheHeaders: Record<string, string> = cacheBust ? {
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
       'Expires': '0'

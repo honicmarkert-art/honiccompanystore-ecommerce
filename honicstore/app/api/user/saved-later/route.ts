@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { createServerClient } from '@supabase/ssr'
 
 export const dynamic = 'force-dynamic'
+
+// profiles is private under RLS (customers can only read their own row); writes go through the
+// admin client and are always filtered to the logged-in user's id.
 
 function getClient(req: NextRequest) {
 	return createServerClient(
@@ -43,7 +47,7 @@ export async function POST(req: NextRequest) {
 		if (error && error.code !== 'PGRST116') return NextResponse.json({ error: 'DB error' }, { status: 500 })
 		const prev: number[] = Array.isArray(data?.saved_later_product_ids) ? data!.saved_later_product_ids : []
 		const next = [productId, ...prev.filter(id => id !== productId)]
-		await supabase.from('profiles').upsert({ id: user.id, saved_later_product_ids: next }, { onConflict: 'id' })
+		await getSupabaseClient().from('profiles').upsert({ id: user.id, saved_later_product_ids: next }, { onConflict: 'id' })
 		return NextResponse.json({ success: true })
 	} catch {
 		return NextResponse.json({ error: 'Failed' }, { status: 500 })
@@ -61,7 +65,7 @@ export async function DELETE(req: NextRequest) {
 		if (error) return NextResponse.json({ error: 'DB error' }, { status: 500 })
 		const prev: number[] = Array.isArray(data?.saved_later_product_ids) ? data!.saved_later_product_ids : []
 		const next = prev.filter(id => id !== productId)
-		await supabase.from('profiles').upsert({ id: user.id, saved_later_product_ids: next }, { onConflict: 'id' })
+		await getSupabaseClient().from('profiles').upsert({ id: user.id, saved_later_product_ids: next }, { onConflict: 'id' })
 		return NextResponse.json({ success: true })
 	} catch {
 		return NextResponse.json({ error: 'Failed' }, { status: 500 })

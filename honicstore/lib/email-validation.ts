@@ -3,6 +3,8 @@
  * Detects common email domain typos and validates email format
  */
 
+import { isDisposableDomain } from './disposable-email-domains'
+
 // Common email domain typos mapping
 export const EMAIL_DOMAIN_TYPOS: Record<string, string> = {
   'gail.com': 'gmail.com',
@@ -21,22 +23,15 @@ export const EMAIL_DOMAIN_TYPOS: Record<string, string> = {
   'hotmali.com': 'hotmail.com',
 }
 
-// Valid email domains (common providers)
+// Valid email domains (common providers). Real domains that look like typos of others are listed
+// too (ymail.com, email.com, me.com...) so they are never flagged.
 export const VALID_EMAIL_DOMAINS = [
-  'gmail.com',
-  'yahoo.com',
-  'outlook.com',
-  'hotmail.com',
-  'icloud.com',
-  'protonmail.com',
-  'proton.me',
-  'aol.com',
-  'mail.com',
-  'yandex.com',
-  'zoho.com',
-  'gmx.com',
-  'live.com',
-  'msn.com',
+  'gmail.com', 'googlemail.com',
+  'yahoo.com', 'ymail.com', 'rocketmail.com', 'yahoo.co.uk',
+  'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'icloud.com', 'me.com', 'mac.com',
+  'protonmail.com', 'proton.me',
+  'aol.com', 'mail.com', 'email.com', 'yandex.com', 'zoho.com', 'gmx.com',
 ]
 
 export interface EmailValidationResult {
@@ -44,80 +39,47 @@ export interface EmailValidationResult {
   suggestion?: string
   error?: string
   isTypo?: boolean
+  isDisposable?: boolean
 }
 
 /**
- * Fuzzy match domain to detect typos
- * Checks if domain is similar to common email domains
+ * Detect a misspelt provider domain (gmial.com, gmail.con, yahooo.com, hotmial.com...).
+ * Uses the known-typo list, then an edit distance of 1 where swapping two neighbouring letters
+ * counts as one edit, compared with the full domain (the old check only ran for 3-6 letter domains,
+ * so it never caught real typos).
  */
 function detectTypo(domain: string): string | null {
-  const normalizedDomain = domain.toLowerCase().trim()
-  
-  // Check exact typo matches first
-  if (EMAIL_DOMAIN_TYPOS[normalizedDomain]) {
-    return EMAIL_DOMAIN_TYPOS[normalizedDomain]
+  const d = domain.toLowerCase().trim()
+  if (EMAIL_DOMAIN_TYPOS[d]) return EMAIL_DOMAIN_TYPOS[d]
+  if (VALID_EMAIL_DOMAINS.includes(d)) return null
+  let best: string | null = null
+  for (const valid of VALID_EMAIL_DOMAINS) {
+    if (Math.abs(d.length - valid.length) > 1) continue
+    if (editDistance(d, valid) <= 1) { best = valid; break }
   }
-
-  // Fuzzy matching for common typos
-  // Check if domain is similar to common domains (1-2 character difference)
-  for (const validDomain of VALID_EMAIL_DOMAINS) {
-    // Check if domain is very similar (likely typo)
-    const similarity = calculateSimilarity(normalizedDomain, validDomain)
-    
-    // If similarity is high (> 0.7) and domain length is similar, likely a typo
-    if (similarity > 0.7 && Math.abs(normalizedDomain.length - validDomain.length) <= 2) {
-      // Additional check: if domain is 3-6 chars and similar, it's likely a typo
-      if (normalizedDomain.length >= 3 && normalizedDomain.length <= 6) {
-        return validDomain
-      }
-    }
-  }
-
+  if (best) return best
+  // right provider name, wrong ending: gmail.con, gmail.co, yahoo.cm
+  const [name, ...rest] = d.split('.')
+  const tld = rest.join('.')
+  const provider = VALID_EMAIL_DOMAINS.find((v) => v.split('.')[0] === name)
+  if (provider && tld !== provider.slice(name.length + 1) && ['con', 'co', 'cm', 'om', 'comm', 'cpm', 'vom', 'xom'].includes(tld)) return provider
   return null
 }
 
-/**
- * Calculate similarity between two strings (Levenshtein distance based)
- */
-function calculateSimilarity(str1: string, str2: string): number {
-  const longer = str1.length > str2.length ? str1 : str2
-  const shorter = str1.length > str2.length ? str2 : str1
-  
-  if (longer.length === 0) return 1.0
-  
-  const distance = levenshteinDistance(longer, shorter)
-  return (longer.length - distance) / longer.length
-}
-
-/**
- * Calculate Levenshtein distance between two strings
- */
-function levenshteinDistance(str1: string, str2: string): number {
-  const matrix: number[][] = []
-  
-  for (let i = 0; i <= str2.length; i++) {
-    matrix[i] = [i]
-  }
-  
-  for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j
-  }
-  
-  for (let i = 1; i <= str2.length; i++) {
-    for (let j = 1; j <= str1.length; j++) {
-      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1]
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        )
-      }
+/** Optimal-string-alignment distance (Levenshtein + adjacent transposition counts as 1). */
+function editDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)])
+  for (let j = 0; j <= n; j++) dp[0][j] = j
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1)
     }
   }
-  
-  return matrix[str2.length][str1.length]
+  return dp[m][n]
 }
 
 /**
@@ -151,7 +113,16 @@ export function validateEmailDomain(email: string): EmailValidationResult {
       isValid: false,
       isTypo: true,
       suggestion: `${localPart}@${correctedDomain}`,
-      error: `Invalid email domain. Please check your email address.`
+      error: `Did you mean ${localPart}@${correctedDomain}? Please check your email address.`
+    }
+  }
+
+  // Throwaway inboxes (mailinator, yopmail, temp-mail…)
+  if (isDisposableDomain(normalizedDomain)) {
+    return {
+      isValid: false,
+      isDisposable: true,
+      error: 'Temporary email addresses can’t be used. Please use your own email address.'
     }
   }
 

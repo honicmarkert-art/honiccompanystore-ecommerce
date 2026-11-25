@@ -226,7 +226,7 @@ export async function POST(request: NextRequest) {
 
       // Clean up old requests (older than 15 minutes)
       setTimeout(() => {
-        passwordChangeRequests.delete(userId)
+        if (userId) passwordChangeRequests.delete(userId)
       }, 15 * 60 * 1000)
 
       // Generate and send OTP

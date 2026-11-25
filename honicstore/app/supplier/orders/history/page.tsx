@@ -67,11 +67,8 @@ export default function SupplierOrderHistoryPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
 
-  useEffect(() => {
-    fetchOrders()
-  }, [])
 
-  const fetchOrders = async () => {
+  async function fetchOrders() {
     try {
       setLoading(true)
       const response = await fetch('/api/supplier/orders', { 
@@ -119,6 +116,11 @@ export default function SupplierOrderHistoryPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+    fetchOrders()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
   const filteredOrders = orders.filter(order =>
     order.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||

@@ -48,13 +48,13 @@ const getHeaderFooterClasses = (backgroundColor: BackgroundColor): HeaderFooterC
   switch (backgroundColor) {
     case "white":
       return {
-        headerBg: "bg-stone-200/60 backdrop-blur-sm",
-        headerBorder: "border-stone-300",
+        headerBg: "bg-white/90 backdrop-blur-md shadow-[0_1px_0_0_rgba(0,0,0,0.04)]",
+        headerBorder: "border-neutral-200",
         footerBg: "bg-white",
         footerBorder: "border-neutral-200",
         dialogSheetBg: "bg-white",
         dialogSheetBorder: "border-neutral-200",
-        inputBg: "bg-neutral-50",
+        inputBg: "bg-white",
         inputBorder: "border-neutral-300",
         inputPlaceholder: "placeholder:text-neutral-500",
         buttonGhostHoverBg: "hover:bg-neutral-100",
@@ -84,7 +84,7 @@ const getHeaderFooterClasses = (backgroundColor: BackgroundColor): HeaderFooterC
       }
     case "dark":
       return {
-        headerBg: "bg-black/50 backdrop-blur-sm",
+        headerBg: "bg-neutral-950/85 backdrop-blur-md",
         headerBorder: "border-gray-800",
         footerBg: "bg-neutral-900",
         footerBorder: "border-neutral-800",
@@ -102,13 +102,13 @@ const getHeaderFooterClasses = (backgroundColor: BackgroundColor): HeaderFooterC
       }
     default:
       return {
-        headerBg: "bg-stone-200/60 backdrop-blur-sm",
-        headerBorder: "border-stone-300",
+        headerBg: "bg-white/90 backdrop-blur-md shadow-[0_1px_0_0_rgba(0,0,0,0.04)]",
+        headerBorder: "border-neutral-200",
         footerBg: "bg-white",
         footerBorder: "border-neutral-200",
         dialogSheetBg: "bg-white",
         dialogSheetBorder: "border-neutral-200",
-        inputBg: "bg-neutral-50",
+        inputBg: "bg-white",
         inputBorder: "border-neutral-300",
         inputPlaceholder: "placeholder:text-neutral-500",
         buttonGhostHoverBg: "hover:bg-neutral-100",
@@ -130,9 +130,9 @@ const getThemeClasses = (backgroundColor: BackgroundColor): ThemeClasses => {
         mainText: "text-neutral-950",
         cardBg: "bg-white",
         cardBorder: "border-neutral-200",
-        checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
+        checkboxCheckedBg: "data-[state=checked]:bg-orange-500",
         checkboxCheckedText: "data-[state=checked]:text-white",
-        sliderTrack: "[&>span:first-child]:bg-yellow-500",
+        sliderTrack: "[&>span:first-child]:bg-orange-500",
         textNeutralSecondary: "text-neutral-500",
         borderNeutralSecondary: "border-neutral-300",
         buttonGhostHoverBg: "hover:bg-neutral-100",
@@ -143,9 +143,9 @@ const getThemeClasses = (backgroundColor: BackgroundColor): ThemeClasses => {
         mainText: "text-white",
         cardBg: "bg-gray-700",
         cardBorder: "border-gray-600",
-        checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
+        checkboxCheckedBg: "data-[state=checked]:bg-orange-500",
         checkboxCheckedText: "data-[state=checked]:text-white",
-        sliderTrack: "[&>span:first-child]:bg-yellow-500",
+        sliderTrack: "[&>span:first-child]:bg-orange-500",
         textNeutralSecondary: "text-gray-400",
         borderNeutralSecondary: "border-gray-600",
         buttonGhostHoverBg: "hover:bg-neutral-800",
@@ -156,9 +156,9 @@ const getThemeClasses = (backgroundColor: BackgroundColor): ThemeClasses => {
         mainText: "text-white",
         cardBg: "bg-neutral-800",
         cardBorder: "border-neutral-700",
-        checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
+        checkboxCheckedBg: "data-[state=checked]:bg-orange-500",
         checkboxCheckedText: "data-[state=checked]:text-white",
-        sliderTrack: "[&>span:first-child]:bg-yellow-500",
+        sliderTrack: "[&>span:first-child]:bg-orange-500",
         textNeutralSecondary: "text-neutral-400",
         borderNeutralSecondary: "border-neutral-700",
         buttonGhostHoverBg: "hover:bg-neutral-800",
@@ -169,9 +169,9 @@ const getThemeClasses = (backgroundColor: BackgroundColor): ThemeClasses => {
         mainText: "text-neutral-950",
         cardBg: "bg-white",
         cardBorder: "border-neutral-200",
-        checkboxCheckedBg: "data-[state=checked]:bg-yellow-500",
+        checkboxCheckedBg: "data-[state=checked]:bg-orange-500",
         checkboxCheckedText: "data-[state=checked]:text-white",
-        sliderTrack: "[&>span:first-child]:bg-yellow-500",
+        sliderTrack: "[&>span:first-child]:bg-orange-500",
         textNeutralSecondary: "text-neutral-500",
         borderNeutralSecondary: "border-neutral-300",
         buttonGhostHoverBg: "hover:bg-neutral-100",
@@ -207,6 +207,7 @@ export function WebThemeProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       const savedColor = localStorage.getItem('backgroundColor') as BackgroundColor
       if (savedColor && ["white", "gray", "dark"].includes(savedColor)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only data after mount, so the server render matches
         setBackgroundColorState(savedColor)
         updateHtmlClass(savedColor)
       } else {

@@ -1,55 +1,63 @@
 "use client"
 
-import { BuyerRouteGuard } from '@/components/buyer-route-guard'
-import { useState, useEffect, useRef, useMemo } from "react"
+/**
+ * Checkout — one page, matching the Marketplace look.
+ *   1. Contact   2. Delivery (address or store pickup)   3. Payment (mobile money via Snippe)
+ * Sticky order summary on desktop; collapsible summary + sticky pay bar on phones.
+ *
+ * Payment flow (unchanged from the old wizard):
+ *   validate -> fresh server shipping estimate -> POST /api/orders (or reuse the order already created)
+ *   -> POST /api/payment/snippe (server checks the amount against the saved order)
+ *   -> poll GET /api/payment/snippe every 3 s -> /checkout/success
+ */
+
+import { BuyerRouteGuard } from "@/components/buyer-route-guard"
+import { useState, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { LazyImage } from "@/components/lazy-image"
-import { logger } from '@/lib/logger'
+import { logger } from "@/lib/logger"
 import {
-  ChevronLeft,
-  Truck,
-  MapPin,
-  Package,
+  ArrowLeft,
+  Building2,
+  Check,
+  ChevronDown,
   Clock,
-  Zap,
-  Gift,
+  Loader2,
+  Lock,
+  MapPin,
+  Minus,
+  Package,
+  Plus,
+  ReceiptText,
+  RotateCcw,
   ShieldCheck,
   Smartphone,
-  Lock,
+  Store,
   Ticket,
-  Plus,
-  Minus,
-  Check,
+  Truck,
+  UserRound,
+  Zap,
 } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { useTheme } from "@/hooks/use-theme"
 import { useCart, type CartItem } from "@/hooks/use-cart"
 import { useAuth } from "@/contexts/auth-context"
-import { useCompanyContext } from "@/components/company-provider"
 import { useGlobalAuthModal } from "@/contexts/global-auth-modal"
 import { useCurrency } from "@/contexts/currency-context"
 import { useToast } from "@/hooks/use-toast"
 import { validateTanzaniaPhone, validateEmail } from "@/lib/phone-validation"
 import { TANZANIA_REGIONS, DISTRICTS_BY_REGION, getWardOptions } from "@/lib/tanzania-address"
 import { CheckoutPageSkeleton } from "@/components/ui/skeleton"
-import { 
-  sessionStorage as safeSessionStorage,
-  getSecureErrorMessage,
-  fetchWithRetry
-} from "@/lib/checkout-utils"
+import { sessionStorage as safeSessionStorage, getSecureErrorMessage, fetchWithRetry } from "@/lib/checkout-utils"
 import { getClientShippingPricing, shouldDeferShippingFeeDisplay } from "@/lib/shipping-calculator"
+import { calculateShippingFee } from "@/lib/shipping-pricing"
 import { useTranslation } from "@/hooks/use-translation"
 import { CheckoutLanguageToggle } from "@/components/checkout-language-toggle"
-import { downloadOrderReceipt, saveLocalOrder, savePendingOrder, takePendingOrder } from "@/lib/local-orders"
+import { BrandLogo } from "@/components/brand-logo"
+import { safeImageSrc, optimizedImg } from "@/lib/image-optimize"
+import { BOUGHT_ITEMS_KEY, saveLocalOrder, savePendingOrder, takePendingOrder } from "@/lib/local-orders"
 
-interface ShippingAddress {
+interface Address {
   fullName: string
   address1: string
   address2?: string
@@ -69,23 +77,121 @@ interface ShippingAddress {
   lon?: number
 }
 
-interface PaymentDetails {
-  paymentMethod: 'snippe' | 'card' | 'mobile_money'
-  cardNumber?: string
-  expiryDate?: string
-  cvv?: string
-  cardholderName?: string
-  mobileNumber?: string
-  mobileProvider?: string
+type Section = "shippingAddress" | "billingAddress"
+type Delivery = "shipping" | "pickup"
+type Errors = Record<string, string>
+
+const EMPTY_ADDRESS: Address = {
+  fullName: "",
+  address1: "",
+  address2: "",
+  city: "",
+  state: "",
+  postalCode: "",
+  country: "Tanzania",
+  phone: "",
+  email: "",
+  streetName: "",
+  tin: "",
+  region: "",
+  district: "",
+  ward: "",
 }
 
-interface FormData {
-  shippingAddress: ShippingAddress
-  billingAddress: ShippingAddress
-  paymentDetails: PaymentDetails
-  sameAsBilling: boolean
-  sameAsShipping: boolean
+const COUNTRIES = ["Tanzania", "Kenya", "Uganda", "Rwanda"]
+/** Delivery is Tanzania-only (pricing is per Tanzanian region); orders abroad are arranged on WhatsApp */
+const SHIP_COUNTRIES = ["Tanzania"]
+/** Mobile-money networks Snippe supports. The network is detected from the number automatically. */
+const NETWORKS = [
+  { name: "M-Pesa", wallet: "M-Pesa", provider: "mpesa", operator: "Vodacom", logo: "/payments/mpesa.svg" },
+  { name: "Airtel Money", wallet: "Airtel Money", provider: "airtel", operator: "Airtel", logo: "/payments/airtel.svg" },
+  { name: "Mixx by Yas", wallet: "Mixx by Yas", provider: "tigo", operator: "Yas", logo: "/payments/yas.svg" },
+  { name: "Halotel", wallet: "HaloPesa", provider: "halopesa", operator: "Halotel", logo: "/payments/halotel.png" },
+] as const
+type Network = (typeof NETWORKS)[number]
+
+/** Official network logo on a white tile (files in /public/payments, from Wikimedia Commons). */
+function NetworkMark({ n, size = "md" }: { n: Network; size?: "sm" | "md" }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "grid shrink-0 place-items-center overflow-hidden rounded-lg bg-white ring-1 ring-neutral-200",
+        size === "sm" ? "h-5 w-7 p-0.5" : "h-9 w-12 p-1"
+      )}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={n.logo} alt="" className="h-full w-full object-contain" />
+    </span>
+  )
 }
+
+/** Turns the network's reason into something the shopper can act on. */
+function friendlyPaymentError(reason: string | undefined, provider: string | undefined, amount: string) {
+  const wallet = NETWORKS.find((n) => provider && provider.includes(n.provider))?.wallet || "mobile money"
+  const r = (reason || "").toLowerCase()
+  if (r.includes("insufficient")) return `Not enough balance on your ${wallet} account for ${amount}. Top up, or use a different number, then try again.`
+  if (r.includes("cancel") || r.includes("rejected by user") || r.includes("declined by user")) return "The payment prompt was cancelled on the phone. Try again when you're ready."
+  if (r.includes("expire") || r.includes("timeout") || r.includes("timed out")) return "The PIN prompt expired before it was approved. Try again and enter your PIN within a minute."
+  if (r.includes("pin")) return `Wrong PIN on ${wallet}. Try again.`
+  if (r.includes("limit")) return `This payment is over your ${wallet} limit. Use another number or a smaller order.`
+  return reason ? `${wallet} declined the payment: ${reason}` : "The payment was not completed. You can try again."
+}
+
+/** Snippe (mobile money) refuses payments under TSh 500, so smaller orders are stopped before payment. */
+const MIN_ORDER_TZS = 500
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/** Field order used to scroll to the first problem. */
+const ERROR_ORDER = [
+  "shippingFullName", "shippingPhone", "shippingEmail",
+  "shippingRegion", "shippingDistrict", "shippingWard", "shippingCity", "shippingStreet", "shippingAddress1",
+  "billingFullName", "billingPhone", "billingEmail", "billingCity", "billingStreet", "billingAddress1",
+]
+
+function detectNetwork(phone: string): Network | null {
+  const d = phone.replace(/\D/g, "")
+  const p = d.startsWith("255") ? d.slice(3, 5) : d.startsWith("0") ? d.slice(1, 3) : d.slice(0, 2)
+  const name =
+    ["74", "75", "76"].includes(p) ? "M-Pesa" :
+    ["68", "69", "78"].includes(p) ? "Airtel Money" :
+    ["65", "67", "71", "77"].includes(p) ? "Mixx by Yas" :
+    ["61", "62"].includes(p) ? "Halotel" : null
+  return NETWORKS.find((n) => n.name === name) || null
+}
+
+/** Reads the items being bought: a "Buy now" item, the items ticked in the cart, or the whole cart. */
+function readSelection(cart: CartItem[]): { items: CartItem[]; buyNow: boolean } {
+  let selectedIds: number[] = []
+  let buyNowItem: CartItem | null = null
+  try {
+    const raw = safeSessionStorage.getItem("selected_cart_items")
+      if (raw) {
+        const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.every((id: unknown) => typeof id === "number" && id > 0)) selectedIds = parsed
+    }
+    if (safeSessionStorage.getItem("buy_now_mode") === "true") {
+      const data = safeSessionStorage.getItem("buy_now_item_data")
+      const parsed = data ? JSON.parse(data) : null
+      if (parsed && typeof parsed === "object" && typeof (parsed as CartItem).productId === "number") buyNowItem = parsed as CartItem
+    }
+  } catch {}
+  if (buyNowItem) return { items: [buyNowItem], buyNow: true }
+  return { items: selectedIds.length > 0 ? cart.filter((i) => selectedIds.includes(i.productId)) : cart, buyNow: false }
+}
+
+function readPromotion(): { code: string; discountAmount: number; name?: string } | null {
+  if (typeof window === "undefined") return null
+  try {
+    const parsed = JSON.parse(safeSessionStorage.getItem("applied_promotion") || "null")
+    if (parsed && typeof parsed.code === "string" && typeof parsed.discountAmount === "number" && parsed.discountAmount >= 0) {
+      return { code: parsed.code, discountAmount: parsed.discountAmount, name: typeof parsed.name === "string" ? parsed.name : undefined }
+      }
+    } catch {}
+  return null
+}
+
+const noopSubscribe = () => () => {}
 
 export default function CheckoutPage() {
   return (
@@ -95,301 +201,249 @@ export default function CheckoutPage() {
   )
 }
 
+/* ---------- small form building blocks ---------- */
+
+const inputClass = (error?: string) =>
+  cn(
+    "h-11 w-full rounded-xl border bg-white px-3.5 text-base text-neutral-950 outline-none transition placeholder:text-neutral-400 sm:text-sm",
+    "focus:border-orange-500 focus:ring-4 focus:ring-orange-500/15",
+    error ? "border-red-400 bg-red-50/40" : "border-neutral-200 hover:border-neutral-300"
+  )
+
+function Field({ id, label, error, hint, optional, className, children }: {
+  id: string
+  label: string
+  error?: string
+  hint?: string
+  optional?: boolean
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <label htmlFor={id} className="mb-1.5 flex items-baseline gap-1.5 text-[13px] font-semibold text-neutral-700">
+        {label}
+        {optional && <span className="text-xs font-normal text-neutral-400">optional</span>}
+      </label>
+      {children}
+      {error ? (
+        <p className="mt-1 text-xs font-medium text-red-600" role="alert">{error}</p>
+      ) : hint ? (
+        <p className="mt-1 text-xs text-neutral-400">{hint}</p>
+      ) : null}
+    </div>
+  )
+}
+
+function SectionCard({ n, icon, title, subtitle, done, children }: {
+  n: number
+  icon: ReactNode
+  title: string
+  subtitle?: string
+  done?: boolean
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-3xl border border-neutral-200/80 bg-white p-4 shadow-sm sm:p-6">
+      <div className="mb-5 flex items-start gap-3">
+        <span
+          className={cn(
+            "grid h-9 w-9 shrink-0 place-items-center rounded-2xl text-sm font-black transition-colors",
+            done ? "bg-emerald-500 text-white" : "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-md shadow-orange-500/30"
+          )}
+          aria-hidden="true"
+        >
+          {done ? <Check className="h-4 w-4" /> : n}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-center gap-2 text-lg font-bold tracking-tight text-neutral-950">
+            {title}
+            <span className="text-orange-400 [&>svg]:h-4 [&>svg]:w-4" aria-hidden="true">{icon}</span>
+          </h2>
+          {subtitle && <p className="mt-0.5 text-sm text-neutral-500">{subtitle}</p>}
+        </div>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+/* ---------- page ---------- */
+
 function CheckoutPageContent() {
   const router = useRouter()
-  const { themeClasses, darkHeaderFooterClasses } = useTheme()
   const { cart, updateItemQuantity } = useCart()
   const { user } = useAuth()
   const { openAuthModal } = useGlobalAuthModal()
-  const { companyName, companyLogo, isLoaded: companyLoaded } = useCompanyContext()
-  const { toast } = useToast()
-  
-  // Fallback logo system - use local logo if API is not loaded or logo is not available
-  const fallbackLogo = "/android-chrome-512x512.png"
-  const displayLogo = companyLoaded && companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const { formatPrice } = useCurrency()
+  const { toast } = useToast()
   const t = useTranslation()
+  /** Translated label without the trailing " *" the old form used. */
+  const label = (key: string) => t(key).replace(/\s*\*\s*$/, "")
 
-  // Get selected items for display
-  const getSelectedItems = () => {
-    let selectedIds: number[] = []
-    let buyNowMode: boolean = false
-    let buyNowItemData: CartItem | null = null
-    
-    try { 
-      const raw = safeSessionStorage.getItem('selected_cart_items')
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        // Validate that parsed data is an array of numbers
-        if (Array.isArray(parsed) && parsed.every((id: unknown) => typeof id === 'number' && id > 0)) {
-          selectedIds = parsed
-        }
-      }
-      
-      const buyNowModeRaw = safeSessionStorage.getItem('buy_now_mode')
-      if (buyNowModeRaw === 'true') buyNowMode = true
-      
-      const buyNowDataRaw = safeSessionStorage.getItem('buy_now_item_data')
-      if (buyNowDataRaw) {
-        const parsed = JSON.parse(buyNowDataRaw)
-        // Validate buyNowItemData structure
-        if (parsed && typeof parsed === 'object' && typeof (parsed as CartItem).productId === 'number') {
-          buyNowItemData = parsed as CartItem
-        }
-      }
-    } catch {}
-    
-    // If this is a "Buy Now" action, use the stored item data
-    if (buyNowMode && buyNowItemData) {
-      // Return only the specific "Buy Now" item with correct quantity and price
-      return [buyNowItemData]
-    }
-    
-    // Regular cart behavior - show all selected items or all cart items
-    return selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
-  }
+  const isClient = useSyncExternalStore(noopSubscribe, () => true, () => false)
 
-  // Calculate totals for selected items only
-  const selectedItems = getSelectedItems()
+  const { items: selectedItems, buyNow } = readSelection(cart)
   const selectedSubtotal = selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
+  const { freeThresholdTz: FREE_SHIPPING_THRESHOLD } = getClientShippingPricing()
 
-  // Same as cart page - for qty input width
-  const getDesktopQuantityInputWidth = (qty: number) => {
-    const n = String(qty).length
-    return Math.min(6, Math.max(2.5, 2.5 + n * 0.8))
-  }
-  
-  
-  const { freeThresholdTz: FREE_SHIPPING_THRESHOLD, flatRateTz: SHIPPING_COST } = getClientShippingPricing()
+  const [deliveryOption, setDeliveryOption] = useState<Delivery>("shipping")
+  const [shippingAddress, setShippingAddress] = useState<Address>(EMPTY_ADDRESS)
+  const [billingAddress, setBillingAddress] = useState<Address>(EMPTY_ADDRESS)
+  const [sameAsShipping, setSameAsShipping] = useState(true)
+  const [errors, setErrors] = useState<Errors>({})
+  const [summaryOpen, setSummaryOpen] = useState(false)
 
-  const [currentStep, setCurrentStep] = useState(0)
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [hasTimedOut, setHasTimedOut] = useState(false)
   const [paymentLinkGenerated, setPaymentLinkGenerated] = useState(false)
-  const [, setCheckoutLinkUrl] = useState<string | null>(null)
-  const [orderId, setOrderId] = useState<string>("")
   const [orderReferenceId, setOrderReferenceId] = useState<string | null>(null)
-  const [orderPickupId, setOrderPickupId] = useState<string | null>(null)
-  const [paymentStatus, setPaymentStatus] = useState<string | null>(null)
-  const [deliveryOption, setDeliveryOption] = useState<'shipping' | 'pickup'>('shipping')
-  // Location coords when structured address is forward-geocoded (optional on order payload)
+  const lastOrderRef = useRef<{ signature: string; reference: string; amount: number } | null>(null)
+  const [waitSeconds, setWaitSeconds] = useState(0)
   const [locationCoords, setLocationCoords] = useState<{ lat: number; lon: number } | null>(null)
+  const [appliedPromotion] = useState(readPromotion)
 
-  const [formData, setFormData] = useState<FormData>({
-    shippingAddress: {
-      fullName: "",
-      address1: "",
-      address2: "",
-      city: "",
-      state: "",
-      postalCode: "",
-      country: "Tanzania",
-      phone: "",
-      email: "",
-      streetName: "",
-      tin: "",
-      region: "",
-      district: "",
-      ward: "",
-    },
-    billingAddress: {
-      fullName: "",
-      address1: "",
-      address2: "",
-      city: "",
-      state: "",
-      postalCode: "",
-      country: "Tanzania",
-      phone: "",
-      email: "",
-      streetName: "",
-      tin: "",
-      region: "",
-      district: "",
-      ward: "",
-    },
-    paymentDetails: {
-      paymentMethod: 'snippe',
-      cardNumber: "",
-      expiryDate: "",
-      cvv: "",
-      cardholderName: "",
-      mobileNumber: "",
-      mobileProvider: "",
-    },
-    sameAsBilling: false,
-    sameAsShipping: false,
-  })
-
-  // Server-side shipping estimate (from shipping address / location); used in Order Summary
-  const [shippingEstimate, setShippingEstimate] = useState<{
-    subtotal: number
-    shipping: number
-    total: number
-    shippingBase?: number
-    shippingDistanceAddon?: number
-    shippingGeocoded?: boolean
-  } | null>(null)
+  /* ----- shipping fee ----- */
+  type DeliveryInfo = { zone: string; eta: string | null; baseFee: number; sizeSurcharge: number; size: string; freeReason: string | null }
+  const [shippingEstimate, setShippingEstimate] = useState<{ subtotal: number; shipping: number; total: number; delivery?: DeliveryInfo | null } | null>(null)
   const [shippingEstimateLoading, setShippingEstimateLoading] = useState(false)
 
-  // Fallback client-side shipping (when server estimate not yet available)
-  const calculateShippingFee = () => {
-    if (deliveryOption === 'pickup') return 0
-    if (selectedSubtotal >= FREE_SHIPPING_THRESHOLD) return 0
-    const allProductsHaveFreeDelivery = selectedItems.every(item => {
+  // Shown until the server estimate arrives: same calculator as the server (lib/shipping-pricing),
+  // without item sizes (the estimate adds any large-item fee).
+  const fallbackShippingFee = calculateShippingFee({
+    deliveryOption,
+    region: shippingAddress.region,
+    district: shippingAddress.district,
+    ward: shippingAddress.ward,
+    subtotal: selectedSubtotal,
+    allProductsHaveFreeDelivery: selectedItems.length > 0 && selectedItems.every((item) => {
       const extra = item as CartItem & { free_delivery?: boolean; freeDelivery?: boolean }
       return extra.free_delivery === true || extra.freeDelivery === true
-    })
-    return allProductsHaveFreeDelivery ? 0 : SHIPPING_COST
-  }
+    }),
+  }).shippingFee
 
-  const fallbackShippingFee = calculateShippingFee()
+  const deferShippingFee = shouldDeferShippingFeeDisplay(deliveryOption, shippingAddress)
   const displaySubtotal = shippingEstimate?.subtotal ?? selectedSubtotal
-  const deferShippingFeeDisplay = shouldDeferShippingFeeDisplay(deliveryOption, formData.shippingAddress)
-  const displayShipping =
-    deliveryOption === 'pickup'
-      ? 0
-      : deferShippingFeeDisplay
-        ? 0
-        : (shippingEstimate?.shipping ?? fallbackShippingFee)
-  const shippingFee = displayShipping
-  const shippingFeeLineLoading = deferShippingFeeDisplay ? false : shippingEstimateLoading
-  
-  // Get applied promotion from sessionStorage
-  const [appliedPromotion, setAppliedPromotion] = useState<{
-    code: string
-    discountAmount: number
-    name?: string
-  } | null>(null)
-  
-  useEffect(() => {
-    try {
-      const promoData = safeSessionStorage.getItem('applied_promotion')
-      if (promoData) {
-        const parsed = JSON.parse(promoData)
-        // Validate promotion data structure
-        if (parsed && typeof parsed === 'object' && 
-            typeof parsed.code === 'string' && 
-            typeof parsed.discountAmount === 'number' && 
-            parsed.discountAmount >= 0) {
-          setAppliedPromotion({
-            code: parsed.code,
-            discountAmount: parsed.discountAmount,
-            name: typeof parsed.name === 'string' ? parsed.name : undefined,
-          })
-        }
-      }
-    } catch {}
-  }, [])
+  const shippingFee = deliveryOption === "pickup" || deferShippingFee ? 0 : (shippingEstimate?.shipping ?? fallbackShippingFee)
+  const shippingFeeLoading = !deferShippingFee && shippingEstimateLoading && deliveryOption === "shipping"
+  const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
+  const orderTotal = displaySubtotal + shippingFee - promotionDiscount
 
-  // Stable key for shipping estimate so we only refetch when cart/location/delivery actually change
-  const shippingEstimateKey = (() => {
-    const items = selectedItems.flatMap((item) =>
-      (item.variants || []).map((v) => [item.productId, v.variantId ?? null, v.quantity ?? 1])
-    )
-    const a = formData.shippingAddress
-    return JSON.stringify({
+  const isTz = shippingAddress.country === "Tanzania"
+  const estimateBody = (items: { productId: number; variantId: string | null; quantity: number }[]) => ({
       items,
       deliveryOption,
-      region: a.region,
-      district: a.district,
-      ward: a.ward,
-      country: a.country,
-      city: a.city,
-      streetName: a.streetName,
-      address1: a.address1,
-      address2: a.address2,
-    })
-  })()
+    country: deliveryOption === "shipping" ? shippingAddress.country : undefined,
+    region: deliveryOption === "shipping" && isTz ? shippingAddress.region : undefined,
+    district: deliveryOption === "shipping" && isTz ? shippingAddress.district : undefined,
+    ward: deliveryOption === "shipping" && isTz ? shippingAddress.ward : undefined,
+    city: deliveryOption === "shipping" ? shippingAddress.city : undefined,
+    streetName: deliveryOption === "shipping" && isTz ? shippingAddress.streetName : undefined,
+    address1: deliveryOption === "shipping" && isTz ? shippingAddress.address1 : undefined,
+    address2: deliveryOption === "shipping" && isTz ? shippingAddress.address2 : undefined,
+  })
+  const estimateItems = selectedItems.flatMap((item) =>
+    (item.variants || []).map((v) => ({ productId: item.productId, variantId: v.variantId ?? null, quantity: v.quantity ?? 1 }))
+  )
 
-  // Fetch server-side shipping estimate when items, delivery option, or location (shipping address) change
+  // Stable key so the estimate is only refetched when items / delivery / location really change.
+  const shippingEstimateKey = JSON.stringify(estimateBody(estimateItems))
+
   useEffect(() => {
-    const items = selectedItems.flatMap((item) =>
-      (item.variants || []).map((v) => ({
-        productId: item.productId,
-        variantId: v.variantId ?? null,
-        quantity: v.quantity ?? 1,
-      }))
-    )
-    if (items.length === 0) {
-      setShippingEstimate(null)
-      setShippingEstimateLoading(false)
-      return
-    }
-    if (shouldDeferShippingFeeDisplay(deliveryOption, formData.shippingAddress)) {
-      setShippingEstimate(null)
-      setShippingEstimateLoading(false)
-      return
-    }
+    const body = JSON.parse(shippingEstimateKey) as ReturnType<typeof estimateBody>
     let cancelled = false
+    const skip = body.items.length === 0 || shouldDeferShippingFeeDisplay(body.deliveryOption, shippingAddress)
+    const run = async () => {
+      if (skip) {
+      setShippingEstimate(null)
+      setShippingEstimateLoading(false)
+      return
+    }
     setShippingEstimateLoading(true)
-    fetch('/api/cart/shipping-estimate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        items,
-        deliveryOption,
-        country: deliveryOption === 'shipping' ? formData.shippingAddress.country : undefined,
-        region:
-          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-            ? formData.shippingAddress.region
-            : undefined,
-        district:
-          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-            ? formData.shippingAddress.district
-            : undefined,
-        ward:
-          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-            ? formData.shippingAddress.ward
-            : undefined,
-        city: deliveryOption === 'shipping' ? formData.shippingAddress.city : undefined,
-        streetName:
-          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-            ? formData.shippingAddress.streetName
-            : undefined,
-        address1:
-          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-            ? formData.shippingAddress.address1
-            : undefined,
-        address2:
-          deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-            ? formData.shippingAddress.address2
-            : undefined,
-      }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (cancelled) return
-        if (data.error) {
-          setShippingEstimate(null)
-          return
-        }
-        setShippingEstimate({
-          subtotal: Number(data.subtotal) || 0,
-          shipping: Number(data.shipping) ?? 0,
-          total: Number(data.total) ?? 0,
-          shippingBase: typeof data.shippingBase === 'number' ? data.shippingBase : undefined,
-          shippingDistanceAddon:
-            typeof data.shippingDistanceAddon === 'number' ? data.shippingDistanceAddon : undefined,
-          shippingGeocoded: typeof data.shippingGeocoded === 'boolean' ? data.shippingGeocoded : undefined,
+      try {
+        const res = await fetch("/api/cart/shipping-estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: shippingEstimateKey,
         })
-      })
-      .catch(() => {
+        const data = await res.json()
+        if (cancelled) return
+        setShippingEstimate(
+          data.error ? null : { subtotal: Number(data.subtotal) || 0, shipping: Number(data.shipping) || 0, total: Number(data.total) || 0, delivery: data.delivery ?? null }
+        )
+      } catch {
         if (!cancelled) setShippingEstimate(null)
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setShippingEstimateLoading(false)
-      })
+      }
+    }
+    run()
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shippingEstimateKey])
 
-  const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
-  const orderTotal = displaySubtotal + displayShipping - promotionDiscount
+  /* ----- geocode the structured address (optional; improves distance-based fees) ----- */
+  // Only the location fields form the query, so typing a name or phone never triggers a lookup.
+  const geoQuery = (() => {
+    if (deliveryOption !== "shipping") return ""
+    const a = shippingAddress
+    const tz = (a.country || "Tanzania").toLowerCase().includes("tanzania")
+    const parts = (tz
+      ? [a.ward, a.district, a.region, a.streetName, a.address1, a.address2, a.country || "Tanzania"]
+      : [a.streetName, a.address1, a.address2, a.city, a.state, a.country || "Tanzania"]
+    ).map((s) => s?.trim()).filter(Boolean) as string[]
+    const hasEnough = tz ? !!(a.region && (a.district || a.ward || a.streetName?.trim() || a.address1?.trim())) : parts.length >= 2
+    return hasEnough && parts.length >= 2 ? parts.reverse().join(", ") : ""
+  })()
+  const geocodeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!geoQuery) return
+    if (geocodeRef.current) clearTimeout(geocodeRef.current)
+    geocodeRef.current = setTimeout(async () => {
+      geocodeRef.current = null
+      try {
+        const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(geoQuery)}`)
+        const data = await res.json()
+        if (Array.isArray(data) && data[0]?.lat != null && data[0]?.lon != null) {
+          const lat = parseFloat(data[0].lat)
+          const lon = parseFloat(data[0].lon)
+          if (!Number.isNaN(lat) && !Number.isNaN(lon)) setLocationCoords({ lat, lon })
+        }
+      } catch {
+        // keep previous coords
+      }
+    }, 800)
+    return () => {
+      if (geocodeRef.current) clearTimeout(geocodeRef.current)
+    }
+  }, [geoQuery])
 
+  /* ----- prefill from the signed-in account (once, never over the shopper's edits) ----- */
+  const prefilledRef = useRef(false)
+  useEffect(() => {
+    if (!user?.email || prefilledRef.current) return
+    prefilledRef.current = true
+    // profile columns vary between accounts; read them loosely
+    const profile = (user.profile || {}) as Record<string, string | undefined>
+    setShippingAddress((prev) => {
+      if (prev.email || prev.fullName || prev.phone) return prev
+      return {
+        ...prev,
+        email: user.email || "",
+        fullName: user.name || profile.full_name || "",
+        phone: profile.phone || "",
+        address1: prev.address1 || profile.address || "",
+        city: prev.city || profile.city || "",
+        state: prev.state || profile.state || "",
+        postalCode: prev.postalCode || profile.postal_code || "",
+      }
+    })
+  }, [user])
+
+  /* ----- payment status polling ----- */
   useEffect(() => {
     if (!paymentLinkGenerated || !orderReferenceId) return
     let stopped = false
@@ -398,7 +452,7 @@ function CheckoutPageContent() {
         const response = await fetch(`/api/payment/snippe?orderReference=${encodeURIComponent(orderReferenceId)}&t=${Date.now()}`, { cache: "no-store" })
         const data = await response.json().catch(() => null)
         if (stopped || !data?.success) return
-        if (data.paymentStatus === 'paid' || data.paymentStatus === 'completed' || data.paymentStatus === 'success') {
+        if (data.paymentStatus === "paid" || data.paymentStatus === "completed" || data.paymentStatus === "success") {
           stopped = true
           const saved = takePendingOrder(orderReferenceId) || {
             referenceId: orderReferenceId,
@@ -413,23 +467,18 @@ function CheckoutPageContent() {
           }
           saved.status = "paid"
           saveLocalOrder(saved)
-          try {
-            if (!sessionStorage.getItem(`honic-receipt-${orderReferenceId}`)) {
-              downloadOrderReceipt(saved)
-              sessionStorage.setItem(`honic-receipt-${orderReferenceId}`, "1")
-            }
-          } catch {}
+          // no automatic download: the result page offers the invoice PDF when the shopper wants it
           router.push(`/checkout/success?orderReference=${encodeURIComponent(orderReferenceId)}`)
-        } else if (data.paymentStatus === 'failed') {
+        } else if (data.paymentStatus === "failed") {
           stopped = true
           setPaymentLinkGenerated(false)
           setIsProcessingPayment(false)
-          const message = data.failureReason || 'The payment was not completed. You can try again.'
+          const message = friendlyPaymentError(data.failureReason, data.provider, formatPrice(orderTotal))
           setPaymentError(message)
-          toast({ title: 'Payment not completed', description: message, variant: 'destructive', duration: 6000 })
+          toast({ title: "Payment not completed", description: message, variant: "destructive", duration: 8000 })
         }
       } catch {
-        // Keep waiting. The next check will try again.
+        // keep waiting; the next check tries again
       }
     }
     checkStatus()
@@ -438,2139 +487,995 @@ function CheckoutPageContent() {
       stopped = true
       clearInterval(timer)
     }
-  }, [paymentLinkGenerated, orderReferenceId, orderTotal, router, toast])
+  }, [paymentLinkGenerated, orderReferenceId, orderTotal, router, toast, formatPrice])
 
-  // Timeout for payment processing (increased to 60 seconds for slower networks)
+  // The request phase gives up after 60 s (slow networks); the shopper can retry with the same order.
   useEffect(() => {
-    if (isProcessingPayment) {
-      setHasTimedOut(false)
-      const timeoutId = setTimeout(() => {
-        setHasTimedOut(true)
-        setIsProcessingPayment(false) // Clear processing state on timeout
-      }, 60000) // Increased to 60 seconds timeout (was 30s)
-
-      return () => clearTimeout(timeoutId)
-    } else {
-      setHasTimedOut(false)
-    }
+    if (!isProcessingPayment) return
+    const id = setTimeout(() => {
+      setHasTimedOut(true)
+      setIsProcessingPayment(false)
+    }, 60000)
+    return () => clearTimeout(id)
   }, [isProcessingPayment])
 
-  // Retry payment function
+  // Seconds spent waiting for the PIN (shown so the wait feels accounted for).
+  useEffect(() => {
+    if (!paymentLinkGenerated) return
+    const started = Date.now()
+    const id = setInterval(() => setWaitSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => {
+      clearInterval(id)
+      setWaitSeconds(0)
+    }
+  }, [paymentLinkGenerated])
+
+  /** Back to the form. The created order is kept so a new attempt reuses it. */
   const handleRetryPayment = () => {
     setHasTimedOut(false)
     setIsProcessingPayment(false)
     setPaymentLinkGenerated(false)
-    setCheckoutLinkUrl(null)
     setPaymentError(null)
-    // Note: We keep orderId and orderReferenceId so we can reuse the existing order
-    // Only create a new order if no order exists yet
   }
-  
-  const [isClient, setIsClient] = useState(false)
 
-  // Fix hydration mismatch
-  useEffect(() => {
-    setIsClient(true)
-  }, [])
-
-  // Track if form has been prefilled to prevent overwriting user edits
-  const hasPrefilledRef = useRef(false)
-  const deliveryAutoCalcRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Auto-calculate delivery from structured address (region/district/ward/street) when enough is filled
-  useEffect(() => {
-    if (deliveryOption !== 'shipping') return
-    const a = formData.shippingAddress
-    const isTz = (a.country || 'Tanzania').toLowerCase().includes('tanzania')
-    // Famous place (address2) used only for precision in geocode; if missing, no effect
-    const parts = isTz
-      ? [a.ward?.trim(), a.district?.trim(), a.region?.trim(), a.streetName?.trim(), a.address1?.trim(), a.address2?.trim(), a.country?.trim() || 'Tanzania'].filter(Boolean) as string[]
-      : [a.streetName?.trim(), a.address1?.trim(), a.address2?.trim(), a.city?.trim(), a.state?.trim(), a.country?.trim() || 'Tanzania'].filter(Boolean) as string[]
-    const hasEnough = isTz ? (a.region && (a.district || a.ward || (a.streetName?.trim()) || (a.address1?.trim()))) : parts.length >= 2
-    if (!hasEnough || parts.length < 2) return
-    if (deliveryAutoCalcRef.current) clearTimeout(deliveryAutoCalcRef.current)
-    deliveryAutoCalcRef.current = setTimeout(async () => {
-      deliveryAutoCalcRef.current = null
-      const query = parts.reverse().join(', ')
-      try {
-        const res = await fetch(`/api/forward-geocode?q=${encodeURIComponent(query)}`)
-        const data = await res.json()
-        if (Array.isArray(data) && data.length > 0 && data[0].lat != null && data[0].lon != null) {
-          const lat = parseFloat(data[0].lat)
-          const lon = parseFloat(data[0].lon)
-          if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
-            setLocationCoords({ lat, lon })
-            toast({ title: 'Delivery price updated', description: 'Fee is now based on your address.' })
-          }
-        }
-      } catch {
-        // keep previous coords or default
-      }
-    }, 800)
-    return () => {
-      if (deliveryAutoCalcRef.current) clearTimeout(deliveryAutoCalcRef.current)
-    }
-  }, [deliveryOption, formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward, formData.shippingAddress.streetName, formData.shippingAddress.address1, formData.shippingAddress.address2, formData.shippingAddress.city, formData.shippingAddress.state, formData.shippingAddress.country])
-
-  // Prefill form data for authenticated users (only once, and only if fields are empty)
-  useEffect(() => {
-    // Only prefill if:
-    // 1. User is authenticated
-    // 2. Form hasn't been prefilled yet
-    // 3. Form fields are empty (not overwriting user edits)
-    if (user && user.email && !hasPrefilledRef.current) {
-      setFormData(prev => {
-        // Check if form is empty (user hasn't edited anything)
-        const isFormEmpty = 
-          !prev.shippingAddress.email && 
-          !prev.shippingAddress.fullName && 
-          !prev.shippingAddress.phone
-
-        // Only prefill if form is empty
-        if (!isFormEmpty) {
-          return prev // Don't overwrite if user has already entered data
-        }
-
-        // Mark as prefilled
-        hasPrefilledRef.current = true
-
-        return {
-          ...prev,
-          shippingAddress: {
-            ...prev.shippingAddress,
-            email: user.email || prev.shippingAddress.email,
-            fullName: user.name || user.profile?.full_name || prev.shippingAddress.fullName,
-            phone: user.profile?.phone || prev.shippingAddress.phone,
-            // Prefill address if available in profile (only if empty)
-            address1: prev.shippingAddress.address1 || user.profile?.address || "",
-            city: prev.shippingAddress.city || user.profile?.city || "",
-            state: prev.shippingAddress.state || user.profile?.state || "",
-            postalCode: prev.shippingAddress.postalCode || user.profile?.postal_code || "",
-          },
-          billingAddress: {
-            ...prev.billingAddress,
-            email: user.email || prev.billingAddress.email,
-            fullName: user.name || user.profile?.full_name || prev.billingAddress.fullName,
-            phone: user.profile?.phone || prev.billingAddress.phone,
-          },
-        }
+  /* ----- form helpers ----- */
+  const setField = (section: Section, field: keyof Address, value: string, clear: string[] = []) => {
+    const set = section === "shippingAddress" ? setShippingAddress : setBillingAddress
+    set((prev) => ({ ...prev, [field]: value }))
+    const prefix = section === "shippingAddress" ? "shipping" : "billing"
+    const key = prefix + (field === "address1" ? "Address1" : field === "streetName" ? "Street" : field.charAt(0).toUpperCase() + field.slice(1))
+    const keys = [key, ...clear]
+    if (keys.some((k) => errors[k])) {
+      setErrors((prev) => {
+        const next = { ...prev }
+        keys.forEach((k) => delete next[k])
+        return next
       })
     }
-
-    // Reset prefilled flag if user logs out (for guest checkout)
-    if (!user && hasPrefilledRef.current) {
-      hasPrefilledRef.current = false
-    }
-  }, [user])
-
-  const handleSameAsShipping = (checked: boolean) => {
-    setFormData(prev => ({
-      ...prev,
-      sameAsShipping: checked,
-      billingAddress: checked ? prev.shippingAddress : {
-        fullName: "",
-        address1: "",
-        address2: "",
-        city: "",
-        state: "",
-        postalCode: "",
-        country: "Tanzania",
-        phone: "",
-        email: "",
-        streetName: "",
-        tin: "",
-        region: "",
-        district: "",
-        ward: "",
-      }
-    }))
   }
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-    section: keyof FormData,
-    field: string
-  ) => {
-    const value = e.target.value
-    setFormData(prev => ({
+  const onRegion = (region: string) => {
+    const districts = (region && DISTRICTS_BY_REGION[region]) || []
+    const district = districts.length === 1 ? districts[0] : ""
+    const wards = district ? getWardOptions(district) : []
+    setShippingAddress((prev) => ({ ...prev, region, district, ward: wards.length === 1 ? wards[0] : "", city: region || prev.city }))
+    setErrors((prev) => {
+      const n = { ...prev }
+      delete n.shippingRegion
+      delete n.shippingDistrict
+      delete n.shippingWard
+      return n
+    })
+  }
+
+  const onDistrict = (district: string) => {
+    const wards = district ? getWardOptions(district) : []
+    setShippingAddress((prev) => ({ ...prev, district, ward: wards.length === 1 ? wards[0] : "" }))
+    setErrors((prev) => {
+      const n = { ...prev }
+      delete n.shippingDistrict
+      delete n.shippingWard
+      return n
+    })
+  }
+
+  const toggleBilling = (useSame: boolean) => {
+    setSameAsShipping(useSame)
+    if (!useSame) {
+      // start the separate billing details from the contact details
+      setBillingAddress((prev) => ({
       ...prev,
-      [section]: {
-        ...(prev[section] as Record<string, string>),
-        [field]: value
+        fullName: prev.fullName || shippingAddress.fullName,
+        phone: prev.phone || shippingAddress.phone,
+        email: prev.email || shippingAddress.email,
+        city: prev.city || shippingAddress.region || shippingAddress.city,
+      }))
+    }
+  }
+
+  /* ----- validation ----- */
+  const validate = (): Errors => {
+    const e: Errors = {}
+    const s = shippingAddress
+    if (!s.fullName.trim()) e.shippingFullName = t("checkout.errFullNameRequired")
+    if (!s.phone.trim()) e.shippingPhone = t("checkout.errPhoneRequired")
+    else if (!validateTanzaniaPhone(s.phone).valid) e.shippingPhone = t("checkout.errInvalidPhoneFormat")
+    if (!s.email.trim()) e.shippingEmail = t("checkout.errEmailRequired")
+    else if (!EMAIL_RE.test(s.email) || !validateEmail(s.email).valid) e.shippingEmail = t("checkout.errEmailInvalid")
+
+    if (deliveryOption === "shipping") {
+      if (s.country === "Tanzania") {
+        if (!s.region?.trim()) e.shippingRegion = t("checkout.errRegionRequired")
+        if (!s.district?.trim()) e.shippingDistrict = t("checkout.errDistrictRequired")
+        if (!s.ward?.trim()) e.shippingWard = t("checkout.errWardRequired")
+      } else if (!s.city.trim()) {
+        e.shippingCity = t("checkout.errCityRequired")
       }
-    }))
+      if (!s.streetName?.trim()) e.shippingStreet = t("checkout.errStreetRequired")
+      if (!s.address1.trim()) e.shippingAddress1 = t("checkout.errHouseRequired")
+    }
+
+    if (!sameAsShipping) {
+      const b = billingAddress
+      if (!b.fullName.trim()) e.billingFullName = t("checkout.errFullNameRequired")
+      if (!b.phone.trim()) e.billingPhone = t("checkout.errPhoneRequired")
+      else if (!validateTanzaniaPhone(b.phone).valid) e.billingPhone = t("checkout.errInvalidPhoneFormat")
+      if (!b.email.trim()) e.billingEmail = t("checkout.errEmailRequired")
+      else if (!EMAIL_RE.test(b.email)) e.billingEmail = t("checkout.errEmailInvalid")
+      if (!b.city.trim()) e.billingCity = t("checkout.errCityRequired")
+      if (!b.streetName?.trim()) e.billingStreet = t("checkout.errStreetRequired")
+      if (!b.address1.trim()) e.billingAddress1 = t("checkout.errBillingAddressRequired")
+    }
+    return e
+  }
+
+  /* ----- order + payment ----- */
+  const submitOrder = async (orderData: Record<string, unknown>) => {
+    const response = await fetchWithRetry(
+      "/api/orders",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(orderData) },
+      2
+    )
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(getSecureErrorMessage(errorData.error || new Error("Order submission failed"), "Failed to submit order. Please try again."))
+    }
+    return response.json()
   }
 
   const handlePlaceOrder = async () => {
-      if (!cart || cart.length === 0) {
-        toast({
-          title: t('checkout.toastEmptyCartTitle'),
-          description: t('checkout.toastEmptyCartDesc'),
-          variant: "destructive"
-        })
+    if (isProcessingPayment || paymentLinkGenerated) return
+    // Items come from the same selection the summary shows (incl. "Buy now").
+    const { items } = readSelection(cart)
+    if (items.length === 0) {
+      toast({ title: t("checkout.toastEmptyCartTitle"), description: t("checkout.toastEmptyCartDesc"), variant: "destructive" })
         return
       }
+
+    const found = validate()
+    setErrors(found)
+    if (Object.keys(found).length > 0) {
+      const first = ERROR_ORDER.find((k) => found[k])
+      const el = first ? document.getElementById(first) : null
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        setTimeout(() => el.focus({ preventScroll: true }), 300)
+      }
+      toast({ title: "Check your details", description: "A few fields need your attention.", variant: "destructive" })
+        return
+      }
+
+    if (orderTotal < MIN_ORDER_TZS) {
+      const msg = `Mobile money can't take payments under ${formatPrice(MIN_ORDER_TZS)}. Add ${formatPrice(MIN_ORDER_TZS - orderTotal)} more (another piece or item) to pay.`
+      setPaymentError(msg)
+      toast({ title: `Minimum order ${formatPrice(MIN_ORDER_TZS)}`, description: msg, variant: "destructive" })
+      return
+    }
 
     setIsProcessingPayment(true)
+    setHasTimedOut(false)
     setPaymentError(null)
-    setPaymentLinkGenerated(false) // Reset payment link state
-    setCheckoutLinkUrl(null)
-
-    // Order is created first. Payment uses the saved server total.
+    setPaymentLinkGenerated(false)
 
     try {
-      // For pickup orders, validate billing address; for shipping, validate shipping address
-      const customerInfo = deliveryOption === 'pickup' ? formData.billingAddress : formData.shippingAddress
-
-      // Validate phone number
-      const phoneValidation = validateTanzaniaPhone(customerInfo.phone)
-      if (!phoneValidation.valid) {
-        setIsProcessingPayment(false)
-        toast({
-          title: t('checkout.toastInvalidPhoneTitle'),
-          description: t('checkout.toastInvalidPhoneDesc'),
-          variant: "destructive"
-        })
-        return
-      }
-
-      // Validate email
-      const emailValidation = validateEmail(customerInfo.email)
-      if (!emailValidation.valid) {
-        setIsProcessingPayment(false)
-        toast({
-          title: t('checkout.toastInvalidEmailTitle'),
-          description: t('checkout.toastInvalidEmailDesc'),
-          variant: "destructive"
-        })
-        return
-      }
-
-      // Skip complex stock validation for better performance
-      // Stock validation will be handled server-side during order processing
-      // Get selected items for order
-      let selectedIds: number[] = []
-      try { 
-        const raw = safeSessionStorage.getItem('selected_cart_items')
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          // Validate that parsed data is an array of numbers
-          if (Array.isArray(parsed) && parsed.every((id: unknown) => typeof id === 'number' && id > 0)) {
-            selectedIds = parsed
-          }
-        }
-      } catch {}
-
-      // Generate unique order ID
-      const orderId = `ORD-${Date.now()}`
-      
-      // Prepare order data (reuse selectedIds from validation above)
-      const selectedItems = selectedIds.length > 0 ? cart.filter(i => selectedIds.includes(i.productId)) : cart
-
-      // Server-side estimate matches POST /api/orders (zones from address + optional lat/lon)
-      const orderItems = selectedItems.flatMap(item =>
-        item.variants.map(variant => ({
-          productId: item.productId,
-          variantId: variant.variantId ?? null,
-          quantity: variant.quantity ?? 1,
-        }))
+      const customerInfo = shippingAddress
+      const orderNumber = `ORD-${Date.now()}`
+      const orderItems = items.flatMap((item) =>
+        item.variants.map((v) => ({ productId: item.productId, variantId: v.variantId ?? null, quantity: v.quantity ?? 1 }))
       )
-      let serverShippingFee = deliveryOption === 'pickup' ? 0 : (shippingEstimate?.shipping ?? SHIPPING_COST)
-      let serverSubtotal = shippingEstimate?.subtotal ?? selectedItems.reduce((sum, item) => sum + item.totalPrice, 0)
-      const hasFreshEstimate = deliveryOption === 'pickup' || (typeof shippingEstimate?.subtotal === 'number' && typeof shippingEstimate?.shipping === 'number')
-      if (!hasFreshEstimate) try {
-        const estimateRes = await fetch('/api/cart/shipping-estimate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            items: orderItems,
-            deliveryOption,
-            country: deliveryOption === 'shipping' ? formData.shippingAddress.country : undefined,
-            region:
-              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-                ? formData.shippingAddress.region
-                : undefined,
-            district:
-              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-                ? formData.shippingAddress.district
-                : undefined,
-            ward:
-              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-                ? formData.shippingAddress.ward
-                : undefined,
-            city: deliveryOption === 'shipping' ? formData.shippingAddress.city : undefined,
-            streetName:
-              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-                ? formData.shippingAddress.streetName
-                : undefined,
-            address1:
-              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-                ? formData.shippingAddress.address1
-                : undefined,
-            address2:
-              deliveryOption === 'shipping' && formData.shippingAddress.country === 'Tanzania'
-                ? formData.shippingAddress.address2
-                : undefined,
-          }),
-        })
-        const estimate = await estimateRes.json()
-        if (!estimate.error && typeof estimate.subtotal === 'number' && typeof estimate.shipping === 'number') {
+
+      // Use the server's numbers (same zones/rates as POST /api/orders).
+      let serverShippingFee = deliveryOption === "pickup" ? 0 : (shippingEstimate?.shipping ?? fallbackShippingFee)
+      let serverSubtotal = shippingEstimate?.subtotal ?? items.reduce((sum, item) => sum + item.totalPrice, 0)
+      const hasFreshEstimate = deliveryOption === "pickup" || (typeof shippingEstimate?.subtotal === "number" && typeof shippingEstimate?.shipping === "number")
+      if (!hasFreshEstimate) {
+        try {
+          const res = await fetch("/api/cart/shipping-estimate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(estimateBody(orderItems)),
+          })
+          const estimate = await res.json()
+          if (!estimate.error && typeof estimate.subtotal === "number" && typeof estimate.shipping === "number") {
           serverSubtotal = estimate.subtotal
           serverShippingFee = estimate.shipping
         }
       } catch {
-        // use fallbacks above
+          // fall back to the values above
       }
-      const serverTotalAmount = Math.round(serverSubtotal + serverShippingFee - promotionDiscount)
+      }
+      const totalAmount = Math.round(serverSubtotal + serverShippingFee - promotionDiscount)
 
       const orderData = {
-        orderNumber: orderId,
-        userId: user?.id || null, // null for guest users
-        // Extract customer information from the appropriate address based on delivery option
+        orderNumber,
+        userId: user?.id || null,
         customerName: customerInfo.fullName,
         customerEmail: customerInfo.email,
         customerPhone: customerInfo.phone,
-        items: selectedItems.flatMap(item => 
-          item.variants.map(variant => ({
+        items: items.flatMap((item) =>
+          item.variants.map((variant) => ({
             productId: item.productId,
             productName: item.product?.name || `Product ${item.productId}`,
-            variantId: variant.variantId && variant.variantId !== 'default' && !isNaN(Number(variant.variantId)) ? parseInt(variant.variantId) : null, // Convert string to integer or null
-            variantName: variant.variant_name || 'Default', // Use simplified variant_name from database
-            variantAttributes: null, // No longer used in simplified variant system
+            variantId: variant.variantId && variant.variantId !== "default" && !isNaN(Number(variant.variantId)) ? parseInt(variant.variantId) : null,
+            variantName: variant.variant_name || "Default",
+            variantAttributes: null,
             quantity: variant.quantity,
-            unitPrice: variant.price, // unit price from database
-            totalPrice: variant.price * variant.quantity, // total price for this variant
+            unitPrice: variant.price,
+            totalPrice: variant.price * variant.quantity,
           name: item.product?.name || `Product ${item.productId}`,
           }))
         ),
         shippingAddress: {
-          ...formData.shippingAddress,
-          ...(deliveryOption === 'shipping' && locationCoords
-            ? { lat: locationCoords.lat, lon: locationCoords.lon }
-            : {}),
+          ...shippingAddress,
+          ...(deliveryOption === "shipping" && locationCoords ? { lat: locationCoords.lat, lon: locationCoords.lon } : {}),
         },
-        billingAddress: formData.sameAsShipping ? formData.shippingAddress : formData.billingAddress,
+        billingAddress: sameAsShipping ? shippingAddress : billingAddress,
         deliveryOption,
         shippingFee: serverShippingFee,
         promotionCode: appliedPromotion?.code || null,
-        promotionDiscount: promotionDiscount,
-        totalAmount: serverTotalAmount,
+        promotionDiscount,
+        totalAmount,
         timestamp: new Date().toISOString(),
       }
 
-      // Check if we already have an order (from previous failed payment link generation)
-      // If order exists, reuse it instead of creating a new one
-      let result
-      
-      try {
-        if (orderReferenceId && orderId) {
-          // Reuse existing order - don't create a new one
-          
-          // Fetch order details to get current payment status
-          try {
-            const orderResponse = await fetch(`/api/orders/${orderReferenceId}`)
-            if (orderResponse.ok) {
-              const orderData = await orderResponse.json()
-              result = {
-                success: true,
-                order: {
-                  id: orderId,
-                  referenceId: orderReferenceId,
-                  pickupId: orderPickupId,
-                  paymentStatus: orderData.paymentStatus || 'pending',
-                  status: orderData.status || 'pending'
-                }
-              }
+      // Retrying with the same items, delivery and total reuses the order created earlier, so a
+      // declined payment doesn't leave duplicate orders. Anything changed -> a new order.
+      // (The old code asked GET /api/orders/[ref] first; that route needs a login, returned 401
+      // for guests and so created a new order on every retry.)
+      const signature = JSON.stringify({ items: orderItems, deliveryOption, totalAmount, shippingAddress, billing: orderData.billingAddress })
+      let reference: string
+      let amount: number
+      if (lastOrderRef.current && lastOrderRef.current.signature === signature) {
+        reference = lastOrderRef.current.reference
+        amount = lastOrderRef.current.amount
             } else {
-              // Order not found, create new one
-              result = await submitOrder(orderData)
-              setOrderId(result.order.id)
-              setOrderReferenceId(result.order.referenceId)
-              setOrderPickupId(result.order.pickupId)
-              setPaymentStatus(result.order.paymentStatus)
-            }
-          } catch {
-            // Error fetching order, create new one
-            result = await submitOrder(orderData)
-            setOrderId(result.order.id)
-            setOrderReferenceId(result.order.referenceId)
-            setOrderPickupId(result.order.pickupId)
-            setPaymentStatus(result.order.paymentStatus)
-          }
-        } else {
-          // No existing order, create new one
-          result = await submitOrder(orderData)
-          setOrderId(result.order.id)
-          setOrderReferenceId(result.order.referenceId)
-          setOrderPickupId(result.order.pickupId)
-          setPaymentStatus(result.order.paymentStatus)
-        }
-      } catch (orderError: unknown) {
-        // If order submission fails, clear loading state and throw error
-        setIsProcessingPayment(false)
-        throw orderError
+        const result = await submitOrder(orderData)
+        reference = result.order.referenceId || orderNumber
+        amount = Number(result.order.totalAmount) || orderData.totalAmount
+        lastOrderRef.current = { signature, reference, amount }
       }
-      
-      // DON'T remove items from cart yet - wait until payment is confirmed
-      // Items will be removed after successful payment via webhook or return page
+      setOrderReferenceId(reference)
 
-      // Open a Snippe checkout for the total saved on the order.
-      // Payment API validates amount against order in DB and uses DB total for the link (anti-tampering).
-      const reference = result.order.referenceId || orderId
-      const orderTotalAmount = result.order.totalAmount || orderData.totalAmount
-      const checkoutIdempotencyKey = `checkout-link:${reference}:${String(orderTotalAmount)}`
-      // Optimized: Use fetchWithRetry with faster retries (2 retries, shorter delays)
-      // Retries on: network errors, 5xx server errors, 429 rate limits, 408 timeouts
-      const response = await fetch('/api/payment/snippe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: String(orderTotalAmount),
-          currency: 'TZS',
-          orderId: reference,
-          idempotencyKey: checkoutIdempotencyKey,
-          customerDetails: {
+      // The payment API checks the amount against the saved order (anti-tampering).
+      const response = await fetch("/api/payment/snippe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+          amount: String(amount),
+          currency: "TZS",
+            orderId: reference,
+          idempotencyKey: `checkout-link:${reference}:${String(amount)}`,
+            customerDetails: {
             fullName: customerInfo.fullName,
             email: customerInfo.email,
             phone: customerInfo.phone,
-            firstName: customerInfo.fullName.split(' ')[0] || '',
-            lastName: customerInfo.fullName.split(' ').slice(1).join(' ') || '',
-          },
-        }),
+            firstName: customerInfo.fullName.split(" ")[0] || "",
+            lastName: customerInfo.fullName.split(" ").slice(1).join(" ") || "",
+            },
+          }),
       })
-
-      // Optimized: Parse JSON directly instead of text() then parse
-      
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Failed' }))
-        throw new Error(getSecureErrorMessage(errorData.error || 'Failed', 'Unable to send the payment request. Please try again.'))
+        const errorData = await response.json().catch(() => ({ error: "Failed" }))
+        throw new Error(getSecureErrorMessage(errorData.error || "Failed", "Unable to send the payment request. Please try again."))
       }
-
       const data = await response.json()
-
       if (!data.success || !data.paymentReference) {
-        throw new Error(getSecureErrorMessage(data.error || 'No payment request', 'Unable to send the payment request. Please try again.'))
+        throw new Error(getSecureErrorMessage(data.error || "No payment request", "Unable to send the payment request. Please try again."))
       }
 
-      safeSessionStorage.setItem('last_order_reference', reference)
+      safeSessionStorage.setItem("last_order_reference", reference)
+      // the result page removes exactly these from the cart once the payment is confirmed
+      try {
+        const bought = readSelection(cart)
+        safeSessionStorage.setItem(BOUGHT_ITEMS_KEY, JSON.stringify({
+          ref: String(reference).replace(/[^A-Za-z0-9]/g, "").toLowerCase(),
+          all: !bought.buyNow && bought.items.length === cart.length,
+          items: bought.buyNow ? [] : bought.items.flatMap((item): { productId: number; variantId: string | null }[] =>
+            item.variants?.length ? item.variants.map((v) => ({ productId: item.productId, variantId: v.variantId ?? null })) : [{ productId: item.productId, variantId: null }]),
+        }))
+      } catch { /* storage unavailable: items simply stay in the cart */ }
       savePendingOrder({
         referenceId: reference,
         status: "pending",
-        total: Number(orderTotalAmount) || 0,
+        total: Number(amount) || 0,
         currency: "TZS",
         createdAt: new Date().toISOString(),
         customerName: customerInfo.fullName || "",
         phone: customerInfo.phone || "",
         email: customerInfo.email || "",
-        items: (orderData.items || []).map((item: { name?: string; productName?: string; quantity?: number; totalPrice?: number }) => ({
+        items: orderData.items.map((item) => ({
           name: item.productName || item.name || "Item",
           quantity: Number(item.quantity) || 1,
           total: Number(item.totalPrice) || 0,
         })),
       })
-      setCheckoutLinkUrl(null)
       setPaymentLinkGenerated(true)
-      toast({
-        title: 'Check your phone',
-        description: 'A payment request was sent to your mobile money number. Enter your PIN on this page\'s phone prompt.',
-        duration: 6000
-      })
-      
-      // Clear processing state after redirect is initiated (keep message visible briefly)
-      // Small delay to ensure redirect happens and user sees success message
-      setTimeout(() => {
         setIsProcessingPayment(false)
-      }, 500) // Brief delay to show success message
-
+      toast({ title: "Check your phone", description: "A payment request was sent to your mobile money number. Approve it with your PIN.", duration: 6000 })
     } catch (error: unknown) {
-      const paymentErrorRecord = error as { message?: string; stack?: string; name?: string }
-      logger.error('Payment initiation error:', {
-        error: error,
-        message: paymentErrorRecord.message,
-        stack: paymentErrorRecord.stack,
-        name: paymentErrorRecord.name
-      })
-      
-      // Always clear loading state on error
+      const err = error as { message?: string; stack?: string; name?: string }
+      logger.error("Payment initiation error:", { error, message: err.message, stack: err.stack, name: err.name })
       setIsProcessingPayment(false)
-      setPaymentLinkGenerated(false) // Reset on error
-      setCheckoutLinkUrl(null)
-      
-      const errorMessage = getSecureErrorMessage(error, 'Something went wrong. Please try again.')
-      setPaymentError(errorMessage)
-      toast({
-        title: 'Order Error',
-        description: errorMessage,
-        variant: 'destructive',
-        duration: 5000
-      })
-    } finally {
-      // Ensure loading state is always cleared, even if something unexpected happens
-      // This is a safety net to prevent stuck loading states
-      setTimeout(() => {
-        setIsProcessingPayment(false)
-      }, 100)
+      setPaymentLinkGenerated(false)
+      const message = getSecureErrorMessage(error, "Something went wrong. Please try again.")
+      setPaymentError(message)
+      toast({ title: "Order error", description: message, variant: "destructive", duration: 5000 })
     }
   }
 
-  // Function to submit order
-  const submitOrder = async (orderData: Record<string, unknown>) => {
-    try {
-      
-      // Submit order to public API with retry logic
-      const response = await fetchWithRetry(
-        '/api/orders',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(orderData),
-        },
-        2 // Max 2 retries with exponential backoff
-      )
+  /* ----- derived view data ----- */
+  const paymentPhone = shippingAddress.phone
+  const network = detectNetwork(paymentPhone)
+  const paying = isProcessingPayment || paymentLinkGenerated || hasTimedOut
+  const contactDone = !!(shippingAddress.fullName.trim() && validateTanzaniaPhone(shippingAddress.phone).valid && EMAIL_RE.test(shippingAddress.email))
+  const deliveryDone =
+    deliveryOption === "pickup" ||
+    !!((isTz ? shippingAddress.region && shippingAddress.district && shippingAddress.ward : shippingAddress.city.trim()) &&
+      shippingAddress.streetName?.trim() && shippingAddress.address1.trim())
 
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        const errorMessage = getSecureErrorMessage(
-          errorData.error || new Error('Order submission failed'),
-          'Failed to submit order. Please try again.'
-        )
-        throw new Error(errorMessage)
-      }
-
-      const result = await response.json()
-      
-      // Store order IDs and payment URL for later use
-      if (result.order.paymentUrl) {
-        // You can store this in state or redirect to payment
-      }
-      
-      return result
-    } catch (error) {
-      throw error
-    }
-  }
-
-  // Validation functions
-  const validateDeliveryOption = () => {
-    if (!deliveryOption) {
-      setValidationErrors({ deliveryOption: t('checkout.errSelectDeliveryOption') })
-      return false
-    }
-    return true
-  }
-
-  const validateShippingAddress = () => {
-    const errors: Record<string, string> = {}
-
-      if (!formData.shippingAddress.fullName.trim()) {
-      errors.shippingFullName = t('checkout.errFullNameRequired')
-      }
-      if (!formData.shippingAddress.phone.trim()) {
-      errors.shippingPhone = t('checkout.errPhoneRequired')
-      }
-      if (!formData.shippingAddress.email.trim()) {
-      errors.shippingEmail = t('checkout.errEmailRequired')
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.shippingAddress.email)) {
-      errors.shippingEmail = t('checkout.errEmailInvalid')
-    }
-    if (formData.shippingAddress.country === 'Tanzania') {
-      if (!formData.shippingAddress.region?.trim()) errors.shippingRegion = t('checkout.errRegionRequired')
-      if (!formData.shippingAddress.district?.trim()) errors.shippingDistrict = t('checkout.errDistrictRequired')
-      if (!formData.shippingAddress.ward?.trim()) errors.shippingWard = t('checkout.errWardRequired')
-    } else {
-      if (!formData.shippingAddress.city.trim()) errors.shippingCity = t('checkout.errCityRequired')
-    }
-    if (!formData.shippingAddress.streetName?.trim()) {
-      errors.shippingStreet = t('checkout.errStreetRequired')
-    }
-    if (!formData.shippingAddress.address1.trim()) {
-      errors.shippingAddress1 = t('checkout.errHouseRequired')
-    }
-    // Landmark is optional — for precision only; if not found, no effect
-
-    setValidationErrors(errors)
-    return Object.keys(errors).length === 0
-  }
-
-  const validateBillingInformation = () => {
-    // For pickup orders, we only need basic billing info (name, email, phone)
-    if (deliveryOption === 'pickup') {
-      const errors: Record<string, string> = {}
-      
-      if (!formData.billingAddress.fullName.trim()) {
-        errors.billingFullName = t('checkout.errFullNameRequired')
-      }
-      if (!formData.billingAddress.phone.trim()) {
-        errors.billingPhone = t('checkout.errPhoneRequired')
-      } else {
-        // Validate Tanzania phone number format
-        const phoneValidation = validateTanzaniaPhone(formData.billingAddress.phone)
-        if (!phoneValidation.valid) {
-          errors.billingPhone = t('checkout.errInvalidPhoneFormat')
-        }
-      }
-      if (!formData.billingAddress.email.trim()) {
-        errors.billingEmail = t('checkout.errEmailRequired')
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.billingAddress.email)) {
-        errors.billingEmail = t('checkout.errEmailInvalid')
-      }
-
-      setValidationErrors(errors)
-      return Object.keys(errors).length === 0
-    }
-
-    // For shipping orders, validate all billing fields
-    // If using same as shipping, no validation needed
-    if (formData.sameAsShipping) {
-      return true
-    }
-
-    const errors: Record<string, string> = {}
-    
-    if (!formData.billingAddress.fullName.trim()) {
-      errors.billingFullName = t('checkout.errFullNameRequired')
-    }
-    if (!formData.billingAddress.phone.trim()) {
-      errors.billingPhone = t('checkout.errPhoneRequired')
-    } else {
-      // Validate Tanzania phone number format
-      const phoneValidation = validateTanzaniaPhone(formData.billingAddress.phone)
-      if (!phoneValidation.valid) {
-        errors.billingPhone = t('checkout.errInvalidPhoneFormat')
-      }
-    }
-    if (!formData.billingAddress.email.trim()) {
-      errors.billingEmail = t('checkout.errEmailRequired')
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.billingAddress.email)) {
-      errors.billingEmail = t('checkout.errEmailInvalid')
-    }
-    if (!formData.billingAddress.city.trim()) {
-      errors.billingCity = t('checkout.errCityRequired')
-    }
-    if (!formData.billingAddress.streetName?.trim()) {
-      errors.billingStreet = t('checkout.errStreetRequired')
-    }
-    if (!formData.billingAddress.address1.trim()) {
-      errors.billingAddress1 = t('checkout.errBillingAddressRequired')
-    }
-
-    setValidationErrors(errors)
-    return Object.keys(errors).length === 0
-  }
-
-  const validateCurrentStep = () => {
-    switch (currentStep) {
-      case 0:
-        return validateDeliveryOption()
-      case 1:
-        if ((deliveryOption as string) === 'shipping') {
-          return validateShippingAddress()
-            } else {
-          return validateBillingInformation()
-        }
-      case 2:
-        if ((deliveryOption as string) === 'shipping') {
-          return validateBillingInformation()
-        }
-        return true // Order review step
-            default:
-        return true
-    }
-  }
-
-  const handleNext = () => {
-    // Validate current step before proceeding
-    if (!validateCurrentStep()) {
-      return
-    }
-
-    // Clear validation errors if validation passes
-    setValidationErrors({})
-
-    if (deliveryOption === 'pickup') {
-      // For pickup: 0 (Delivery) -> 1 (Billing) -> 2 (Review) -> 3 (Confirmed)
-      setCurrentStep(prev => Math.min(prev + 1, 3))
-      } else {
-      // For shipping: 0 (Delivery) -> 1 (Shipping) -> 2 (Billing) -> 3 (Review) -> 4 (Confirmed)
-      setCurrentStep(prev => Math.min(prev + 1, 4))
-    }
-  }
-
-  const handleBack = () => {
-    if (currentStep === 0) {
-      // If on delivery option step, go back to cart
-      router.push('/cart')
-    } else {
-      // Otherwise, go to previous step
-      setCurrentStep(prev => Math.max(prev - 1, 0))
-    }
-  }
-
-  const paymentPhone = deliveryOption === 'pickup' ? formData.billingAddress.phone : formData.shippingAddress.phone
-  const brandName = companyName || 'Honic Company Limited'
-
-  const renderSecurePayment = () => (
-    <Card className="overflow-hidden rounded-none border border-neutral-200 bg-white shadow-none">
-      <div className="flex items-end justify-between gap-4 border-b border-neutral-200 px-6 py-5">
-        <div>
-          <p className="text-sm font-semibold text-neutral-500">Honic Company Limited</p>
-          <h3 className="mt-2 text-xl font-bold text-neutral-950 sm:text-2xl">{paymentLinkGenerated ? 'Approve on your phone' : 'Sending a secure request'}</h3>
-          <p className="mt-1 text-sm sm:text-base text-neutral-500">Mobile money stays on this page. Your PIN is never typed here.</p>
-        </div>
-        <p className="text-right text-lg font-bold tabular-nums text-neutral-950">{formatPrice(orderTotal)}</p>
-      </div>
-      <CardContent className="px-6 py-8">
-        {!hasTimedOut ? (
-          <div className="mx-auto max-w-md text-center">
-            <div className="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center bg-yellow-500 text-neutral-950">
-              {paymentLinkGenerated ? <Smartphone className="h-7 w-7" /> : <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-950 border-t-transparent" />}
-            </div>
-            <h3 className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
-              {paymentLinkGenerated ? 'Enter your PIN' : 'Connecting to mobile money'}
-            </h3>
-            <p className={cn("mt-2 text-sm leading-relaxed sm:text-base", themeClasses.textNeutralSecondary)}>
-              {paymentLinkGenerated
-                ? `A payment request is on ${paymentPhone || 'your phone'}. Approve it with your mobile-money PIN. This page confirms the result.`
-                : 'Honic is sending the request for the saved order total. The amount cannot be changed in the browser.'}
-            </p>
-            <div className="mt-6 grid grid-cols-3 gap-2 text-left">
-              {[
-                { icon: Zap, label: 'Fast push' },
-                { icon: Lock, label: 'Amount locked' },
-                { icon: ShieldCheck, label: 'PIN private' },
-              ].map(({ icon: Icon, label }) => (
-                <div key={label} className="border border-neutral-200 px-3 py-3 dark:border-neutral-800">
-                  <Icon className="mb-2 h-4 w-4 text-yellow-600" />
-                  <p className="text-sm font-semibold">{label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="mx-auto max-w-md text-center">
-            <Clock className="mx-auto mb-4 h-10 w-10 text-yellow-600" />
-            <h3 className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>The request needs another try</h3>
-            <p className={cn("mt-2 text-sm sm:text-base", themeClasses.textNeutralSecondary)}>Stay on this page. The same order total will be used.</p>
-            <div className="mt-6 flex justify-center gap-3">
-              <Button onClick={handleRetryPayment} className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600">Try again</Button>
-              <Button variant="outline" onClick={() => window.location.reload()}>Refresh</Button>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-
-  const renderReviewItems = () => (
-                <div className="space-y-0">
-                  {selectedItems.length === 0 ? (
-                    <div className="text-center py-8">
-                      <p className={cn("text-gray-500", themeClasses.textNeutralSecondary)}>
-                        {t('checkout.orderReviewEmptyCart')}
-                      </p>
-                    </div>
-                  ) : (
-                    selectedItems.flatMap((item, itemIndex) =>
-                      (item.variants || []).map((variant, variantIndex: number) => {
-                        const product = item.product
-                        const variantPrice = variant.price || 0
-                        const variantQuantity = variant.quantity || 1
-                        const variantTotalPrice = variantPrice * variantQuantity
-                        const discountPercentage = product?.originalPrice && product.originalPrice > variantPrice
-                          ? ((product.originalPrice - variantPrice) / product.originalPrice) * 100
-                          : 0
-                        return (
-                          <div
-                            key={`${item.productId}-${variant.variantId || variantIndex}-${itemIndex}`}
-                            className={cn(
-                              "transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 group rounded-sm p-2 sm:p-3 border-b border-neutral-200 dark:border-gray-700 last:border-b-0",
-                            )}
-                          >
-                            <div className="flex gap-1 sm:gap-2">
-                              <div className="flex items-start gap-2">
-                                <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`} className="flex-shrink-0">
-                                  <div className="relative">
-                                    {(variant.image || product?.image) ? (
-                                      <img
-                                        src={variant.image || product?.image}
-                                        alt={product?.name || "Product"}
-                                        className="h-12 w-12 rounded object-cover border border-neutral-200 bg-gray-50 sm:h-16 sm:w-16"
-                                      />
-                                    ) : (
-                                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover border border-neutral-200 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                                        <span className="text-gray-400 text-xs">No Image</span>
-                                      </div>
-                                    )}
-                                    {discountPercentage > 0 && (
-                                      <div className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[7px] sm:text-[10px] font-bold px-0.5 sm:px-1.5 py-0.5 rounded-full">
-                                        -{discountPercentage.toFixed(0)}%
-                                      </div>
-                                    )}
-                                  </div>
-                                </Link>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-1">
-                                  <div className="flex-1 min-w-0">
-                                    <Link href={`/products/${item.productId}-${encodeURIComponent(product?.name || 'product')}?returnTo=${encodeURIComponent('/checkout')}`}>
-                                      <h3 className={cn("font-semibold text-xs sm:text-base hover:underline line-clamp-2", themeClasses.mainText)}>
-                                        {product?.name || `Product ${item.productId}`}
-                                        {variant.variant_name && (
-                                          <span className="font-normal text-blue-600 dark:text-blue-400">{" | "}{variant.variant_name}</span>
-                                        )}
-                                      </h3>
-                                    </Link>
-                                    <div className="flex flex-wrap items-baseline gap-0.5 mt-0.5 sm:mt-2">
-                                      <span className={cn("font-semibold text-[10px] sm:text-sm", themeClasses.mainText)}>
-                                        {formatPrice(variantPrice)}
-                                      </span>
-                                      {product?.originalPrice && product.originalPrice > variantPrice && (
-                                        <>
-                                          <span className={cn("text-[9px] sm:text-xs line-through", themeClasses.textNeutralSecondary)}>
-                                            {formatPrice(product.originalPrice)}
-                                          </span>
-                                          <span className="text-[9px] sm:text-xs font-medium text-green-500 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-0.5 sm:px-1.5 py-0.5 rounded">
-                                            {t('checkout.saveAmountPrefix')} {formatPrice(product.originalPrice - variantPrice)}
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                    {/* Mobile: qty below product details */}
-                                    <div className="flex items-center gap-2 mt-1.5 sm:hidden">
-                                      <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
-                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
-                                          <Minus className="w-3.5 h-3.5" />
-                                        </Button>
-                                        <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                                        <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
-                                          <Plus className="w-3.5 h-3.5" />
-                                        </Button>
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center justify-between mt-0.5 sm:mt-2 pt-0.5 sm:pt-1 border-t border-neutral-200 dark:border-gray-600">
-                                      <span className={cn("text-[10px] sm:text-sm", themeClasses.textNeutralSecondary)}>{t('checkout.itemTotalPriceLabel')}</span>
-                                      <span className={cn("font-bold text-xs sm:text-base", themeClasses.mainText)}>{formatPrice(variantTotalPrice)}</span>
-                                    </div>
-                                  </div>
-                                  {/* Desktop: qty on right side like cart */}
-                                  <div className="hidden sm:flex flex-col items-center gap-1">
-                                    <div className="flex items-center border rounded overflow-hidden bg-white dark:bg-gray-800 dark:border-gray-600">
-                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, Math.max(1, variantQuantity - 1), variant.variantId)} disabled={variantQuantity <= 1} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-100 dark:hover:bg-gray-700">
-                                        <Minus className="w-3.5 h-3.5" />
-                                      </Button>
-                                      <Input type="number" min={1} value={variantQuantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v) && v >= 1) updateItemQuantity(item.productId, v, variant.variantId); }} style={{ width: `${getDesktopQuantityInputWidth(variantQuantity)}rem`, minWidth: '2.5rem', maxWidth: '6rem' }} className="px-2 py-0.5 text-sm font-medium text-neutral-950 dark:text-gray-100 text-center border-0 rounded-none h-7 focus:ring-0 focus:border-0 transition-all duration-200 ease-in-out [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                                      <Button type="button" variant="ghost" size="icon" onClick={() => updateItemQuantity(item.productId, variantQuantity + 1, variant.variantId)} className="rounded-none h-7 w-7 text-neutral-950 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700">
-                                        <Plus className="w-3.5 h-3.5" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })
-                    )
-                  )}
-                </div>
-  )
-
-  const renderStepContent = () => {
-    switch (currentStep) {
-      case 0:
-        return (
-          <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-            <CardHeader className="p-3 sm:p-6">
-              <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
-                {t('checkout.deliveryOptionTitle')}
-              </CardTitle>
-              <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                {t('checkout.deliveryOptionSubtitle')}
-              </p>
-            </CardHeader>
-            <CardContent className="p-3 sm:p-6">
-              {/* Validation Error Display */}
-              {validationErrors.deliveryOption && (
-                <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg mb-4">
-                  <p className="text-sm text-red-600 dark:text-red-400">{validationErrors.deliveryOption}</p>
-              </div>
-              )}
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div 
-                         className={cn(
-                    "relative cursor-pointer rounded-xl border p-5 transition-all",
-                    (deliveryOption as string) === 'shipping' 
-                      ? "border-neutral-950 bg-white shadow-[inset_3px_0_0_#eab308]" 
-                      : "border-neutral-200 bg-white hover:border-neutral-400"
-                  )}
-                  onClick={() => {
-                    setDeliveryOption('shipping')
-                    // Clear validation error when option is selected
-                    if (validationErrors.deliveryOption) {
-                      setValidationErrors(prev => {
-                        const newErrors = { ...prev }
-                        delete newErrors.deliveryOption
-                        return newErrors
-                      })
-                    }
-                  }}
-                >
-                  <div className="flex items-start space-x-3">
-                    <Truck className="w-5 h-5 text-blue-500 mt-1" />
-                    <div className="flex-1">
-                      <h3 className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
-                        {t('checkout.shippingDeliveryTitle')}
-                      </h3>
-                      <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                        {t('checkout.shippingDeliveryDesc')}
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Package className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>{t('checkout.estDeliveryLabel')}</strong> {t('checkout.estDeliveryValue')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-               </div>
-
-                <div 
-                   className={cn(
-                    "relative cursor-pointer rounded-xl border p-5 transition-all",
-                    deliveryOption === 'pickup' 
-                      ? "border-neutral-950 bg-white shadow-[inset_3px_0_0_#eab308]" 
-                      : "border-neutral-200 bg-white hover:border-neutral-400"
-                  )}
-                  onClick={() => {
-                    setDeliveryOption('pickup')
-                    // Clear validation error when option is selected
-                    if (validationErrors.deliveryOption) {
-                      setValidationErrors(prev => {
-                        const newErrors = { ...prev }
-                        delete newErrors.deliveryOption
-                        return newErrors
-                      })
-                    }
-                  }}
-                >
-                  <div className="flex items-start space-x-3">
-                    <MapPin className="w-5 h-5 text-green-500 mt-1" />
-                    <div className="flex-1">
-                      <h3 className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
-                        {t('checkout.storePickupTitle')}
-                      </h3>
-                      <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                        {t('checkout.storePickupDesc')}
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Clock className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>{t('checkout.pickupTimeLabel')}</strong> {t('checkout.pickupTimeValue')}
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Gift className="w-3 h-3 text-transparent" />
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>
-                            <strong>{t('checkout.pickupFeeLabel')}</strong> {t('checkout.pickupFeeValue')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )
-
-      case 1:
-        if ((deliveryOption as string) === 'shipping') {
-          return (
-            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-              <CardHeader className="p-3 sm:p-6 space-y-0">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
-                      {t('checkout.shippingAddressTitle')}
-                    </CardTitle>
-                    <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                      {t('checkout.shippingAddressSubtitle')}
-                    </p>
-                  </div>
-                  <div
-                    className={cn(
-                      'shrink-0 rounded-lg border px-3 py-2 sm:px-4 sm:py-3 sm:min-w-[10rem] text-right',
-                      themeClasses.cardBorder,
-                      themeClasses.cardBg
-                    )}
-                  >
-                    <p className={cn('text-xs font-semibold text-neutral-500 dark:text-neutral-400 sm:text-sm')}>
-                      {t('checkout.totalShippingFee')}
-                    </p>
-                    <p
-                      className={cn(
-                        'text-lg sm:text-2xl font-bold tabular-nums mt-1 leading-tight',
-                        themeClasses.mainText
-                      )}
-                    >
-                      {shippingFeeLineLoading
-                        ? '…'
-                        : deferShippingFeeDisplay
-                          ? formatPrice(0)
-                          : shippingFee === 0
-                            ? t('checkout.free')
-                            : formatPrice(shippingFee)}
-                    </p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="grid gap-3 sm:gap-4 p-3 sm:p-6">
-                {/* Row 1: Contact — Full Name, Phone, Email */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-start">
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingFullName" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                  {t('checkout.fullNameLabel')}
-                </Label>
-                <Input
-                      id="shippingFullName"
-                  value={formData.shippingAddress.fullName}
-                      onChange={(e) => {
-                        handleInputChange(e, "shippingAddress", "fullName")
-                        // Clear validation error when user starts typing
-                        if (validationErrors.shippingFullName) {
-                          setValidationErrors(prev => {
-                            const newErrors = { ...prev }
-                            delete newErrors.shippingFullName
-                            return newErrors
-                          })
-                        }
-                      }}
-                      placeholder={t('checkout.phFullName')}
-                  className={cn(
-                    darkHeaderFooterClasses.inputBg,
-                    darkHeaderFooterClasses.textNeutralPrimary,
-                    darkHeaderFooterClasses.inputPlaceholder,
-                        validationErrors.shippingFullName
-                          ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                          : darkHeaderFooterClasses.inputBorder
-                  )}
-                />
-                    {validationErrors.shippingFullName && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingFullName}</p>
-                )}
-              </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingPhone" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      {t('checkout.phoneLabel')}
-                </Label>
-                <Input
-                      id="shippingPhone"
-                      value={formData.shippingAddress.phone}
-                      onChange={(e) => {
-                        handleInputChange(e, "shippingAddress", "phone")
-                        if (validationErrors.shippingPhone) {
-                          setValidationErrors(prev => {
-                            const newErrors = { ...prev }
-                            delete newErrors.shippingPhone
-                            return newErrors
-                          })
-                        }
-                      }}
-                      placeholder={t('checkout.phPhone')}
-                  className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                        validationErrors.shippingPhone
-                          ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                          : darkHeaderFooterClasses.inputBorder
-                      )}
-                    />
-                    {validationErrors.shippingPhone && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingPhone}</p>
-                    )}
-              </div>
-
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingEmail" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      {t('checkout.emailLabel')}
-                </Label>
-                <Input
-                      id="shippingEmail"
-                      type="email"
-                      value={formData.shippingAddress.email}
-                      onChange={(e) => {
-                        handleInputChange(e, "shippingAddress", "email")
-                        if (validationErrors.shippingEmail) {
-                          setValidationErrors(prev => {
-                            const newErrors = { ...prev }
-                            delete newErrors.shippingEmail
-                            return newErrors
-                          })
-                        }
-                      }}
-                      placeholder={t('checkout.phEmail')}
-                  className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                        validationErrors.shippingEmail
-                          ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                          : darkHeaderFooterClasses.inputBorder
-                      )}
-                    />
-                    {validationErrors.shippingEmail && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingEmail}</p>
-                    )}
-                  </div>
-              </div>
-
-                {/* Row 2: Location — Country, Region, District, Ward (Tanzania) or Country, Region/City, Street (other) */}
-                {formData.shippingAddress.country === 'Tanzania' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 items-start">
-                    <div className="grid gap-1 sm:gap-2">
-                      <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.countryLabel')}</Label>
-                      <select
-                        id="shippingCountry"
-                        value={formData.shippingAddress.country}
-                        onChange={(e) => handleInputChange(e, "shippingAddress", "country")}
-                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary)}
-                      >
-                        <option value="Tanzania">Tanzania</option>
-                        <option value="Kenya">Kenya</option>
-                        <option value="Uganda">Uganda</option>
-                        <option value="Rwanda">Rwanda</option>
-                      </select>
-                    </div>
-                    <div className="grid gap-1 sm:gap-2">
-                      <Label htmlFor="shippingRegion" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.regionLabel')}</Label>
-                      <select
-                        id="shippingRegion"
-                        value={formData.shippingAddress.region || ""}
-                        onChange={(e) => {
-                          const newRegion = e.target.value
-                          handleInputChange(e, "shippingAddress", "region")
-                          const districts = (newRegion && (DISTRICTS_BY_REGION[newRegion] ?? [])) || []
-                          const onlyDistrict = districts.length === 1 ? districts[0] : ''
-                          const wards = onlyDistrict ? getWardOptions(onlyDistrict) : []
-                          const onlyWard = wards.length === 1 ? wards[0] : ''
-                          setFormData(prev => ({
-                            ...prev,
-                            shippingAddress: {
-                              ...prev.shippingAddress,
-                              district: onlyDistrict,
-                              ward: onlyWard,
-                              city: newRegion || prev.shippingAddress.city
-                            }
-                          }))
-                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingRegion; delete n.shippingDistrict; delete n.shippingWard; return n })
-                        }}
-                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingRegion ? "border-red-500" : "")}
-                      >
-                        <option value="">{t('checkout.selectRegion')}</option>
-                        {TANZANIA_REGIONS.map((r) => (
-                          <option key={r} value={r}>{r}</option>
-                        ))}
-                      </select>
-                      {validationErrors.shippingRegion && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingRegion}</p>}
-                    </div>
-                    <div className="grid gap-1 sm:gap-2">
-                      <Label htmlFor="shippingDistrict" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.districtLabel')}</Label>
-                      <select
-                        id="shippingDistrict"
-                        value={formData.shippingAddress.district || ""}
-                        onChange={(e) => {
-                          const newDistrict = e.target.value
-                          handleInputChange(e, "shippingAddress", "district")
-                          const wards = newDistrict ? getWardOptions(newDistrict) : []
-                          const onlyWard = wards.length === 1 ? wards[0] : ''
-                          setFormData(prev => ({
-                            ...prev,
-                            shippingAddress: { ...prev.shippingAddress, ward: onlyWard }
-                          }))
-                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingDistrict; delete n.shippingWard; return n })
-                        }}
-                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingDistrict ? "border-red-500" : "")}
-                      >
-                        <option value="">{t('checkout.selectDistrict')}</option>
-                        {(DISTRICTS_BY_REGION[formData.shippingAddress.region || ""] ?? []).map((d) => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </select>
-                      {validationErrors.shippingDistrict && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingDistrict}</p>}
-                    </div>
-                    <div className="grid gap-1 sm:gap-2">
-                      <Label htmlFor="shippingWard" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.wardLabel')}</Label>
-                      <select
-                        id="shippingWard"
-                        value={formData.shippingAddress.ward || ""}
-                        onChange={(e) => {
-                          handleInputChange(e, "shippingAddress", "ward")
-                          setValidationErrors(prev => { const n = { ...prev }; delete n.shippingWard; return n })
-                        }}
-                        className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, validationErrors.shippingWard ? "border-red-500" : "")}
-                      >
-                        <option value="">{t('checkout.selectWard')}</option>
-                        {getWardOptions(formData.shippingAddress.district || "").map((w) => (
-                          <option key={w} value={w}>{w}</option>
-                        ))}
-                      </select>
-                      {validationErrors.shippingWard && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingWard}</p>}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 items-start">
-                    <div className="grid gap-1 sm:gap-2">
-                      <Label htmlFor="shippingCountry" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.countryLabel')}</Label>
-                      <select id="shippingCountry" value={formData.shippingAddress.country} onChange={(e) => handleInputChange(e, "shippingAddress", "country")} className={cn("w-full min-h-10 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500", darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary)}>
-                        <option value="Tanzania">Tanzania</option>
-                        <option value="Kenya">Kenya</option>
-                        <option value="Uganda">Uganda</option>
-                        <option value="Rwanda">Rwanda</option>
-                      </select>
-                    </div>
-                    <div className="grid gap-1 sm:gap-2">
-                      <Label htmlFor="shippingCity" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.regionCityLabel')}</Label>
-                      <Input id="shippingCity" value={formData.shippingAddress.city} onChange={(e) => { handleInputChange(e, "shippingAddress", "city"); if (validationErrors.shippingCity) setValidationErrors(prev => { const n = { ...prev }; delete n.shippingCity; return n }) }} placeholder={t('checkout.phRegionCityNonTz')} className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, validationErrors.shippingCity ? "border-red-500" : darkHeaderFooterClasses.inputBorder)} />
-                      {validationErrors.shippingCity && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingCity}</p>}
-                    </div>
-                  </div>
-                )}
-
-                {/* Row 3: Street address — Street Name, House/Building Number, Famous place (optional) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 items-start">
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingStreet" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.streetNameLabel')}</Label>
-                    <Input
-                      id="shippingStreet"
-                      value={formData.shippingAddress.streetName || ""}
-                      onChange={(e) => {
-                        handleInputChange(e, "shippingAddress", "streetName")
-                        if (validationErrors.shippingStreet) setValidationErrors(prev => { const n = { ...prev }; delete n.shippingStreet; return n })
-                      }}
-                      placeholder={t('checkout.phStreet')}
-                      className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, validationErrors.shippingStreet ? "border-red-500 focus:border-red-500 focus:ring-red-500" : darkHeaderFooterClasses.inputBorder)}
-                    />
-                    {validationErrors.shippingStreet && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingStreet}</p>}
-                  </div>
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingHouseNumber" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.houseNumberLabel')}</Label>
-                    <Input
-                      id="shippingHouseNumber"
-                      value={formData.shippingAddress.address1}
-                      onChange={(e) => {
-                        handleInputChange(e, "shippingAddress", "address1")
-                        if (validationErrors.shippingAddress1) {
-                          setValidationErrors(prev => { const newErrors = { ...prev }; delete newErrors.shippingAddress1; return newErrors })
-                        }
-                      }}
-                      placeholder={t('checkout.phHouse')}
-                      className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                        validationErrors.shippingAddress1 ? "border-red-500 focus:border-red-500 focus:ring-red-500" : darkHeaderFooterClasses.inputBorder
-                      )}
-                    />
-                    {validationErrors.shippingAddress1 && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.shippingAddress1}</p>}
-                  </div>
-                  <div className="grid gap-1 sm:gap-2">
-                    <Label htmlFor="shippingLandmark" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.famousPlaceLabel')}</Label>
-                    <Input
-                      id="shippingLandmark"
-                      value={formData.shippingAddress.address2 || ""}
-                      onChange={(e) => {
-                        handleInputChange(e, "shippingAddress", "address2")
-                        if (validationErrors.shippingLandmark) {
-                          setValidationErrors(prev => { const newErrors = { ...prev }; delete newErrors.shippingLandmark; return newErrors })
-                        }
-                      }}
-                      placeholder={t('checkout.phFamousPlace')}
-                      className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder, darkHeaderFooterClasses.inputBorder)}
-                    />
-                    <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>{t('checkout.famousPlaceHint')}</p>
-                  </div>
-                </div>
-
-                {/* Row 4: More details (optional) */}
-                <div className="grid gap-1 sm:gap-2 w-full max-w-full">
-                  <Label htmlFor="shippingMoreDetails" className={cn("text-sm sm:text-base", themeClasses.mainText)}>{t('checkout.moreDetailsLabel')}</Label>
-                  <Input
-                    id="shippingMoreDetails"
-                    value={formData.shippingAddress.state || ""}
-                    onChange={(e) => handleInputChange(e, "shippingAddress", "state")}
-                    placeholder={t('checkout.phMoreDetails')}
-                    className={cn(darkHeaderFooterClasses.inputBg, darkHeaderFooterClasses.inputBorder, darkHeaderFooterClasses.textNeutralPrimary, darkHeaderFooterClasses.inputPlaceholder)}
-                  />
-                </div>
-            </CardContent>
-          </Card>
-        )
-        } else {
-          // For pickup, case 1 is billing information
-        return (
-          <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-              <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>{t('checkout.contactInfoTitle')}</CardTitle>
-                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                  {t('checkout.contactInfoSubtitle')}
-                </p>
-            </CardHeader>
-              <CardContent className="grid gap-3 sm:gap-4 p-3 sm:p-6">
-                {/* Contact Form for Pickup */}
-                <div className="space-y-4">
-                    {/* Row 1: Full Name, Email, Phone */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingFullNamePickup" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                      {t('checkout.fullNameLabel')}
-                    </Label>
-                    <Input
-                          id="billingFullNamePickup"
-                      value={formData.billingAddress.fullName}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "fullName")
-                            if (validationErrors.billingFullName) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingFullName
-                                return newErrors
-                              })
-                            }
-                          }}
-                      placeholder={t('checkout.phFullName')}
-                      className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingFullName
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                      )}
-                    />
-                        {validationErrors.billingFullName && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingFullName}</p>
-                    )}
-                  </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingEmailPickup" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.emailLabel')}
-                        </Label>
-                        <Input
-                          id="billingEmailPickup"
-                          type="email"
-                          value={formData.billingAddress.email}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "email")
-                            if (validationErrors.billingEmail) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingEmail
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phEmail')}
-                          className={cn(
-                            darkHeaderFooterClasses.inputBg,
-                            darkHeaderFooterClasses.textNeutralPrimary,
-                            darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingEmail
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                          )}
-                        />
-                        {validationErrors.billingEmail && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingEmail}</p>
-                    )}
-                  </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingPhonePickup" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.phoneLabel')}
-                        </Label>
-                        <Input
-                          id="billingPhonePickup"
-                          value={formData.billingAddress.phone}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "phone")
-                            if (validationErrors.billingPhone) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingPhone
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phPhone')}
-                      className={cn(
-                            darkHeaderFooterClasses.inputBg,
-                            darkHeaderFooterClasses.textNeutralPrimary,
-                            darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingPhone
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                          )}
-                        />
-                        {validationErrors.billingPhone && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingPhone}</p>
-                        )}
-                      </div>
-                      </div>
-                      </div>
-              </CardContent>
-            </Card>
-          )
-        }
-
-      case 2:
-        if ((deliveryOption as string) === 'shipping') {
-          // For shipping, case 2 is billing information
-          return (
-            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-              <CardHeader className="p-3 sm:p-6">
-                <CardTitle className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
-                  {t('checkout.billingInformationTitle')}
-                </CardTitle>
-                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                  {t('checkout.billingDetailsSubtitle')}
-                </p>
-              </CardHeader>
-              <CardContent className="grid gap-3 sm:gap-4 p-3 sm:p-6">
-                {/* Same as Shipping Checkbox */}
-                <div className="flex items-center space-x-2 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                  <Checkbox
-                    id="sameAsShippingShipping"
-                    checked={formData.sameAsShipping}
-                    onCheckedChange={(checked) => handleSameAsShipping(checked as boolean)}
-                    className="border-blue-500 data-[state=checked]:bg-blue-500"
-                  />
-                  <Label htmlFor="sameAsShippingShipping" className={cn("text-sm font-medium cursor-pointer", themeClasses.mainText)}>
-                    {t('checkout.sameAsShippingLabel')}
-                  </Label>
-                    </div>
-
-                {/* Billing Form - Show only if not using same as shipping */}
-                {!formData.sameAsShipping && (
-                  <>
-                    {/* Row 1: Full Name, Email, Phone */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingFullNameShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.fullNameLabel')}
-                      </Label>
-                      <Input
-                          id="billingFullNameShipping"
-                          value={formData.billingAddress.fullName}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "fullName")
-                            if (validationErrors.billingFullName) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingFullName
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phFullName')}
-                        className={cn(
-                              darkHeaderFooterClasses.inputBg,
-                              darkHeaderFooterClasses.textNeutralPrimary,
-                              darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingFullName
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                        )}
-                      />
-                        {validationErrors.billingFullName && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingFullName}</p>
-                      )}
-                    </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingEmailShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.emailLabel')}
-                      </Label>
-                      <Input
-                          id="billingEmailShipping"
-                          type="email"
-                          value={formData.billingAddress.email}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "email")
-                            if (validationErrors.billingEmail) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingEmail
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phEmail')}
-                        className={cn(
-                              darkHeaderFooterClasses.inputBg,
-                              darkHeaderFooterClasses.textNeutralPrimary,
-                              darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingEmail
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                        )}
-                      />
-                        {validationErrors.billingEmail && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingEmail}</p>
-                      )}
-                    </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingPhoneShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        {t('checkout.phoneLabel')}
-                      </Label>
-                      <Input
-                          id="billingPhoneShipping"
-                        value={formData.billingAddress.phone}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "phone")
-                            if (validationErrors.billingPhone) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingPhone
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phPhone')}
-                        className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingPhone
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                          )}
-                        />
-                        {validationErrors.billingPhone && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingPhone}</p>
-                      )}
-                    </div>
-                  </div>
-
-                    {/* Row 2: Country, City, Street */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingCountryShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.countryLabel')}
-                      </Label>
-                        <select
-                          id="billingCountryShipping"
-                          value={formData.billingAddress.country}
-                          onChange={(e) => handleInputChange(e, "billingAddress", "country")}
-                        className={cn(
-                            "w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500",
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.inputBorder,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          )}
-                        >
-                          <option value="Tanzania">Tanzania</option>
-                          <option value="Kenya">Kenya</option>
-                          <option value="Uganda">Uganda</option>
-                          <option value="Rwanda">Rwanda</option>
-                        </select>
-              </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingCityShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.regionCityLabel')}
-                </Label>
-                <Input
-                          id="billingCityShipping"
-                          value={formData.billingAddress.city}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "city")
-                            if (validationErrors.billingCity) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingCity
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phRegionCityBilling')}
-                  className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingCity
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                          )}
-                        />
-                        {validationErrors.billingCity && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingCity}</p>
-                      )}
-                    </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingStreetShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.streetNameLabel')}
-                </Label>
-                <Input
-                          id="billingStreetShipping"
-                          value={formData.billingAddress.streetName || ""}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "streetName")
-                            if (validationErrors.billingStreet) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingStreet
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phStreet')}
-                  className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingStreet
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                  )}
-                />
-                        {validationErrors.billingStreet && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingStreet}</p>
-                )}
-              </div>
-                    </div>
-
-                    {/* Row 3: Address, Postal Code, TIN */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingAddressShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.houseNumberLabel')}
-                  </Label>
-                  <Input
-                          id="billingAddressShipping"
-                          value={formData.billingAddress.address1}
-                          onChange={(e) => {
-                            handleInputChange(e, "billingAddress", "address1")
-                            if (validationErrors.billingAddress1) {
-                              setValidationErrors(prev => {
-                                const newErrors = { ...prev }
-                                delete newErrors.billingAddress1
-                                return newErrors
-                              })
-                            }
-                          }}
-                          placeholder={t('checkout.phHouse')}
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                            validationErrors.billingAddress1
-                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
-                              : darkHeaderFooterClasses.inputBorder
-                    )}
-                  />
-                        {validationErrors.billingAddress1 && (
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationErrors.billingAddress1}</p>
-                  )}
-                </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingPostalCodeShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.postalCodeOptionalLabel')}
-                  </Label>
-                  <Input
-                          id="billingPostalCodeShipping"
-                          value={formData.billingAddress.postalCode}
-                          onChange={(e) => handleInputChange(e, "billingAddress", "postalCode")}
-                          placeholder={t('checkout.phPostal')}
-                    className={cn(
-                          darkHeaderFooterClasses.inputBg,
-                          darkHeaderFooterClasses.inputBorder,
-                          darkHeaderFooterClasses.textNeutralPrimary,
-                          darkHeaderFooterClasses.inputPlaceholder,
-                    )}
-                  />
-                    </div>
-
-                      <div className="grid gap-1 sm:gap-2">
-                        <Label htmlFor="billingTinShipping" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                          {t('checkout.tinOptionalLabel')}
-                    </Label>
-                    <Input
-                          id="billingTinShipping"
-                          value={formData.billingAddress.tin || ""}
-                          onChange={(e) => handleInputChange(e, "billingAddress", "tin")}
-                          placeholder={t('checkout.phTin')}
-                      className={cn(
-                        darkHeaderFooterClasses.inputBg,
-                        darkHeaderFooterClasses.inputBorder,
-                        darkHeaderFooterClasses.textNeutralPrimary,
-                        darkHeaderFooterClasses.inputPlaceholder,
-                      )}
-                    />
-                      </div>
-                  </div>
-                </>
-              )}
-              
-                {/* Show summary if using same as shipping */}
-                {formData.sameAsShipping && (
-                  <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <p className={cn("text-sm font-medium", themeClasses.mainText)}>
-                        {t('checkout.usingShippingForBillingLabel')}
-                    </p>
-                  </div>
-                    <div className="text-sm space-y-1">
-                      <p className={themeClasses.mainText}>{formData.shippingAddress.fullName}</p>
-                      <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.address1}</p>
-                      <p className={themeClasses.textNeutralSecondary}>
-                        {formData.shippingAddress.country === 'Tanzania'
-                          ? [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward].filter(Boolean).join(', ') || formData.shippingAddress.city
-                          : formData.shippingAddress.city}, {formData.shippingAddress.country}
-                      </p>
-                      <p className={themeClasses.textNeutralSecondary}>{formData.shippingAddress.phone}</p>
-                </div>
-              </div>
-                )}
-            </CardContent>
-          </Card>
-        )
-        } else {
-          // For pickup, case 2 is order review
-          if (isProcessingPayment || paymentLinkGenerated) {
-            return renderSecurePayment()
-          }
-          
-        return (
-          <>
-            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-              <CardContent className="p-3 sm:p-4 md:p-6 space-y-6" style={{ contentVisibility: 'auto' }}>
-                {renderReviewItems()}
-
-                {/* Applied promotion - same style as cart page (read-only) */}
-                {appliedPromotion && (
-                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Ticket className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-                        <span className="text-xs sm:text-sm font-semibold text-green-800 dark:text-green-200">
-                          {appliedPromotion.code}
-                        </span>
-                      </div>
-                      <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
-                        {appliedPromotion.name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-            </CardContent>
-          </Card>
-          </>
-        )
-          }
-
-      case 3:
-        if ((deliveryOption as string) === 'shipping') {
-          // For shipping, case 3 is order review
-          if (isProcessingPayment || paymentLinkGenerated) {
-            return renderSecurePayment()
-          }
-          
-        return (
-          <>
-            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-              <CardContent className="p-3 sm:p-4 md:p-6 space-y-6">
-                {renderReviewItems()}
-
-                {/* Applied promotion - same style as cart page (read-only) */}
-                {appliedPromotion && (
-                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Ticket className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-                        <span className="text-xs sm:text-sm font-semibold text-green-800 dark:text-green-200">
-                          {appliedPromotion.code}
-                        </span>
-                      </div>
-                      <p className="text-[10px] sm:text-xs text-green-700 dark:text-green-300">
-                        {appliedPromotion.name || t('cart.promotionNameFallback')} • {formatPrice(appliedPromotion.discountAmount)} {t('cart.promoDiscountApplied')}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Shipping Address */}
-                <div className="space-y-3 sm:space-y-4">
-                  <h3 className={cn("text-xl font-bold sm:text-2xl", themeClasses.mainText)}>
-                    {t('checkout.reviewShippingTitle')}
-                  </h3>
-                  <div className={cn(
-                    "rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-4",
-                    "bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700",
-                  )}>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                      <div className="space-y-1">
-                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFullName')}</p>
-                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.fullName || '—'}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewPhone')}</p>
-                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.phone || '—'}</p>
-                      </div>
-                      <div className="space-y-1 sm:col-span-2">
-                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewEmail')}</p>
-                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.email || '—'}</p>
-                      </div>
-                      {formData.shippingAddress.streetName && (
-                        <div className="space-y-1">
-                          <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewStreet')}</p>
-                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.streetName}</p>
-                        </div>
-                      )}
-                      <div className="space-y-1">
-                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewHouseBuilding')}</p>
-                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address1 || '—'}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{formData.shippingAddress.country === 'Tanzania' ? t('checkout.reviewRegionDistrictWard') : t('checkout.reviewCity')}</p>
-                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
-                          {formData.shippingAddress.country === 'Tanzania'
-                            ? [formData.shippingAddress.region, formData.shippingAddress.district, formData.shippingAddress.ward].filter(Boolean).join(', ') || '—'
-                            : (formData.shippingAddress.city || '—')}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewCountry')}</p>
-                        <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.country || '—'}</p>
-                      </div>
-                      {(formData.shippingAddress.postalCode || formData.shippingAddress.state) && (
-                        <div className="space-y-1">
-                          <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewMoreDetails')}</p>
-                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>
-                            {[formData.shippingAddress.postalCode, formData.shippingAddress.state].filter(Boolean).join(' · ') || '—'}
-                          </p>
-                        </div>
-                      )}
-                      {formData.shippingAddress.address2 && (
-                        <div className="space-y-1 sm:col-span-2">
-                          <p className={cn("text-sm font-semibold", themeClasses.textNeutralSecondary)}>{t('checkout.reviewFamousPlace')}</p>
-                          <p className={cn("text-sm sm:text-base font-medium", themeClasses.mainText)}>{formData.shippingAddress.address2}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-            </CardContent>
-          </Card>
-          </>
-        )
-        } else {
-          // For pickup, case 3 is order confirmation
-          return (
-            <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-              <CardHeader className="text-center">
-                <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>
-                  {t('checkout.orderConfirmedTitle')}
-                </CardTitle>
-                <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                  Thank you for your order. We will notify you when it is ready for pickup.
-                </p>
-              </CardHeader>
-              <CardContent className="text-center space-y-4">
-                <div className="bg-green-50 dark:bg-green-950/20 p-4 rounded-lg space-y-3">
-              <div>
-                    <p className={cn("font-medium text-lg", themeClasses.mainText)}>
-                      Pickup ID: {orderPickupId || orderId}
-                    </p>
-                    <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                      Use this ID for pickup reference
-                          </p>
-                        </div>
-                  {paymentStatus && (
-                    <div className="pt-2 border-t border-green-200 dark:border-green-800">
-                      <p className={cn("text-sm font-medium", themeClasses.mainText)}>
-                        Payment Status: 
-                        <span className={cn(
-                          "ml-2 px-2 py-1 rounded text-xs",
-                          paymentStatus === 'paid' 
-                            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                            : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                        )}>
-                          {paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
-                        </span>
-                          </p>
-                        </div>
-                  )}
-              </div>
-            </CardContent>
-              <CardFooter className="justify-center">
-                <Link href="/home">
-                  <Button className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600">
-                    Continue Shopping
-              </Button>
-                </Link>
-            </CardFooter>
-          </Card>
-        )
-        }
-
-      case 4:
-        // For shipping, case 4 is order confirmation
-        return (
-          <Card className={cn("border border-neutral-200 bg-white text-neutral-900 shadow-none")}>
-            <CardHeader className="text-center">
-              <CardTitle className={cn("text-2xl text-green-600", themeClasses.mainText)}>
-                  {t('checkout.orderConfirmedTitle')}
-                </CardTitle>
-              <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                Thank you for your order. We will process it and send you tracking information.
-              </p>
-            </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <div className="bg-green-50 dark:bg-green-950/20 p-4 rounded-lg space-y-3">
-                <div>
-                  <p className={cn("font-medium text-lg", themeClasses.mainText)}>
-                    Order ID: {orderPickupId || orderId}
-                  </p>
-                  <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                    Please save this order ID for your records
-                  </p>
-                </div>
-                {paymentStatus && (
-                  <div className="pt-2 border-t border-green-200 dark:border-green-800">
-                    <p className={cn("text-sm font-medium", themeClasses.mainText)}>
-                      Payment Status: 
-                      <span className={cn(
-                        "ml-2 px-2 py-1 rounded text-xs",
-                        paymentStatus === 'paid' 
-                          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                          : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                      )}>
-                        {paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
-                      </span>
-                    </p>
-                  </div>
-                )}
-                </div>
-            </CardContent>
-            <CardFooter className="justify-center">
-              <Link href="/">
-                <Button className="bg-yellow-500 text-neutral-950 hover:bg-yellow-600">
-                  Continue Shopping
-                </Button>
-                </Link>
-            </CardFooter>
-          </Card>
-        )
-
-      default:
-        return null
-    }
-  }
-
-  const stepTitles = useMemo(
-    () =>
-      deliveryOption === 'pickup'
-        ? [
-            t('checkout.stepDelivery'),
-            t('checkout.stepBilling'),
-            t('checkout.stepReview'),
-            t('checkout.stepConfirmed'),
-          ]
-        : [
-            t('checkout.stepDelivery'),
-            t('checkout.stepShipping'),
-            t('checkout.stepBilling'),
-            t('checkout.stepReview'),
-            t('checkout.stepConfirmed'),
-          ],
-    [deliveryOption, t]
-  )
-
-  const maxSteps = deliveryOption === 'pickup' ? 4 : 5
-  const onPayStep = (deliveryOption === 'pickup' && currentStep === 2) || (deliveryOption === 'shipping' && currentStep === 3)
-  const phoneDigits = paymentPhone.replace(/\D/g, "")
-  const networkPrefix = phoneDigits.startsWith("255") ? phoneDigits.slice(3, 5) : phoneDigits.startsWith("0") ? phoneDigits.slice(1, 3) : phoneDigits.slice(0, 2)
-  const detectedNetwork =
-    ["74", "75", "76"].includes(networkPrefix) ? "M-Pesa" :
-    ["68", "69", "78"].includes(networkPrefix) ? "Airtel Money" :
-    ["65", "67", "71"].includes(networkPrefix) ? "Mixx by Yas" :
-    networkPrefix === "62" ? "Halotel" :
-    null
-  const mobileNetworks = ["Airtel Money", "M-Pesa", "Mixx by Yas", "Halotel"]
-
-  const summaryItems = selectedItems.flatMap((item) =>
-    (item.variants || []).map((variant: { variantId?: string | number; variant_name?: string; quantity?: number; price?: number; image?: string }) => ({
+  const lines = selectedItems.flatMap((item) =>
+    (item.variants || []).map((variant) => ({
       key: `${item.productId}-${variant.variantId || variant.variant_name || "item"}`,
+      productId: item.productId,
+      variantId: variant.variantId,
       name: item.product?.name || "Item",
-      variant: variant.variant_name,
+      variant: variant.variant_name && variant.variant_name !== "Default" ? variant.variant_name : "",
       quantity: variant.quantity || 1,
+      price: variant.price || 0,
       total: (variant.price || 0) * (variant.quantity || 1),
-      image: variant.image || item.product?.image || "",
+      image: safeImageSrc(variant.image || item.product?.image || ""),
     }))
   )
+  const itemCount = lines.reduce((n, l) => n + l.quantity, 0)
 
+  const feeText = deliveryOption === "pickup"
+    ? t("checkout.free")
+    : deferShippingFee
+      ? "Add your region"
+      : shippingFeeLoading
+        ? null
+        : shippingFee === 0
+          ? t("checkout.free")
+          : formatPrice(shippingFee)
+
+  const payLabel = isProcessingPayment ? "Sending request…" : paymentError ? t("checkout.tryAgain") : `Pay ${formatPrice(orderTotal)}`
+
+  /* ----- pieces ----- */
+  const payButton = (className?: string) => (
+    <button
+      type="button"
+      onClick={handlePlaceOrder}
+      disabled={isProcessingPayment || paymentLinkGenerated || lines.length === 0}
+                         className={cn(
+        "group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3.5 text-base font-bold text-white shadow-lg shadow-orange-500/30 transition",
+        "hover:from-orange-600 hover:to-orange-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60",
+        className
+      )}
+    >
+      {isProcessingPayment ? <Loader2 className="h-5 w-5 animate-spin" /> : <Lock className="h-4 w-4" />}
+      <span className="tabular-nums">{payLabel}</span>
+    </button>
+  )
+
+  const summary = (
+    <div className="overflow-hidden rounded-3xl border border-neutral-200/80 bg-white shadow-sm">
+      <div className="flex items-center justify-between px-5 pb-3 pt-5">
+        <h2 className="text-base font-bold text-neutral-950">Order summary</h2>
+        <span className="rounded-full bg-orange-50 px-2.5 py-1 text-xs font-bold text-orange-700">
+          {itemCount} {itemCount === 1 ? "item" : "items"}
+        </span>
+                        </div>
+
+      <ul className="max-h-[22rem] divide-y divide-neutral-100 overflow-y-auto px-5">
+        {lines.map((line) => (
+          <li key={line.key} className="flex gap-3 py-3">
+            <Link
+              href={`/products/${line.productId}-${encodeURIComponent(line.name)}?returnTo=${encodeURIComponent("/checkout")}`}
+              className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={optimizedImg(line.image, 64)} alt="" className="h-full w-full object-contain p-1" loading="lazy" />
+            </Link>
+                  <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 text-[13px] font-semibold leading-snug text-neutral-900">{line.name}</p>
+              {line.variant && <p className="mt-0.5 truncate text-xs text-neutral-500">{line.variant}</p>}
+              <div className="mt-1.5 flex items-center justify-between gap-2">
+                {buyNow || paying ? (
+                  <span className="text-xs text-neutral-500">Qty {line.quantity} × {formatPrice(line.price)}</span>
+                ) : (
+                  <div className="flex items-center rounded-full border border-neutral-200">
+                    <button
+                      type="button"
+                      aria-label="Decrease quantity"
+                      disabled={line.quantity <= 1}
+                      onClick={() => updateItemQuantity(line.productId, line.quantity - 1, line.variantId)}
+                      className="grid h-7 w-7 place-items-center rounded-full text-neutral-600 hover:bg-neutral-100 disabled:opacity-30"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <span className="min-w-6 text-center text-xs font-bold tabular-nums">{line.quantity}</span>
+                    <button
+                      type="button"
+                      aria-label="Increase quantity"
+                      onClick={() => updateItemQuantity(line.productId, line.quantity + 1, line.variantId)}
+                      className="grid h-7 w-7 place-items-center rounded-full text-neutral-600 hover:bg-neutral-100"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+                <span className="text-sm font-bold tabular-nums text-neutral-950">{formatPrice(line.total)}</span>
+              </div>
+              </div>
+          </li>
+        ))}
+      </ul>
+
+      {appliedPromotion && (
+        <div className="mx-5 mt-2 flex items-center gap-2 rounded-2xl border border-dashed border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          <Ticket className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            <b>{appliedPromotion.code}</b> · {appliedPromotion.name || t("cart.promotionNameFallback")}
+          </span>
+                  </div>
+      )}
+
+      <dl className="space-y-2 px-5 py-4 text-sm">
+        <div className="flex justify-between">
+          <dt className="text-neutral-500">Subtotal</dt>
+          <dd className="font-semibold tabular-nums">{formatPrice(displaySubtotal)}</dd>
+                </div>
+        <div className="flex justify-between">
+          <dt className="text-neutral-500">{deliveryOption === "pickup" ? t("checkout.storePickupTitle") : "Delivery"}</dt>
+          <dd className={cn("font-semibold", (feeText === t("checkout.free")) && "text-emerald-600", deferShippingFee && deliveryOption === "shipping" && "text-xs font-medium text-neutral-400")}>
+            {feeText ?? <span className="inline-block h-3.5 w-14 animate-pulse rounded bg-neutral-200 align-middle" />}
+          </dd>
+        </div>
+        {/* where it goes, how long, and why (zone, delivery time, large-item fee, free delivery) */}
+        {deliveryOption === "shipping" && !deferShippingFee && shippingEstimate?.delivery && (
+          <p className="-mt-1 text-right text-[11px] leading-snug text-neutral-500">
+            {shippingEstimate.delivery.zone}{shippingEstimate.delivery.eta ? ` · ${shippingEstimate.delivery.eta}` : ""}
+            {shippingEstimate.delivery.freeReason === "threshold" && <span className="block text-emerald-700">Free delivery on orders over {formatPrice(FREE_SHIPPING_THRESHOLD)}</span>}
+            {shippingEstimate.delivery.sizeSurcharge > 0 && <span className="block">Includes {formatPrice(shippingEstimate.delivery.sizeSurcharge)} {shippingEstimate.delivery.size === "large" ? "large-item" : "bigger-item"} handling</span>}
+          </p>
+        )}
+        {promotionDiscount > 0 && (
+          <div className="flex justify-between text-emerald-700">
+            <dt>Discount</dt>
+            <dd className="font-semibold tabular-nums">−{formatPrice(promotionDiscount)}</dd>
+                  </div>
+        )}
+        <div className="flex items-end justify-between border-t border-neutral-100 pt-3">
+          <dt className="font-bold text-neutral-950">Total</dt>
+          <dd className="text-right">
+            <span className="block text-2xl font-black tabular-nums tracking-tight text-neutral-950">{formatPrice(orderTotal)}</span>
+            {deliveryOption === "shipping" && deferShippingFee && <span className="text-[11px] text-neutral-400">+ delivery once you pick a region</span>}
+          </dd>
+                  </div>
+      </dl>
+
+      {!paying && (
+        <div className="hidden px-5 pb-5 lg:block">
+          {payButton()}
+          {paymentError && <p className="mt-2 text-center text-sm text-red-600">{paymentError}</p>}
+                      </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-px border-t border-neutral-100 bg-neutral-100 text-center text-[11px] font-semibold text-neutral-600">
+        {[
+          { icon: Lock, label: "Secure checkout" },
+          { icon: ShieldCheck, label: "PIN stays private" },
+          { icon: ReceiptText, label: "Instant receipt" },
+        ].map(({ icon: Icon, label: l }) => (
+          <div key={l} className="flex flex-col items-center gap-1 bg-white px-2 py-3">
+            <Icon className="h-4 w-4 text-orange-500" />
+            {l}
+                    </div>
+        ))}
+                    </div>
+                  </div>
+  )
+
+  const select = (id: string, value: string, onChange: (v: string) => void, options: readonly string[], placeholder: string, error?: string, disabled?: boolean) => (
+    <div className="relative">
+                        <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(inputClass(error), "appearance-none pr-9 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-400")}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+                        </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+              </div>
+  )
+
+  const contactSection = (
+    <SectionCard n={1} icon={<UserRound className="h-4 w-4" />} title="Contact" subtitle="We send order updates and the receipt here." done={contactDone}>
+      {!user && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-4 py-3 text-sm">
+          <span className="text-neutral-600">Have an account? Sign in to fill this in and track your order.</span>
+          <button type="button" onClick={() => openAuthModal("login")} className="font-bold text-orange-600 hover:text-orange-700">
+            Sign in
+          </button>
+                    </div>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field id="shippingFullName" label={label("checkout.fullNameLabel")} error={errors.shippingFullName} className="sm:col-span-2">
+          <input
+            id="shippingFullName"
+            autoComplete="name"
+            value={shippingAddress.fullName}
+            onChange={(e) => setField("shippingAddress", "fullName", e.target.value)}
+            placeholder={t("checkout.phFullName")}
+            className={inputClass(errors.shippingFullName)}
+          />
+        </Field>
+        <Field id="shippingPhone" label={label("checkout.phoneLabel")} error={errors.shippingPhone} hint="The mobile money number that will pay">
+          <input
+            id="shippingPhone"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            value={shippingAddress.phone}
+            onChange={(e) => setField("shippingAddress", "phone", e.target.value)}
+            placeholder="0712 345 678"
+            className={inputClass(errors.shippingPhone)}
+          />
+        </Field>
+        <Field id="shippingEmail" label={label("checkout.emailLabel")} error={errors.shippingEmail}>
+          <input
+            id="shippingEmail"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            value={shippingAddress.email}
+            onChange={(e) => setField("shippingAddress", "email", e.target.value)}
+            placeholder={t("checkout.phEmail")}
+            className={inputClass(errors.shippingEmail)}
+          />
+        </Field>
+                    </div>
+    </SectionCard>
+  )
+
+  const deliveryChoices: { value: Delivery; icon: ReactNode; title: string; line: string; badge: string }[] = [
+    { value: "shipping", icon: <Truck className="h-5 w-5" />, title: "Deliver to me", line: t("checkout.estDeliveryValue"), badge: feeText ?? "…" },
+    { value: "pickup", icon: <Store className="h-5 w-5" />, title: t("checkout.storePickupTitle"), line: "Dar es Salaam · ready same or next day", badge: t("checkout.free") },
+  ]
+
+  const deliverySection = (
+    <SectionCard n={2} icon={<MapPin className="h-4 w-4" />} title="Delivery" subtitle={t("checkout.deliveryOptionSubtitle")} done={contactDone && deliveryDone}>
+      <div role="radiogroup" aria-label={t("checkout.deliveryOptionTitle")} className="grid gap-3 sm:grid-cols-2">
+        {deliveryChoices.map((c) => {
+          const active = deliveryOption === c.value
+                        return (
+            <button
+              key={c.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => setDeliveryOption(c.value)}
+                            className={cn(
+                "relative flex items-start gap-3 rounded-2xl border-2 p-4 text-left transition",
+                active ? "border-orange-500 bg-orange-50/60 shadow-sm" : "border-neutral-200 hover:border-neutral-300"
+              )}
+            >
+              <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", active ? "bg-orange-500 text-white" : "bg-neutral-100 text-neutral-500")}>
+                {c.icon}
+                                      </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-neutral-950">{c.title}</span>
+                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold", c.badge === t("checkout.free") ? "bg-emerald-100 text-emerald-700" : "bg-white text-neutral-600 ring-1 ring-neutral-200")}>
+                    {c.badge}
+                                          </span>
+                                          </span>
+                <span className="mt-0.5 block text-xs text-neutral-500">{c.line}</span>
+              </span>
+              <span className={cn("absolute right-3 top-3 hidden h-4 w-4 rounded-full border-2", active ? "border-orange-500 bg-orange-500" : "border-neutral-300")} />
+            </button>
+          )
+        })}
+                </div>
+
+      {deliveryOption === "pickup" ? (
+        <div className="mt-4 flex gap-3 rounded-2xl bg-neutral-950 p-4 text-white">
+          <Building2 className="mt-0.5 h-5 w-5 shrink-0 text-orange-400" />
+          <div className="text-sm">
+            <p className="font-semibold">{t("checkout.storePickupDesc")}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-neutral-400">
+              <Clock className="h-3.5 w-3.5" /> {t("checkout.pickupTimeValue")}
+            </p>
+            <p className="mt-1 text-xs text-neutral-400">Bring your order number (we send it by SMS/email after payment).</p>
+                          </div>
+                        </div>
+                      ) : (
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <Field id="shippingCountry" label={label("checkout.countryLabel")}>
+            {select("shippingCountry", shippingAddress.country, (v) => setField("shippingAddress", "country", v || "Tanzania"), SHIP_COUNTRIES, "Tanzania")}
+          </Field>
+          {isTz ? (
+            <>
+              <Field id="shippingRegion" label={label("checkout.regionLabel")} error={errors.shippingRegion}>
+                {select("shippingRegion", shippingAddress.region || "", onRegion, TANZANIA_REGIONS, t("checkout.selectRegion"), errors.shippingRegion)}
+              </Field>
+              <Field id="shippingDistrict" label={label("checkout.districtLabel")} error={errors.shippingDistrict}>
+                {select(
+                  "shippingDistrict",
+                  shippingAddress.district || "",
+                  onDistrict,
+                  DISTRICTS_BY_REGION[shippingAddress.region || ""] ?? [],
+                  shippingAddress.region ? t("checkout.selectDistrict") : "Pick a region first",
+                  errors.shippingDistrict,
+                  !shippingAddress.region
+                )}
+              </Field>
+              <Field id="shippingWard" label={label("checkout.wardLabel")} error={errors.shippingWard}>
+                {select(
+                  "shippingWard",
+                  shippingAddress.ward || "",
+                  (v) => setField("shippingAddress", "ward", v),
+                  getWardOptions(shippingAddress.district || ""),
+                  shippingAddress.district ? t("checkout.selectWard") : "Pick a district first",
+                  errors.shippingWard,
+                  !shippingAddress.district
+                )}
+              </Field>
+                    </>
+                  ) : (
+            <Field id="shippingCity" label={label("checkout.regionCityLabel")} error={errors.shippingCity}>
+              <input
+                id="shippingCity"
+                autoComplete="address-level2"
+                value={shippingAddress.city}
+                onChange={(e) => setField("shippingAddress", "city", e.target.value)}
+                placeholder={t("checkout.phRegionCityNonTz")}
+                className={inputClass(errors.shippingCity)}
+              />
+            </Field>
+          )}
+          <Field id="shippingStreet" label={label("checkout.streetNameLabel")} error={errors.shippingStreet}>
+            <input
+              id="shippingStreet"
+              autoComplete="address-line1"
+              value={shippingAddress.streetName || ""}
+              onChange={(e) => setField("shippingAddress", "streetName", e.target.value)}
+              placeholder={t("checkout.phStreet")}
+              className={inputClass(errors.shippingStreet)}
+            />
+          </Field>
+          <Field id="shippingAddress1" label={label("checkout.houseNumberLabel")} error={errors.shippingAddress1}>
+            <input
+              id="shippingAddress1"
+              autoComplete="address-line2"
+              value={shippingAddress.address1}
+              onChange={(e) => setField("shippingAddress", "address1", e.target.value)}
+              placeholder={t("checkout.phHouse")}
+              className={inputClass(errors.shippingAddress1)}
+            />
+          </Field>
+          <Field id="shippingLandmark" label={t("checkout.famousPlaceLabel").replace(/\s*\(.*\)\s*$/, "")} optional hint="Helps the rider find you" className="sm:col-span-2">
+            <input
+              id="shippingLandmark"
+              value={shippingAddress.address2 || ""}
+              onChange={(e) => setField("shippingAddress", "address2", e.target.value)}
+              placeholder={t("checkout.phMoreDetails")}
+              className={inputClass()}
+            />
+          </Field>
+          {!deferShippingFee && (
+            <p className="flex items-center gap-2 rounded-xl bg-orange-50 px-3 py-2 text-xs font-medium text-orange-800 sm:col-span-2">
+              <Truck className="h-4 w-4 shrink-0" />
+              {shippingFeeLoading ? "Working out the delivery fee…" : `Delivery to ${[shippingAddress.ward, shippingAddress.district, shippingAddress.region || shippingAddress.city].filter(Boolean).join(", ")}: ${feeText}`}
+            </p>
+          )}
+                        </div>
+      )}
+    </SectionCard>
+  )
+
+  const paymentSection = (
+    <SectionCard n={3} icon={<Smartphone className="h-4 w-4" />} title="Payment" subtitle="Pay with mobile money. You approve it on your phone.">
+      <div className="rounded-2xl border-2 border-orange-500 bg-orange-50/40 p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-orange-500 text-white">
+            <Smartphone className="h-5 w-5" />
+                  </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-neutral-950">Mobile money</p>
+            <p className="mt-0.5 text-sm text-neutral-600">
+              {paymentPhone.trim()
+                ? <>A payment prompt goes to <b className="tabular-nums text-neutral-900">{paymentPhone}</b>.</>
+                : "A payment prompt goes to the phone number above."}{" "}
+              Your PIN never touches this website.
+            </p>
+                </div>
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-orange-500 text-white">
+            <Check className="h-3 w-3" />
+          </span>
+                </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {NETWORKS.map((n) => {
+            const on = network?.name === n.name
+                      return (
+                        <div
+                key={n.name}
+                          className={cn(
+                  "relative flex flex-col items-center gap-1.5 rounded-xl bg-white px-2 pb-2 pt-2.5 ring-1 transition",
+                  on ? "ring-2 ring-orange-500" : network ? "opacity-40 grayscale ring-neutral-200" : "ring-neutral-200"
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={n.logo} alt="" className="h-8 w-full object-contain" />
+                <span className="w-full truncate text-center text-[11px] font-semibold text-neutral-700">{n.name}</span>
+                {on && (
+                  <span className="absolute -right-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full bg-orange-500 text-white">
+                    <Check className="h-2.5 w-2.5" />
+                                    </span>
+                )}
+                        </div>
+                      )
+          })}
+        </div>
+        <p className="mt-2.5 text-xs text-neutral-500">
+          {network
+            ? <>Detected <b className="text-neutral-800">{network.wallet}</b> from your number. No need to choose a network.</>
+            : "No need to choose a network: it's detected from your phone number."}
+        </p>
+                </div>
+
+      {/* billing / invoice details */}
+      <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-neutral-200 p-4 transition hover:border-neutral-300">
+        <input
+          type="checkbox"
+          checked={!sameAsShipping}
+          onChange={(e) => toggleBilling(!e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-orange-500"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-neutral-900">I need an invoice with a TIN or different billing details</span>
+          <span className="block text-xs text-neutral-500">Otherwise your contact{deliveryOption === "shipping" ? " and delivery" : ""} details are used for billing.</span>
+                    </span>
+      </label>
+
+      {!sameAsShipping && (
+        <div className="mt-4 grid gap-4 rounded-2xl bg-neutral-50 p-4 sm:grid-cols-2">
+          <Field id="billingFullName" label="Name on invoice" error={errors.billingFullName} className="sm:col-span-2">
+            <input id="billingFullName" value={billingAddress.fullName} onChange={(e) => setField("billingAddress", "fullName", e.target.value)} placeholder="Person or company name" className={inputClass(errors.billingFullName)} />
+          </Field>
+          <Field id="billingPhone" label={label("checkout.phoneLabel")} error={errors.billingPhone}>
+            <input id="billingPhone" type="tel" inputMode="tel" value={billingAddress.phone} onChange={(e) => setField("billingAddress", "phone", e.target.value)} placeholder="0712 345 678" className={inputClass(errors.billingPhone)} />
+          </Field>
+          <Field id="billingEmail" label={label("checkout.emailLabel")} error={errors.billingEmail}>
+            <input id="billingEmail" type="email" inputMode="email" value={billingAddress.email} onChange={(e) => setField("billingAddress", "email", e.target.value)} placeholder={t("checkout.phEmail")} className={inputClass(errors.billingEmail)} />
+          </Field>
+          <Field id="billingTin" label={t("checkout.tinOptionalLabel").replace(/\s*\(.*\)\s*$/, "")} optional>
+            <input id="billingTin" inputMode="numeric" value={billingAddress.tin || ""} onChange={(e) => setField("billingAddress", "tin", e.target.value)} placeholder={t("checkout.phTin")} className={inputClass()} />
+          </Field>
+          <Field id="billingCountry" label={label("checkout.countryLabel")}>
+            {select("billingCountry", billingAddress.country, (v) => setField("billingAddress", "country", v || "Tanzania"), COUNTRIES, "Tanzania")}
+          </Field>
+          <Field id="billingCity" label={label("checkout.regionCityLabel")} error={errors.billingCity}>
+            <input id="billingCity" value={billingAddress.city} onChange={(e) => setField("billingAddress", "city", e.target.value)} placeholder={t("checkout.phRegionCityBilling")} className={inputClass(errors.billingCity)} />
+          </Field>
+          <Field id="billingStreet" label={label("checkout.streetNameLabel")} error={errors.billingStreet}>
+            <input id="billingStreet" value={billingAddress.streetName || ""} onChange={(e) => setField("billingAddress", "streetName", e.target.value)} placeholder={t("checkout.phStreet")} className={inputClass(errors.billingStreet)} />
+          </Field>
+          <Field id="billingAddress1" label={label("checkout.houseNumberLabel")} error={errors.billingAddress1}>
+            <input id="billingAddress1" value={billingAddress.address1} onChange={(e) => setField("billingAddress", "address1", e.target.value)} placeholder={t("checkout.phHouse")} className={inputClass(errors.billingAddress1)} />
+          </Field>
+          <Field id="billingPostalCode" label={t("checkout.postalCodeOptionalLabel").replace(/\s*\(.*\)\s*$/, "")} optional>
+            <input id="billingPostalCode" inputMode="numeric" value={billingAddress.postalCode} onChange={(e) => setField("billingAddress", "postalCode", e.target.value)} placeholder={t("checkout.phPostal")} className={inputClass()} />
+          </Field>
+                    </div>
+                  )}
+
+      <p className="mt-4 text-xs leading-relaxed text-neutral-500">
+        By paying you agree to our{" "}
+        <Link href="/terms" className="font-semibold text-neutral-700 underline-offset-2 hover:underline">terms</Link> and{" "}
+        <Link href="/privacy" className="font-semibold text-neutral-700 underline-offset-2 hover:underline">privacy policy</Link>.
+        The amount is set by the saved order and can&apos;t be changed in the browser.
+      </p>
+    </SectionCard>
+  )
+
+  const waitingSteps = [
+    { label: "Order saved", done: !isProcessingPayment || paymentLinkGenerated, active: isProcessingPayment && !paymentLinkGenerated },
+    { label: `Prompt sent to ${paymentPhone || "your phone"}`, done: paymentLinkGenerated, active: isProcessingPayment },
+    { label: "Approve with your PIN", done: false, active: paymentLinkGenerated },
+    { label: "Payment confirmed", done: false, active: false },
+  ]
+
+  const paymentPanel = (
+    <section className="overflow-hidden rounded-3xl border border-neutral-200/80 bg-white shadow-sm" role="status" aria-live="polite">
+      <div className="relative px-5 pb-6 pt-6 sm:px-8">
+        <div className="pointer-events-none absolute -right-24 -top-24 h-60 w-60 rounded-full bg-orange-200/50 blur-3xl" />
+        {hasTimedOut ? (
+          <div className="relative text-center">
+            <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-orange-50">
+              <Clock className="h-7 w-7 text-orange-500" />
+                    </span>
+            <h2 className="mt-4 text-xl font-bold text-neutral-950">The request took too long</h2>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-neutral-500">Your network may be slow. Nothing was charged. Try again: the same order and amount are used.</p>
+            <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
+              <button type="button" onClick={() => { handleRetryPayment(); setTimeout(handlePlaceOrder, 0) }} className="flex items-center justify-center gap-2 rounded-2xl bg-orange-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-orange-500/30 hover:bg-orange-600">
+                <RotateCcw className="h-4 w-4" /> Try again
+              </button>
+              <button type="button" onClick={handleRetryPayment} className="rounded-2xl border border-neutral-200 px-5 py-3 text-sm font-bold text-neutral-700 hover:bg-neutral-50">
+                Change details
+              </button>
+                  </div>
+                    </div>
+        ) : (
+          <div className="relative">
+            <div className="flex items-center gap-4">
+              <div className="relative grid h-20 w-20 shrink-0 place-items-center">
+                <span className="absolute inset-0 animate-ping rounded-full bg-orange-400/20 motion-reduce:animate-none" />
+                <span className="absolute inset-2 animate-pulse rounded-full bg-orange-100" />
+                <span className="relative grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-lg shadow-orange-500/40">
+                  {paymentLinkGenerated ? <Smartphone className="h-6 w-6" /> : <Loader2 className="h-6 w-6 animate-spin" />}
+                        </span>
+                      </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-600">{paymentLinkGenerated ? "Check your phone" : "Connecting"}</p>
+                <h2 className="mt-1 text-xl font-bold text-neutral-950 sm:text-2xl">{paymentLinkGenerated ? "Enter your PIN to pay" : "Sending a secure request…"}</h2>
+                <p className="mt-1 flex items-center gap-2 text-2xl font-black tabular-nums tracking-tight text-neutral-950">
+                  {formatPrice(orderTotal)}
+                  {network && <span className="flex items-center gap-1.5 rounded-full bg-neutral-100 py-0.5 pl-0.5 pr-2.5 text-xs font-semibold tracking-normal text-neutral-600"><NetworkMark n={network} size="sm" />{network.wallet}</span>}
+                      </p>
+                    </div>
+                  </div>
+
+            <ol className="mt-6 space-y-3">
+              {waitingSteps.map((s) => (
+                <li key={s.label} className={cn("flex items-center gap-3 text-sm transition-colors", s.done ? "text-neutral-500" : s.active ? "font-semibold text-neutral-950" : "text-neutral-300")}>
+                  <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-full text-white transition", s.done ? "bg-emerald-500" : s.active ? "bg-orange-500 ring-4 ring-orange-500/20" : "bg-neutral-100")}>
+                    {s.done ? <Check className="h-3.5 w-3.5" /> : s.active ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  </span>
+                  {s.label}
+                </li>
+              ))}
+            </ol>
+
+            {paymentLinkGenerated && (
+              <div className="mt-6 rounded-2xl bg-orange-50/70 p-4 text-sm text-neutral-700 ring-1 ring-orange-100">
+                <p className="flex items-center gap-2 font-semibold text-neutral-950">
+                  <Zap className="h-4 w-4 text-orange-500" /> No prompt on {network?.wallet || "your phone"}?
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-neutral-600">
+                  <li>Keep the phone unlocked with network signal; prompts can take up to a minute.</li>
+                  <li>Make sure the wallet has at least {formatPrice(orderTotal)}. With too little balance the network declines before the PIN prompt.</li>
+                  <li>Keep this page open; it updates by itself once you approve.</li>
+                </ul>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs tabular-nums text-neutral-500">Waiting {Math.floor(waitSeconds / 60)}:{String(waitSeconds % 60).padStart(2, "0")}</span>
+                  <button type="button" onClick={handleRetryPayment} className="rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs font-bold text-neutral-800 hover:bg-neutral-50">
+                    Change number / send again
+                  </button>
+                      </div>
+                        </div>
+                      )}
+                        </div>
+                      )}
+                    </div>
+      <div className="flex items-center justify-center gap-4 border-t border-neutral-100 bg-neutral-50/60 px-5 py-3 text-[11px] font-semibold text-neutral-500">
+        <span className="flex items-center gap-1"><Lock className="h-3.5 w-3.5" /> Amount locked</span>
+        <span className="flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" /> PIN stays on your phone</span>
+                  </div>
+    </section>
+  )
+
+  const steps = [
+    { label: "Cart", done: true },
+    { label: "Details", done: paying, active: !paying },
+    { label: "Payment", done: false, active: paying },
+    { label: "Done", done: false },
+  ]
+
+  /* ----- render ----- */
   return (
-    <div className="honic-checkout min-h-screen bg-[#f3f4f6] text-neutral-950">
+    <div className="min-h-screen bg-[#f6f6f7] text-neutral-950">
+      <header className="sticky top-0 z-40 border-b border-neutral-200/70 bg-white/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+            <Link href="/cart" aria-label={t("checkout.backToCart")} className="grid h-9 w-9 place-items-center rounded-full text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-950">
+              <ArrowLeft className="h-5 w-5" />
+          </Link>
+            <BrandLogo size="md" href="/products" textClassName="hidden min-[380px]:flex" />
+          </div>
+          <div className="flex items-center gap-2 text-sm sm:gap-3">
+            <span className="hidden items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-500 sm:flex">
+              <ShieldCheck className="h-3.5 w-3.5 text-neutral-400" /> Secure checkout
+            </span>
+            <CheckoutLanguageToggle />
+          </div>
+        </div>
+      </header>
+
       {!isClient ? (
         <div className="mx-auto max-w-6xl px-4 py-8">
           <CheckoutPageSkeleton />
-        </div>
-      ) : (
-    <>
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-            <Link href="/cart" className="flex items-center gap-1.5 text-sm font-semibold text-neutral-600 hover:text-neutral-950">
-            <ChevronLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('checkout.backToCart')}</span>
+              </div>
+      ) : lines.length === 0 && !paying ? (
+        <div className="mx-auto max-w-md px-4 py-20 text-center">
+          <span className="mx-auto grid h-16 w-16 place-items-center rounded-3xl bg-orange-100 text-orange-600">
+            <Package className="h-7 w-7" />
+                    </span>
+          <h1 className="mt-5 text-2xl font-bold">Nothing to check out yet</h1>
+          <p className="mt-2 text-sm text-neutral-500">{t("checkout.toastEmptyCartDesc")}</p>
+          <Link href="/products" className="mt-6 inline-flex rounded-2xl bg-orange-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-orange-500/30 hover:bg-orange-600">
+            Browse the Marketplace
           </Link>
-            <div className="flex items-center gap-2">
-              <LazyImage src={displayLogo} alt={brandName} width={28} height={28} className="h-7 w-7 object-contain" />
-              <p className="text-base font-bold tracking-tight sm:text-lg">Honic Company Limited</p>
-            </div>
-            <div className="flex items-center gap-3 text-sm font-medium">
-              {!user && (
-                <button type="button" onClick={() => openAuthModal('login')} className="hidden font-semibold text-neutral-950 sm:inline">
-                  Sign in
-                </button>
-              )}
-              <span className="hidden items-center gap-1 text-neutral-500 sm:flex"><Lock className="h-3.5 w-3.5" /> Secure</span>
-              <CheckoutLanguageToggle />
-            </div>
-          </div>
-      </header>
-
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        <ol className="mb-6 flex gap-2 overflow-x-auto pb-1">
-          {stepTitles.map((title, index) => {
-            const done = index < currentStep
-            const active = index === currentStep
-            return (
-              <li key={`${title}-${index}`} className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold sm:text-sm", active ? "border-neutral-950 bg-neutral-950 text-white" : done ? "border-yellow-300 bg-yellow-400 text-neutral-950" : "border-neutral-200 bg-white text-neutral-400")}>
-                <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px]", active ? "bg-yellow-400 text-neutral-950" : done ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-400")}>
-                  {done ? <Check className="h-3 w-3" /> : index + 1}
-                </span>
-                <span className="truncate">{title}</span>
-              </li>
-            )
-          })}
-        </ol>
-
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="order-2 min-w-0 space-y-4 lg:order-1">
-            <div className="honic-checkout-form space-y-4 text-sm text-neutral-900 sm:text-base [&_input]:h-11 [&_input]:rounded-lg [&_input]:border-neutral-200 [&_input]:bg-white [&_input]:text-base [&_input]:md:text-sm [&_label]:text-sm [&_label]:font-medium [&_label]:text-neutral-700">
-              {renderStepContent()}
+                </div>
+      ) : (
+        <main className="mx-auto max-w-6xl px-4 pb-32 pt-5 sm:px-6 sm:pt-8 lg:pb-12">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3 sm:mb-7">
+            <h1 className="text-2xl font-black tracking-tight sm:text-3xl">{t("checkout.title")}</h1>
+            <ol className="flex items-center gap-1.5 text-xs font-semibold" aria-label="Progress">
+              {steps.map((s, i) => (
+                <li key={s.label} className="flex items-center gap-1.5">
+                  <span className={cn("flex items-center gap-1 rounded-full px-2.5 py-1", s.done ? "bg-emerald-100 text-emerald-700" : s.active ? "bg-neutral-950 text-white" : "bg-white text-neutral-400 ring-1 ring-neutral-200")}>
+                    {s.done && <Check className="h-3 w-3" />}
+                    {s.label}
+                  </span>
+                  {i < steps.length - 1 && <span className="h-px w-3 bg-neutral-300 sm:w-5" />}
+                </li>
+              ))}
+            </ol>
             </div>
 
-            {currentStep < maxSteps - 1 && (
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <Button onClick={handleBack} variant="ghost" className="h-12 rounded-lg text-sm font-semibold text-neutral-600 sm:text-base">
-                  {currentStep === 0 ? t('checkout.backToCart') : t('checkout.backShort')}
-                </Button>
-                <div className="sm:w-64">
-                  {onPayStep ? (
-                    paymentLinkGenerated ? (
-                      <Button disabled className="h-12 w-full rounded-lg bg-yellow-500 text-sm font-semibold text-neutral-950 sm:text-base">Waiting for your PIN</Button>
-                    ) : (
-                      <Button
-                        onClick={handlePlaceOrder}
-                        disabled={isProcessingPayment || paymentLinkGenerated}
-                        className="h-12 w-full rounded-lg bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 disabled:opacity-50 sm:text-base"
-                      >
-                        {isProcessingPayment ? 'Sending securely' : paymentError ? t('checkout.tryAgain') : `Pay ${formatPrice(orderTotal)}`}
-                      </Button>
-                    )
-                  ) : (
-                    <Button onClick={handleNext} className="h-12 w-full rounded-lg bg-yellow-500 text-sm font-semibold text-neutral-950 hover:bg-yellow-600 sm:text-base">
-                      {t('checkout.continue')}
-                    </Button>
-                  )}
-                  {paymentError && !isProcessingPayment && !paymentLinkGenerated && (
-                    <p className="mt-2 text-sm text-red-600">{paymentError}</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <aside className="order-1 space-y-4 lg:sticky lg:top-6 lg:order-2">
-            <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-neutral-100 px-5 py-4">
-                <h2 className="text-base font-bold">Your order</h2>
-                <p className="text-sm font-medium text-neutral-500">{summaryItems.length} item{summaryItems.length === 1 ? "" : "s"}</p>
-              </div>
-              <div className="max-h-80 divide-y divide-neutral-100 overflow-y-auto px-5">
-                {summaryItems.length === 0 ? (
-                  <p className="py-6 text-sm text-neutral-500">Your cart is empty.</p>
-                ) : summaryItems.map((item) => (
-                  <div key={item.key} className="flex items-center gap-3 py-3">
-                    <div className="relative h-16 w-16 shrink-0 rounded-lg bg-neutral-100">
-                      {item.image ? (
-                        <img src={item.image} alt="" className="h-16 w-16 rounded-lg object-cover" />
-                      ) : (
-                        <div className="flex h-16 w-16 items-center justify-center text-neutral-300"><Package className="h-5 w-5" /></div>
-                      )}
-                      <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-neutral-950 px-1 text-[11px] font-bold text-white">{item.quantity}</span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{item.name}</p>
-                      {item.variant ? <p className="truncate text-xs text-neutral-500">{item.variant}</p> : null}
-                    </div>
-                    <p className="text-sm font-semibold tabular-nums">{formatPrice(item.total)}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-2 border-t border-neutral-100 px-5 py-4 text-sm">
-                <div className="flex justify-between"><span className="text-neutral-500">Subtotal</span><span className="font-medium tabular-nums">{formatPrice(displaySubtotal)}</span></div>
-                <div className="flex justify-between"><span className="text-neutral-500">{deliveryOption === "pickup" ? "Store pickup" : "Delivery"}</span><span className="font-medium">{shippingFeeLineLoading && deliveryOption === "shipping" ? "…" : deliveryOption === "pickup" || shippingFee === 0 ? "Free" : formatPrice(shippingFee)}</span></div>
-                {promotionDiscount > 0 && (
-                  <div className="flex justify-between text-green-700"><span>Discount</span><span className="font-medium tabular-nums">-{formatPrice(promotionDiscount)}</span></div>
-                )}
-                <div className="flex items-end justify-between border-t border-neutral-100 pt-3">
-                  <span className="font-semibold">Total due now</span>
-                  <span className="text-xl font-bold tabular-nums">{formatPrice(orderTotal)}</span>
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-              <h2 className="text-base font-bold">Payment</h2>
-              <div className="mt-3 rounded-xl border-2 border-neutral-950 p-3">
-                <div className="flex items-start gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-yellow-400 text-neutral-950"><Smartphone className="h-4 w-4" /></span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold">Mobile money</p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">The request goes to {paymentPhone || "your phone"}. Your PIN stays on the phone.</p>
-                  </div>
-                  <Check className="h-4 w-4 shrink-0 text-neutral-950" />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {mobileNetworks.map((network) => (
-                    <span key={network} className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", detectedNetwork === network ? "bg-yellow-400 text-neutral-950" : "bg-neutral-100 text-neutral-600")}>{network}</span>
-                  ))}
-                </div>
-                <p className="mt-2 text-xs text-neutral-500">{detectedNetwork ? `This number is ${detectedNetwork}.` : "The network is read from the phone number."}</p>
-              </div>
-            </section>
-          </aside>
+          {/* phones: collapsible summary */}
+          <div className="mb-4 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setSummaryOpen((o) => !o)}
+              aria-expanded={summaryOpen}
+              className="flex w-full items-center justify-between rounded-2xl border border-neutral-200/80 bg-white px-4 py-3 text-sm shadow-sm"
+            >
+              <span className="flex items-center gap-2 font-semibold">
+                <Package className="h-4 w-4 text-orange-500" />
+                {summaryOpen ? "Hide" : "Show"} order summary
+                <ChevronDown className={cn("h-4 w-4 transition-transform", summaryOpen && "rotate-180")} />
+              </span>
+              <span className="font-black tabular-nums">{formatPrice(orderTotal)}</span>
+            </button>
+            {summaryOpen && <div className="mt-3">{summary}</div>}
         </div>
+
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="min-w-0 space-y-4">
+              {paying ? (
+                paymentPanel
+              ) : (
+                <>
+                  {contactSection}
+                  {deliverySection}
+                  {paymentSection}
+                </>
+                  )}
+                </div>
+            <aside className="hidden lg:sticky lg:top-24 lg:block lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-3xl [scrollbar-width:thin]">{summary}</aside>
+          </div>
+        </main>
+      )}
+
+      {/* phones: sticky pay bar */}
+      {isClient && lines.length > 0 && !paying && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl lg:hidden">
+          {paymentError && <p className="mb-2 text-center text-xs text-red-600">{paymentError}</p>}
+          <div className="flex items-center gap-3">
+            <div className="shrink-0">
+              <p className="text-[11px] font-semibold text-neutral-500">Total</p>
+              <p className="text-lg font-black tabular-nums leading-tight">{formatPrice(orderTotal)}</p>
+        </div>
+            {payButton("flex-1")}
       </div>
-    </>
+        </div>
     )}
     </div>
   )

@@ -87,9 +87,9 @@ function InvoicesContent() {
 
   useEffect(() => {
     fetchBillingData()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
-  const fetchBillingData = async () => {
+  async function fetchBillingData() {
     try {
       setLoading(true)
       setError(null)
@@ -191,7 +191,7 @@ ${user?.email || ''}
 
 PLAN DETAILS:
 Plan: ${invoice.plan_name}
-Amount: ${formatPrice(invoice.amount, invoice.currency)}
+Amount: ${formatPrice(invoice.amount)}
 Currency: ${invoice.currency}
 
 PAYMENT INFORMATION:
@@ -250,6 +250,7 @@ For support, please contact customer service.
       })
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
     setInvoices(filtered)
 
     // Update summary based on filtered invoices
@@ -334,7 +335,7 @@ For support, please contact customer service.
 
   if (loading) {
     return (
-      <div className={cn("min-h-screen p-4 md:p-8", themeClasses.bg)}>
+      <div className={cn("min-h-screen p-4 md:p-8", themeClasses.mainBg)}>
         <div className="max-w-6xl mx-auto space-y-6">
           <Skeleton className="h-10 w-64" />
           <Skeleton className="h-48 w-full" />
@@ -345,7 +346,7 @@ For support, please contact customer service.
   }
 
   return (
-    <div className={cn("min-h-screen p-3 sm:p-4 md:p-6 lg:p-8", themeClasses.bg)}>
+    <div className={cn("min-h-screen p-3 sm:p-4 md:p-6 lg:p-8", themeClasses.mainBg)}>
       <div className="max-w-6xl mx-auto space-y-4 sm:space-y-6">
         {/* Header - Mobile Optimized */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
@@ -408,7 +409,7 @@ For support, please contact customer service.
               </CardHeader>
               <CardContent className="p-3 sm:p-4 lg:p-6 pt-0">
                 <div className={cn("text-lg sm:text-xl lg:text-2xl font-bold text-green-600 dark:text-green-400", themeClasses.mainText)}>
-                  {formatPrice(summary.total_paid, summary.currency)}
+                  {formatPrice(summary.total_paid)}
                 </div>
               </CardContent>
             </Card>
@@ -420,7 +421,7 @@ For support, please contact customer service.
               </CardHeader>
               <CardContent className="p-3 sm:p-4 lg:p-6 pt-0">
                 <div className={cn("text-lg sm:text-xl lg:text-2xl font-bold text-red-600 dark:text-red-400", themeClasses.mainText)}>
-                  {formatPrice(summary.total_failed, summary.currency)}
+                  {formatPrice(summary.total_failed)}
                 </div>
               </CardContent>
             </Card>
@@ -527,7 +528,7 @@ For support, please contact customer service.
                     themeClasses.cardBg,
                     themeClasses.cardBorder,
                     themeClasses.mainText,
-                    "focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                    "focus:outline-none focus:ring-2 focus:ring-orange-500"
                   )}
                 >
                   <option value="all">All Status</option>
@@ -677,7 +678,7 @@ For support, please contact customer service.
                         <div>
                           <p className={cn("text-[10px] sm:text-xs mb-0.5 sm:mb-1", themeClasses.textNeutralSecondary)}>Amount</p>
                           <p className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>
-                            {formatPrice(invoice.amount, invoice.currency)}
+                            {formatPrice(invoice.amount)}
                           </p>
                         </div>
                         <div>
@@ -858,7 +859,7 @@ For support, please contact customer service.
                   <div>
                     <p className={cn("text-[10px] sm:text-xs mb-1", themeClasses.textNeutralSecondary)}>Amount</p>
                     <p className={cn("font-semibold text-base sm:text-lg", themeClasses.mainText)}>
-                      {formatPrice(selectedInvoice.amount, selectedInvoice.currency)}
+                      {formatPrice(selectedInvoice.amount)}
                     </p>
                   </div>
                   <div>
@@ -948,7 +949,7 @@ export default function SupplierInvoicesPage() {
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
           <p className="mt-4 text-gray-600 dark:text-gray-400">Loading invoices...</p>
         </div>
       </div>

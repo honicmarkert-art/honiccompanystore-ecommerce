@@ -44,6 +44,7 @@ function WingaBusinessInfoContent() {
   const [uploadingDocument, setUploadingDocument] = useState<string | null>(null)
 
   const hasLoadedRef = useRef(false)
+  const [hasLoaded, setHasLoaded] = useState(false)
   useEffect(() => {
     // Prevent multiple calls
     if (hasLoadedRef.current) {
@@ -68,6 +69,7 @@ function WingaBusinessInfoContent() {
         }
         
         hasLoadedRef.current = true
+        setHasLoaded(true)
         
         // Load existing business info if available
         const response = await fetch('/api/user/profile')
@@ -101,7 +103,7 @@ function WingaBusinessInfoContent() {
     }
     
     checkAuthAndLoad()
-  }, []) // Empty dependency array - only run once on mount
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- Empty dependency array - only run once on mount
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -259,11 +261,12 @@ function WingaBusinessInfoContent() {
       }, 5000) // 5 second timeout
       return () => clearTimeout(timer)
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setLoadingTimeout(false)
     }
   }, [isLoading])
   
-  if (isLoading && !loadingTimeout && !hasLoadedRef.current) {
+  if (isLoading && !loadingTimeout && !hasLoaded) {
     return (
       <div className={cn("min-h-screen flex items-center justify-center", themeClasses.mainBg)}>
         <div className="text-center">
@@ -441,7 +444,7 @@ function WingaBusinessInfoContent() {
 
                     <div>
                       <Label htmlFor="location" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        Operating Location <span className="text-yellow-600 dark:text-yellow-400">(Recommended)</span>
+                        Operating Location <span className="text-orange-600 dark:text-orange-400">(Recommended)</span>
                       </Label>
                       <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
                         Where you operate (e.g., "Kariakoo Market", "Dar es Salaam", "Online via WhatsApp/Instagram")
@@ -531,7 +534,7 @@ function WingaBusinessInfoContent() {
                     {/* NIDA Card Photo Upload (Optional) */}
                     <div>
                       <Label htmlFor="nidaCardPhoto" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        NIDA Card Photo <span className="text-yellow-600 dark:text-yellow-400">(Optional - can upload later)</span>
+                        NIDA Card Photo <span className="text-orange-600 dark:text-orange-400">(Optional - can upload later)</span>
                       </Label>
                       <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
                         Upload a clear photo of your NIDA card for verification and comparison purposes
@@ -623,7 +626,7 @@ function WingaBusinessInfoContent() {
                     {/* Self Face Photo Upload (Optional) */}
                     <div>
                       <Label htmlFor="selfFacePhoto" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                        Self Face Photo <span className="text-yellow-600 dark:text-yellow-400">(Optional - can upload later)</span>
+                        Self Face Photo <span className="text-orange-600 dark:text-orange-400">(Optional - can upload later)</span>
                       </Label>
                       <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
                         Upload a clear photo of yourself for comparison with your NIDA card photo

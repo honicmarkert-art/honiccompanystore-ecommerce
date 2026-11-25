@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 import { logger } from '@/lib/logger'
 
 // Environment variables - SECURITY: No hardcoded values, must be set in environment
@@ -165,7 +165,7 @@ export const supabaseAuth = {
           success: false,
           error: 'Please check your email and password.',
           type: 'VALIDATION_ERROR' as AuthErrorType,
-          details: validation.error.errors
+          details: validation.error.issues
         }
       }
 
@@ -281,14 +281,14 @@ export const supabaseAuth = {
       if (!validation.success) {
         // SECURITY: Don't expose detailed validation errors in production
         const errorMessage = process.env.NODE_ENV === 'development' 
-          ? validation.error.errors[0]?.message || ERROR_MESSAGES.VALIDATION_ERROR
+          ? validation.error.issues[0]?.message || ERROR_MESSAGES.VALIDATION_ERROR
           : ERROR_MESSAGES.VALIDATION_ERROR
         
         return {
           success: false,
           error: errorMessage,
           type: 'VALIDATION_ERROR' as AuthErrorType,
-          details: process.env.NODE_ENV === 'development' ? validation.error.errors : undefined
+          details: process.env.NODE_ENV === 'development' ? validation.error.issues : undefined
         }
       }
 

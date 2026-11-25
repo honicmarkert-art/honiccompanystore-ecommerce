@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { shippingSizeOrNull } from '@/lib/shipping-pricing'
+import { clientIp } from '@/lib/client-ip'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { validateServerSession } from '@/lib/security-server'
-import { getCachedData, setCachedData, CACHE_TTL, generateCacheKey } from '@/lib/database-optimization'
+import { getCachedData, setCachedData, CACHE_TTL, generateCacheKey, clearCache } from '@/lib/database-optimization'
 import { performanceMonitor } from '@/lib/performance-monitor'
 import { createSecureApiHandler, createSecureResponse, createErrorResponse } from '@/lib/secure-api'
 import { securityUtils } from '@/lib/secure-config'
@@ -15,10 +17,7 @@ const logSecurityEvent = (action: string, userId?: string, details?: any) => {
 
 // Rate limit logging helper
 const logRateLimitEvent = (endpoint: string, reason: string | undefined, request: NextRequest) => {
-  const clientIP = request.headers.get('x-forwarded-for') || 
-                   request.headers.get('x-real-ip') || 
-                   request.headers.get('cf-connecting-ip') || 
-                   'unknown'
+  const clientIP = clientIp(request) || 'unknown'
   logger.security(`Rate limit exceeded on ${endpoint}`, undefined, {
     ip: clientIP,
     reason,
@@ -295,7 +294,7 @@ export async function GET(request: NextRequest) {
     const idsParam = validated.ids
 
     // AliExpress-style: Check popular products cache first (no DB hit for popular requests)
-    const { isPopularProductsRequest, getPopularProductsFromCache } = await import('@/lib/popular-products-cache')
+    const { isPopularProductsRequest } = await import('@/lib/popular-products-cache')
     
     // Check if this is a popular products request (no filters, default sort, first page)
     const isPopularRequest = isPopularProductsRequest({
@@ -309,60 +308,10 @@ export async function GET(request: NextRequest) {
       offset
     })
     
-    // Serve popular products from cache without database hit
-    // Production-ready: Popular products served from cache/CDN (90-95% hit rate)
-    if (isPopularRequest && offset === 0) {
-      try {
-        const popularProducts = getPopularProductsFromCache()
-        if (popularProducts && Array.isArray(popularProducts) && popularProducts.length > 0) {
-          const apiTime = Date.now() - startTime
-          performanceMonitor.recordMetric('products_api_popular_cache_hit', apiTime, { 
-            cacheHitRate: 100,
-            productCount: popularProducts.length
-          })
-          
-          // Validate limit and offset
-          const safeLimit = Math.min(limit, 200) // Max 200 products per request
-          const safeOffset = Math.max(0, offset)
-          const slicedProducts = popularProducts.slice(safeOffset, safeOffset + safeLimit)
-          
-          // Return popular products from cache (NO DATABASE HIT!)
-          // AliExpress-style: Popular products served from cache/CDN without hitting database
-          return createSecureResponse({
-            products: slicedProducts,
-            pagination: {
-              total: popularProducts.length,
-              limit: safeLimit,
-              offset: safeOffset,
-              hasMore: safeOffset + safeLimit < popularProducts.length
-            }
-          }, {
-            popularProducts: true, // Aggressive CDN + browser caching (2 hours CDN, 1 hour browser)
-            cdnCache: true,
-            browserCache: true,
-            headers: {
-              'X-Cache': 'POPULAR_HIT',
-              'X-Products-Count': slicedProducts.length.toString(),
-              'X-Total-Count': popularProducts.length.toString(),
-              'X-API-Time': apiTime.toString(),
-              'X-Cache-Hit-Rate': '100',
-              'X-Data-Source': 'POPULAR_CACHE',
-              'X-No-DB-Hit': 'true',
-              'X-CDN-Cache': 'HIT',
-              'X-Browser-Cache': 'HIT',
-              'X-Cache-Type': 'POPULAR_PRODUCTS'
-            }
-          })
-        }
-      } catch (cacheError: any) {
-        // Log error but continue to regular flow (don't fail request)
-        logger.error('[Products API] Error getting popular products from cache:', cacheError)
-        performanceMonitor.recordMetric('products_api_popular_cache_error', Date.now() - startTime, {
-          error: cacheError.message
-        })
-        // Continue to regular database query
-      }
-    }
+    // The old "serve popular products from cache" shortcut was removed: it answered
+    // unfiltered first-page requests with a small re-sorted subset (sometimes only 2
+    // items, hasMore=false) and ignored filters like inStock / isChina / supplier.
+    // Repeat requests are still served from memory by the regular cache below.
 
     // Generate cache key based on parameters (including filters)
     const cacheKey = generateCacheKey('products', {
@@ -405,8 +354,7 @@ export async function GET(request: NextRequest) {
           'X-Products-Count': productsCount.toString(),
           'X-Total-Count': totalCount.toString(),
           'X-API-Time': apiTime.toString(),
-          'X-Cache-Hit-Rate': '100',
-          'X-Data-Source': 'SERVER_CACHE'
+          'X-Cache-Hit-Rate': '100'
         }
       })
     }
@@ -868,7 +816,7 @@ export async function GET(request: NextRequest) {
         }
         
         if (categories !== undefined && categories !== null) {
-          const categoryList = categories.split(',').map(c => c.trim()).filter(Boolean)
+          const categoryList: string[] = Array.isArray(categories) ? categories : []
           if (categoryList.length > 0) {
             fuzzyQuery.in('category_id', categoryList)
           } else {
@@ -1103,9 +1051,7 @@ export async function GET(request: NextRequest) {
           if (supplier) fallbackQuery.or(`supplier_id.eq.${supplier},user_id.eq.${supplier}`)
           
           if (categories && categories.length > 0) {
-            if (categoryList.length > 0) {
-              fallbackQuery.in('category_id', categoryList)
-            }
+            fallbackQuery.in('category_id', categories)
           }
           
           const { data: fallbackProducts, error: fallbackError } = await fallbackQuery
@@ -1220,7 +1166,7 @@ export async function GET(request: NextRequest) {
       // PRIORITY: Products with search term in name get highest priority
       // Then exact brand matches get high priority
       // Includes: name, brand, model, SKU, category, description, specs, variants
-      const scoredProducts = filteredProducts.map((p: any) => {
+      const scoredProducts: Array<{ product: any; score: number }> = filteredProducts.map((p: any) => {
         const nameLower = (p.name || '').toLowerCase()
         const brandLower = (p.brand || '').toLowerCase()
         const categoryLower = (p.category || '').toLowerCase()
@@ -1657,50 +1603,6 @@ export async function GET(request: NextRequest) {
     // Cache the result
     setCachedData(cacheKey, responseData, CACHE_TTL.PRODUCTS)
     
-    // AliExpress-style: Store popular products in dedicated cache (no DB hit next time)
-    // Pre-populate cache with popular products for instant serving
-    // Production-ready: Background cache population with error handling (non-blocking)
-    if (isPopularRequest && offset === 0 && transformedProducts.length > 0) {
-      // Don't block response - cache in background (fire-and-forget)
-      // This ensures request response time is not affected by cache population
-      setImmediate(async () => {
-        try {
-          const { setPopularProductsCache, isPopularProduct, calculatePopularityScore } = await import('@/lib/popular-products-cache')
-          
-          // Filter and store popular products (by sold_count, rating, reviews, views)
-          // Production-grade: Validate and sort by popularity score
-          const popularProducts = transformedProducts
-            .filter((p: any) => {
-              // Validate product structure before filtering
-              if (!p || typeof p !== 'object') return false
-              return isPopularProduct(p)
-            })
-            .sort((a: any, b: any) => {
-              // Use production-grade scoring algorithm
-              const aScore = calculatePopularityScore(a)
-              const bScore = calculatePopularityScore(b)
-              return bScore - aScore
-            })
-            .slice(0, 100) // Store top 100 popular products
-          
-          if (popularProducts.length > 0) {
-            setPopularProductsCache(popularProducts)
-            logger.log(`[Popular Cache] Cached ${popularProducts.length} popular products (no DB hit next time)`)
-            performanceMonitor.recordMetric('popular_products_cached', 0, {
-              count: popularProducts.length
-            })
-          }
-        } catch (cacheError: any) {
-          // Don't fail the request if cache population fails
-          // Log error for monitoring but continue normally
-          logger.error('[Popular Cache] Error populating cache:', cacheError)
-          performanceMonitor.recordMetric('popular_products_cache_population_error', 0, {
-            error: cacheError.message
-          })
-        }
-      })
-    }
-    
     const apiTime = Date.now() - startTime
     performanceMonitor.recordMetric('products_api', apiTime, { cacheHitRate: 0 })
     
@@ -1736,12 +1638,6 @@ export async function GET(request: NextRequest) {
       headers: responseHeaders
     })
   } catch (error: any) {
-    performanceMonitor.recordSecurityEvent({
-      type: 'api_error',
-      error: error instanceof Error ? error.message : 'Unknown error',
-      endpoint: 'products'
-    })
-    
     const apiTime = Date.now() - startTime
     performanceMonitor.recordMetric('products_api_error', apiTime, { errors: 1 })
     
@@ -1860,6 +1756,7 @@ export async function POST(request: NextRequest) {
       in_stock: productData.inStock !== undefined ? productData.inStock : true,
       stock_quantity: productData.stockQuantity,
       free_delivery: productData.freeDelivery || false,
+      ...(productData.shippingSize !== undefined ? { shipping_size: shippingSizeOrNull(productData.shippingSize) } : {}),
       same_day_delivery: productData.sameDayDelivery || false,
       import_china: productData.importChina || false,
       variant_config: productData.variantConfig,
@@ -2062,6 +1959,7 @@ export async function PUT(request: NextRequest) {
     if (updates.inStock !== undefined) supabaseUpdates.in_stock = updates.inStock
     if (updates.stockQuantity !== undefined) supabaseUpdates.stock_quantity = updates.stockQuantity
     if (updates.freeDelivery !== undefined) supabaseUpdates.free_delivery = updates.freeDelivery
+    if (updates.shippingSize !== undefined) supabaseUpdates.shipping_size = shippingSizeOrNull(updates.shippingSize)
     if (updates.sameDayDelivery !== undefined) supabaseUpdates.same_day_delivery = updates.sameDayDelivery
     if (updates.importChina !== undefined) supabaseUpdates.import_china = updates.importChina
     if (updates.variantConfig !== undefined) supabaseUpdates.variant_config = updates.variantConfig

@@ -1,125 +1,199 @@
-export const DEFAULT_REGION_BASE_PRICE = 5000
-export const DAR_ES_SALAAM_FALLBACK_BASE_PRICE = 2500
+/**
+ * Delivery fees (TSh). One place to change every number; checkout, the order API and the
+ * Delivery & shipping page all read from here.
+ *
+ * How it works (the usual model for Tanzanian online shops):
+ *  - Dar es Salaam: bodaboda door delivery, priced by ward (unknown ward -> its district's fee).
+ *  - Other regions: parcel sent by bus/courier to the customer's town, priced by zone
+ *    (distance from Dar es Salaam). Zanzibar and Pemba go by ferry.
+ *  - Size: fees cover a standard parcel. Medium items (e.g. 1 kg filament spools) and large items
+ *    (3D printers, water purifiers) add a surcharge, because bus/courier companies charge by size.
+ *  - Free delivery over the threshold (NEXT_PUBLIC_SHIPPING_FREE_THRESHOLD_TZS, default 100,000) covers the standard fee; the large-item
+ *    surcharge still applies. Store pickup and products marked "free delivery" are free.
+ */
 
-export const REGION_BASE_PRICE_MAP: Record<string, number> = {
-  'dar es salaam': 2500,
-  dodoma: 4500,
-  arusha: 5000,
-  mwanza: 5500,
-  morogoro: 5000,
-  pwani: 4500,
-  coast: 4500,
+export type ShippingSize = 'small' | 'medium' | 'large'
+
+export type DeliveryZone = {
+  id: string
+  name: string
+  /** fee for a standard (small) parcel */
+  fee: number
+  /** typical delivery time after payment is confirmed */
+  eta: string
+  regions: string[]
 }
 
-export const DAR_ES_SALAAM_WARD_PRICE_MAP: Record<string, number> = {
-  // Ilala
-  bonyokwa: 3500,
-  buguruni: 3000,
-  buyuni: 4000,
-  chanika: 4500,
-  gerezani: 2500,
-  gongolamboto: 4000,
-  ilala: 3000,
-  jangwani: 2500,
-  liwiti: 2500,
-  kariakoo: 2500,
-  kimanga: 3500,
-  kinyerezi: 4500,
-  kipawa: 3500,
-  kipunguni: 4000,
-  kisukuru: 3500,
-  kitunda: 4500,
-  kisutu: 2500,
-  kivukoni: 2500,
-  kivule: 4500,
-  kiwalani: 3000,
-  majohe: 4500,
-  mchafukoge: 2500,
-  mchikichini: 3000,
-  'minazi mirefu': 3500,
-  mnyamani: 2500,
-  msongola: 4500,
-  mzinga: 4500,
-  pugu: 5000,
-  'pugu station': 5000,
-  segerea: 3500,
-  tabata: 3000,
-  ukonga: 4000,
-  'upanga east': 2500,
-  'upanga west': 2500,
-  vingunguti: 3000,
-  zingiziwa: 4000,
-  // Kinondoni
-  bunju: 5000,
-  hananasif: 2500,
-  kawe: 3000,
-  kigogo: 3000,
-  kijitonyama: 3000,
-  kinondoni: 3000,
-  kunduchi: 5000,
-  mabwepande: 6000,
-  magomeni: 2500,
-  makongo: 4000,
-  makumbusho: 3000,
-  'mbezi juu': 4500,
-  mbweni: 4500,
-  mikocheni: 3000,
-  msasani: 3000,
-  mwananyamala: 3000,
-  mzimuni: 2500,
-  ndugumbi: 2500,
-  tandale: 3000,
-  wazo: 5000,
-  // Temeke
-  azimio: 3000,
-  chamazi: 5000,
-  "chang'ombe": 3000,
-  charambe: 3500,
-  keko: 3000,
-  kibada: 6000,
-  kimbiji: 7000,
-  'kisarawe ii': 6500,
-  kurasini: 3000,
-  makangarawe: 4000,
-  mbagala: 4500,
-  'mbagala kuu': 5000,
-  miburani: 3000,
-  mjimwema: 6000,
-  mtoni: 3500,
-  'pemba mnazi': 7000,
-  sandali: 3500,
-  somangira: 6500,
-  tandika: 3500,
-  temeke: 3500,
-  toangoma: 5000,
-  vijibweni: 6000,
-  'yombo vituka': 4500,
-  // Ubungo
-  goba: 4500,
-  kibamba: 5000,
-  kimara: 4000,
-  kwembe: 5000,
-  mabibo: 3000,
-  makuburi: 3500,
-  makurumla: 3000,
-  manzese: 3000,
-  mbezi: 4500,
-  mburahati: 3000,
-  msigani: 3500,
-  saranga: 4500,
-  sinza: 3000,
-  ubungo: 3000,
-  // Kigamboni
-  tungi: 7000,
-  kigamboni: 5000,
-  somangila: 7000,
-  pembamnazi: 7000,
-}
-
-export const DAR_ES_SALAAM_DISTANCE_TIERS: Array<{ maxKm: number; price: number }> = [
-  { maxKm: 3, price: 2500 },
-  { maxKm: 8, price: 3500 },
-  { maxKm: 15, price: 5000 },
-  { maxKm: 25, price: 7000 },
-  { maxKm: Number.POSITIVE_INFINITY, price: 9000 },
+/** Zones outside Dar es Salaam, nearest first. Region names match lib/tanzania-address.ts (lower-cased). */
+export const DELIVERY_ZONES: DeliveryZone[] = [
+  { id: 'near', name: 'Near Dar es Salaam', fee: 6000, eta: '2–3 days', regions: ['pwani', 'coast', 'morogoro', 'tanga', 'dodoma'] },
+  { id: 'north-central', name: 'North & central', fee: 8000, eta: '2–4 days', regions: ['arusha', 'kilimanjaro', 'manyara', 'iringa', 'singida', 'njombe', 'lindi', 'mtwara'] },
+  { id: 'lake-south', name: 'Lake zone & Southern Highlands', fee: 10000, eta: '3–5 days', regions: ['mwanza', 'mbeya', 'songwe', 'tabora', 'shinyanga', 'simiyu', 'geita', 'mara', 'ruvuma'] },
+  { id: 'far-west', name: 'Far west', fee: 12000, eta: '4–6 days', regions: ['kagera', 'kigoma', 'katavi', 'rukwa'] },
+  { id: 'zanzibar', name: 'Zanzibar (Unguja)', fee: 7000, eta: '2–4 days', regions: ['zanzibar central/south', 'zanzibar north', 'zanzibar urban/west'] },
+  { id: 'pemba', name: 'Pemba', fee: 10000, eta: '3–5 days', regions: ['pemba north', 'pemba south'] },
 ]
+
+/** Region not in any zone (shouldn't happen with the checkout list): priced like the farthest mainland zone */
+export const UNKNOWN_REGION_ZONE: DeliveryZone = { id: 'other', name: 'Other regions', fee: 12000, eta: '4–6 days', regions: [] }
+
+export const DAR_ES_SALAAM_ETA = '1–2 days'
+
+/** Dar es Salaam: tier when the ward isn't listed, by district */
+export const DAR_ES_SALAAM_DISTRICT_TIER: Record<string, 'A' | 'B' | 'C' | 'D'> = {
+  ilala: 'B',
+  kinondoni: 'C',
+  ubungo: 'C',
+  temeke: 'C',
+  kigamboni: 'D',
+}
+/** Dar es Salaam with no district picked yet */
+export const DAR_ES_SALAAM_FALLBACK_TIER = 'C' as const
+
+/** Extra per order for bigger items (the biggest item in the order decides). */
+export const SIZE_SURCHARGE: Record<ShippingSize, { dar: number; upcountry: number; label: string }> = {
+  small: { dar: 0, upcountry: 0, label: 'Standard parcel' },
+  medium: { dar: 0, upcountry: 2000, label: 'Medium item' },
+  large: { dar: 5000, upcountry: 15000, label: 'Large item' },
+}
+
+/** Dar es Salaam: bodaboda door delivery in four tiers by distance from our store (city centre). */
+export type DarTier = 'A' | 'B' | 'C' | 'D'
+export const DAR_ES_SALAAM_TIERS: Record<DarTier, { name: string; fee: number }> = {
+  A: { name: 'City centre', fee: 3000 },
+  B: { name: 'Inner suburbs', fee: 4000 },
+  C: { name: 'Outer suburbs', fee: 5000 },
+  D: { name: 'Outskirts', fee: 7000 },
+}
+
+/** Ward -> tier (ward names lower-cased, as in lib/tanzania-address.ts). Unknown ward -> its district's tier. */
+export const DAR_ES_SALAAM_WARD_TIER: Record<string, DarTier> = {
+  // Ilala
+  bonyokwa: 'B',
+  buguruni: 'B',
+  buyuni: 'C',
+  chanika: 'C',
+  gerezani: 'A',
+  gongolamboto: 'C',
+  ilala: 'B',
+  jangwani: 'A',
+  liwiti: 'A',
+  kariakoo: 'A',
+  kimanga: 'B',
+  kinyerezi: 'C',
+  kipawa: 'B',
+  kipunguni: 'C',
+  kisukuru: 'B',
+  kitunda: 'C',
+  kisutu: 'A',
+  kivukoni: 'A',
+  kivule: 'C',
+  kiwalani: 'B',
+  majohe: 'C',
+  mchafukoge: 'A',
+  mchikichini: 'B',
+  'minazi mirefu': 'B',
+  mnyamani: 'A',
+  msongola: 'C',
+  mzinga: 'C',
+  pugu: 'C',
+  'pugu station': 'C',
+  segerea: 'B',
+  tabata: 'B',
+  ukonga: 'C',
+  'upanga east': 'A',
+  'upanga west': 'A',
+  vingunguti: 'B',
+  zingiziwa: 'C',
+  // Kinondoni
+  bunju: 'C',
+  hananasif: 'A',
+  kawe: 'B',
+  kigogo: 'B',
+  kijitonyama: 'B',
+  kinondoni: 'B',
+  kunduchi: 'C',
+  mabwepande: 'D',
+  magomeni: 'A',
+  makongo: 'C',
+  makumbusho: 'B',
+  'mbezi juu': 'C',
+  mbweni: 'C',
+  mikocheni: 'B',
+  msasani: 'B',
+  mwananyamala: 'B',
+  mzimuni: 'A',
+  ndugumbi: 'A',
+  tandale: 'B',
+  wazo: 'C',
+  // Temeke
+  azimio: 'B',
+  chamazi: 'C',
+  charambe: 'B',
+  keko: 'B',
+  kibada: 'D',
+  kimbiji: 'D',
+  'kisarawe ii': 'D',
+  kurasini: 'B',
+  makangarawe: 'C',
+  mbagala: 'C',
+  'mbagala kuu': 'C',
+  miburani: 'B',
+  mjimwema: 'D',
+  mtoni: 'B',
+  'pemba mnazi': 'D',
+  sandali: 'B',
+  somangira: 'D',
+  tandika: 'B',
+  temeke: 'B',
+  toangoma: 'C',
+  vijibweni: 'D',
+  'yombo vituka': 'C',
+  // Ubungo
+  goba: 'C',
+  kibamba: 'C',
+  kimara: 'C',
+  kwembe: 'C',
+  mabibo: 'B',
+  makuburi: 'B',
+  makurumla: 'B',
+  manzese: 'B',
+  mbezi: 'C',
+  mburahati: 'B',
+  msigani: 'B',
+  saranga: 'C',
+  sinza: 'B',
+  ubungo: 'B',
+  // Kigamboni
+  tungi: 'D',
+  kigamboni: 'C',
+  somangila: 'D',
+  pembamnazi: 'D',
+}
+
+/**
+ * Tanzania geography: upcountry parcels go by bus/courier to the regional town (where the bus
+ * terminal is). Districts away from that town need onward transport (local bus or bodaboda), so they
+ * pay a little more. Islands reached by an extra ferry/boat pay more again.
+ * District names lower-cased, as in lib/tanzania-address.ts.
+ */
+export const TOWN_DISTRICTS = new Set([
+  // regional towns (bus terminals)
+  'arusha city', 'ilemela', 'nyamagana', 'dodoma urban', 'mbeya city', 'tanga city', 'morogoro urban',
+  'moshi urban', 'musoma urban', 'bukoba urban', 'iringa urban', 'tabora urban', 'kigoma urban',
+  'mtwara urban', 'lindi urban', 'songea urban', 'shinyanga urban', 'singida urban', 'sumbawanga urban',
+  'babati', 'njombe urban', 'geita', 'bariadi', 'mpanda urban', 'mbozi', 'kahama',
+  // Pwani: daily direct buses from Dar es Salaam
+  'kibaha', 'bagamoyo', 'kisarawe', 'mkuranga', 'kibiti', 'rufiji',
+  // Zanzibar & Pemba towns
+  'mjini', 'magharibi', 'chake chake', 'wete',
+])
+
+/** Outside the regional town (onward transport to the district) */
+export const OUTSIDE_TOWN_SURCHARGE = 3000
+
+/** Islands needing an extra boat/ferry from the mainland or main island (replaces the outside-town fee) */
+export const ISLAND_DISTRICT_SURCHARGE: Record<string, number> = {
+  mafia: 10000,
+  ukerewe: 4000,
+}

@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabaseClient } from '@/lib/supabase-server'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 // Simple in-memory cache
 const cache = new Map<string, { data: any; timestamp: number }>()
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
-
-// Export function to clear cache (used by admin routes)
-export function clearSupplierPlansCache() {
-  cache.delete('supplier-plans')
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -38,9 +33,9 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    // Plans are public pricing, but supplier_plans is closed to the anon key by RLS (the page showed
+    // empty plan cards forever). Read with the server client; only active plans are returned.
+    const supabase = getSupabaseClient()
 
     // Fetch all active plans with their features
     const { data: plans, error: plansError } = await supabase

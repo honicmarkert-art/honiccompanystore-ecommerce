@@ -19,12 +19,12 @@ export default function StemKitsPage() {
   return (
     <main className="min-h-screen bg-white text-neutral-950">
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
-        <Link href="/home" className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-700 hover:text-yellow-600">
+        <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-700 hover:text-orange-600">
           <ArrowLeft className="h-4 w-4" />
           Home
         </Link>
         <div className="mt-6 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center bg-yellow-500 text-neutral-950">
+          <div className="flex h-12 w-12 items-center justify-center bg-orange-500 text-neutral-950">
             <GraduationCap className="h-6 w-6" />
           </div>
           <p className="text-sm font-semibold uppercase tracking-wide text-neutral-500">{companyName || 'Honic Company Limited'}</p>
@@ -41,7 +41,7 @@ export default function StemKitsPage() {
           ))}
         </ul>
         <div className="mt-8 flex flex-wrap gap-3">
-          <Link href="/contact" className="bg-yellow-500 px-4 py-2 text-sm font-semibold text-neutral-950 hover:bg-yellow-600">
+          <Link href="/contact" className="bg-orange-500 px-4 py-2 text-sm font-semibold text-neutral-950 hover:bg-orange-600">
             Ask about a kit
           </Link>
           <Link href="/products" className="border border-neutral-300 px-4 py-2 text-sm font-semibold hover:bg-neutral-100">

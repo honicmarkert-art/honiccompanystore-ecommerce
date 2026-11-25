@@ -143,7 +143,7 @@ export async function secureOrderUpdate(
   updateData: any,
   userId?: string,
   ipAddress?: string
-): Promise<{ success: boolean; data?: any; error?: string }> {
+): Promise<{ success: boolean; data?: any; error?: string; details?: unknown; code?: string }> {
   try {
     const supabase = getSupabaseClient()
     
@@ -226,7 +226,7 @@ export async function secureOrderCreation(
   orderData: any,
   userId?: string,
   ipAddress?: string
-): Promise<{ success: boolean; data?: any; error?: string }> {
+): Promise<{ success: boolean; data?: any; error?: string; details?: unknown; code?: string }> {
   try {
     const supabase = getSupabaseClient()
     

@@ -117,6 +117,16 @@ export async function POST(request: NextRequest) {
     if (order.payment_status === "paid" || order.payment_status === "success") {
       return NextResponse.json({ success: true, duplicate: true })
     }
+    // SECURITY: the payment must belong to this order: either it's the payment we created for it,
+    // or Snippe's own record names this order.
+    const verifiedOrderRef = normalizeOrderReference(verified?.orderReference || "")
+    const sameOrder =
+      (order.clickpesa_transaction_id && String(order.clickpesa_transaction_id) === paymentReference) ||
+      (verifiedOrderRef && verifiedOrderRef === normalizeOrderReference(String(order.reference_id || "")))
+    if (paid && !sameOrder) {
+      logger.error("Snippe payment does not belong to order", { orderId: order.id })
+      return NextResponse.json({ error: "Payment does not belong to this order" }, { status: 401 })
+    }
     const orderTotal = tzsAmount(order.total_amount)
     if (paid && (orderTotal == null || verified?.amount !== orderTotal)) {
       logger.error("Snippe amount mismatch", { orderId: order.id })

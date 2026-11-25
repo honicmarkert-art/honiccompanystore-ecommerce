@@ -6,7 +6,7 @@ import { performanceMonitor } from '@/lib/performance-monitor'
 import { getCachedData, setCachedData, CACHE_TTL, clearCache, generateCacheKey } from '@/lib/database-optimization'
 import { createErrorResponse, logError } from '@/lib/error-handler'
 import { logger } from '@/lib/logger'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -372,7 +372,7 @@ export async function POST(request: NextRequest) {
         })
       } catch (validationError: any) {
         return NextResponse.json(
-          { success: false, error: 'Invalid input data', details: validationError.errors },
+          { success: false, error: 'Invalid input data', details: validationError.issues },
           { status: 400 }
         )
       }

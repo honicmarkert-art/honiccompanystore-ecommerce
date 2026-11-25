@@ -16,7 +16,8 @@ export function useProductsByIds(productIds: number[]): UseProductsByIdsReturn {
   const [error, setError] = useState<string | null>(null)
 
   // Memoize the productIds to prevent unnecessary re-renders
-  const memoizedProductIds = useMemo(() => productIds, [productIds.join(',')])
+  const idsKey = productIds.join(',')
+  const memoizedProductIds = useMemo(() => (idsKey ? idsKey.split(',').map(Number) : []), [idsKey])
 
   const fetchProducts = useCallback(async () => {
     if (memoizedProductIds.length === 0) {
@@ -43,6 +44,7 @@ export function useProductsByIds(productIds: number[]): UseProductsByIdsReturn {
   }, [memoizedProductIds])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
     fetchProducts()
   }, [fetchProducts])
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createServerClient } from '@supabase/ssr'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
+import { sniffImage, sameImageType } from '@/lib/image-sniff'
 
 export const runtime = 'nodejs'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml']
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'] // no SVG: it can carry scripts
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
         { error: 'Invalid file type. Only images are allowed.' },
@@ -103,8 +104,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // The browser-supplied type and name can be faked: check the real format and take the extension from it
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const real = sniffImage(bytes)
+    if (!real || !sameImageType(file.type, real)) {
+      logSecurityEvent('UPLOAD_TYPE_MISMATCH', { endpoint: '/api/supplier/logo-upload', claimed: file.type, real: real?.mime }, request)
+      return NextResponse.json({ error: 'This file isn’t a valid JPG, PNG, GIF or WebP image.' }, { status: 400 })
+    }
+
     // Create a unique filename
-    const fileExt = file.name.split('.').pop()
+    const fileExt = real.ext
     const fileName = `supplier-logos/${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
 
     // Delete old logo if exists
@@ -124,7 +133,7 @@ export async function POST(request: NextRequest) {
         // Extract path after 'service-images/'
         const pathMatch = oldUrl.match(/service-images\/([^?]+)/)
         if (pathMatch && pathMatch[1]) {
-          oldFileName = pathMatch[1]
+          oldFileName = decodeURIComponent(pathMatch[1])
         }
       } else if (oldUrl.includes('supplier-logos')) {
         // Handle direct path format: supplier-logos/user-id/filename
@@ -134,6 +143,10 @@ export async function POST(request: NextRequest) {
         }
       }
       
+      // Only ever delete this supplier's own old logo (company_logo is editable, so never trust the path blindly)
+      if (oldFileName && (!oldFileName.startsWith(`supplier-logos/${user.id}/`) || oldFileName.includes('..'))) {
+        oldFileName = null
+      }
       // Delete old file from storage if we found a valid filename
         if (oldFileName) {
         try {
@@ -153,10 +166,10 @@ export async function POST(request: NextRequest) {
     // Upload to Supabase Storage
     const { data, error } = await adminSupabase.storage
       .from('service-images')
-      .upload(fileName, file, {
+      .upload(fileName, bytes, {
         cacheControl: '3600',
         upsert: false,
-        contentType: file.type
+        contentType: real.mime
       })
 
     if (error) {

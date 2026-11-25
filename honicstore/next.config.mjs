@@ -8,19 +8,22 @@ const shouldUseStandaloneOutput = process.env.NEXT_OUTPUT_STANDALONE === 'true'
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
+  // (eslint config removed: Next.js 16 no longer runs or configures ESLint during builds)
+  // The project type-checks cleanly (0 errors as of 2026-11-24): a new type error now fails the build
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   images: {
-    formats: ['image/webp', 'image/avif'],
-    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
-    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
-    qualities: [60, 75, 80, 85, 90, 100], // Required for Next.js 16 - configure allowed quality values (includes all values used in codebase)
+    // Kept deliberately small: every (image × width × format × quality) is one billable
+    // transformation on Vercel. WebP only (AVIF doubles the variants for a small gain);
+    // widths cover phone cards → full-screen gallery.
+    formats: ['image/webp'],
+    deviceSizes: [640, 828, 1080, 1440, 1920],
+    imageSizes: [64, 128, 256, 384],
+    qualities: [60, 75, 80, 85], // must include every quality= used in the code
     minimumCacheTTL: 31536000, // 1 year cache for images
-    dangerouslyAllowSVG: true,
+    // SVGs never go through the optimizer (next/image serves .svg files as-is automatically)
+    dangerouslyAllowSVG: false,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     // Enable CDN support
     loader: 'default',
@@ -93,6 +96,12 @@ const nextConfig = {
   ],
   experimental: {
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
+    // Keep visited pages in the client cache for 30 s so back/forward and repeat visits are instant
+    // (product data and stock are re-read after that; payment state never relies on this cache).
+    staleTimes: { dynamic: 30, static: 300 },
+    // Build-only: lower peak memory so production builds fit on an 8 GB machine
+    webpackMemoryOptimizations: true,
+    cpus: 2,
   },
   // `experimental.turbo` is deprecated in Next 15+, use top-level `turbopack`.
   turbopack: {
@@ -201,7 +210,7 @@ const nextConfig = {
   // Security: Request size limits (Note: Next.js 15 handles this differently, but this still works)
   // The warning can be ignored - body size limits are enforced at the route level
   // External packages for server components (moved from experimental)
-  serverExternalPackages: ['@supabase/supabase-js'],
+  serverExternalPackages: ['@supabase/supabase-js', 'sharp', 'tesseract.js'], // sharp/tesseract: native + worker code, keep out of the bundle (photo search)
   // Navigation and prefetching optimizations
   trailingSlash: false, // Consistent URL structure
   skipTrailingSlashRedirect: true, // Avoid redirects
@@ -212,6 +221,13 @@ const nextConfig = {
   output: shouldUseStandaloneOutput ? 'standalone' : undefined,
   async redirects() {
     return [
+      // Marketplace is now the main products page; removed pages point to their replacements
+      { source: '/marketplace-demo', destination: '/products', permanent: true },
+      { source: '/marketplace', destination: '/products', permanent: false },
+      { source: '/home', destination: '/', permanent: true },
+      { source: '/china', destination: '/products', permanent: true },
+      { source: '/china/:path*', destination: '/products', permanent: true },
+      { source: '/settings', destination: '/account/settings', permanent: true },
       { source: '/tracking', destination: '/support/order-tracking', permanent: false },
       { source: '/returns', destination: '/support/returns-refunds', permanent: false },
       { source: '/shipping', destination: '/support/shipping-info', permanent: false },
@@ -237,145 +253,48 @@ const nextConfig = {
       { source: '/test-location', destination: '/products', permanent: false },
     ]
   },
-  // Enhanced Security Headers and Performance Optimizations
+  // Photo search reads its bundled OCR data from disk; make sure Vercel ships the file with that function
+  outputFileTracingIncludes: {
+    '/api/image-search': ['./data/tessdata/**/*'],
+  },
   async headers() {
+    // Caching rules. SECURITY:
+    // - Never mark API responses or pages as "public" here: carts, profiles, orders and sessions are per user,
+    //   and a public / s-maxage header lets the browser and Vercel's CDN store one person's data and serve it
+    //   to another. Routes that are safe to share (product lists, product detail) set their own CDN headers.
+    // - No hand-written ETag headers: one ETag shared by every page/response makes caches return the wrong copy.
+    //   Next.js and Vercel generate real ones.
+    // - Pages: Next.js sets the right Cache-Control itself (ISR pages get s-maxage, dynamic pages no-store).
+    // - Security headers (CSP, HSTS, X-Frame-Options...) are set in proxy.ts, one place only.
     return [
-      // Static assets caching (Next.js generated files) - 1 year
-      {
-        source: '/_next/static/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-          {
-            key: 'ETag',
-            value: 'W/"static-asset"',
-          },
-        ],
-      },
-      // Image optimization caching - 1 year
-      {
-        source: '/_next/image/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-          {
-            key: 'ETag',
-            value: 'W/"optimized-image"',
-          },
-        ],
-      },
-      // Fonts caching - 1 year
+      // Fonts: 1 year
       {
         source: '/fonts/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-          {
-            key: 'ETag',
-            value: 'W/"font"',
-          },
-        ],
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
       },
-      // Public assets (images, icons, etc.) - 1 year
+      // Files in /public (logos, icons, placeholders) aren't content-hashed, so not "immutable":
+      // cached for a week and refreshed in the background, so a replaced logo shows up
       {
-        source: '/:path*\\.(ico|png|jpg|jpeg|gif|webp|svg|woff|woff2|ttf|eot|css|js)',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-          {
-            key: 'ETag',
-            value: 'W/"public-asset"',
-          },
-        ],
+        source: '/:path*\\.(ico|png|jpg|jpeg|gif|webp|svg|woff|woff2|ttf|eot)',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=604800, stale-while-revalidate=86400' }],
       },
-      // API routes caching - 5 minutes with revalidation
+      // API: private by default
       {
         source: '/api/:path*',
         headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=300, s-maxage=300, stale-while-revalidate=600',
-          },
-          {
-            key: 'ETag',
-            value: 'W/"api-response"',
-          },
-          {
-            key: 'Vary',
-            value: 'Accept-Encoding',
-          },
+          { key: 'Cache-Control', value: 'private, no-store' },
+          { key: 'Vary', value: 'Accept-Encoding, Cookie, Authorization' },
         ],
       },
-      // Landing page - 1 hour with long revalidation
-      {
-        source: '/',
+      // Public catalogue data (no login, same for everyone): shared on the CDN for a minute, refreshed in the
+      // background. Only add routes here that never read cookies or the Authorization header.
+      ...['/api/products', '/api/products/:id(\\d+)', '/api/products/:id(\\d+)/sold-count', '/api/search', '/api/categories', '/api/company/settings'].map((source) => ({
+        source,
         headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
-          },
-          {
-            key: 'ETag',
-            value: 'W/"landing-page"',
-          },
+          { key: 'Cache-Control', value: 'public, max-age=0, s-maxage=60, stale-while-revalidate=300' },
+          { key: 'Vary', value: 'Accept-Encoding' },
         ],
-      },
-      // All other routes (pages, etc.)
-      {
-        source: '/:path*',
-        headers: [
-          // Content Security Policy
-          {
-            key: 'Content-Security-Policy',
-            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://maps.googleapis.com https://www.google.com https://www.gstatic.com https://static.cloudflareinsights.com https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; media-src 'self' data: ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} https://*.supabase.co; connect-src 'self' https://api.snippe.sh ${process.env.NEXT_PUBLIC_SUPABASE_URL || ''} wss://${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace('https://', '').replace('http://', '') || ''} https://www.google.com https://vision.googleapis.com https://va.vercel-scripts.com; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self';`
-          },
-          // Security Headers
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-          {
-            key: 'X-XSS-Protection',
-            value: '1; mode=block',
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'strict-origin-when-cross-origin',
-          },
-          {
-            key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=(self), payment=(self)',
-          },
-          {
-            key: 'Strict-Transport-Security',
-            value: 'max-age=31536000; includeSubDomains; preload',
-          },
-          // Page caching (shorter for dynamic content)
-          ...(process.env.NODE_ENV === 'development' ? [{
-            key: 'Cache-Control',
-            value: 'no-cache, no-store, must-revalidate',
-          }] : [{
-            key: 'Cache-Control',
-            value: 'public, max-age=1800, s-maxage=1800, stale-while-revalidate=86400',
-          }]),
-          {
-            key: 'ETag',
-            value: 'W/"page-content"',
-          },
-        ],
-      },
+      })),
     ]
   },
 }

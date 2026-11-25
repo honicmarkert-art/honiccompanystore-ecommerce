@@ -134,7 +134,7 @@ export function OTPInput({
         {Array.from({ length }, (_, index) => (
           <div key={index} className="relative">
             <Input
-              ref={(el) => (inputRefs.current[index] = el)}
+              ref={(el) => { inputRefs.current[index] = el }}
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
@@ -172,7 +172,7 @@ export function OTPInput({
       {/* Resend Section */}
       {onResend && (
         <div className="flex items-center justify-center space-x-2">
-          {countdown !== null && countdown > 0 ? (
+          {countdown != null && countdown > 0 ? (
             <>
               <Clock className="w-4 h-4 text-gray-500" />
               <span className="text-sm text-gray-600">

@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
         name: name || email.split('@')[0],
         companyName: name || 'Your Company',
         dashboardUrl: `${appUrl}/supplier/dashboard`,
-        commissionRate: '5%'
+        commissionRate: '' // shown only when it comes from the seller's plan
       })
 
       if (result.success) {

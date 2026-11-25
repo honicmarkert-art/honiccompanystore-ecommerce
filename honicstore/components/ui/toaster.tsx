@@ -15,7 +15,7 @@ export function Toaster() {
   const { toasts } = useToast()
 
   return (
-    <ToastProvider suppressHydrationWarning>
+    <ToastProvider>
       {toasts.map(function ({ id, title, description, action, variant, ...props }) {
         return (
           <Toast key={id} variant={variant} {...props} suppressHydrationWarning>

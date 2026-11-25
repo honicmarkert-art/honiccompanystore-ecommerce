@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { clientIp } from '@/lib/client-ip'
 import { supabase } from '@/lib/supabase'
 import { enhancedRateLimit } from '@/lib/enhanced-rate-limit'
 import { logger } from '@/lib/logger'
 
 // Rate limit logging helper
 const logRateLimitEvent = (endpoint: string, reason: string | undefined, request: NextRequest) => {
-  const clientIP = request.headers.get('x-forwarded-for') || 
-                   request.headers.get('x-real-ip') || 
-                   request.headers.get('cf-connecting-ip') || 
-                   'unknown'
+  const clientIP = clientIp(request) || 'unknown'
   logger.security(`Rate limit exceeded on ${endpoint}`, undefined, {
     ip: clientIP,
     reason,

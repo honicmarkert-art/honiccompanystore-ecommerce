@@ -29,7 +29,9 @@ const DEFAULT_COMPANY_SETTINGS = {
   
   // Contact Information
   websiteUrl: process.env.NEXT_PUBLIC_WEBSITE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || "https://honic-co.com",
-  contactEmail: process.env.CONTACT_EMAIL || "contact@honic-co.com",
+  // Must be a NEXT_PUBLIC_ variable: this hook runs on both server and client, and server-only env vars are
+  // undefined in the browser — that made the server render one email and the client another (hydration error).
+  contactEmail: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "contact@honiccompanystore.com",
   contactPhone: "+255 123 456 789",
   address: "Dar es Salaam, Tanzania",
   socialLinks: {

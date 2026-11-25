@@ -127,7 +127,7 @@ export function UserProfile() {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-8 w-8 sm:h-8 sm:w-8 rounded-full hover:bg-yellow-500/10 hover:text-yellow-500 transition-colors">
+          <Button variant="ghost" className="relative h-8 w-8 sm:h-8 sm:w-8 rounded-full hover:bg-orange-500/10 hover:text-orange-500 transition-colors">
             <User className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -234,7 +234,7 @@ export function UserProfile() {
                   <div className="flex items-center gap-2">
                     <Crown className={cn(
                       "h-3 w-3",
-                      isPremiumPlan ? "text-yellow-500" : "text-gray-400"
+                      isPremiumPlan ? "text-orange-500" : "text-gray-400"
                     )} />
                     <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
                       {currentPlan.name}
@@ -243,7 +243,7 @@ export function UserProfile() {
                   {isFreePlan && (
                     <Button
                       size="sm"
-                      className="h-6 px-2 text-xs bg-yellow-500 hover:bg-yellow-600 text-black"
+                      className="h-6 px-2 text-xs bg-orange-500 hover:bg-orange-600 text-black"
                       onClick={(e) => {
                         e.stopPropagation()
                         e.preventDefault()

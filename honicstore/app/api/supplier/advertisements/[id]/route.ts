@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 // DELETE - Delete supplier's advertisement
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+  const params = await paramsPromise // Next 15+: params is a Promise (reading .id directly gave undefined)
   return performanceMonitor.measure('supplier_advertisements_delete_by_id', async () => {
     try {
       // Rate limiting

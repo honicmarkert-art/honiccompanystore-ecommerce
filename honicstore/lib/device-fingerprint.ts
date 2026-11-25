@@ -7,6 +7,18 @@
 
 const DEVICE_ID_KEY = 'device-fingerprint-id'
 const DEVICE_VERIFIED_KEY = 'device-verified'
+/** Set when the user signed in without "Keep me signed in" */
+const SESSION_ONLY_KEY = 'honic-session-only'
+/** Browser-session cookie: shared by every tab, deleted when the browser closes (unlike sessionStorage, which is per tab) */
+const BROWSER_SESSION_COOKIE = 'honic_browser_session'
+const hasBrowserSessionCookie = () => typeof document !== 'undefined' && document.cookie.split('; ').includes(`${BROWSER_SESSION_COOKIE}=1`)
+const setBrowserSessionCookie = (on: boolean) => {
+  if (typeof document === 'undefined') return
+  const secure = location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = on
+    ? `${BROWSER_SESSION_COOKIE}=1; path=/; SameSite=Lax${secure}`
+    : `${BROWSER_SESSION_COOKIE}=; path=/; Max-Age=0; SameSite=Lax${secure}`
+}
 
 /**
  * Generate a unique device fingerprint
@@ -33,7 +45,7 @@ export function generateDeviceFingerprint(): string {
       new Date().getTimezoneOffset(),
       canvas.toDataURL(),
       navigator.hardwareConcurrency || 0,
-      navigator.deviceMemory || 0,
+      (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0,
       window.localStorage ? 'localStorage' : 'no-localStorage',
       window.sessionStorage ? 'sessionStorage' : 'no-sessionStorage',
     ].join('|')
@@ -83,6 +95,8 @@ export function isDeviceVerified(): boolean {
   }
 
   try {
+    // "Keep me signed in" off: valid while this browser session lasts (all tabs), gone when the browser closes
+    if (localStorage.getItem(SESSION_ONLY_KEY) === '1') return hasBrowserSessionCookie()
     const verified = localStorage.getItem(DEVICE_VERIFIED_KEY)
     const deviceId = getDeviceId()
     const storedDeviceId = localStorage.getItem(DEVICE_ID_KEY)
@@ -99,17 +113,38 @@ export function isDeviceVerified(): boolean {
 /**
  * Mark device as verified (after explicit login)
  */
-export function markDeviceVerified(): void {
+export function markDeviceVerified(remember: boolean = true): void {
   if (typeof window === 'undefined') {
     return
   }
 
   try {
-    localStorage.setItem(DEVICE_VERIFIED_KEY, 'true')
-    const deviceId = getDeviceId()
-    localStorage.setItem(DEVICE_ID_KEY, deviceId)
+    if (remember) {
+      localStorage.setItem(DEVICE_VERIFIED_KEY, 'true')
+      localStorage.setItem(DEVICE_ID_KEY, getDeviceId())
+      localStorage.removeItem(SESSION_ONLY_KEY)
+      setBrowserSessionCookie(false)
+    } else {
+      // Signed in for this browser session only
+      localStorage.removeItem(DEVICE_VERIFIED_KEY)
+      localStorage.setItem(SESSION_ONLY_KEY, '1')
+      setBrowserSessionCookie(true)
+    }
   } catch (error) {
     // Ignore storage errors
+  }
+}
+
+/**
+ * True when the last sign-in was "don't keep me signed in" and that browser session has ended
+ * (the server cookies may still exist, so the caller should sign out on the server too).
+ */
+export function sessionOnlyExpired(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return localStorage.getItem(SESSION_ONLY_KEY) === '1' && !hasBrowserSessionCookie()
+  } catch {
+    return false
   }
 }
 
@@ -124,6 +159,8 @@ export function clearDeviceVerification(): void {
   try {
     localStorage.removeItem(DEVICE_VERIFIED_KEY)
     localStorage.removeItem(DEVICE_ID_KEY)
+    localStorage.removeItem(SESSION_ONLY_KEY)
+    setBrowserSessionCookie(false)
   } catch (error) {
     // Ignore storage errors
   }

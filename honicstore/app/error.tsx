@@ -33,7 +33,7 @@ export default function Error({
   }
 
   const handleGoHome = () => {
-    router.push('/home')
+    router.push('/')
   }
 
   return (

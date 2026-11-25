@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { logger } from '@/lib/logger'
+import { clientIp } from '@/lib/client-ip'
 
 interface RateLimitConfig {
   windowMs: number
@@ -20,6 +21,10 @@ const rateLimitStore = new Map<string, RateLimitEntry>()
 const rateLimitConfigs: Record<string, RateLimitConfig> = {
   // Authentication endpoints - stricter limits
   '/api/auth/login': { windowMs: 15 * 60 * 1000, maxRequests: 5, blockDurationMs: 30 * 60 * 1000 },
+  // "Is this email registered / verified?" lookups: enough for real forms, too few to harvest emails
+  '/api/auth/check-': { windowMs: 10 * 60 * 1000, maxRequests: 20, blockDurationMs: 30 * 60 * 1000 },
+  // Order invoice PDFs: generating them costs CPU, so cap per visitor. Must come before '/api/orders/'
+  '/api/orders/invoice': { windowMs: 10 * 60 * 1000, maxRequests: 20, blockDurationMs: 15 * 60 * 1000 },
   
   // Payment endpoints - very strict
   '/api/payment': { windowMs: 5 * 60 * 1000, maxRequests: 10, blockDurationMs: 60 * 60 * 1000 },
@@ -27,18 +32,30 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   '/api/webhooks/manual-trigger': { windowMs: 60 * 60 * 1000, maxRequests: 3, blockDurationMs: 2 * 60 * 60 * 1000 },
   '/api/media/upload': { windowMs: 60 * 1000, maxRequests: 10, blockDurationMs: 15 * 60 * 1000 },
   '/api/media/delete': { windowMs: 60 * 1000, maxRequests: 20, blockDurationMs: 15 * 60 * 1000 },
+  // Guest order tracking (order number + phone/email): tight, so order numbers can't be guessed. Must come before '/api/orders/'
+  '/api/orders/track': { windowMs: 10 * 60 * 1000, maxRequests: 10, blockDurationMs: 30 * 60 * 1000 },
   '/api/orders/': { windowMs: 60 * 1000, maxRequests: 30, blockDurationMs: 10 * 60 * 1000 },
   
   // Cart endpoints - moderate limits to prevent abuse
   '/api/cart': { windowMs: 60 * 1000, maxRequests: 30, blockDurationMs: 5 * 60 * 1000 },
   
+  // Contact form / quote requests / reviews: each one emails the team, so keep it tight
+  '/api/contact': { windowMs: 60 * 60 * 1000, maxRequests: 8, blockDurationMs: 60 * 60 * 1000 },
+
   // Newsletter subscription - moderate limits to prevent spam
+  // Email links (confirm / unsubscribe / preferences): signed links, so a moderate limit is enough
+  '/api/email/': { windowMs: 10 * 60 * 1000, maxRequests: 40, blockDurationMs: 15 * 60 * 1000 },
   '/api/newsletter/subscribe': { windowMs: 60 * 60 * 1000, maxRequests: 5, blockDurationMs: 60 * 60 * 1000 },
   
   // Public API endpoints - higher limits for products (used for infinite scroll)
   '/api/products': { windowMs: 60 * 1000, maxRequests: 120, blockDurationMs: 2 * 60 * 1000 },
   '/api/categories': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
   '/api/advertisements': { windowMs: 60 * 1000, maxRequests: 60, blockDurationMs: 5 * 60 * 1000 },
+  // AI text search calls the paid Gemini API; plain search is cheap but still bounded
+  '/api/search/ai': { windowMs: 60 * 1000, maxRequests: 20, blockDurationMs: 2 * 60 * 1000 },
+  '/api/search': { windowMs: 60 * 1000, maxRequests: 120, blockDurationMs: 60 * 1000 },
+  // Photo search calls the paid Gemini API — keep it tight per visitor
+  '/api/image-search': { windowMs: 60 * 1000, maxRequests: 15, blockDurationMs: 2 * 60 * 1000 },
   
   
   // Supplier endpoints - moderate limits
@@ -215,16 +232,9 @@ export async function getRateLimitBackendStatus(): Promise<{
   }
 }
 
+// Only host-set headers (lib/client-ip.ts): a client-sent cf-connecting-ip used to bypass every limit
 function getClientIP(request: NextRequest): string {
-  const forwarded = request.headers.get('x-forwarded-for')
-  const realIP = request.headers.get('x-real-ip')
-  const cfConnectingIP = request.headers.get('cf-connecting-ip')
-  
-  if (cfConnectingIP) return cfConnectingIP
-  if (realIP) return realIP
-  if (forwarded) return forwarded.split(',')[0].trim()
-  
-  return 'unknown'
+  return clientIp(request) || 'unknown'
 }
 
 function getRateLimitConfig(pathname: string): RateLimitConfig {
@@ -249,18 +259,29 @@ setInterval(() => {
 }, 5 * 60 * 1000) // Cleanup every 5 minutes
 
 // Security monitoring
-export function logSecurityEvent(event: string, details: any, request: NextRequest) {
-  const clientIP = getClientIP(request)
-  const userAgent = request.headers.get('user-agent') || 'unknown'
-  const timestamp = new Date().toISOString()
-  
-  logger.log(`[SECURITY] ${timestamp} - ${event}`, {
-    ip: clientIP,
-    userAgent,
-    path: request.nextUrl.pathname,
-    method: request.method,
-    ...details
-  })
+/**
+ * Log a security event. Never throws: several routes call it as (event, undefined, details) from inside their
+ * error handling, and a crash here used to turn a 401/403 into a 500. Accepts either argument order.
+ */
+export function logSecurityEvent(event: string, details?: unknown, request?: NextRequest | Record<string, unknown>) {
+  try {
+    const isRequest = (x: unknown): x is NextRequest =>
+      !!x && typeof x === 'object' && typeof (x as NextRequest).headers?.get === 'function'
+    const req = isRequest(request) ? request : isRequest(details) ? details : null
+    const extra = {
+      ...(details && !isRequest(details) && typeof details === 'object' ? details : {}),
+      ...(request && !isRequest(request) && typeof request === 'object' ? request : {}),
+    }
+    logger.log(`[SECURITY] ${new Date().toISOString()} - ${event}`, {
+      ip: req ? getClientIP(req) : 'unknown',
+      userAgent: req?.headers.get('user-agent') || 'unknown',
+      path: req?.nextUrl?.pathname,
+      method: req?.method,
+      ...extra,
+    })
+  } catch {
+    /* logging must never break the request */
+  }
   
   // In production, send to monitoring service
   // Example: sendToMonitoringService(event, { ip: clientIP, ...details })

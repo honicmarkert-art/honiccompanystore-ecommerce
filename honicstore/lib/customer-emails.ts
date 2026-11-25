@@ -1,11 +1,12 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 import {
-  sendInvoiceEmail,
   sendOrderCancellationEmail,
-  sendOrderConfirmationEmail,
+  sendPaymentReceivedEmail,
   sendSecurityAlertEmail,
   sendSupplierPremiumReceiptEmail,
 } from '@/lib/user-email-service'
+import { buildInvoicePdf, invoiceFileName, loadInvoiceOrder } from '@/lib/invoice-pdf'
 
 type Row = Record<string, unknown>
 
@@ -14,10 +15,8 @@ type Query = PromiseLike<{ data: Row[] | null }> & {
   maybeSingle: () => Promise<{ data: Row | null }>
 }
 
-type Supabase = {
-  from: (table: string) => { select: (columns: string) => Query }
-  auth: { admin: { getUserById: (id: string) => Promise<{ data: { user: { email?: string } | null } }> } }
-}
+// The real client; the hand-written shape it replaced no longer matched supabase-js 2.119
+type Supabase = SupabaseClient
 
 function siteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://honiccompanystore.com'
@@ -52,8 +51,15 @@ async function customerEmail(supabase: Supabase, userId: unknown, shipping: Reco
   return shipping.email || billing.email || ''
 }
 
-export async function sendPaidOrderEmails(supabase: Supabase, order: Row) {
+/**
+ * The one email a shopper gets when payment is confirmed: summary, private order link and the
+ * invoice PDF attached. Called by whichever request flips the order to paid (webhook or status check),
+ * so it goes out once.
+ */
+export async function sendPaidOrderEmails(supabase: Supabase, partial: Row) {
   try {
+    const { data: full } = await supabase.from('orders').select('*').eq('id', key(partial.id)).maybeSingle()
+    const order: Row = (full as Row) || partial
     const shipping = readAddress(order.shipping_address)
     const billing = readAddress(order.billing_address)
     const email = await customerEmail(supabase, order.user_id || null, shipping, billing)
@@ -67,41 +73,42 @@ export async function sendPaidOrderEmails(supabase: Supabase, order: Row) {
       name: text(item.product_name) || 'Item',
       quantity: Number(item.quantity) || 1,
       price: Number(item.price) || 0,
-      totalPrice: Number(item.total_price) || 0,
+      totalPrice: Number(item.total_price) || (Number(item.price) || 0) * (Number(item.quantity) || 1),
     }))
-    const subtotal = items.reduce((sum: number, item: { totalPrice: number; price: number; quantity: number }) => sum + (item.totalPrice || item.price * item.quantity), 0)
-    const shippingFee = Number(order.shipping_fee || order.shipping_cost || 0)
-    const tax = Number(order.tax_amount || 0)
-    const total = Number(order.total_amount) || subtotal + shippingFee + tax
+    const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0)
+    const total = Number(order.total_amount) || subtotal
     const orderNumber = String(order.order_number || order.id)
-    const created = order.created_at
-    const orderUrl = `${siteUrl()}/account/orders/${encodeURIComponent(orderNumber)}`
-    const invoiceUrl = `${siteUrl()}/api/user/orders/${encodeURIComponent(orderNumber)}/invoice`
+    const ref = String(order.reference_id || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase()
+    const base = siteUrl().replace(/\/$/, '')
+    // private order link: works for guests and members on any device, no sign-in needed
+    const orderUrl = ref ? `${base}/orders/${ref}` : `${base}/account/orders/${encodeURIComponent(orderNumber)}`
+    const invoiceUrl = ref ? `${base}/api/orders/invoice/${ref}` : `${base}/api/user/orders/${encodeURIComponent(orderNumber)}/invoice`
+    const pickup = order.delivery_option === 'pickup'
+    const deliveryLine = pickup
+      ? `Store pickup${order.pickup_id ? ` · pickup ID ${text(order.pickup_id)}` : ''}. Bring the pickup ID and a valid ID.`
+      : `To ${[shipping.address1 || shipping.address, shipping.district, shipping.city, shipping.region].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'the address you gave at checkout'}`
 
-    await sendOrderConfirmationEmail(email, {
+    // invoice PDF attached (skip the attachment, not the email, if it cannot be built)
+    let invoicePdf: { filename: string; content: Uint8Array; contentType: string } | undefined
+    try {
+      const inv = ref ? await loadInvoiceOrder(supabase, { referenceId: ref }) : null
+      if (inv) invoicePdf = { filename: invoiceFileName(inv), content: await buildInvoicePdf(inv), contentType: 'application/pdf' }
+    } catch (error) {
+      logger.error('Invoice PDF for email failed:', error)
+    }
+
+    await sendPaymentReceivedEmail(email, {
+      name: shipping.fullName || billing.fullName,
       orderNumber,
-      orderDate: new Date(typeof created === 'string' || typeof created === 'number' ? created : Date.now()).toLocaleString('en-TZ', { timeZone: 'Africa/Dar_es_Salaam' }),
+      orderDate: new Date(String(order.created_at || Date.now())).toLocaleString('en-GB', { timeZone: 'Africa/Dar_es_Salaam' }),
       items,
       subtotal,
-      shipping: shippingFee,
-      tax,
+      shipping: Math.max(0, total - subtotal),
       total,
-      shippingAddress: shipping,
-      billingAddress: billing,
-      paymentMethod: text(order.payment_method) || 'Mobile money',
-      trackingUrl: orderUrl,
+      deliveryLine,
+      orderUrl,
       invoiceUrl,
-    })
-    await sendInvoiceEmail(email, {
-      invoiceNumber: orderNumber,
-      invoiceDate: new Date().toLocaleDateString('en-TZ', { timeZone: 'Africa/Dar_es_Salaam' }),
-      orderNumber,
-      items,
-      subtotal,
-      tax,
-      total,
-      billingAddress: Object.keys(billing).length ? billing : shipping,
-      invoiceUrl,
+      invoicePdf,
     })
   } catch (error) {
     logger.error('Paid order email failed:', error)
@@ -183,7 +190,6 @@ export async function sendExpiredOrderEmails(supabase: Supabase, orders: Array<{
         cancellationReason: 'Expired. Not confirmed within 15 minutes.',
         refundAmount: paid ? Number(order.total_amount) || undefined : undefined,
         refundMethod: paid ? 'Original payment method' : undefined,
-        refundTimeline: paid ? '5-7 business days' : undefined,
       })
     } catch (error) {
       logger.error('Expired order email failed:', error)

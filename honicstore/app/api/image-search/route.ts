@@ -1,233 +1,145 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { enhancedRateLimit } from '@/lib/enhanced-rate-limit'
 import { logger } from '@/lib/logger'
-import { analyzeImage, extractSearchKeywords, extractKeywordsFromFilename } from '@/lib/image-recognition'
-import { fuzzySearchProducts } from '@/lib/fuzzy-search'
+import { parseDataUrl, searchByPhoto, warmCatalog, type ImageInput, type PhotoAnalysis } from '@/lib/visual-search'
 
-
-
-// Force dynamic rendering - don't pre-render during build
+/**
+ * Photo search ("Honic Lens"), powered by Gemini — see lib/visual-search.ts.
+ *
+ * POST accepts either:
+ *   - JSON  { image: "data:image/jpeg;base64,..." }   (new UI; images are resized in the browser)
+ *   - multipart form with an `image` file              (older callers)
+ *
+ * Response keeps the old fields (success, products, keywords, searchType, totalCount)
+ * and adds: query, analysis, products[].match ('exact' | 'similar' | 'related').
+ */
 
 export const dynamic = 'force-dynamic'
-
 export const runtime = 'nodejs'
-export async function GET() {
-  return NextResponse.json({ 
-    message: 'Image search API is working',
-    aiEnabled: !!process.env.GOOGLE_CLOUD_VISION_API_KEY,
-    status: 'ready'
-  })
+
+const MAX_BYTES = 6 * 1024 * 1024
+const ALLOWED = /^image\/(jpeg|jpg|png|webp|gif|heic|heif)$/i
+
+export async function GET(request: NextRequest) {
+  // ?warm=1 — the photo dialog calls this when it opens, so the product index is
+  // already in memory by the time the shopper picks a photo.
+  if (request.nextUrl.searchParams.get('warm')) {
+    await warmCatalog().catch(() => {})
+    return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } })
+  }
+  // Health check, incl. how many product images have a fingerprint (no-AI matching)
+  let fingerprints: { images: number; hashed: number } | null = null
+  try {
+    const [{ loadCatalog }, { fingerprintCoverage }] = await Promise.all([import('@/lib/visual-search'), import('@/lib/image-match')])
+    fingerprints = fingerprintCoverage(await loadCatalog())
+  } catch { /* report without it */ }
+  return NextResponse.json(
+    { message: 'Image search API is working', aiEnabled: !!process.env.GEMINI_API_KEY, fingerprints, status: 'ready' },
+    { headers: { 'Cache-Control': 'no-store' } },
+  )
+}
+
+const keywordsOf = (a: PhotoAnalysis) => [...new Set([a.name, a.brand, ...a.modelNumbers, ...a.keywords].filter(Boolean))].slice(0, 10)
+
+const ERRORS = {
+  ai_unavailable: { status: 503, error: 'Photo search is busy right now. Please try again in a moment.' },
+  no_product: { status: 422, error: "We couldn't spot a product in that photo. Try a closer shot of the item." },
+} as const
+
+/**
+ * Streaming mode (Accept: application/x-ndjson): one JSON object per line —
+ *   {"type":"partial", ...}  results as soon as the photo is understood
+ *   {"type":"final", ...}    re-ranked results with exact/similar/related labels
+ *   {"type":"error", ...}
+ */
+function streamSearch(image: ImageInput) {
+  const enc = new TextEncoder()
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        const send = (o: unknown) => controller.enqueue(enc.encode(JSON.stringify(o) + '\n'))
+        try {
+          const r = await searchByPhoto(image, {
+            onPartial: (p) => send({ type: 'partial', query: p.query, analysis: p.analysis, keywords: keywordsOf(p.analysis), products: p.products }),
+          })
+          if (r.status !== 'ok') {
+            send({ type: 'error', ...ERRORS[r.status], analysis: 'analysis' in r ? r.analysis : undefined })
+          } else {
+            logger.log('[image-search]', { method: r.method, detail: r.detail, query: r.query, matches: r.products.length, reranked: r.reranked, ms: r.tookMs, ...r.timings })
+            send({ type: 'final', method: r.method, query: r.query, analysis: r.analysis, keywords: keywordsOf(r.analysis), products: r.products, tookMs: r.tookMs, timings: r.timings })
+          }
+        } catch (error) {
+          logger.error('[image-search] failed', error)
+          send({ type: 'error', status: 500, error: 'Photo search failed. Please try again.' })
+        }
+        controller.close()
+      },
+    }),
+    { headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } },
+  )
+}
+
+async function readImage(request: NextRequest): Promise<ImageInput | { error: string }> {
+  const type = request.headers.get('content-type') || ''
+  if (type.includes('application/json')) {
+    const body = await request.json().catch(() => null)
+    const img = parseDataUrl(String(body?.image || ''))
+    return img || { error: 'Please add a JPG, PNG, WEBP or GIF photo.' }
+  }
+  const form = await request.formData().catch(() => null)
+  const file = form?.get('image')
+  if (!(file instanceof File) || file.size === 0) return { error: 'No image provided' }
+  if (!ALLOWED.test(file.type)) return { error: 'Please add a JPG, PNG, WEBP or GIF photo.' }
+  if (file.size > MAX_BYTES) return { error: 'That photo is too large (max 6 MB).' }
+  const data = Buffer.from(await file.arrayBuffer()).toString('base64')
+  return { mimeType: file.type.toLowerCase() === 'image/jpg' ? 'image/jpeg' : file.type.toLowerCase(), data }
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    logger.log('Image search API called')
-    
-    const formData = await request.formData()
-    const imageFile = formData.get('image') as File
-    
-    logger.log('Form data keys:', Array.from(formData.keys()))
-    logger.log('Image file received:', {
-      name: imageFile?.name,
-      type: imageFile?.type,
-      size: imageFile?.size,
-      hasFile: !!imageFile
-    })
-    
-    if (!imageFile || imageFile.size === 0) {
-      logger.log('No valid image file provided')
-      return NextResponse.json({ error: 'No image provided' }, { status: 400 })
-    }
-
-    // Validate file type
-    if (!imageFile.type.startsWith('image/')) {
-      return NextResponse.json({ error: 'File must be an image' }, { status: 400 })
-    }
-
-    // Validate file size (max 10MB)
-    if (imageFile.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: 'Image file too large (max 10MB)' }, { status: 400 })
-    }
-
-    // Convert image to buffer for analysis
-    const arrayBuffer = await imageFile.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    
-    // Analyze image using Google Cloud Vision API (or fallback to filename)
-    const analysis = await analyzeImage(buffer)
-    const keywords = extractSearchKeywords(analysis, imageFile.name)
-    
-    logger.log('Image analysis complete:', {
-      keywords,
-      confidence: analysis.confidence,
-      hasText: analysis.text.length > 0,
-      hasObjects: analysis.objects.length > 0,
-      aiEnabled: !!process.env.GOOGLE_CLOUD_VISION_API_KEY
-    })
-
-    if (keywords.length === 0) {
-      logger.log('No keywords extracted from image')
-      return NextResponse.json({ 
-        error: 'Could not extract keywords from image. Try uploading an image with visible text or product labels.' 
-      }, { status: 400 })
-    }
-
-    // Fetch all products for fuzzy search (with reasonable limit)
-    const { data: allProducts, error: fetchError } = await supabase
-      .from('products')
-      .select('*')
-      .limit(5000) // Fetch up to 5000 products for search
-    
-    if (fetchError) {
-      return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 })
-    }
-
-    if (!allProducts || allProducts.length === 0) {
-      return NextResponse.json({
-        success: true,
-        products: [],
-        keywords,
-        searchType: 'image',
-        totalCount: 0,
-        message: 'No products found in database'
-      })
-    }
-
-    // Convert to searchable format - include variant data
-    const searchableProducts = allProducts.map((product: any) => {
-      // Use product_variants (raw from database) or variants (if already transformed)
-      const rawVariants = product.product_variants || product.variants || []
-      
-      // Collect all variant data for comprehensive search
-      const variantSkus = rawVariants.map((v: any) => v.sku).filter(Boolean)
-      const variantNames = rawVariants.map((v: any) => v.name).filter(Boolean)
-      
-      // Collect variant attributes (regular attributes object)
-      const variantAttributes = rawVariants.flatMap((v: any) => 
-        v.attributes ? Object.values(v.attributes).flatMap(val => 
-          typeof val === 'string' && val.includes(',') ? val.split(',').map(s => s.trim()) : [val]
-        ) : []
-      ).filter(Boolean)
-      
-      // Combine all searchable text including all variant data
-      const combinedText = [
-        product.name || '',
-        product.description || '',
-        product.category || '',
-        product.brand || '',
-        product.sku || '',
-        product.model || '',
-        ...variantSkus,
-        ...variantNames,
-        ...variantAttributes,
-        ...variantPrimaryValues,
-      ].join(' ')
-      
-      return {
-        id: product.id,
-        name: combinedText, // Use combined text for comprehensive search
-        description: product.description || '',
-        category: product.category || '',
-        brand: product.brand || '',
-        price: product.price || 0,
-        sku: product.sku,
-        model: product.model,
-        tags: []
-      }
-    })
-
-    // Use fuzzy search with all extracted keywords
-    let searchResults: any[] = []
-    
-    // Search with each keyword and combine results
-    for (const keyword of keywords.slice(0, 3)) { // Use top 3 keywords
-      const results = fuzzySearchProducts(searchableProducts, keyword, {
-        maxResults: 20,
-        minScore: 0.4, // More lenient for image search
-        useSynonyms: true
-      })
-      
-      // Add results that aren't already in the list
-      results.forEach(result => {
-        if (!searchResults.find(r => r.id === result.id)) {
-          searchResults.push(result)
-        }
-      })
-    }
-
-    // Limit to top 20 results
-    searchResults = searchResults.slice(0, 20)
-
-    // Map back to full product data
-    const productIds = new Set(searchResults.map(r => r.id))
-    const matchedProducts = allProducts.filter((p: any) => productIds.has(p.id))
-
-    // Transform products to match expected format
-    const transformedProducts = matchedProducts.map((product: any) => ({
-      id: product.id,
-      name: product.name,
-      description: product.description,
-      price: product.price,
-      originalPrice: product.original_price,
-      rating: product.rating,
-      reviews: product.reviews,
-      image: product.image,
-      category: product.category,
-      brand: product.brand,
-      inStock: product.in_stock,
-      freeDelivery: product.free_delivery,
-      sameDayDelivery: product.same_day_delivery,
-      variants: product.variants || [],
-      variantConfig: product.variant_config || null,
-      specifications: typeof product.specifications === 'string' 
-        ? JSON.parse(product.specifications) 
-        : product.specifications || {},
-      gallery: product.gallery || [],
-      sku: product.sku,
-      model: product.model,
-      views: product.views,
-      video: product.video,
-      view360: product.view360,
-      stockQuantity: product.stock_quantity,
-      variantImages: product.variant_images || []
-    }))
-
-    logger.log('Image search results:', { 
-      keywordsCount: keywords.length, 
-      resultsCount: transformedProducts.length,
-      confidence: analysis.confidence 
-    })
-
-    return NextResponse.json({
-      success: true,
-      products: transformedProducts,
-      keywords,
-      searchType: 'image',
-      totalCount: transformedProducts.length,
-      analysis: {
-        detectedText: analysis.text.slice(0, 5),
-        detectedObjects: analysis.objects.slice(0, 5),
-        confidence: analysis.confidence,
-        aiEnabled: !!process.env.GOOGLE_CLOUD_VISION_API_KEY
-      }
-    })
-
-  } catch (error) {
-    return NextResponse.json({ 
-      error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 })
+  const limit = await enhancedRateLimit(request)
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: 'Too many photo searches. Please wait a minute and try again.' },
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfter || 60) } },
+    )
   }
-}
+  if (!process.env.GEMINI_API_KEY?.trim()) {
+    return NextResponse.json({ error: 'Photo search is not configured yet.' }, { status: 503 })
+  }
 
-// Handle preflight requests
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  })
+  try {
+    const image = await readImage(request)
+    if ('error' in image) return NextResponse.json({ error: image.error }, { status: 400 })
+
+    if ((request.headers.get('accept') || '').includes('application/x-ndjson')) return streamSearch(image)
+
+    const result = await searchByPhoto(image)
+
+    if (result.status !== 'ok') {
+      const e = ERRORS[result.status]
+      return NextResponse.json({ error: e.error, analysis: 'analysis' in result ? result.analysis : undefined }, { status: e.status })
+    }
+
+    const a = result.analysis
+    const keywords = keywordsOf(a)
+    logger.log('[image-search]', { method: result.method, detail: result.detail, query: result.query, matches: result.products.length, reranked: result.reranked, ms: result.tookMs, ...result.timings })
+
+    return NextResponse.json(
+      {
+        success: true,
+        searchType: 'image',
+        method: result.method,
+        query: result.query,
+        keywords,
+        analysis: a,
+        products: result.products,
+        totalCount: result.products.length,
+        tookMs: result.tookMs,
+      },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
+  } catch (error) {
+    logger.error('[image-search] failed', error)
+    return NextResponse.json({ error: 'Photo search failed. Please try again.' }, { status: 500 })
+  }
 }

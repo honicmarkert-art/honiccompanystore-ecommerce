@@ -13,7 +13,7 @@ export default function ErrorPageClient() {
   }
 
   const handleGoHome = () => {
-    router.push('/home')
+    router.push('/')
   }
 
   return (

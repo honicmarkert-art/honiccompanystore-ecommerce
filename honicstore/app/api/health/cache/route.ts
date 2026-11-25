@@ -11,11 +11,14 @@ import { getCacheStats } from '@/lib/database-optimization'
 import { getPopularProductsCacheStats } from '@/lib/popular-products-cache'
 import { cacheMonitor } from '@/lib/cache-monitoring'
 import { logger } from '@/lib/logger'
+import { requireInternal } from '@/lib/internal-auth'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
+  const blocked = requireInternal(request)
+  if (blocked) return blocked
   try {
     // Get cache statistics (async for popular cache stats)
     const serverCacheStats = getCacheStats()

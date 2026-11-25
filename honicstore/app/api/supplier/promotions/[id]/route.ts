@@ -4,7 +4,7 @@ import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { performanceMonitor } from '@/lib/performance-monitor'
 import { clearCache } from '@/lib/database-optimization'
 import { createErrorResponse, logError } from '@/lib/error-handler'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -46,8 +46,9 @@ const promotionUpdateSchema = z.object({
 // DELETE - Delete a promotion
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise // Next 15+: params is a Promise (reading .id directly gave undefined)
   return performanceMonitor.measure('supplier_promotions_delete', async () => {
     try {
       // Rate limiting
@@ -150,8 +151,9 @@ export async function DELETE(
 // PATCH - Update a promotion
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise // Next 15+: params is a Promise (reading .id directly gave undefined)
   return performanceMonitor.measure('supplier_promotions_patch', async () => {
     try {
       // Rate limiting
@@ -222,7 +224,7 @@ export async function PATCH(
         promotionUpdateSchema.parse(body)
       } catch (validationError: any) {
         return NextResponse.json(
-          { success: false, error: 'Invalid input data', details: validationError.errors },
+          { success: false, error: 'Invalid input data', details: validationError.issues },
           { status: 400 }
         )
       }

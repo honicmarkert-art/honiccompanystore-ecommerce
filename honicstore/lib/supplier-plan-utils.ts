@@ -60,7 +60,7 @@ export async function canCreateProduct(
     }
   }
 
-  return { allowed: true, maxProducts: plan.max_products || null }
+  return { allowed: true, maxProducts: plan.max_products || undefined }
 }
 
 /**

@@ -36,7 +36,7 @@ interface MediaUploadProps {
   className?: string
   label?: string
   description?: string
-  context?: 'category' | 'product' | 'variant' // Context for bucket selection
+  context?: 'category' | 'product' | 'variant' | 'specification' // Context for bucket selection
   productId?: number // Product ID for product-specific uploads
 }
 
@@ -129,7 +129,7 @@ export function MediaUpload({
       // For videos and 3D models, upload directly
       await uploadFile(file)
     }
-  }, [maxSize, formats, type, toast])
+  }, [maxSize, formats, type, toast]) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -139,7 +139,7 @@ export function MediaUpload({
   }
 
 
-  const uploadFile = async (file: File) => {
+  async function uploadFile(file: File) {
     setIsUploading(true)
     try {
       const formData = new FormData()

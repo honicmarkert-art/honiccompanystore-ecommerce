@@ -89,6 +89,7 @@ function CompanyInfoPageContent() {
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false)
 
   const hasLoadedRef = useRef(false)
+  const [hasLoaded, setHasLoaded] = useState(false)
   useEffect(() => {
     // Prevent multiple calls
     if (hasLoadedRef.current) {
@@ -113,6 +114,7 @@ function CompanyInfoPageContent() {
         }
         
         hasLoadedRef.current = true
+        setHasLoaded(true)
         
         // Load existing company info if available
         const response = await fetch('/api/user/profile')
@@ -164,7 +166,7 @@ function CompanyInfoPageContent() {
     }
     
     checkAuthAndLoad()
-  }, []) // Empty dependency array - only run once on mount
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- Empty dependency array - only run once on mount
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -460,15 +462,16 @@ function CompanyInfoPageContent() {
       }, 5000) // 5 second timeout
       return () => clearTimeout(timer)
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setLoadingTimeout(false)
     }
   }, [isLoading])
   
-  if (isLoading && !loadingTimeout && !hasLoadedRef.current) {
+  if (isLoading && !loadingTimeout && !hasLoaded) {
     return (
       <div className={cn("min-h-screen flex items-center justify-center", themeClasses.mainBg)}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
           <p className={cn("mt-4", themeClasses.mainText)}>Loading...</p>
         </div>
       </div>
@@ -490,7 +493,7 @@ function CompanyInfoPageContent() {
                 <div className="space-y-6">
                   <div className="flex items-center gap-4">
                     <div className={cn("p-4 rounded-lg bg-yellow-100 dark:bg-yellow-900/20")}>
-                      <Building2 className="w-8 h-8 text-yellow-600 dark:text-yellow-400" />
+                      <Building2 className="w-8 h-8 text-orange-600 dark:text-orange-400" />
                     </div>
                     <div>
                       <h2 className={cn("text-2xl font-bold", themeClasses.mainText)}>
@@ -803,7 +806,7 @@ function CompanyInfoPageContent() {
                             {(formData.registrationType === 'business' || formData.registrationType === 'tin') && (
                               <div>
                                 <Label htmlFor="businessTinCertificate" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                                  Business TIN Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                                  Business TIN Certificate <span className="text-orange-600 dark:text-orange-400">(Required for verification)</span>
                                 </Label>
                                 <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
                                   Upload a clear photo or scan of your Business TIN Certificate. This is required for account verification.
@@ -891,7 +894,7 @@ function CompanyInfoPageContent() {
                             {formData.registrationType === 'company' && (
                               <div>
                                 <Label htmlFor="companyCertificate" className={cn("text-sm sm:text-base", themeClasses.mainText)}>
-                                  Company Registration Certificate <span className="text-yellow-600 dark:text-yellow-400">(Required for verification)</span>
+                                  Company Registration Certificate <span className="text-orange-600 dark:text-orange-400">(Required for verification)</span>
                                 </Label>
                                 <p className={cn("text-[10px] sm:text-xs mt-1 mb-2", themeClasses.textNeutralSecondary)}>
                                   Upload a clear photo or scan of your Company Registration Certificate. This is required for account verification.
@@ -998,9 +1001,9 @@ function CompanyInfoPageContent() {
                             )}
                           </>
                     ) : showCertificationSection ? (
-                      <div className={cn("p-4 rounded-lg border-2 border-yellow-500/50 bg-yellow-50 dark:bg-yellow-900/20", themeClasses.cardBorder)}>
+                      <div className={cn("p-4 rounded-lg border-2 border-orange-500/50 bg-yellow-50 dark:bg-yellow-900/20", themeClasses.cardBorder)}>
                         <p className={cn("text-sm", themeClasses.mainText)}>
-                          <AlertTriangle className="inline w-4 h-4 mr-2 text-yellow-600 dark:text-yellow-400" />
+                          <AlertTriangle className="inline w-4 h-4 mr-2 text-orange-600 dark:text-orange-400" />
                           Please select a registration type above to see the required certificate upload section.
                         </p>
                       </div>
@@ -1028,7 +1031,7 @@ function CompanyInfoPageContent() {
                       <Button
                         type="submit"
                         disabled={isSubmitting}
-                        className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-600 text-neutral-950 text-sm sm:text-base"
+                        className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-neutral-950 text-sm sm:text-base"
                       >
                         {isSubmitting ? (
                           'Saving...'

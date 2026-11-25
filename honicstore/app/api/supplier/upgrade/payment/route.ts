@@ -176,9 +176,7 @@ export async function POST(request: NextRequest) {
       })
     } catch (error: any) {
       logError(error, {
-        context: 'supplier_upgrade_payment_post',
-        userId: user?.id,
-        referenceId: body?.referenceId
+        context: 'supplier_upgrade_payment_post'
       })
       return createErrorResponse(error, 500)
     }

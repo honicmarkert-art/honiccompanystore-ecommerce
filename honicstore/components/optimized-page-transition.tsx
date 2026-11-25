@@ -17,11 +17,12 @@ export function OptimizedPageTransition({ children, className }: PageTransitionP
   const pathname = usePathname()
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [previousPathname, setPreviousPathname] = useState(pathname)
-  const transitionTimeoutRef = useRef<NodeJS.Timeout>()
+  const transitionTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
 
   useEffect(() => {
     // Only trigger transition if pathname actually changed
     if (pathname !== previousPathname) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setIsTransitioning(true)
       
       // Clear any existing timeout
@@ -141,7 +142,7 @@ export function OptimizedPageWrapper({
 export function ScrollRestoration() {
   const pathname = usePathname()
   const isRestoringRef = useRef(false)
-  const scrollTimeoutRef = useRef<NodeJS.Timeout>()
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -235,25 +236,3 @@ export function ScrollRestoration() {
   return null
 }
 
-/**
- * Performance monitoring for page transitions
- */
-export function PageTransitionMonitor() {
-  const pathname = usePathname()
-  const startTimeRef = useRef<number>(Date.now())
-
-  useEffect(() => {
-    const startTime = startTimeRef.current
-    const endTime = Date.now()
-    const transitionTime = endTime - startTime
-
-    // Log performance metrics
-    if (process.env.NODE_ENV === 'development') {
-    }
-
-    // Update start time for next transition
-    startTimeRef.current = Date.now()
-  }, [pathname])
-
-  return null
-}

@@ -51,36 +51,9 @@ export function SWRProvider({ children }: SWRProviderProps) {
         // Keep previous data while revalidating (prevents flicker)
         keepPreviousData: true,
         
-        // Cache provider with persistent storage
-        provider: (() => {
-          // Use a persistent Map that survives navigation
-          if (typeof window !== 'undefined') {
-            const cache = new Map()
-            // Restore from sessionStorage on init
-            try {
-              const stored = sessionStorage.getItem('swr_cache')
-              if (stored) {
-                const parsed = JSON.parse(stored)
-                Object.entries(parsed).forEach(([key, value]) => {
-                  cache.set(key, value)
-                })
-              }
-            } catch (e) {
-              // Ignore storage errors
-            }
-            // Save to sessionStorage periodically
-            setInterval(() => {
-              try {
-                const cacheObj = Object.fromEntries(cache)
-                sessionStorage.setItem('swr_cache', JSON.stringify(cacheObj))
-              } catch (e) {
-                // Ignore storage errors
-              }
-            }, 5000)
-            return cache
-          }
-          return new Map()
-        })(),
+        // In-memory cache only (this is what was in effect before: a duplicate key overrode a
+        // sessionStorage-persisting provider that also ran a 5 s timer and stored per-user API data)
+        provider: () => new Map(),
         
         // Global fetcher with rate limiting
         fetcher: async (url: string) => {
@@ -101,14 +74,9 @@ export function SWRProvider({ children }: SWRProviderProps) {
           return response.json()
         },
         
-        // Cache configuration
-        provider: () => new Map(),
-        
         // Loading timeout
         loadingTimeout: 10000,
-        
-        // Error timeout
-        errorTimeout: 5000,
+
       }}
     >
       {children}

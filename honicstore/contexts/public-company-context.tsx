@@ -92,3 +92,11 @@ export function usePublicCompanyContext() {
   }
   return context
 }
+
+/**
+ * Same as usePublicCompanyContext, but returns null instead of throwing when used outside the provider
+ * (e.g. the sign-in window, which is rendered above the company providers). Callers use their own defaults.
+ */
+export function usePublicCompanyContextOptional() {
+  return useContext(PublicCompanyContext) ?? null
+}

@@ -32,7 +32,7 @@ export default function UnauthorizedPage() {
           </div>
 
           <div className="space-y-3">
-            <Link href="/home">
+            <Link href="/">
               <Button className="w-full" variant="outline">
                 <Home className="w-4 h-4 mr-2" />
                 Go to Home

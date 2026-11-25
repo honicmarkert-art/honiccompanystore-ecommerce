@@ -5,6 +5,8 @@ import { createSecureResponse, createErrorResponse } from '@/lib/secure-api'
 import { securityUtils } from '@/lib/secure-config'
 import { logger } from '@/lib/logger'
 import { getCachedData, setCachedData, CACHE_TTL } from '@/lib/database-optimization'
+import { getProductDetail } from '@/lib/product-detail'
+import { shippingSizeOrNull } from '@/lib/shipping-pricing'
 
 // Simple security functions
 const logSecurityEvent = (action: string, userId?: string, details?: any) => {
@@ -21,8 +23,10 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // declared outside try so the catch block can log it
+  let productId = ''
   try {
-    const { id: productId } = await params
+    productId = (await params).id
     
     // Validate and sanitize product ID
     if (!productId || isNaN(Number(productId))) {
@@ -42,197 +46,11 @@ export async function GET(
     // Log request for monitoring
     logger.log(`Product detail request: ID=${productId}, IP=${clientIP}, User-Agent=${request.headers.get('user-agent')}`)
 
-    // Generate cache key
-    const cacheKey = `product:${productId}`
-    
-    // Check cache first
-    const cachedProduct = getCachedData(cacheKey)
-    if (cachedProduct) {
-      return createSecureResponse(cachedProduct, {
-        cacheControl: 'public, s-maxage=1800, stale-while-revalidate=3600',
-        headers: {
-          'X-Cache': 'HIT',
-          'X-Product-ID': productId
-        }
-      })
-    }
-
-    // Fetch product from database using public client for GET requests
-    const { createClient } = await import('@supabase/supabase-js')
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    const publicClient = createClient(supabaseUrl, supabaseAnonKey)
-    
-    // Fetch product from database - use maybeSingle to handle 0 results gracefully
-    const { data: product, error } = await publicClient
-      .from('products')
-      .select(`
-        *,
-        product_variants (*)
-      `)
-      .eq('id', productId)
-      .eq('is_hidden', false)
-      .maybeSingle() // Use maybeSingle instead of single to handle 0 results gracefully
-
-    if (error) {
+    // Shared loader (also used by the server-rendered product page); uses the in-memory cache
+    const transformedProduct = await getProductDetail(productId)
+    if (!transformedProduct) {
       return createErrorResponse('Product not found', 404)
     }
-
-    if (!product) {
-      return createErrorResponse('Product not found', 404)
-    }
-
-    // Check if product is hidden (optional - you might want to allow hidden products for admins)
-    if (product.is_hidden) {
-      // Uncomment if you want to block hidden products:
-      // return createErrorResponse('Product not found', 404)
-    }
-
-    // Transform data
-    // Parse specifications if it's a JSON string
-    let parsedSpecifications = {}
-    if (product.specifications) {
-      if (typeof product.specifications === 'string') {
-        try {
-          parsedSpecifications = JSON.parse(product.specifications)
-        } catch (e) {
-          // If parsing fails, try to use as-is or set to empty object
-          parsedSpecifications = {}
-        }
-      } else if (typeof product.specifications === 'object' && product.specifications !== null) {
-        parsedSpecifications = product.specifications
-      }
-    }
-    
-    const transformedProduct = {
-      id: product.id,
-      name: product.name,
-      originalPrice: product.original_price,
-      price: product.price,
-      rating: product.rating,
-      reviews: product.reviews,
-      image: product.image,
-      category_id: (product as any).category_id,
-      category: product.category,
-      brand: product.brand,
-      description: product.description,
-      specifications: parsedSpecifications,
-      gallery: product.gallery || [],
-      sku: product.sku,
-      model: product.model,
-      views: product.views,
-      video: product.video,
-      view360: product.view360,
-      inStock: product.in_stock,
-      stockQuantity: product.stock_quantity,
-      freeDelivery: product.free_delivery,
-      sameDayDelivery: product.same_day_delivery,
-      importChina: !!(product as any).import_china,
-      variants: product.product_variants?.map((variant: any) => {
-        const attributes = variant.attributes || {}
-        const quantities = variant.stock_quantities || {}
-        
-        // Clean attributes by removing any remaining _quantity fields
-        const cleanAttributes = { ...attributes }
-        Object.keys(cleanAttributes).forEach(key => {
-          if (key.endsWith('_quantity') || key === '_quantities') {
-            delete cleanAttributes[key]
-          }
-        })
-        
-        // Keep arrays as arrays for product detail page - don't convert to comma-separated
-        const displayAttributes = { ...cleanAttributes }
-
-        // Parse primary_values if it's a JSON string
-        let primaryValues = variant.primary_values || variant.primaryValues || []
-        if (typeof primaryValues === 'string') {
-          try {
-            primaryValues = JSON.parse(primaryValues)
-          } catch (e) {
-            primaryValues = []
-          }
-        }
-        // Ensure it's an array
-        if (!Array.isArray(primaryValues)) {
-          primaryValues = []
-        }
-
-        return {
-          id: variant.id,
-          price: variant.price,
-          image: variant.image,
-          sku: variant.sku,
-          model: variant.model,
-          variantType: variant.variant_type,
-          attributes: displayAttributes,
-          quantities: quantities,
-          primaryAttribute: variant.primary_attribute,
-          dependencies: variant.dependencies || {},
-          primaryValues: primaryValues,
-          // Also preserve snake_case for compatibility
-          primary_values: primaryValues,
-          stockQuantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
-          stock_quantity: typeof variant.stock_quantity === 'number' ? variant.stock_quantity : undefined,
-          inStock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true,
-          in_stock: typeof variant.stock_quantity === 'number' ? variant.stock_quantity > 0 : true,
-          // Include simplified variant fields
-          variant_name: variant.variant_name || null
-        }
-      }) || [],
-      variantConfig: (() => {
-        const config = product.variant_config || {}
-        if (config.attributeOrder) {
-          // Clean attributeOrder by removing technical fields
-          config.attributeOrder = config.attributeOrder.filter((attr: string) => 
-            !attr.endsWith('_quantity') && 
-            attr !== '_quantities' && 
-            attr !== 'quantities' &&
-            !attr.startsWith('_')
-          )
-        }
-        if (config.primaryAttributes) {
-          // Clean primaryAttributes by removing technical fields
-          config.primaryAttributes = config.primaryAttributes.filter((attr: string) => 
-            !attr.endsWith('_quantity') && 
-            attr !== '_quantities' && 
-            attr !== 'quantities' &&
-            !attr.startsWith('_')
-          )
-        }
-        return config
-      })(),
-      variantImages: (() => {
-        const images = product.variant_images || []
-        
-        
-        // Normalize to ensure consistent format
-        const normalized = images.map((img: any): { imageUrl: string } => {
-          if (typeof img === 'string') {
-            return { imageUrl: img }
-          } else if (img && typeof img === 'object' && img.imageUrl) {
-            return { imageUrl: img.imageUrl }
-          }
-          return { imageUrl: String(img || '') }
-        }).filter((img: { imageUrl: string }) => img.imageUrl)
-        
-        return normalized
-      })(),
-      specificationImages: (() => {
-        const images = product.specification_images || []
-        // Handle JSONB array - ensure it's always an array
-        if (typeof images === 'string') {
-          try {
-            return JSON.parse(images)
-          } catch {
-            return []
-          }
-        }
-        return Array.isArray(images) ? images : []
-      })()
-    }
-
-    // Cache the result with longer TTL for product details
-    setCachedData(cacheKey, transformedProduct, CACHE_TTL.PRODUCT_DETAIL)
 
     // Check if this is a fresh request (has cache-busting parameter)
     const url = new URL(request.url)
@@ -267,8 +85,10 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // declared outside try so the catch block can log it
+  let productId = ''
   try {
-    const { id: productId } = await params
+    productId = (await params).id
     
     // Validate product ID
     if (!productId || isNaN(Number(productId))) {
@@ -330,6 +150,7 @@ export async function PUT(
     if (sanitizedUpdates.inStock !== undefined) supabaseUpdates.in_stock = sanitizedUpdates.inStock
     if (sanitizedUpdates.stockQuantity !== undefined) supabaseUpdates.stock_quantity = sanitizedUpdates.stockQuantity
     if (sanitizedUpdates.freeDelivery !== undefined) supabaseUpdates.free_delivery = sanitizedUpdates.freeDelivery
+    if ((updates as any).shippingSize !== undefined) supabaseUpdates.shipping_size = shippingSizeOrNull((updates as any).shippingSize)
     if (sanitizedUpdates.sameDayDelivery !== undefined) supabaseUpdates.same_day_delivery = sanitizedUpdates.sameDayDelivery
     if (sanitizedUpdates.importChina !== undefined) supabaseUpdates.import_china = sanitizedUpdates.importChina
     if (sanitizedUpdates.specificationImages !== undefined) supabaseUpdates.specification_images = sanitizedUpdates.specificationImages
@@ -502,6 +323,7 @@ export async function PUT(
       inStock: responseProduct.in_stock,
       stockQuantity: responseProduct.stock_quantity,
       freeDelivery: responseProduct.free_delivery,
+      shippingSize: (responseProduct as any).shipping_size ?? null,
       sameDayDelivery: responseProduct.same_day_delivery,
       importChina: !!(responseProduct as any).import_china,
       variants: responseProduct.product_variants?.map((variant: any) => {
@@ -596,8 +418,10 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // declared outside try so the catch block can log it
+  let productId = ''
   try {
-    const { id: productId } = await params
+    productId = (await params).id
     
     // Validate product ID
     if (!productId || isNaN(Number(productId))) {

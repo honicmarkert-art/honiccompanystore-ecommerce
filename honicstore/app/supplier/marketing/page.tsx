@@ -99,7 +99,7 @@ export default function SupplierMarketingPage() {
   useEffect(() => {
     fetchCurrentPlan()
     fetchPromotions()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
   useEffect(() => {
     if (isPremiumPlan) {
@@ -113,7 +113,7 @@ export default function SupplierMarketingPage() {
     }
   }, [isPremiumPlan])
 
-  const fetchProducts = async () => {
+  async function fetchProducts() {
     try {
       setLoadingProducts(true)
       const response = await fetch('/api/supplier/products?limit=1000', {
@@ -144,7 +144,7 @@ export default function SupplierMarketingPage() {
     }
   }
 
-  const fetchCurrentPlan = async () => {
+  async function fetchCurrentPlan() {
     try {
       const response = await fetch('/api/user/current-plan', {
         credentials: 'include'
@@ -168,7 +168,7 @@ export default function SupplierMarketingPage() {
       }
   }
 
-  const fetchPromotions = async () => {
+  async function fetchPromotions() {
     try {
       setLoading(true)
       const response = await fetch('/api/supplier/promotions', {
@@ -360,7 +360,7 @@ export default function SupplierMarketingPage() {
     setEditingPromotion(null)
   }
 
-  const fetchAdvertisements = async () => {
+  async function fetchAdvertisements() {
     try {
       setLoadingAds(true)
       const response = await fetch('/api/supplier/advertisements', {
@@ -600,10 +600,10 @@ export default function SupplierMarketingPage() {
       {!isPremiumPlan ? (
         <>
           {/* Upgrade Prompt */}
-          <Card className={cn("border-2 border-yellow-500", themeClasses.cardBg)}>
+          <Card className={cn("border-2 border-orange-500", themeClasses.cardBg)}>
             <CardContent className="p-6 sm:p-8">
               <div className="text-center">
-                <Megaphone className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 text-yellow-500" />
+                <Megaphone className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 text-orange-500" />
                 <h2 className={cn("text-xl sm:text-2xl font-bold mb-2", themeClasses.mainText)}>
                   Marketing Tools Available in Premium Plan
                 </h2>
@@ -689,7 +689,7 @@ export default function SupplierMarketingPage() {
                       })
                     }
                   }}
-                  className="inline-block px-6 py-3 bg-yellow-500 hover:bg-yellow-600 text-black rounded-md font-semibold text-sm sm:text-base"
+                  className="inline-block px-6 py-3 bg-orange-500 hover:bg-orange-600 text-black rounded-md font-semibold text-sm sm:text-base"
                 >
                   Upgrade to Premium
                 </button>
@@ -706,12 +706,12 @@ export default function SupplierMarketingPage() {
                   <CardContent className="p-4 sm:p-6">
                     <div className="flex items-start gap-3 sm:gap-4">
                       <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex-shrink-0">
-                        <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
+                        <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 dark:text-orange-400" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1 sm:mb-2">
                           <h3 className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>{tool.title}</h3>
-                          <Badge className="bg-yellow-500 text-black text-[10px] sm:text-xs">Premium</Badge>
+                          <Badge className="bg-orange-500 text-black text-[10px] sm:text-xs">Premium</Badge>
                         </div>
                         <p className={cn("text-xs sm:text-sm", themeClasses.textNeutralSecondary)}>
                           {tool.description}
@@ -730,7 +730,7 @@ export default function SupplierMarketingPage() {
           <div className="flex justify-end">
             <Button
               onClick={() => setIsCreateDialogOpen(true)}
-              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+              className="bg-orange-500 hover:bg-orange-600 text-black"
             >
               <Plus className="w-4 h-4 mr-2" />
               Create Promotion
@@ -853,7 +853,7 @@ export default function SupplierMarketingPage() {
               <CardTitle className={cn(themeClasses.mainText)}>My Advertisements</CardTitle>
               <Button
                 onClick={() => setIsAdDialogOpen(true)}
-                className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                className="bg-orange-500 hover:bg-orange-600 text-black"
                 size="sm"
               >
                 <Plus className="w-4 h-4 mr-2" />
@@ -897,7 +897,7 @@ export default function SupplierMarketingPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>{ad.title}</h3>
-                          <Badge className={ad.is_active ? 'bg-green-500 text-white' : 'bg-yellow-500 text-black'}>
+                          <Badge className={ad.is_active ? 'bg-green-500 text-white' : 'bg-orange-500 text-black'}>
                             {ad.is_active ? 'Active' : 'Pending Review'}
                           </Badge>
                         </div>
@@ -910,7 +910,7 @@ export default function SupplierMarketingPage() {
                           <span>Order: {ad.display_order}</span>
                         </div>
                         {!ad.is_active && (
-                          <p className={cn("text-xs mt-2 text-yellow-600 dark:text-yellow-400")}>
+                          <p className={cn("text-xs mt-2 text-orange-600 dark:text-orange-400")}>
                             ⏳ Waiting for administration approval
                           </p>
                         )}
@@ -939,12 +939,12 @@ export default function SupplierMarketingPage() {
                   <CardContent className="p-4 sm:p-6">
                     <div className="flex items-start gap-3 sm:gap-4">
                       <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex-shrink-0">
-                        <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
+                        <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 dark:text-orange-400" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1 sm:mb-2">
                           <h3 className={cn("font-semibold text-sm sm:text-base", themeClasses.mainText)}>{tool.title}</h3>
-                          {tool.comingSoon && (
+                          {(tool as { comingSoon?: boolean }).comingSoon && (
                             <Badge className="bg-gray-500 text-white text-[10px] sm:text-xs">Coming Soon</Badge>
                           )}
                         </div>
@@ -953,14 +953,14 @@ export default function SupplierMarketingPage() {
                         </p>
                         {tool.href ? (
                           <Link href={tool.href}>
-                            <Button className="w-full bg-yellow-500 hover:bg-yellow-600 text-black text-xs sm:text-sm">
+                            <Button className="w-full bg-orange-500 hover:bg-orange-600 text-black text-xs sm:text-sm">
                               Use Tool
                             </Button>
                           </Link>
                         ) : tool.onClick ? (
                           <Button 
                             onClick={tool.onClick}
-                            className="w-full bg-yellow-500 hover:bg-yellow-600 text-black text-xs sm:text-sm"
+                            className="w-full bg-orange-500 hover:bg-orange-600 text-black text-xs sm:text-sm"
                           >
                             Use Tool
                           </Button>
@@ -1191,7 +1191,7 @@ export default function SupplierMarketingPage() {
               </Button>
               <Button
                 onClick={handleCreatePromotion}
-                className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                className="bg-orange-500 hover:bg-orange-600 text-black"
                 disabled={!formData.name || !formData.code || !formData.discountValue || !formData.startDate || !formData.endDate || (!formData.appliesToAllProducts && formData.selectedProductIds.length === 0)}
               >
                 {editingPromotion ? 'Update Promotion' : 'Create Promotion'}
@@ -1219,7 +1219,7 @@ export default function SupplierMarketingPage() {
             {/* Ad Size Requirements */}
             <div className={cn("p-4 rounded-lg border-2", themeClasses.cardBg, themeClasses.cardBorder)}>
               <div className="flex items-start gap-2 mb-2">
-                <ImageIcon className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                <ImageIcon className="w-5 h-5 text-orange-600 dark:text-orange-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Recommended Ad Sizes</h4>
                   <div className="space-y-1.5 text-xs">
@@ -1404,7 +1404,7 @@ export default function SupplierMarketingPage() {
               </Button>
               <Button
                 onClick={handleCreateAdvertisement}
-                className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                className="bg-orange-500 hover:bg-orange-600 text-black"
                 disabled={!selectedAdFile || !adFormData.title.trim() || isUploadingAd}
               >
                 {isUploadingAd ? (

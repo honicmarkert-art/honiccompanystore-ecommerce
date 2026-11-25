@@ -1,392 +1,164 @@
-"use client"
-
-// Note: ISR (revalidate) cannot be used in client components
-// CPU optimization is handled via API route caching and CDN caching instead
-
-import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { 
-  ArrowLeft,
-  Truck,
-  MapPin,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  ArrowRight,
-  Package,
-  Globe,
-  CreditCard,
-  Calendar,
-  Phone,
-  Mail,
-  MessageCircle,
-  Info,
-  Shield,
-  Zap,
-  Car
-} from 'lucide-react'
-import { useTheme } from '@/hooks/use-theme'
-import { useRouter } from 'next/navigation'
+import type { Metadata } from 'next'
 import Link from 'next/link'
-import { getClientShippingPricing } from '@/lib/shipping-calculator'
+import { Gift, MapPin, MessageCircle, PackageCheck, Store, Truck } from 'lucide-react'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
+import { STORE_ADDRESS, whatsappLink } from '@/lib/contact'
+import { freeDeliveryThreshold } from '@/lib/shipping-pricing'
+import { DAR_DELIVERY_ATTEMPTS, RETURN_DAYS } from '@/lib/policies'
+import { DAR_ES_SALAAM_ETA, DAR_ES_SALAAM_TIERS, DAR_ES_SALAAM_WARD_TIER, DELIVERY_ZONES, ISLAND_DISTRICT_SURCHARGE, OUTSIDE_TOWN_SURCHARGE, SIZE_SURCHARGE, type DarTier } from '@/lib/shipping-pricing-config'
 
-interface ShippingOption {
-  id: string
-  name: string
-  description: string
-  price: number
-  deliveryTime: string
-  coverage: string[]
-  features: string[]
-  icon: React.ReactNode
-  color: string
+/**
+ * Delivery & shipping: generated from the same settings checkout charges with
+ * (lib/shipping-pricing-config.ts + the free-delivery threshold), so the page can't drift from reality.
+ * (The old page listed express/international services, insurance and "duty paid" that checkout never offered.)
+ */
+export const metadata: Metadata = {
+  title: 'Delivery & shipping | Honic Company Store',
+  description: 'Delivery fees, times and free delivery on Honic: across Tanzania, with free store pickup in Dar es Salaam.',
+  alternates: { canonical: '/support/shipping-info' },
 }
 
-interface DeliveryZone {
-  zone: string
-  cities: string[]
-  standardDelivery: string
-  expressDelivery: string
-  freeShippingThreshold: number
-}
+const tsh = (n: number) => `TSh ${n.toLocaleString('en-US')}`
+const title = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase())
 
 export default function ShippingInfoPage() {
-  const { themeClasses } = useTheme()
-  const router = useRouter()
-  const [selectedZone, setSelectedZone] = useState('dar-es-salaam')
-  const { freeThresholdTz, flatRateTz } = getClientShippingPricing()
-
-  const shippingOptions: ShippingOption[] = [
-    {
-      id: 'standard',
-      name: 'Standard Shipping',
-      description: 'Reliable delivery to your doorstep',
-      price: flatRateTz,
-      deliveryTime: '3-5 business days',
-      coverage: ['Dar es Salaam', 'Arusha', 'Mwanza', 'Dodoma', 'Tanga'],
-      features: ['Tracked delivery', 'Signature required', 'Insurance included'],
-      icon: <Truck className="w-6 h-6" />,
-      color: 'bg-blue-500'
-    },
-    {
-      id: 'express',
-      name: 'Express Shipping',
-      description: 'Fast delivery for urgent orders',
-      price: 10000,
-      deliveryTime: '1-2 business days',
-      coverage: ['Dar es Salaam', 'Arusha', 'Mwanza'],
-      features: ['Priority handling', 'Same-day dispatch', 'Real-time tracking'],
-      icon: <Zap className="w-6 h-6" />,
-      color: 'bg-orange-500'
-    },
-    {
-      id: 'pickup',
-      name: 'Store Pickup',
-      description: 'Pick up your order from our store',
-      price: 0,
-      deliveryTime: 'Same day',
-      coverage: ['Dar es Salaam only'],
-      features: ['No shipping cost', 'Immediate pickup', 'Personal assistance'],
-      icon: <Car className="w-6 h-6" />,
-      color: 'bg-green-500'
-    },
-    {
-      id: 'international',
-      name: 'International Shipping',
-      description: 'Worldwide delivery to select countries',
-      price: 25000,
-      deliveryTime: '7-14 business days',
-      coverage: ['Kenya', 'Uganda', 'Rwanda', 'Burundi'],
-      features: ['Customs handling', 'International tracking', 'Duty paid'],
-      icon: <Globe className="w-6 h-6" />,
-      color: 'bg-purple-500'
-    }
-  ]
-
-  const deliveryZones: DeliveryZone[] = [
-    {
-      zone: 'dar-es-salaam',
-      cities: ['Dar es Salaam', 'Kinondoni', 'Ilala', 'Temeke', 'Ubungo'],
-      standardDelivery: '1-2 business days',
-      expressDelivery: 'Same day',
-      freeShippingThreshold: freeThresholdTz
-    },
-    {
-      zone: 'major-cities',
-      cities: ['Arusha', 'Mwanza', 'Dodoma', 'Tanga', 'Morogoro', 'Moshi'],
-      standardDelivery: '2-3 business days',
-      expressDelivery: '1-2 business days',
-      freeShippingThreshold: freeThresholdTz
-    },
-    {
-      zone: 'other-regions',
-      cities: ['Iringa', 'Mbeya', 'Tabora', 'Kigoma', 'Mtwara', 'Lindi'],
-      standardDelivery: '3-5 business days',
-      expressDelivery: '2-3 business days',
-      freeShippingThreshold: freeThresholdTz
-    }
-  ]
+  const freeThresholdTz = freeDeliveryThreshold()
+  const tiers = Object.entries(DAR_ES_SALAAM_TIERS) as [DarTier, { name: string; fee: number }][]
+  const darMin = Math.min(...tiers.map(([, t]) => t.fee))
+  const darMax = Math.max(...tiers.map(([, t]) => t.fee))
+  /** a few example wards per tier, so shoppers can place themselves */
+  const examples = (tier: DarTier) =>
+    Object.entries(DAR_ES_SALAAM_WARD_TIER).filter(([, t]) => t === tier).slice(0, 4).map(([w]) => title(w)).join(', ')
+  const upMin = Math.min(...DELIVERY_ZONES.map((z) => z.fee))
+  const upMax = Math.max(...DELIVERY_ZONES.map((z) => z.fee))
+  const regionList = (z: (typeof DELIVERY_ZONES)[number]) =>
+    z.regions.filter((r) => r !== 'coast').map((r) => title(r.replace(/ (central\/south|north|south|urban\/west)$/, ''))).filter((r, i, a) => a.indexOf(r) === i).join(', ')
 
   const faqs = [
-    {
-      question: 'How much does shipping cost?',
-      answer: `Shipping costs vary by location and speed. Standard flat shipping is from TZS ${flatRateTz.toLocaleString()} when distance-based pricing does not apply; Express and international options may differ. Store pickup is free. Free shipping applies when your order meets the site threshold (currently TZS ${freeThresholdTz.toLocaleString()}).`,
-    },
-    {
-      question: 'How long does delivery take?',
-      answer: 'Delivery times depend on your location and chosen shipping method. Standard delivery takes 1-2 days in Dar es Salaam, 2-3 days in major cities, and 3-5 days in other regions. Express delivery is available for faster shipping.'
-    },
-    {
-      question: 'Do you ship internationally?',
-      answer: 'Yes, we ship to Kenya, Uganda, Rwanda, and Burundi. International shipping costs TZS 25,000 and takes 7-14 business days. We handle all customs documentation and duties.'
-    },
-    {
-      question: 'Can I track my order?',
-      answer: 'Yes, all orders come with tracking information. You\'ll receive a tracking number via email and SMS, and you can track your order status in your account.'
-    },
-    {
-      question: 'What if I\'m not home for delivery?',
-      answer: 'Our delivery partner will attempt delivery 3 times. If you\'re not available, they\'ll leave a delivery notice with instructions for pickup or rescheduling.'
-    },
-    {
-      question: 'Is my package insured?',
-      answer: 'Yes, all packages are insured against loss or damage during transit. If your package is lost or damaged, we\'ll provide a full refund or replacement.'
-    }
+    { q: 'How much is delivery?', a: `It depends on where you are. In Dar es Salaam it is ${tsh(darMin)}–${tsh(darMax)} by bodaboda, depending on your ward. Other regions are ${tsh(upMin)}–${tsh(upMax)} depending on distance (we send by bus or courier to your town). Large items like 3D printers cost more to send. The exact fee for your address is shown at checkout before you pay.` },
+    { q: 'When is delivery free?', a: `When the items in your order add up to ${tsh(freeThresholdTz)} or more, when every product in the order is marked "free delivery", or when you collect from our store. Large items keep a handling fee (${tsh(SIZE_SURCHARGE.large.dar)} in Dar es Salaam, ${tsh(SIZE_SURCHARGE.large.upcountry)} elsewhere).` },
+    { q: 'How long does delivery take?', a: `Usually ${DAR_ES_SALAAM_ETA} in Dar es Salaam and 2–6 days to other regions depending on distance, counted from when your payment is confirmed. Checkout shows the time for your address.` },
+    { q: 'Can I track my order?', a: 'Yes. Every order has a status page in your account, and you can also look it up with your order number on the order tracking page.' },
+    { q: 'What if I miss the delivery?', a: `In Dar es Salaam our rider calls before coming and tries again the next working day; after ${DAR_DELIVERY_ATTEMPTS} tries the order waits at our store for pickup. Upcountry, collect your parcel quickly from the bus or courier office in your town, as they may charge for storage.` },
+    { q: 'Do you deliver outside Tanzania?', a: 'Not through checkout. For an order to another country, message us on WhatsApp and we will tell you if we can arrange it and what it costs.' },
+    { q: 'What if my item arrives damaged or wrong?', a: `Message us within ${RETURN_DAYS} days of delivery with your order number and a photo, and we will replace it or refund you in full, including delivery. See Returns & refunds for details.` },
   ]
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-TZ', {
-      style: 'currency',
-      currency: 'TZS',
-      minimumFractionDigits: 0
-    }).format(amount)
-  }
-
-  const selectedZoneData = deliveryZones.find(zone => zone.zone === selectedZone) || deliveryZones[0]
-
   return (
-    <div className={`min-h-screen ${themeClasses.mainBg} ${themeClasses.mainText}`}>
-      <div className="container mx-auto px-4 py-8">
-        {/* Back Button */}
-        <div className="mb-6">
-          <Button 
-            variant="ghost" 
-            onClick={() => router.back()}
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
-        </div>
+    <div className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-white">
+      <SiteHeader />
+      <main className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
+        <nav aria-label="Breadcrumb" className="text-sm text-neutral-500">
+          <Link href="/support" className="hover:text-orange-600">Help centre</Link> <span aria-hidden>/</span> Delivery & shipping
+        </nav>
+        <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Delivery & shipping</h1>
+        <p className="mt-2 max-w-2xl text-neutral-600 dark:text-neutral-300">We deliver across Tanzania. You see the exact fee for your address at checkout, before you pay.</p>
 
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4">Shipping Information</h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-8">
-            Fast, reliable shipping options to get your orders delivered quickly and safely
-          </p>
-        </div>
-
-        {/* Shipping Options */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          {shippingOptions.map((option) => (
-            <Card key={option.id} className="hover:shadow-lg transition-shadow group">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 ${option.color} rounded-lg flex items-center justify-center text-white`}>
-                    {option.icon}
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">{option.name}</CardTitle>
-                    <p className="text-sm text-muted-foreground">{option.description}</p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-orange-500">
-                      {option.price === 0 ? 'Free' : formatCurrency(option.price)}
-                    </div>
-                    <div className="text-sm text-muted-foreground">{option.deliveryTime}</div>
-                  </div>
-                  <div className="space-y-2">
-                    <h4 className="font-semibold text-sm">Coverage:</h4>
-                    <div className="flex flex-wrap gap-1">
-                      {option.coverage.slice(0, 2).map((city, index) => (
-                        <Badge key={index} variant="secondary" className="text-xs">
-                          {city}
-                        </Badge>
-                      ))}
-                      {option.coverage.length > 2 && (
-                        <Badge variant="secondary" className="text-xs">
-                          +{option.coverage.length - 2} more
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    {option.features.map((feature, index) => (
-                      <div key={index} className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <CheckCircle className="w-4 h-4 text-green-500" />
-                        <span>{feature}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Delivery Zones */}
-          <div className="lg:col-span-1">
-            <Card className="mb-8">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <MapPin className="w-5 h-5" />
-                  Delivery Zones
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {deliveryZones.map((zone) => (
-                    <div key={zone.zone} className="space-y-2">
-                      <button
-                        onClick={() => setSelectedZone(zone.zone)}
-                        className={`w-full text-left p-3 rounded-lg transition-colors ${
-                          selectedZone === zone.zone
-                            ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800'
-                            : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
-                        }`}
-                      >
-                        <h3 className="font-semibold capitalize">
-                          {zone.zone.replace('-', ' ')}
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                          {zone.cities.slice(0, 3).join(', ')}
-                          {zone.cities.length > 3 && ` +${zone.cities.length - 3} more`}
-                        </p>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Free Shipping Info */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="w-5 h-5" />
-                  Free Shipping
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                      {formatCurrency(selectedZoneData.freeShippingThreshold)}
-                    </div>
-                    <div className="text-sm text-muted-foreground">Minimum order for free shipping</div>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span>Standard Delivery:</span>
-                      <span className="font-medium">{selectedZoneData.standardDelivery}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Express Delivery:</span>
-                      <span className="font-medium">{selectedZoneData.expressDelivery}</span>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+        {/* options */}
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl p-5 ring-1 ring-neutral-200 dark:ring-neutral-800">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/40"><Truck className="h-5 w-5" /></span>
+            <h2 className="mt-4 font-bold">Delivery to your door</h2>
+            <p className="mt-1 text-sm text-neutral-500">Dar es Salaam {tsh(darMin)}–{tsh(darMax)} by bodaboda. Other regions {tsh(upMin)}–{tsh(upMax)} by bus or courier to your town.</p>
+            <p className="mt-3 text-sm font-semibold">{DAR_ES_SALAAM_ETA} in Dar · 2–6 days elsewhere</p>
           </div>
+          <div className="rounded-2xl p-5 ring-1 ring-neutral-200 dark:ring-neutral-800">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/40"><Store className="h-5 w-5" /></span>
+            <h2 className="mt-4 font-bold">Store pickup: free</h2>
+            <p className="mt-1 text-sm text-neutral-500">Collect from {STORE_ADDRESS}. Choose &quot;Pickup&quot; at checkout.</p>
+            <p className="mt-3 text-sm font-semibold">We tell you when it&apos;s ready</p>
+          </div>
+          <div className="rounded-2xl bg-orange-50 p-5 ring-1 ring-orange-200 dark:bg-orange-950/30 dark:ring-orange-900">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-orange-500 text-white"><Gift className="h-5 w-5" /></span>
+            <h2 className="mt-4 font-bold">Free delivery over {tsh(freeThresholdTz)}</h2>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-300">Anywhere in Tanzania, when your items add up to {tsh(freeThresholdTz)} or more. Large items keep a handling fee.</p>
+            <p className="mt-3 text-sm font-semibold">Applied automatically at checkout</p>
+          </div>
+        </div>
 
-          {/* Main Content */}
-          <div className="lg:col-span-2">
-            {/* Selected Zone Details */}
-            <Card className="mb-8">
-              <CardHeader>
-                <CardTitle>
-                  Delivery Information for {selectedZoneData.zone.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h4 className="font-semibold mb-3">Cities Covered</h4>
-                    <div className="space-y-1">
-                      {selectedZoneData.cities.map((city, index) => (
-                        <div key={index} className="flex items-center gap-2 text-sm">
-                          <MapPin className="w-4 h-4 text-orange-500" />
-                          <span>{city}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-3">Delivery Times</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Truck className="w-4 h-4 text-blue-500" />
-                        <span>Standard: {selectedZoneData.standardDelivery}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Zap className="w-4 h-4 text-orange-500" />
-                        <span>Express: {selectedZoneData.expressDelivery}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* FAQ Section */}
-            <div>
-              <h2 className="text-2xl font-bold mb-6">Shipping FAQ</h2>
-              <div className="space-y-4">
-                {faqs.map((faq, index) => (
-                  <Card key={index}>
-                    <CardContent className="p-6">
-                      <h3 className="font-semibold mb-2">{faq.question}</h3>
-                      <p className="text-muted-foreground">{faq.answer}</p>
-                    </CardContent>
-                  </Card>
+        {/* fees */}
+        <section className="mt-12 grid gap-8 lg:grid-cols-[1fr_1.4fr]">
+          <div>
+            <h2 className="flex items-center gap-2 text-xl font-black tracking-tight"><MapPin className="h-5 w-5 text-orange-600" /> Dar es Salaam</h2>
+            <p className="mt-1 text-sm text-neutral-500">Bodaboda to your door, {DAR_ES_SALAAM_ETA}. Your ward decides the tier; checkout shows it.</p>
+            <table className="mt-4 w-full text-sm">
+              <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                {tiers.map(([tier, t]) => (
+                  <tr key={tier} className="align-top">
+                    <td className="py-2.5 pr-3">
+                      <span className="font-semibold">{t.name}</span>
+                      <span className="block text-xs text-neutral-500">e.g. {examples(tier)}</span>
+                    </td>
+                    <td className="py-2.5 text-right font-bold tabular-nums">{tsh(t.fee)}</td>
+                  </tr>
                 ))}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </div>
-        </div>
+          <div>
+            <h2 className="flex items-center gap-2 text-xl font-black tracking-tight"><PackageCheck className="h-5 w-5 text-orange-600" /> Other regions</h2>
+            <p className="mt-1 text-sm text-neutral-500">Sent by bus or courier to your regional town. Districts outside the regional town add {tsh(OUTSIDE_TOWN_SURCHARGE)} for the onward trip; Mafia adds {tsh(ISLAND_DISTRICT_SURCHARGE.mafia)} and Ukerewe {tsh(ISLAND_DISTRICT_SURCHARGE.ukerewe)} for the boat. Checkout shows the exact fee and time for your address.</p>
+            <table className="mt-4 w-full text-sm">
+              <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                {DELIVERY_ZONES.map((z) => (
+                  <tr key={z.id} className="align-top">
+                    <td className="py-2.5 pr-3">
+                      <span className="font-semibold">{z.name}</span>
+                      <span className="block text-xs text-neutral-500">{regionList(z)}</span>
+                    </td>
+                    <td className="whitespace-nowrap py-2.5 pr-3 text-neutral-500">{z.eta}</td>
+                    <td className="py-2.5 text-right font-bold tabular-nums">{tsh(z.fee)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-        {/* Contact Support CTA */}
-        <div className="mt-16">
-          <Card className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
-            <CardContent className="p-12 text-center">
-              <h2 className="text-3xl font-bold mb-4">Need help with shipping?</h2>
-              <p className="text-xl mb-8 opacity-90">
-                Our support team is here to help you with any shipping questions
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button size="lg" variant="secondary" className="bg-white text-orange-500 hover:bg-gray-100">
-                  <Phone className="w-4 h-4 mr-2" />
-                  Call Support
-                </Button>
-                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10">
-                  <Mail className="w-4 h-4 mr-2" />
-                  Email Support
-                </Button>
+        {/* sizes */}
+        <section className="mt-10">
+          <h2 className="text-xl font-black tracking-tight">Bigger items</h2>
+          <p className="mt-1 text-sm text-neutral-500">Prices above are for a standard parcel. Bus and courier companies charge more for big parcels, so the biggest item in your order adds:</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {(['medium', 'large'] as const).map((k) => (
+              <div key={k} className="rounded-2xl p-4 ring-1 ring-neutral-200 dark:ring-neutral-800">
+                <p className="font-bold">{SIZE_SURCHARGE[k].label}{k === 'medium' ? ' (e.g. 1 kg filament spool)' : ' (e.g. 3D printer, water purifier)'}</p>
+                <p className="mt-1 text-sm text-neutral-500">Dar es Salaam {SIZE_SURCHARGE[k].dar ? `+${tsh(SIZE_SURCHARGE[k].dar)}` : 'no extra'} · other regions +{tsh(SIZE_SURCHARGE[k].upcountry)}</p>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            ))}
+          </div>
+        </section>
+
+        {/* faqs */}
+        <section className="mt-12">
+          <h2 className="text-xl font-black tracking-tight">Questions</h2>
+          <div className="mt-4 divide-y divide-neutral-200 rounded-2xl ring-1 ring-neutral-200 dark:divide-neutral-800 dark:ring-neutral-800">
+            {faqs.map((f) => (
+              <details key={f.q} className="group px-5 py-4">
+                <summary className="cursor-pointer list-none font-semibold marker:hidden">
+                  <span className="flex items-center justify-between gap-4">{f.q}<span aria-hidden className="text-orange-600 transition group-open:rotate-45">+</span></span>
+                </summary>
+                <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-300">{f.a}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-10 flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-neutral-950 p-7 text-white">
+          <div>
+            <h2 className="text-xl font-black">Question about a delivery?</h2>
+            <p className="mt-1 text-sm text-neutral-300">Send us your order number and we&apos;ll check.</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <a href={whatsappLink('Hello Honic, I have a question about my delivery. Order number:')} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold hover:bg-orange-600">
+              <MessageCircle className="h-4 w-4" /> WhatsApp us
+            </a>
+            <Link href="/support/order-tracking" className="inline-flex items-center rounded-xl px-5 py-3 text-sm font-bold ring-1 ring-white/30 hover:ring-white">Track an order</Link>
+          </div>
+        </section>
+      </main>
+      <SiteFooter />
     </div>
   )
 }

@@ -41,6 +41,7 @@ export function useBrands(): UseBrandsReturn {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
     fetchBrands()
   }, [fetchBrands])
 

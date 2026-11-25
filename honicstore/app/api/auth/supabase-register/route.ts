@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAuth } from '@/lib/supabase-auth'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { createServerClient } from '@supabase/ssr'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 import { notifyAllAdmins } from '@/lib/notification-helpers'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { logger } from '@/lib/logger'
+import { clientIp } from '@/lib/client-ip'
 import { sendAccountCreatedNotice } from '@/lib/user-email-service'
 import { validateEmailDomain, EMAIL_DOMAIN_TYPOS } from '@/lib/email-validation'
 import { validateEmailDomainWithTimeout } from '@/lib/email-domain-validator'
+import { verifyTurnstile } from '@/lib/turnstile'
 
 // Force dynamic rendering - don't pre-render during build
 export const dynamic = 'force-dynamic'
@@ -24,21 +26,17 @@ const registerRequestSchema = z.object({
     .max(255, 'Email is too long')
     .toLowerCase()
     .trim()
-    .refine((email) => {
-      const domainValidation = validateEmailDomain(email)
-      return domainValidation.isValid
-    }, (email) => {
-      const domainValidation = validateEmailDomain(email)
-      return {
-        message: domainValidation.error || 'Invalid email domain',
-        path: ['email']
-      }
+    .refine((email) => validateEmailDomain(email).isValid, {
+      // zod 4: a dynamic message is given via `error` (the old function-as-2nd-argument form now yields "Invalid input")
+      error: (issue) => validateEmailDomain(String(issue.input ?? '')).error || 'Invalid email domain',
     }),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password is too long'),
+  password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password is too long')
+    // same rule as the sign-up form (upper + lower case + a number), enforced on the server too
+    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Password must contain an uppercase letter, a lowercase letter and a number'),
   confirmPassword: z.string().min(1, 'Password confirmation is required'),
   phone: z.string().max(20, 'Phone number is too long').optional(),
   isSupplier: z.boolean().optional(),
-  planId: z.string().uuid().optional()
+  planId: z.guid().optional() // zod 4: guid() keeps zod 3's permissive UUID check (uuid() is now RFC-strict)
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"]
@@ -105,6 +103,23 @@ export async function POST(request: NextRequest) {
       throw parseError
     }
     
+    // Bot check (Cloudflare Turnstile) before anything is created or emailed. Skipped until the keys are set.
+    const ip = clientIp(request)
+    const captcha = await verifyTurnstile(body?.captchaToken, ip)
+    if (!captcha.ok) {
+      logSecurityEvent('CAPTCHA_FAILED', { endpoint: '/api/auth/supabase-register', reason: captcha.reason }, request)
+      return NextResponse.json(
+        {
+          success: false,
+          error: captcha.reason === 'verify-unavailable'
+            ? 'We couldn’t check that you’re human right now. Please try again.'
+            : 'Please complete the security check and try again.',
+          type: 'CAPTCHA_ERROR'
+        },
+        { status: 400 }
+      )
+    }
+
     // Pre-validate email domain before full schema validation (catch typos early)
     if (body.email) {
       const emailValidation = validateEmailDomain(String(body.email).toLowerCase().trim())
@@ -133,7 +148,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       if (error instanceof z.ZodError) {
         // Check if it's an email domain error and provide suggestion
-        const emailError = error.errors.find(e => e.path.includes('email'))
+        const emailError = error.issues.find(e => e.path.includes('email'))
         if (emailError && body.email) {
           const domainValidation = validateEmailDomain(String(body.email).toLowerCase().trim())
           return NextResponse.json(
@@ -142,7 +157,7 @@ export async function POST(request: NextRequest) {
               error: emailError.message || 'Invalid email address',
               suggestion: domainValidation.suggestion,
               type: 'VALIDATION_ERROR',
-              details: process.env.NODE_ENV === 'development' ? error.errors : undefined
+              details: process.env.NODE_ENV === 'development' ? error.issues : undefined
             },
             { status: 400 }
           )
@@ -151,9 +166,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { 
             success: false,
-            error: error.errors[0]?.message || 'Invalid input data',
+            error: error.issues[0]?.message || 'Invalid input data',
             type: 'VALIDATION_ERROR',
-            details: process.env.NODE_ENV === 'development' ? error.errors : undefined
+            details: process.env.NODE_ENV === 'development' ? error.issues : undefined
           },
           { status: 400 }
         )
@@ -319,7 +334,7 @@ export async function POST(request: NextRequest) {
       }, { status: 201 })
 
       // If session exists, set cookies for auto-login
-      const session = result.data?.session || result.session
+      const session = result.data?.session || (result as { session?: NonNullable<typeof result.data>["session"] }).session
       if (session) {
         const supabase = createServerClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL || '',

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { clearCache, getCacheStats } from '@/lib/database-optimization'
+import { requireInternal } from '@/lib/internal-auth'
 
 // POST - Clear the API cache
 export async function POST(request: NextRequest) {
+  const blocked = requireInternal(request)
+  if (blocked) return blocked
   try {
     // Clear the cache (all entries)
     clearCache()
@@ -21,7 +24,9 @@ export async function POST(request: NextRequest) {
 }
 
 // GET - Get cache stats
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const blocked = requireInternal(request)
+  if (blocked) return blocked
   try {
     const stats = getCacheStats()
     

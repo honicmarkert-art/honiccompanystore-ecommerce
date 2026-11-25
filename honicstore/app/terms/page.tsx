@@ -25,13 +25,14 @@ import {
   Scale,
   CreditCard,
   Truck,
-  RotateCcw
 } from 'lucide-react'
 import Link from 'next/link'
+import { getClientShippingPricing } from '@/lib/shipping-calculator'
+import { NON_RETURNABLE, REFUND_BUSINESS_DAYS, RETURN_DAYS } from '@/lib/policies'
 
 export default function TermsOfServicePage() {
-  const { companyName, companyColor, settings: adminSettings } = useCompanyContext()
-  const { theme } = useTheme()
+  const { companyName, settings: adminSettings } = useCompanyContext()
+  const { backgroundColor: theme } = useTheme()
   const [activeSection, setActiveSection] = useState('overview')
 
   const sections = [
@@ -61,7 +62,7 @@ export default function TermsOfServicePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <Link href="/home">
+              <Link href="/">
                 <Button variant="ghost" size="sm" className="flex items-center space-x-2">
                   <ArrowLeft className="w-4 h-4" />
                   <span>Back to Home</span>
@@ -72,11 +73,11 @@ export default function TermsOfServicePage() {
                   Terms of Service
                 </h1>
                 <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                  Last updated: {new Date().toLocaleDateString()}
+                  Last updated: 25 November 2026
                 </p>
               </div>
             </div>
-            <Badge variant="outline" className="flex items-center space-x-1">
+            <Badge variant="outline" className="hidden items-center space-x-1 sm:flex">
               <FileText className="w-3 h-3" />
               <span>Legal Document</span>
             </Badge>
@@ -129,7 +130,7 @@ export default function TermsOfServicePage() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <p className={cn("text-sm leading-relaxed", themeClasses.textNeutralSecondary)}>
-                      Welcome to {companyName || 'Honic Co.'}. These Terms of Service ("Terms") govern your use of our website, products, and services. By accessing or using our services, you agree to be bound by these Terms.
+                      Welcome to {companyName || 'Honic Co.'}. These Terms of Service (&quot;Terms&quot;) govern your use of our website, products, and services. By accessing or using our services, you agree to be bound by these Terms.
                     </p>
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                       <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Important Notice:</h4>
@@ -342,8 +343,8 @@ export default function TermsOfServicePage() {
                         <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Payment Processing</h4>
                         <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
                           <li>• Payments are processed securely</li>
-                          <li>• We use industry-standard encryption</li>
-                          <li>• Payment information is not stored locally</li>
+                          <li>• You confirm every payment with your own PIN on your phone</li>
+                          <li>• We never see or store your mobile money PIN</li>
                           <li>• Third-party processors handle transactions</li>
                         </ul>
                       </div>
@@ -354,7 +355,7 @@ export default function TermsOfServicePage() {
                           <li>• Invoices are generated automatically</li>
                           <li>• Payment receipts are provided</li>
                           <li>• Billing disputes must be reported promptly</li>
-                          <li>• Late payment fees may apply</li>
+                          <li>• Orders are paid in full at checkout</li>
                         </ul>
                       </div>
                     </div>
@@ -362,31 +363,22 @@ export default function TermsOfServicePage() {
                     <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
                       <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Accepted Payment Methods</h4>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3">
-                        <div className="text-center">
-                          <div className="w-12 h-8 bg-blue-600 rounded text-white flex items-center justify-center mx-auto mb-1">
-                            <span className="text-xs font-bold">VISA</span>
+                        {[
+                          ['/payments/mpesa.svg', 'M-Pesa'],
+                          ['/payments/airtel.svg', 'Airtel Money'],
+                          ['/payments/yas.svg', 'Mixx by Yas'],
+                          ['/payments/halotel.png', 'HaloPesa'],
+                        ].map(([src, label]) => (
+                          <div key={label} className="text-center">
+                            <span className="mx-auto mb-1 grid h-8 w-12 place-items-center rounded bg-white p-1 ring-1 ring-neutral-200">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={src} alt="" className="h-full w-full object-contain" />
+                            </span>
+                            <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>{label}</p>
                           </div>
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>Visa</p>
-                        </div>
-                        <div className="text-center">
-                          <div className="w-12 h-8 bg-red-600 rounded text-white flex items-center justify-center mx-auto mb-1">
-                            <span className="text-xs font-bold">MC</span>
-                          </div>
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>Mastercard</p>
-                        </div>
-                        <div className="text-center">
-                          <div className="w-12 h-8 bg-green-600 rounded text-white flex items-center justify-center mx-auto mb-1">
-                            <span className="text-xs font-bold">M-P</span>
-                          </div>
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>M-Pesa</p>
-                        </div>
-                        <div className="text-center">
-                          <div className="w-12 h-8 bg-orange-600 rounded text-white flex items-center justify-center mx-auto mb-1">
-                            <span className="text-xs font-bold">AIRTEL</span>
-                          </div>
-                          <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>Airtel Money</p>
-                        </div>
+                        ))}
                       </div>
+                      <p className={cn("mt-3 text-xs", themeClasses.textNeutralSecondary)}>Card payments are not available yet.</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -405,7 +397,7 @@ export default function TermsOfServicePage() {
                     <div>
                       <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Shipping Policy</h4>
                       <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        We ship worldwide with various shipping options available. Shipping costs and delivery times vary by location and shipping method selected.
+                        We deliver across Tanzania, or you can collect your order from our store in Dar es Salaam. The delivery fee for your address is shown at checkout before you pay.
                       </p>
                     </div>
                     
@@ -413,20 +405,20 @@ export default function TermsOfServicePage() {
                       <div>
                         <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Shipping Options</h4>
                         <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Standard shipping (5-7 business days)</li>
-                          <li>• Express shipping (2-3 business days)</li>
-                          <li>• Overnight shipping (1 business day)</li>
-                          <li>• International shipping available</li>
+                          <li>• Home or office delivery across Tanzania</li>
+                          <li>• Usually 1-2 days in Dar es Salaam, 2-6 days to other regions</li>
+                          <li>• Free pickup from our store in Dar es Salaam</li>
+                          <li>• Orders outside Tanzania by arrangement only</li>
                         </ul>
                       </div>
                       
                       <div>
                         <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Shipping Costs</h4>
                         <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Calculated based on weight and destination</li>
-                          <li>• Free shipping on orders over $100</li>
-                          <li>• International shipping fees apply</li>
-                          <li>• Express shipping has additional costs</li>
+                          <li>• Based on your region (and distance within Dar es Salaam)</li>
+                          <li>• Shown at checkout before you pay</li>
+                          <li>• Free when your items add up to TSh {getClientShippingPricing().freeThresholdTz.toLocaleString('en-US')} or more, or for products marked &quot;free delivery&quot;</li>
+                          <li>• Store pickup is free</li>
                         </ul>
                       </div>
                     </div>
@@ -437,32 +429,29 @@ export default function TermsOfServicePage() {
                         <div>
                           <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>Return Policy</h5>
                           <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                            <li>• 30-day return window from delivery date</li>
-                            <li>• Items must be in original condition</li>
-                            <li>• Original packaging required</li>
-                            <li>• Return shipping costs may apply</li>
+                            <li>• Wrong, damaged or faulty items: report within {RETURN_DAYS} days of delivery; we replace or refund in full and pay return transport</li>
+                            <li>• Change of mind: within {RETURN_DAYS} days, unused and unopened in original packaging</li>
+                            <li>• Change-of-mind returns: you pay return transport; delivery fee not refunded</li>
+                            <li>• Returns are arranged by WhatsApp or email with your order number</li>
                           </ul>
                         </div>
                         
                         <div>
                           <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>Refund Process</h5>
                           <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                            <li>• Refunds processed within 5-10 business days</li>
-                            <li>• Original payment method refunded</li>
-                            <li>• Processing fees may be deducted</li>
-                            <li>• International returns may have restrictions</li>
+                            <li>• Sent within {REFUND_BUSINESS_DAYS} business days after we receive and check the item</li>
+                            <li>• Paid to the mobile money number used for the order</li>
+                            <li>• Paid, unsent orders can be cancelled for a full refund</li>
+                            <li>• Your rights under Tanzanian consumer law are not affected</li>
                           </ul>
                         </div>
                       </div>
                     </div>
                     
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Non-Returnable Items</h4>
+                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Not returnable for a change of mind</h4>
                       <ul className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                        <li>• Custom-made or personalized products</li>
-                        <li>• Digital products and software</li>
-                        <li>• Perishable goods</li>
-                        <li>• Items damaged by misuse</li>
+                        {NON_RETURNABLE.map((x) => <li key={x}>• {x}</li>)}
                       </ul>
                     </div>
                   </CardContent>
@@ -574,7 +563,7 @@ export default function TermsOfServicePage() {
                         <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
                           <li>• Posting offensive or inappropriate content</li>
                           <li>• Sharing false or misleading information</li>
-                          <li>• Violating others' privacy rights</li>
+                          <li>• Violating others&apos; privacy rights</li>
                           <li>• Promoting illegal or harmful activities</li>
                         </ul>
                       </div>
@@ -603,7 +592,7 @@ export default function TermsOfServicePage() {
                     <div>
                       <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Service Disclaimers</h4>
                       <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        Our services are provided "as is" without warranties of any kind. We disclaim all warranties, express or implied, including but not limited to merchantability and fitness for a particular purpose.
+                        The website itself is provided &quot;as is&quot;: we work to keep it available and correct, but cannot promise it will always be error-free. Products you buy are covered by our returns policy (wrong, damaged or faulty items are replaced or refunded) and by your rights under Tanzanian consumer law, which these Terms do not limit.
                       </p>
                     </div>
                     

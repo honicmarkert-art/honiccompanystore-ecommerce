@@ -97,8 +97,8 @@ export async function GET(request: NextRequest) {
       })
     })
     
-    let productImagesMap = new Map<number, string>()
-    let productSuppliersMap = new Map<number, { supplierName: string | null }>()
+    const productImagesMap = new Map<number, string>()
+    const productSuppliersMap = new Map<number, { supplierName: string | null }>()
     
     if (allProductIds.size > 0) {
       try {
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
           const supplierIds = [...new Set(products.map(p => p.supplier_id || p.user_id).filter(Boolean))]
           
           // Fetch supplier names (SECURITY: Only send display names, never UUIDs)
-          let suppliersMap = new Map<string, string>()
+          const suppliersMap = new Map<string, string>()
           if (supplierIds.length > 0) {
             const { data: suppliers } = await supabase
               .from('profiles')
@@ -141,13 +141,13 @@ export async function GET(request: NextRequest) {
 
     // Check confirmed orders for status updates
     const orderIds = orders?.map(order => order.id) || []
-    let confirmedOrdersMap = new Map()
-    let confirmedOrderItemsMap = new Map<string, any[]>() // Map order_id to confirmed items
+    const confirmedOrdersMap = new Map()
+    const confirmedOrderItemsMap = new Map<string, any[]>() // Map order_id to confirmed items
     
     if (orderIds.length > 0) {
       const { data: confirmedOrders } = await supabase
         .from('confirmed_orders')
-        .select('order_id, status, confirmed_at, is_received, received_at')
+        .select('id, order_id, status, confirmed_at, is_received, received_at')
         .in('order_id', orderIds)
       
       if (confirmedOrders) {
@@ -261,91 +261,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    // Rate limiting
-    const rateLimitResult = await enhancedRateLimit(request)
-    if (!rateLimitResult.allowed) {
-      logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-        endpoint: '/api/user/orders',
-        reason: rateLimitResult.reason
-      }, request)
-      return NextResponse.json(
-        { error: rateLimitResult.reason },
-        { status: 429, headers: { 'Retry-After': rateLimitResult.retryAfter?.toString() || '60' } }
-      )
-    }
-
-    const supabase = await getClient()
-    
-    // Get the current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const body = await request.json()
-    const { 
-      orderNumber, 
-      status, 
-      totalAmount, 
-      paymentMethod, 
-      paymentStatus, 
-      shippingAddress, 
-      billingAddress, 
-      items, 
-      notes 
-    } = body
-
-    // Create the order
-    const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .insert({
-        user_id: user.id,
-        order_number: orderNumber,
-        status: status || 'pending',
-        total_amount: totalAmount,
-        payment_method: paymentMethod,
-        payment_status: paymentStatus || 'pending',
-        shipping_address: shippingAddress,
-        billing_address: billingAddress,
-        notes: notes
-      })
-      .select()
-      .single()
-
-    if (orderError) {
-      return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
-    }
-
-    // Create order items
-    if (items && items.length > 0) {
-      const orderItems = items.map((item: any) => ({
-        order_id: order.id,
-        product_id: item.productId,
-        product_name: item.productName || 'Unknown Product',
-        variant_id: item.variantId,
-        variant_name: item.variantName || null,
-        variant_attributes: null, // No longer used in simplified variant system
-        quantity: item.quantity,
-        price: item.unitPrice || item.price, // Use unitPrice if available, fallback to price
-        total_price: item.totalPrice
-      }))
-
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(orderItems)
-
-      if (itemsError) {
-        return NextResponse.json({ error: 'Failed to create order items' }, { status: 500 })
-      }
-    }
-
-
-    return NextResponse.json({ order })
-
-  } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  }
-}
+// POST removed (security): it let a logged-in user create an order with any status, payment status
+// and total taken straight from the request body (e.g. a "paid" order). Nothing used it — real orders
+// are created by /api/checkout, which computes prices and statuses on the server.

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
+import { sendPaidOrderEmails } from "@/lib/customer-emails"
 import { logger } from "@/lib/logger"
 import { getSupabaseClient } from "@/lib/supabase-server"
 import { logSecurityEvent } from "@/lib/enhanced-rate-limit"
+import { clientIp } from "@/lib/client-ip"
 import { createSnippeMobilePayment, getSnippePayment, isSnippeConfigured, normalizeOrderReference, resendSnippePush, snippePhoneDigits, tzsAmount } from "@/lib/snippe-api"
 import { processPaidOrderStockAndCart } from "@/lib/paid-order"
 
@@ -11,8 +13,7 @@ export const runtime = "nodejs"
 const actionLimits = new Map<string, { count: number; reset: number; blockedUntil?: number }>()
 
 function allowPaymentAction(request: NextRequest, kind: "push" | "status"): { allowed: boolean; retryAfter?: number } {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-  const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-real-ip") || forwarded || "unknown"
+  const ip = clientIp(request) || "unknown"
   const key = `${kind}:${ip}`
   const now = Date.now()
   const windowMs = kind === "push" ? 2 * 60 * 1000 : 60 * 1000
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
     const adminSupabase = getSupabaseClient()
     const { data: orders, error: orderError } = await adminSupabase
       .from("orders")
-      .select("id, reference_id, total_amount, currency, payment_status, shipping_address, billing_address, clickpesa_transaction_id")
+      .select("id, reference_id, status, total_amount, currency, payment_status, shipping_address, billing_address, clickpesa_transaction_id")
       .in("reference_id", [normalizedOrderRef, orderId])
 
     const order =
@@ -97,6 +98,10 @@ export async function POST(request: NextRequest) {
     }
     if (order.payment_status === "paid" || order.payment_status === "success") {
       return NextResponse.json({ success: false, error: "This order has already been paid." }, { status: 400 })
+    }
+    if (order.status === "cancelled") {
+      // expired or cancelled orders must never take a payment
+      return NextResponse.json({ success: false, error: "This order has expired. Please place a new order from your cart." }, { status: 400 })
     }
     if (String(order.currency || "TZS").toUpperCase() !== "TZS") {
       return NextResponse.json({ success: false, error: "Snippe accepts Tanzanian shillings only." }, { status: 400 })
@@ -214,19 +219,24 @@ export async function GET(request: NextRequest) {
         } catch (stockError) {
           logger.error("Paid order stock update failed:", stockError instanceof Error ? stockError.message : String(stockError))
         }
+        // this check often confirms the payment before the webhook does: send the receipt here too
+        // (only the request that flips the order to paid gets here, so it is sent once)
+        void sendPaidOrderEmails(supabase, order)
       }
       return NextResponse.json({ success: true, paymentStatus: "paid" }, { headers: { "Cache-Control": "no-store" } })
     }
 
     const rejected = verified?.status === "failed" || verified?.status === "expired" || verified?.status === "voided" || verified?.status === "cancelled"
     if (rejected) {
-      const reason = verified?.status === "expired" ? "Payment expired" : verified?.status === "voided" ? "Payment voided" : verified?.status === "cancelled" ? "Payment cancelled" : "Payment failed"
+      const fallback = verified?.status === "expired" ? "Payment expired" : verified?.status === "voided" ? "Payment voided" : verified?.status === "cancelled" ? "Payment cancelled" : "Payment failed"
+      // Keep the network's own reason (e.g. insufficient balance) so the shopper knows what to fix.
+      const reason = verified?.failureReason || fallback
       await supabase
         .from("orders")
         .update({ payment_status: "failed", failure_reason: reason, payment_method: "snippe", updated_at: new Date().toISOString() })
         .eq("id", order.id)
         .in("payment_status", ["pending", "reserved"])
-      return NextResponse.json({ success: true, paymentStatus: "failed", failureReason: reason }, { headers: { "Cache-Control": "no-store" } })
+      return NextResponse.json({ success: true, paymentStatus: "failed", failureReason: reason, provider: verified?.provider || undefined }, { headers: { "Cache-Control": "no-store" } })
     }
 
     return NextResponse.json({

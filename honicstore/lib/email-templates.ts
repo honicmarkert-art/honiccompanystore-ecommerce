@@ -4,11 +4,18 @@
  * Security-focused with proper validation
  */
 
+import { renderEmail, esc, safeUrl, button, featureList, steps, callout, divider, heading, paragraph, BRAND } from './email-layout'
+
 export interface EmailTemplateOptions {
   companyName?: string
   companyLogo?: string
   primaryColor?: string
   supportEmail?: string
+  contactEmail?: string
+  salesEmail?: string
+  legalEmail?: string
+  privacyEmail?: string
+  securityEmail?: string
   unsubscribeUrl?: string
 }
 
@@ -765,142 +772,129 @@ Download invoice: ${invoice.invoiceUrl}
 }
 
 // Welcome Email Template (User)
+// Welcome email (customer): modern marketplace layout (lib/email-layout.ts)
 export function getWelcomeUserTemplate(user: {
   name: string
   accountUrl: string
 }, options: EmailTemplateOptions = {}): { html: string; text: string } {
-  const html = getBaseEmailTemplate(`
-    <div class="email-content">
-      <h2 style="color: #111827; margin-bottom: 20px;">${Icons.check} Welcome to ${options.companyName || 'Honic Company Store'}!</h2>
-      <p>Hi ${user.name},</p>
-      <p>Thank you for joining us! We're excited to have you as part of our community.</p>
-      
-      <div class="info-box">
-        <div class="info-box-title">${Icons.user} Get Started</div>
-        <div class="info-box-content">
-          Your account has been successfully created. You can now browse our products, place orders, and track your purchases.
-        </div>
-      </div>
+  const store = options.companyName || 'Honic Company Store'
+  const support = options.supportEmail || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'
+  const siteUrl = siteRoot(user.accountUrl)
+  const first = firstName(user.name)
 
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${user.accountUrl}" class="email-button">View Your Account</a>
-      </div>
+  const html = renderEmail({
+    preheader: `Your ${store} account is ready. Shop the official Honic store and trusted sellers, pay with mobile money.`,
+    eyebrow: 'Welcome to Honic',
+    title: `Karibu, ${esc(first)}! Your account is ready.`,
+    siteUrl,
+    supportEmail: support,
+    companyName: store,
+    body: `
+      ${paragraph(`Thanks for joining <strong style="color:${BRAND.ink}">${esc(store)}</strong>, Tanzania&rsquo;s online marketplace. Everything you need, from the official Honic store and trusted sellers, delivered to your door.`)}
+      ${button('Start shopping', siteUrl)}
+      <p style="margin:0 0 4px;font-size:14px;color:${BRAND.muted};font-family:Arial,sans-serif">or <a href="${safeUrl(user.accountUrl)}" style="color:${BRAND.orange};font-weight:600">go to your account</a></p>
+      ${divider}
+      ${heading('Why shop with us')}
+      ${featureList([
+        { icon: '&#127978;', title: 'Official store + trusted sellers', text: 'Buy from the official Honic store and verified sellers in one place.' },
+        { icon: '&#128241;', title: 'Pay with mobile money', text: 'Secure checkout with mobile money. No card needed.' },
+        { icon: '&#128666;', title: 'Delivered across Tanzania', text: 'Track every order from checkout to your door.' },
+        { icon: '&#9825;', title: 'Save for later', text: 'Keep a wishlist and get back to it anytime.' },
+      ])}
+    `,
+    footnote: `You&rsquo;re getting this email because an account was created on ${esc(store)}. If this wasn&rsquo;t you, write to <a href="mailto:${esc(support)}" style="color:${BRAND.muted}">${esc(support)}</a>.`,
+  })
 
-      <h3 style="color: #111827; margin: 30px 0 15px 0;">What's Next?</h3>
-      <ul style="list-style: none; padding: 0;">
-        <li style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">${Icons.package} Browse our wide selection of products</li>
-        <li style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">${Icons.star} Save items to your wishlist</li>
-        <li style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">${Icons.truck} Enjoy fast and secure delivery</li>
-        <li style="padding: 10px 0;">${Icons.mail} Get support whenever you need it</li>
-      </ul>
-    </div>
-  `, options)
+  const text = `Karibu, ${first}! Your ${store} account is ready.
 
-  const text = `
-Welcome to ${options.companyName || 'Honic Company Store'}!
+Thanks for joining ${store}, Tanzania's online marketplace. Everything you need, from the official Honic store and trusted sellers, delivered to your door.
 
-Hi ${user.name},
+Start shopping: ${siteUrl}
+Your account: ${user.accountUrl}
 
-Thank you for joining us! We're excited to have you as part of our community.
-
-Your account has been successfully created. You can now browse our products, place orders, and track your purchases.
-
-View your account: ${user.accountUrl}
-
-What's Next?
-- Browse our wide selection of products
+Why shop with us
+- Official store + trusted sellers in one place
+- Pay with mobile money, no card needed
+- Delivered across Tanzania, with order tracking
 - Save items to your wishlist
-- Enjoy fast and secure delivery
-- Get support whenever you need it
-  `.trim()
+
+Questions? ${support}
+If you didn't create this account, write to ${support}.`
 
   return { html, text }
 }
 
-// Welcome Email Template (Supplier)
+// Welcome email (seller / supplier): modern marketplace layout
 export function getWelcomeSupplierTemplate(supplier: {
   name: string
   companyName: string
   dashboardUrl: string
   commissionRate: string
 }, options: EmailTemplateOptions = {}): { html: string; text: string } {
-  const html = getBaseEmailTemplate(`
-    <div class="email-content">
-      <h2 style="color: #111827; margin-bottom: 20px;">${Icons.check} Welcome to ${options.companyName || 'Honic Company Store'} Supplier Program!</h2>
-      <p>Hi ${supplier.name},</p>
-      <p>Thank you for joining our supplier program! We're excited to partner with <strong>${supplier.companyName}</strong>.</p>
-      
-      <div class="info-box" style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 20px 0; border-radius: 6px;">
-        <div class="info-box-title" style="font-weight: 600; color: #92400e; margin-bottom: 8px;">${Icons.alert} Important Account Notice</div>
-        <div class="info-box-content" style="color: #78350f; line-height: 1.6;">
-          Your supplier account has been created and your company information has been submitted successfully. Your account is currently <strong>under review</strong> by our administration team. You will receive a notification once your account is activated and you can start listing products.
-        </div>
-      </div>
+  const store = options.companyName || 'Honic Company Store'
+  const support = options.supportEmail || process.env.SUPPORT_EMAIL || 'support@honiccompanystore.com'
+  const siteUrl = siteRoot(supplier.dashboardUrl)
+  const first = firstName(supplier.name)
 
-      <div class="info-box">
-        <div class="info-box-title">${Icons.user} Your Supplier Account</div>
-        <div class="info-box-content">
-          <strong>Company Name:</strong> ${supplier.companyName}<br>
-          Your supplier account is ready. Once activated, you can start adding products and managing your inventory.
-        </div>
-      </div>
+  const html = renderEmail({
+    preheader: `Your seller account for ${supplier.companyName} is in review. Here is what happens next.`,
+    eyebrow: 'Seller account created',
+    title: `Welcome aboard, ${esc(first)}!`,
+    siteUrl,
+    supportEmail: support,
+    companyName: store,
+    body: `
+      ${paragraph(`Thanks for choosing to sell on <strong style="color:${BRAND.ink}">${esc(store)}</strong>. We&rsquo;re glad to have <strong style="color:${BRAND.ink}">${esc(supplier.companyName)}</strong> on the marketplace.`)}
+      ${callout('Status: in review', 'Our team is checking your company details. We&rsquo;ll email you as soon as your shop is approved and you can publish products.', 'orange')}
+      ${heading('What happens next')}
+      ${steps([
+        { title: 'We review your details', text: 'Usually quick. We may contact you if something is missing.' },
+        { title: 'Add your products', text: 'Upload photos, prices and stock from your seller dashboard.' },
+        { title: 'Start selling', text: 'We handle checkout and mobile money payments. You ship and get paid.' },
+      ])}
+      ${button('Open seller dashboard', supplier.dashboardUrl)}
+      ${divider}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="font-family:Arial,sans-serif;font-size:14px;color:${BRAND.muted};padding:2px 0">Shop name</td>
+        <td align="right" style="font-family:Arial,sans-serif;font-size:14px;font-weight:700;color:${BRAND.ink};padding:2px 0">${esc(supplier.companyName)}</td>
+      </tr>${supplier.commissionRate ? `<tr>
+        <td style="font-family:Arial,sans-serif;font-size:14px;color:${BRAND.muted};padding:8px 0 2px">Commission per sale</td>
+        <td align="right" style="font-family:Arial,sans-serif;font-size:14px;font-weight:700;color:${BRAND.ink};padding:8px 0 2px">${esc(supplier.commissionRate)}</td>
+      </tr>` : ''}</table>
+    `,
+    footnote: `You&rsquo;re getting this email because a seller account was created on ${esc(store)}. If this wasn&rsquo;t you, write to <a href="mailto:${esc(support)}" style="color:${BRAND.muted}">${esc(support)}</a>.`,
+  })
 
-      <div class="info-box">
-        <div class="info-box-title">${Icons.dollar} Commission Structure</div>
-        <div class="info-box-content">
-          Your commission rate: <strong>${supplier.commissionRate}</strong> per product sale
-        </div>
-      </div>
+  const text = `Welcome aboard, ${first}!
 
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${supplier.dashboardUrl}" class="email-button">Access Supplier Dashboard</a>
-      </div>
+Thanks for choosing to sell on ${store}. We're glad to have ${supplier.companyName} on the marketplace.
 
-      <h3 style="color: #111827; margin: 30px 0 15px 0;">What's Next?</h3>
-      <ul style="list-style: none; padding: 0;">
-        <li style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">${Icons.check} Wait for account activation (you'll be notified via email)</li>
-        <li style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">${Icons.package} Add your products to the marketplace</li>
-        <li style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">${Icons.truck} Manage orders and shipping</li>
-        <li style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">${Icons.dollar} Track your earnings and commissions</li>
-        <li style="padding: 10px 0;">${Icons.mail} Get support from our team</li>
-      </ul>
+STATUS: IN REVIEW
+Our team is checking your company details. We'll email you as soon as your shop is approved and you can publish products.
 
-      <div style="background-color: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
-        <p style="margin: 0; color: #4b5563; font-size: 14px;">
-          <strong>Need Help?</strong><br>
-          If you have any questions or need assistance, please don't hesitate to contact our support team. We're here to help you succeed!
-        </p>
-      </div>
-    </div>
-  `, options)
+What happens next
+1. We review your details
+2. Add your products from your seller dashboard
+3. Start selling: we handle checkout and mobile money payments
 
-  const text = `
-Welcome to ${options.companyName || 'Honic Company Store'} Supplier Program!
-
-Hi ${supplier.name},
-
-Thank you for joining our supplier program! We're excited to partner with ${supplier.companyName}.
-
-IMPORTANT ACCOUNT NOTICE:
-Your supplier account has been created and your company information has been submitted successfully. Your account is currently UNDER REVIEW by our administration team. You will receive a notification once your account is activated and you can start listing products.
-
-Company Name: ${supplier.companyName}
-Commission Rate: ${supplier.commissionRate} per product sale
-
-Access Supplier Dashboard: ${supplier.dashboardUrl}
-
-What's Next?
-- Wait for account activation (you'll be notified via email)
-- Add your products to the marketplace
-- Manage orders and shipping
-- Track your earnings and commissions
-- Get support from our team
-
-Need Help?
-If you have any questions or need assistance, please don't hesitate to contact our support team. We're here to help you succeed!
-  `.trim()
+Seller dashboard: ${supplier.dashboardUrl}
+Shop name: ${supplier.companyName}
+${supplier.commissionRate ? `Commission per sale: ${supplier.commissionRate}
+` : ''}
+Questions? ${support}`
 
   return { html, text }
+}
+
+/** "https://x.com/account" -> "https://x.com" */
+function siteRoot(url: string): string {
+  try { return new URL(url).origin } catch { return 'https://honiccompanystore.com' }
+}
+
+/** First name for a friendly greeting ("Asha Mushi" -> "Asha"; emails -> part before @) */
+function firstName(name: string): string {
+  const n = String(name || '').trim().split('@')[0].split(/\s+/)[0] || 'there'
+  return n.length > 40 ? n.slice(0, 40) : n
 }
 
 // Price Drop Alert Email Template

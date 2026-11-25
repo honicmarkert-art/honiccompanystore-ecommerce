@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 import { securityUtils, performanceUtils } from './secure-config'
 import { logger } from '@/lib/logger'
 
@@ -202,7 +202,7 @@ export function createSecureApiHandler(
         } catch (error) {
           if (error instanceof z.ZodError) {
             return createErrorResponse('Invalid input parameters', 400, {
-              errors: error.errors
+              errors: error.issues
             })
           }
           throw error

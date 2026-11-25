@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch cart items with product details, variant information, and supplier info
     // Note: We can't directly join product_variants from cart_items, so we'll fetch it separately
-    let { data, error: cartErr } = await supabase
+    const { data, error: cartErr } = await supabase
     .from('cart_items')
     .select(`
       id, 
@@ -66,12 +66,12 @@ export async function GET(request: NextRequest) {
         variant_id: data[0].variant_id,
         variant_idType: typeof data[0].variant_id,
         products: data[0].products ? {
-          id: data[0].products.id,
-          name: data[0].products.name,
-          supplier_id: data[0].products.supplier_id,
-          user_id: data[0].products.user_id,
-          hasSupplierId: !!data[0].products.supplier_id,
-          hasUserId: !!data[0].products.user_id
+          id: (data[0].products as any).id,
+          name: (data[0].products as any).name,
+          supplier_id: (data[0].products as any).supplier_id,
+          user_id: (data[0].products as any).user_id,
+          hasSupplierId: !!(data[0].products as any).supplier_id,
+          hasUserId: !!(data[0].products as any).user_id
         } : null
       } : null
     })
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
       uniqueVariantIds: [...new Set(variantIds)]
     })
 
-    let variantMap: { [key: number]: { variant_name: string | null } } = {}
+    const variantMap: { [key: number]: { variant_name: string | null } } = {}
     if (variantIds.length > 0) {
       logger.log('🛒 [CART GET] Step 2: Fetching variant names from database', {
         variantIdsToFetch: variantIds
@@ -155,17 +155,17 @@ export async function GET(request: NextRequest) {
     logger.log('🛒 [CART GET] Step 2a: Extracting supplier IDs from products', {
       allSupplierIds: allSupplierIds,
       sampleProduct: data?.[0]?.products ? {
-        id: data[0].products.id,
-        name: data[0].products.name,
-        supplier_id: data[0].products.supplier_id,
-        user_id: data[0].products.user_id,
-        supplier_idType: typeof data[0].products.supplier_id,
-        user_idType: typeof data[0].products.user_id
+        id: (data[0].products as any).id,
+        name: (data[0].products as any).name,
+        supplier_id: (data[0].products as any).supplier_id,
+        user_id: (data[0].products as any).user_id,
+        supplier_idType: typeof (data[0].products as any).supplier_id,
+        user_idType: typeof (data[0].products as any).user_id
       } : null
     })
     
     const supplierIds = [...new Set(allSupplierIds.map(item => item.extracted).filter(Boolean))]
-    let supplierMap: { [key: string]: { company_name?: string, is_verified?: boolean, location?: string, region?: string, nation?: string } } = {}
+    const supplierMap: { [key: string]: { company_name?: string, is_verified?: boolean, location?: string | null, region?: string | null, nation?: string | null, company_logo?: string | null } } = {}
     
     logger.log('🛒 [CART GET] Step 2a: Fetching supplier info', {
       supplierIdsCount: supplierIds.length,
@@ -816,7 +816,7 @@ export async function POST(request: NextRequest) {
         .filter((id: any) => id && id !== 'default' && !isNaN(Number(id)))
         .map((id: any) => Number(id))
       
-      let existingVariantMapPartial: { [key: number]: string | null } = {}
+      const existingVariantMapPartial: { [key: number]: string | null } = {}
       if (existingVariantIdsPartial.length > 0) {
         const { data: existingVariantsPartial } = await supabase
           .from('product_variants')
@@ -944,7 +944,6 @@ export async function POST(request: NextRequest) {
   const finalPrice = variantPriceFromDB !== null ? variantPriceFromDB : parseFloat(product.price) || 0
   
   logger.log('🛒 [CART ADD] Price determination:', {
-    clientProvidedPrice: variantPrice,
     variantPriceFromDB,
     productPrice: product.price,
     finalPriceUsed: finalPrice,
@@ -968,7 +967,7 @@ export async function POST(request: NextRequest) {
       .filter((id: any) => id && id !== 'default' && !isNaN(Number(id)))
       .map((id: any) => Number(id))
     
-    let existingVariantMap: { [key: number]: string | null } = {}
+    const existingVariantMap: { [key: number]: string | null } = {}
     if (existingVariantIds.length > 0) {
       const { data: existingVariants, error: variantsError } = await supabase
         .from('product_variants')

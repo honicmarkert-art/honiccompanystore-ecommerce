@@ -16,7 +16,7 @@ export function validateTanzaniaPhone(phone: string): { valid: boolean; error?: 
   }
 
   // Remove all spaces
-  let cleaned = phone.replace(/\s+/g, '')
+  const cleaned = phone.replace(/\s+/g, '')
   
   // Remove any non-numeric characters except +
   let digitsOnly = cleaned.replace(/[^\d+]/g, '')

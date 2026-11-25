@@ -67,6 +67,7 @@ interface AnalyticsData {
 }
 
 export default function SupplierAnalyticsPage() {
+  const router = useRouter()
   const { themeClasses } = useTheme()
   const { formatPrice } = useCurrency()
   const { toast } = useToast()
@@ -79,12 +80,8 @@ export default function SupplierAnalyticsPage() {
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d')
   const [activeTab, setActiveTab] = useState<string>('overview')
 
-  useEffect(() => {
-    fetchAnalytics()
-    fetchCurrentPlan()
-  }, [])
 
-  const fetchCurrentPlan = async () => {
+  async function fetchCurrentPlan() {
     try {
       const response = await fetch('/api/user/current-plan', {
         credentials: 'include'
@@ -100,7 +97,7 @@ export default function SupplierAnalyticsPage() {
       }
   }
 
-  const fetchAnalytics = async () => {
+  async function fetchAnalytics() {
     try {
       setLoading(true)
       // Fetch products
@@ -239,6 +236,12 @@ export default function SupplierAnalyticsPage() {
     }
   }
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
+    fetchAnalytics()
+    fetchCurrentPlan()
+  }, [])
+
   const isPremiumPlan = currentPlan?.slug === 'premium' && hasValidPremiumPayment
   const isFreePlan = currentPlan?.slug === 'free'
   // Check if premium plan payment is pending - use payment_status directly
@@ -293,7 +296,7 @@ export default function SupplierAnalyticsPage() {
       title: 'Total Views',
       value: loading ? '...' : analytics?.totalViews.toString() || '0',
       icon: Eye,
-      color: 'text-yellow-600 dark:text-yellow-400',
+      color: 'text-orange-600 dark:text-orange-400',
       bgColor: 'bg-yellow-100 dark:bg-yellow-900/20',
       change: analytics?.viewsChange || 0
     },
@@ -319,7 +322,7 @@ export default function SupplierAnalyticsPage() {
           </p>
         </div>
         {isPremiumPlan ? (
-          <Badge className="bg-yellow-500 text-black font-semibold text-xs sm:text-sm px-2 sm:px-3 w-fit">
+          <Badge className="bg-orange-500 text-black font-semibold text-xs sm:text-sm px-2 sm:px-3 w-fit">
             Advanced Analytics
           </Badge>
         ) : (
@@ -391,7 +394,7 @@ export default function SupplierAnalyticsPage() {
                     case 'completed':
                       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800'
                     case 'pending':
-                      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800'
+                      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-orange-400 border-yellow-200 dark:border-yellow-800'
                     case 'cancelled':
                     case 'rejected':
                       return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800'
@@ -406,7 +409,7 @@ export default function SupplierAnalyticsPage() {
                     case 'completed':
                       return 'text-green-600 dark:text-green-400'
                     case 'pending':
-                      return 'text-yellow-600 dark:text-yellow-400'
+                      return 'text-orange-600 dark:text-orange-400'
                     case 'failed':
                     case 'cancelled':
                       return 'text-red-600 dark:text-red-400'
@@ -422,7 +425,7 @@ export default function SupplierAnalyticsPage() {
                       "group relative overflow-hidden rounded-lg border-2 transition-all duration-200 hover:shadow-md",
                       themeClasses.cardBorder,
                       themeClasses.cardBg,
-                      "hover:border-yellow-400 dark:hover:border-yellow-600"
+                      "hover:border-orange-400 dark:hover:border-orange-600"
                     )}
                   >
                     <div className="p-4">
@@ -432,7 +435,7 @@ export default function SupplierAnalyticsPage() {
                           <div className="flex items-center gap-3 mb-2">
                             <div className={cn(
                               "flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm",
-                              "bg-gradient-to-br from-yellow-400 to-yellow-600 text-black"
+                              "bg-gradient-to-br from-orange-400 to-orange-600 text-black"
                             )}>
                               <ShoppingCart className="w-5 h-5" />
                             </div>
@@ -492,7 +495,7 @@ export default function SupplierAnalyticsPage() {
                     
                     {/* Hover Effect Border */}
                     <div className={cn(
-                      "absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-yellow-400 to-yellow-600",
+                      "absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-orange-400 to-orange-600",
                       "transform scale-x-0 group-hover:scale-x-100 transition-transform duration-200"
                     )} />
                   </div>
@@ -534,7 +537,7 @@ export default function SupplierAnalyticsPage() {
                 >
                   <div className="flex items-center gap-3">
                     <div className={cn("w-8 h-8 rounded-full flex items-center justify-center font-bold", 
-                      index === 0 ? "bg-yellow-500 text-black" : "bg-gray-200 dark:bg-gray-700"
+                      index === 0 ? "bg-orange-500 text-black" : "bg-gray-200 dark:bg-gray-700"
                     )}>
                       {index + 1}
                     </div>
@@ -639,7 +642,7 @@ export default function SupplierAnalyticsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card className={cn("border-2 border-yellow-500", themeClasses.cardBg)}>
+        <Card className={cn("border-2 border-orange-500", themeClasses.cardBg)}>
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -717,7 +720,7 @@ export default function SupplierAnalyticsPage() {
                     })
                   }
                 }}
-                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-md font-semibold"
+                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-black rounded-md font-semibold"
               >
                 {isPremiumPendingPayment ? 'Complete Payment' : 'Upgrade Plan'}
               </button>
@@ -736,6 +739,7 @@ function DetailedSalesReports({ analytics, formatPrice, themeClasses, timeRange 
   themeClasses: any
   timeRange: string
 }) {
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- the compiler skips this one; the manual memo is kept on purpose
   const filteredOrders = useMemo(() => {
     if (!analytics?.orders) return []
     const now = new Date()
@@ -952,6 +956,7 @@ function PerformanceTrends({ analytics, formatPrice, themeClasses, timeRange }: 
   themeClasses: any
   timeRange: string
 }) {
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- the compiler skips this one; the manual memo is kept on purpose
   const filteredOrders = useMemo(() => {
     if (!analytics?.orders) return []
     const now = new Date()
@@ -1102,6 +1107,7 @@ function CustomerInsights({ analytics, formatPrice, themeClasses }: {
   formatPrice: (amount: number) => string
   themeClasses: any
 }) {
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- the compiler skips this one; the manual memo is kept on purpose
   const customerData = useMemo(() => {
     if (!analytics?.orders) return { uniqueCustomers: 0, repeatCustomers: 0, customerOrders: {}, avgOrderValue: 0 }
     
@@ -1125,6 +1131,7 @@ function CustomerInsights({ analytics, formatPrice, themeClasses }: {
     return { uniqueCustomers, repeatCustomers, customerOrders, avgOrderValue }
   }, [analytics?.orders])
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- the compiler skips this one; the manual memo is kept on purpose
   const topCustomers = useMemo(() => {
     if (!analytics?.orders) return []
     const customerMap: Record<string, { orders: number; totalSpent: number }> = {}
@@ -1173,7 +1180,7 @@ function CustomerInsights({ analytics, formatPrice, themeClasses }: {
         <Card className={cn(themeClasses.cardBg, themeClasses.cardBorder)}>
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <DollarSign className="w-5 h-5 text-yellow-600" />
+              <DollarSign className="w-5 h-5 text-orange-600" />
               <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>Avg Order Value</p>
             </div>
             <p className={cn("text-2xl font-bold", themeClasses.mainText)}>{formatPrice(customerData.avgOrderValue)}</p>
@@ -1239,6 +1246,7 @@ function BusinessIntelligence({ analytics, formatPrice, themeClasses }: {
   formatPrice: (amount: number) => string
   themeClasses: any
 }) {
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- the compiler skips this one; the manual memo is kept on purpose
   const insights = useMemo(() => {
     if (!analytics?.products || !analytics?.orders) return []
 

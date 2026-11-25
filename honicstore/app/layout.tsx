@@ -11,12 +11,12 @@ import { GlobalAuthModalProvider } from '@/contexts/global-auth-modal'
 import { CurrencyProvider } from '@/contexts/currency-context'
 import { LanguageProvider } from '@/contexts/language-context'
 import { NextIntlProvider } from '@/components/next-intl-provider'
-import { RoutePrefetcher } from '@/components/route-prefetcher'
-import { PerformanceOptimizer } from '@/components/performance-optimizer'
-import { AdvancedRoutePrefetcher } from '@/components/advanced-route-prefetcher'
 import { SharedDataCacheProvider } from '@/contexts/shared-data-cache'
-import { OptimizedPageWrapper, ScrollRestoration, PageTransitionMonitor } from '@/components/optimized-page-transition'
+import { OptimizedPageWrapper, ScrollRestoration } from '@/components/optimized-page-transition'
 import { Toaster } from '@/components/ui/toaster'
+import { MobileTabBar } from '@/components/mobile-tab-bar'
+import { RouteProgress } from '@/components/route-progress'
+import { LensRoot } from '@/components/image-search/lens'
 import { HydrationFix } from '@/components/hydration-fix'
 import { SWRProvider } from '@/components/swr-provider'
 import { ChunkErrorHandler } from '@/components/chunk-error-handler'
@@ -24,14 +24,13 @@ import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Analytics } from '@vercel/analytics/react'
 
 export const metadata: Metadata = {
+  // Resolves relative URLs in page metadata (canonical links, Open Graph images)
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'),
   title: 'Honic Company Store - Online Shopping in Tanzania',
-  description: 'Shop the best deals on electronics, fashion, home goods, and more. Free shipping across Tanzania. Best prices guaranteed!',
+  description: 'Shop electronics, home devices, school items and more from Honic and trusted sellers across Tanzania. Pay with mobile money.',
   generator: 'Next.js',
-  keywords: 'online shopping, Tanzania, electronics, fashion, home goods, marketplace, best deals, free shipping',
+  keywords: 'online shopping, Tanzania, marketplace, electronics, electronic components, home devices, school items, mobile money',
   authors: [{ name: 'Honic Company Store' }],
-  alternates: {
-    canonical: process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com'
-  },
   icons: {
     icon: [
       { url: '/favicon.ico' },
@@ -49,7 +48,7 @@ export const metadata: Metadata = {
   manifest: '/site.webmanifest',
   openGraph: {
     title: 'Honic Company Store - Online Shopping in Tanzania',
-    description: 'Shop the best deals on electronics, fashion, home goods, and more. Free shipping across Tanzania.',
+    description: 'Shop electronics, home devices, school items and more from Honic and trusted sellers across Tanzania.',
     type: 'website',
     locale: 'en_US',
     url: process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_WEBSITE_URL || 'https://www.honiccompanystore.com',
@@ -58,7 +57,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Honic Company Store - Online Shopping in Tanzania',
-    description: 'Shop the best deals on electronics, fashion, home goods, and more.',
+    description: 'Shop from Honic and trusted sellers across Tanzania.',
   },
   robots: {
     index: true,
@@ -97,9 +96,8 @@ export default function RootLayout({
             <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_SUPABASE_URL} />
           </>
         )}
-        <link rel="preconnect" href="https://api.snippe.sh" crossOrigin="anonymous" />
+        {/* Payment provider is only needed at checkout: DNS lookup only, no early connection on every page */}
         <link rel="dns-prefetch" href="https://api.snippe.sh" />
-        <link rel="preconnect" href="https://snippe.me" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.googleapis.com" crossOrigin="anonymous" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         
@@ -115,7 +113,7 @@ export default function RootLayout({
         />
         
         {/* Meta tags for performance */}
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#f97316" />
         <meta name="mobile-web-app-capable" content="yes" />
         
         {/* Hydration fix script - runs before React hydration */}
@@ -224,14 +222,13 @@ export default function RootLayout({
                       <NextIntlProvider>
                       <CompanyProvider>
                         <PublicCompanyProvider>
-                        <RoutePrefetcher />
-                        <AdvancedRoutePrefetcher />
-                        <PerformanceOptimizer />
                         <ScrollRestoration />
-                        <PageTransitionMonitor />
                         <OptimizedPageWrapper>
                           {children}
                         </OptimizedPageWrapper>
+                        <MobileTabBar />
+                        <RouteProgress />
+                        <LensRoot />
                         <HydrationFix />
                         <ChunkErrorHandler />
                         <div suppressHydrationWarning>

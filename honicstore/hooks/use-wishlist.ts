@@ -76,6 +76,7 @@ export function useWishlist() {
 	}, [isAuthenticated])
 
 	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
 		syncFromSource()
 	}, [syncFromSource])
 

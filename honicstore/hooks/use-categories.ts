@@ -49,7 +49,7 @@ export function useCategories(): UseCategoriesReturn {
       
       if (data.success) {
         const raw = Array.isArray(data.categories) ? data.categories : []
-        const detailed = raw.map((c: any, i: number) => ({
+        const detailed: Array<{ id: any; name: string; slug: string; parent_id?: any; parent_name?: string; is_main: boolean }> = raw.map((c: any, i: number) => ({
           id: c.id ?? i,
           name: c.name ?? String(c),
           slug: c.slug ?? (String(c.name ?? c).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')),
@@ -58,7 +58,7 @@ export function useCategories(): UseCategoriesReturn {
           is_main: c.is_main ?? !c.parent_id
         }))
         setCategoriesDetailed(detailed)
-        setCategories(detailed.map(c => c.name))
+        setCategories(detailed.map((c: { name: string }) => c.name))
         
         // Separate main categories and subcategories
         const mainCats = detailed.filter(c => c.is_main).map(c => ({
@@ -87,6 +87,7 @@ export function useCategories(): UseCategoriesReturn {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
     fetchCategories()
   }, [fetchCategories])
 

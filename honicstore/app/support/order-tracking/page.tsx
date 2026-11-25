@@ -1,486 +1,215 @@
-"use client"
+'use client'
 
-// Note: ISR (revalidate) cannot be used in client components
-// CPU optimization is handled via API route caching and CDN caching instead
-
-import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { 
-  Search,
-  Package,
-  Truck,
-  CheckCircle,
-  Clock,
-  AlertCircle,
-  ArrowRight,
-  ArrowLeft,
-  MapPin,
-  Calendar,
-  User,
-  Phone,
-  Mail,
-  ExternalLink,
-  RefreshCw,
-  Eye,
-  Download
-} from 'lucide-react'
-import { useTheme } from '@/hooks/use-theme'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '@/contexts/auth-context'
+/**
+ * Track an order.
+ *  - Anyone: order number + the phone or email used at checkout (POST /api/orders/track).
+ *  - Signed in: their recent orders (GET /api/user/orders) with links to the full order page.
+ * (The old page showed made-up orders such as "HC-2025-001234" to everyone.)
+ */
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
+import { Check, Loader2, MessageCircle, PackageSearch, Search, Store, Truck, X } from 'lucide-react'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
+import { useAuth } from '@/contexts/auth-context'
+import { useCurrency } from '@/contexts/currency-context'
+import { whatsappLink } from '@/lib/contact'
 
-interface OrderStatus {
-  id: string
-  status: string
-  description: string
-  timestamp: string
-  location?: string
-  completed: boolean
-}
-
-interface Order {
-  id: string
+type Step = { key: string; label: string; done: boolean; at?: string | null }
+type Tracked = {
   orderNumber: string
+  orderLink?: string | null
   status: string
-  statusDescription: string
-  orderDate: string
-  estimatedDelivery: string
-  totalAmount: number
-  items: number
-  trackingNumber?: string
-  statusHistory: OrderStatus[]
-  shippingAddress: {
-    name: string
-    address: string
-    city: string
-    phone: string
-  }
+  paid: boolean
+  delivery: 'pickup' | 'delivery'
+  createdAt: string
+  trackingNumber: string | null
+  estimatedDelivery: string | null
+  total: number
+  firstName: string | null
+  items: { name: string; variant: string | null; quantity: number }[]
+  steps: Step[]
 }
+type MyOrder = { orderNumber: string; status: string; createdAt?: string; totalAmount?: number; total?: number; items?: unknown[] }
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Waiting for payment',
+  confirmed: 'Being prepared',
+  shipped: 'On the way',
+  delivered: 'Delivered',
+  ready_for_pickup: 'Ready for pickup',
+  picked_up: 'Picked up',
+  cancelled: 'Cancelled',
+}
+const date = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 
 export default function OrderTrackingPage() {
-  const { themeClasses } = useTheme()
-  const router = useRouter()
-  const { isAuthenticated } = useAuth()
-  const [searchTerm, setSearchTerm] = useState('')
-  const [trackingNumber, setTrackingNumber] = useState('')
-  const [isSearching, setIsSearching] = useState(false)
-
-  // Mock order data - in real app, this would come from API
-  const mockOrders: Order[] = [
-    {
-      id: '1',
-      orderNumber: 'HC-2025-001234',
-      status: 'shipped',
-      statusDescription: 'Your order has been shipped and is on its way',
-      orderDate: '2025-01-15',
-      estimatedDelivery: '2025-01-20',
-      totalAmount: 125000,
-      items: 3,
-      trackingNumber: 'TZ123456789',
-      statusHistory: [
-        {
-          id: '1',
-          status: 'Order Placed',
-          description: 'Your order has been successfully placed',
-          timestamp: '2025-01-15T10:30:00Z',
-          completed: true
-        },
-        {
-          id: '2',
-          status: 'Processing',
-          description: 'Your order is being prepared for shipment',
-          timestamp: '2025-01-15T14:20:00Z',
-          completed: true
-        },
-        {
-          id: '3',
-          status: 'Shipped',
-          description: 'Your order has been shipped and is on its way',
-          timestamp: '2025-01-16T09:15:00Z',
-          location: 'Dar es Salaam Warehouse',
-          completed: true
-        },
-        {
-          id: '4',
-          status: 'In Transit',
-          description: 'Your order is currently in transit',
-          timestamp: '2025-01-17T11:45:00Z',
-          location: 'Arusha Distribution Center',
-          completed: false
-        },
-        {
-          id: '5',
-          status: 'Out for Delivery',
-          description: 'Your order is out for delivery',
-          timestamp: '2025-01-20T08:00:00Z',
-          completed: false
-        }
-      ],
-      shippingAddress: {
-        name: 'John Mwalimu',
-        address: '123 Mwenge Street, Kinondoni',
-        city: 'Dar es Salaam',
-        phone: '+255 123 456 789'
-      }
-    },
-    {
-      id: '2',
-      orderNumber: 'HC-2025-001235',
-      status: 'delivered',
-      statusDescription: 'Your order has been successfully delivered',
-      orderDate: '2025-01-10',
-      estimatedDelivery: '2025-01-15',
-      totalAmount: 75000,
-      items: 2,
-      trackingNumber: 'TZ123456790',
-      statusHistory: [
-        {
-          id: '1',
-          status: 'Order Placed',
-          description: 'Your order has been successfully placed',
-          timestamp: '2025-01-10T15:20:00Z',
-          completed: true
-        },
-        {
-          id: '2',
-          status: 'Processing',
-          description: 'Your order is being prepared for shipment',
-          timestamp: '2025-01-10T16:45:00Z',
-          completed: true
-        },
-        {
-          id: '3',
-          status: 'Shipped',
-          description: 'Your order has been shipped and is on its way',
-          timestamp: '2025-01-11T10:30:00Z',
-          location: 'Dar es Salaam Warehouse',
-          completed: true
-        },
-        {
-          id: '4',
-          status: 'Delivered',
-          description: 'Your order has been successfully delivered',
-          timestamp: '2025-01-15T14:20:00Z',
-          location: '123 Mwenge Street, Kinondoni',
-          completed: true
-        }
-      ],
-      shippingAddress: {
-        name: 'Sarah Kimaro',
-        address: '456 Upanga Road, Ilala',
-        city: 'Dar es Salaam',
-        phone: '+255 987 654 321'
-      }
-    }
-  ]
-
-  const filteredOrders = mockOrders.filter(order => 
-    order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.trackingNumber?.toLowerCase().includes(searchTerm.toLowerCase())
+  // useSearchParams needs a Suspense boundary
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-white dark:bg-neutral-950" />}>
+      <OrderTracking />
+    </Suspense>
   )
+}
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'delivered':
-        return <CheckCircle className="w-5 h-5 text-green-500" />
-      case 'shipped':
-      case 'in_transit':
-        return <Truck className="w-5 h-5 text-blue-500" />
-      case 'processing':
-        return <Package className="w-5 h-5 text-orange-500" />
-      case 'pending':
-        return <Clock className="w-5 h-5 text-yellow-500" />
-      default:
-        return <AlertCircle className="w-5 h-5 text-gray-500" />
+function OrderTracking() {
+  const { isAuthenticated } = useAuth()
+  const { formatPrice } = useCurrency()
+  // ?order=ORD-123 prefills the form (links from emails)
+  const [orderNumber, setOrderNumber] = useState(useSearchParams().get('order') || '')
+  const [contact, setContact] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<Tracked | null>(null)
+  const [mine, setMine] = useState<MyOrder[] | null>(null)
+
+  useEffect(() => {
+    if (!isAuthenticated) return // the list only renders when signed in
+    let cancelled = false
+    fetch('/api/user/orders', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setMine(Array.isArray(d?.orders) ? d.orders.slice(0, 5) : []) })
+      .catch(() => { if (!cancelled) setMine([]) })
+    return () => { cancelled = true }
+  }, [isAuthenticated])
+
+  const track = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    setResult(null)
+    try {
+      const res = await fetch('/api/orders/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber, contact }),
+      })
+      const d = await res.json().catch(() => null)
+      if (!res.ok || !d?.order) throw new Error(d?.error || 'Could not find that order.')
+      setResult(d.order)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not find that order.')
+    } finally {
+      setLoading(false)
     }
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'delivered':
-        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
-      case 'shipped':
-      case 'in_transit':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300'
-      case 'processing':
-        return 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300'
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
-      default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300'
-    }
-  }
-
-  const handleTrackOrder = () => {
-    setIsSearching(true)
-    // Simulate API call
-    setTimeout(() => {
-      setIsSearching(false)
-      // In real app, would search for order and display results
-    }, 1000)
-  }
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-TZ', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-TZ', {
-      style: 'currency',
-      currency: 'TZS',
-      minimumFractionDigits: 0
-    }).format(amount)
-  }
+  const field = 'w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 dark:border-neutral-700 dark:bg-neutral-900'
 
   return (
-    <div className={`min-h-screen ${themeClasses.mainBg} ${themeClasses.mainText}`}>
-      <div className="container mx-auto px-4 py-8">
-        {/* Back Button */}
-        <div className="mb-6">
-          <Button 
-            variant="ghost" 
-            onClick={() => router.back()}
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
-        </div>
+    <div className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-white">
+      <SiteHeader />
+      <main className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+        <nav aria-label="Breadcrumb" className="text-sm text-neutral-500">
+          <Link href="/support" className="hover:text-orange-600">Help centre</Link> <span aria-hidden>/</span> Track an order
+        </nav>
+        <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Track your order</h1>
+        <p className="mt-2 text-neutral-600 dark:text-neutral-300">Enter your order number and the phone number or email you used at checkout.</p>
 
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4">Order Tracking</h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-8">
-            Track your orders and stay updated on delivery status
+        {/* signed in: recent orders */}
+        {isAuthenticated && mine && mine.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-neutral-500">Your recent orders</h2>
+            <ul className="mt-3 divide-y divide-neutral-200 rounded-2xl ring-1 ring-neutral-200 dark:divide-neutral-800 dark:ring-neutral-800">
+              {mine.map((o) => (
+                <li key={o.orderNumber}>
+                  <Link href={`/account/orders/${o.orderNumber}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-900">
+                    <span className="min-w-0">
+                      <span className="block font-semibold">{o.orderNumber}</span>
+                      <span className="text-xs text-neutral-500">{date(o.createdAt)}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700 dark:bg-orange-950/40">{STATUS_LABEL[o.status] || o.status}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <Link href="/account/orders" className="mt-2 inline-block text-sm font-semibold text-orange-600 hover:underline">See all your orders</Link>
+          </section>
+        )}
+
+        {/* lookup */}
+        <form onSubmit={track} className="mt-8 grid gap-3 rounded-2xl p-5 ring-1 ring-neutral-200 dark:ring-neutral-800 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <label className="block text-sm">
+            <span className="mb-1 block font-semibold">Order number</span>
+            <input required value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} placeholder="e.g. ORD-1795358150702" autoComplete="off" className={field} />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-semibold">Phone or email</span>
+            <input required value={contact} onChange={(e) => setContact(e.target.value)} placeholder="0712 345 678 or you@email.com" autoComplete="tel" className={field} />
+          </label>
+          <button disabled={loading} className="inline-flex h-[46px] items-center justify-center gap-2 rounded-xl bg-orange-500 px-5 text-sm font-bold text-white hover:bg-orange-600 disabled:opacity-60">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Track
+          </button>
+          <p className="text-xs text-neutral-500 sm:col-span-3">Your order number is in your confirmation email and in your account under &quot;My orders&quot;.</p>
+        </form>
+
+        {error && (
+          <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            <X className="mt-0.5 h-4 w-4 shrink-0" /> {error}
           </p>
+        )}
 
-          {/* Search Bar */}
-          <div className="max-w-2xl mx-auto relative">
-            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-muted-foreground w-5 h-5" />
-            <Input
-              placeholder="Search by order number or tracking number..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handleTrackOrder()
-                }
-              }}
-              className="pl-12 pr-4 py-3 text-lg"
-            />
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6 text-center">
-              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Eye className="w-6 h-6 text-orange-500" />
+        {result && (
+          <section className="mt-6 rounded-2xl p-6 ring-1 ring-neutral-200 dark:ring-neutral-800" aria-live="polite">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">Order {result.orderNumber}</p>
+                <h2 className="mt-1 text-2xl font-black tracking-tight">{STATUS_LABEL[result.status] || result.status}</h2>
+                <p className="text-sm text-neutral-500">Placed {date(result.createdAt)}{result.firstName ? ` by ${result.firstName}` : ''} · {formatPrice(result.total)}</p>
               </div>
-              <h3 className="font-semibold mb-2">View All Orders</h3>
-              <p className="text-sm text-muted-foreground mb-4">See your complete order history</p>
-              {isAuthenticated ? (
-                <Link href="/account/orders">
-                  <Button variant="outline" size="sm" className="w-full">
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Go to My Orders
-                  </Button>
-                </Link>
-              ) : (
-                <Button variant="outline" size="sm" className="w-full" disabled>
-                  Sign in required
-                </Button>
-              )}
-            </CardContent>
-          </Card>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold dark:bg-neutral-800">
+                {result.delivery === 'pickup' ? <Store className="h-3.5 w-3.5" /> : <Truck className="h-3.5 w-3.5" />}
+                {result.delivery === 'pickup' ? 'Store pickup' : 'Delivery'}
+              </span>
+            </div>
 
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6 text-center">
-              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <RefreshCw className="w-6 h-6 text-orange-500" />
-              </div>
-              <h3 className="font-semibold mb-2">Refresh Status</h3>
-              <p className="text-sm text-muted-foreground mb-4">Get the latest order updates</p>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="w-full"
-                onClick={handleTrackOrder}
-                disabled={isSearching}
-              >
-                {isSearching ? (
-                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                )}
-                Refresh
-              </Button>
-            </CardContent>
-          </Card>
+            <ol className="mt-6 space-y-3">
+              {result.steps.map((s) => (
+                <li key={s.key} className="flex items-center gap-3">
+                  <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${s.done ? (s.key === 'cancelled' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white') : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-800'}`}>
+                    {s.done ? (s.key === 'cancelled' ? <X className="h-4 w-4" /> : <Check className="h-4 w-4" />) : <span className="h-2 w-2 rounded-full bg-current" />}
+                  </span>
+                  <span className={s.done ? 'font-semibold' : 'text-neutral-500'}>{s.label}</span>
+                  {s.at && <span className="ml-auto text-xs text-neutral-500">{date(s.at)}</span>}
+                </li>
+              ))}
+            </ol>
 
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6 text-center">
-              <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Download className="w-6 h-6 text-orange-500" />
-              </div>
-              <h3 className="font-semibold mb-2">Download Invoice</h3>
-              <p className="text-sm text-muted-foreground mb-4">Get your order receipts</p>
-              <Button variant="outline" size="sm" className="w-full" disabled>
-                <Download className="w-4 h-4 mr-2" />
-                Download
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Orders List */}
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold">Recent Orders</h2>
-            {isAuthenticated && (
-              <Link href="/account/orders">
-                <Button variant="outline" className="flex items-center gap-2">
-                  View All Orders
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </Link>
-            )}
-          </div>
-
-          {filteredOrders.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No orders found</h3>
-                <p className="text-muted-foreground mb-4">
-                  {searchTerm ? 'Try searching with a different order number' : 'You don\'t have any orders yet'}
-                </p>
-                {!isAuthenticated && (
-                  <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">Sign in to view your orders</p>
-                    <Button onClick={() => router.push('/auth/login')}>
-                      Sign In
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            filteredOrders.map((order) => (
-              <Card key={order.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-lg">Order #{order.orderNumber}</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        Placed on {formatDate(order.orderDate)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Badge className={getStatusColor(order.status)}>
-                        {getStatusIcon(order.status)}
-                        <span className="ml-2 capitalize">{order.status.replace('_', ' ')}</span>
-                      </Badge>
-                      {isAuthenticated && (
-                        <Link href={`/account/orders/${order.id}`}>
-                          <Button variant="outline" size="sm">
-                            <Eye className="w-4 h-4 mr-2" />
-                            View Details
-                          </Button>
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Order Summary */}
-                    <div>
-                      <h4 className="font-semibold mb-2">Order Summary</h4>
-                      <div className="space-y-1 text-sm text-muted-foreground">
-                        <p>Items: {order.items}</p>
-                        <p>Total: {formatCurrency(order.totalAmount)}</p>
-                        <p>Est. Delivery: {formatDate(order.estimatedDelivery)}</p>
-                        {order.trackingNumber && (
-                          <p>Tracking: {order.trackingNumber}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Shipping Address */}
-                    <div>
-                      <h4 className="font-semibold mb-2">Shipping Address</h4>
-                      <div className="text-sm text-muted-foreground">
-                        <p className="font-medium">{order.shippingAddress.name}</p>
-                        <p>{order.shippingAddress.address}</p>
-                        <p>{order.shippingAddress.city}</p>
-                        <p>{order.shippingAddress.phone}</p>
-                      </div>
-                    </div>
-
-                    {/* Status Timeline */}
-                    <div>
-                      <h4 className="font-semibold mb-2">Status Timeline</h4>
-                      <div className="space-y-2">
-                        {order.statusHistory.slice(-3).map((status, index) => (
-                          <div key={status.id} className="flex items-center gap-2 text-sm">
-                            <div className={`w-2 h-2 rounded-full ${
-                              status.completed ? 'bg-green-500' : 'bg-gray-300'
-                            }`} />
-                            <span className={status.completed ? 'text-foreground' : 'text-muted-foreground'}>
-                              {status.status}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Status Description */}
-                  <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                    <p className="text-sm text-muted-foreground">
-                      {order.statusDescription}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-
-        {/* Contact Support CTA */}
-        <div className="mt-16">
-          <Card className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
-            <CardContent className="p-12 text-center">
-              <h2 className="text-3xl font-bold mb-4">Need help with your order?</h2>
-              <p className="text-xl mb-8 opacity-90">
-                Our support team is here to help you track your orders
+            {(result.trackingNumber || result.estimatedDelivery) && (
+              <p className="mt-5 rounded-xl bg-orange-50 px-4 py-3 text-sm dark:bg-orange-950/30">
+                {result.trackingNumber && <>Tracking / parcel number: <strong>{result.trackingNumber}</strong>. </>}
+                {result.estimatedDelivery && <>Expected: <strong>{date(result.estimatedDelivery)}</strong>.</>}
               </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button size="lg" variant="secondary" className="bg-white text-orange-500 hover:bg-gray-100">
-                  <Phone className="w-4 h-4 mr-2" />
-                  Call Support
-                </Button>
-                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10">
-                  <Mail className="w-4 h-4 mr-2" />
-                  Email Support
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            )}
+
+            <h3 className="mt-6 text-sm font-bold">Items</h3>
+            <ul className="mt-2 space-y-1 text-sm text-neutral-600 dark:text-neutral-300">
+              {result.items.map((i, n) => <li key={n}>{i.quantity} × {i.name}{i.variant ? ` (${i.variant})` : ''}</li>)}
+            </ul>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a href={whatsappLink(`Hello Honic, a question about my order ${result.orderNumber}`)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-neutral-950 px-4 py-2.5 text-sm font-bold text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-950">
+                <MessageCircle className="h-4 w-4" /> Ask about this order
+              </a>
+              {result.orderLink && (
+                <Link href={result.orderLink} className="inline-flex items-center rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-orange-600">Full order &amp; invoice (PDF)</Link>
+              )}
+              {isAuthenticated && !result.orderLink && (
+                <Link href={`/account/orders/${result.orderNumber}`} className="inline-flex items-center rounded-xl px-4 py-2.5 text-sm font-bold ring-1 ring-neutral-300 hover:ring-orange-500 dark:ring-neutral-700">Open full order</Link>
+              )}
+            </div>
+          </section>
+        )}
+
+        {!result && !error && (
+          <div className="mt-10 flex items-start gap-3 text-sm text-neutral-500">
+            <PackageSearch className="h-5 w-5 shrink-0 text-orange-600" />
+            <p>Can&apos;t find your order number? <a href={whatsappLink('Hello Honic, I need help finding my order')} target="_blank" rel="noopener noreferrer" className="font-semibold text-orange-600 hover:underline">Message us on WhatsApp</a> with the name and phone number you used, and we&apos;ll look it up.</p>
+          </div>
+        )}
+      </main>
+      <SiteFooter />
     </div>
   )
 }

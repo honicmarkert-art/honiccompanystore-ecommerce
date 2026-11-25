@@ -24,7 +24,7 @@ interface UseStockReturn {
 }
 
 // Global cache for stock data
-let globalStockCache: Map<number, { data: StockData, timestamp: number }> = new Map()
+const globalStockCache: Map<number, { data: StockData, timestamp: number }> = new Map()
 const CACHE_DURATION = 30 * 1000 // 30 seconds
 
 export function useStock(): UseStockReturn {

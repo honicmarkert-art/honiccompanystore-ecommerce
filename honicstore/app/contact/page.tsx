@@ -19,12 +19,13 @@ import {
   HelpCircle,
   AlertCircle,
   CheckCircle,
-  ArrowLeft
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { useCompanyContext } from '@/components/company-provider'
+import { STORE_ADDRESS, STORE_WHATSAPP, phoneLabel, whatsappLink } from '@/lib/contact'
+import Link from 'next/link'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
 import { useTheme } from '@/hooks/use-theme'
-import { useRouter } from 'next/navigation'
 
 interface ContactFormData {
   name: string
@@ -38,7 +39,6 @@ interface ContactFormData {
 export default function ContactPage() {
   const { toast } = useToast()
   const { themeClasses } = useTheme()
-  const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<ContactFormData>({
     name: '',
@@ -91,7 +91,7 @@ export default function ContactPage() {
       if (result.success) {
         toast({
           title: "Message Sent!",
-          description: result.message || "Thank you for contacting us. We'll get back to you within 24 hours.",
+          description: result.message || "Thank you for contacting us. We'll get back to you soon.",
         })
         
         // Reset form
@@ -124,9 +124,9 @@ export default function ContactPage() {
   const contactInfo = [
     {
       icon: <Phone className="w-5 h-5" />,
-      title: "Phone",
-      details: ["+255 763818138", "+255 69 311 9708"],
-      description: "Call us for immediate assistance"
+      title: "Phone & WhatsApp",
+      details: [phoneLabel(STORE_WHATSAPP)],
+      description: "Call or message us on WhatsApp"
     },
     {
       icon: <Mail className="w-5 h-5" />,
@@ -137,7 +137,7 @@ export default function ContactPage() {
     {
       icon: <MapPin className="w-5 h-5" />,
       title: "Address",
-      details: ["NSSF 3-Floor", "Dar es Salaam, Tanzania"],
+      details: [STORE_ADDRESS, "Tanzania"],
       description: "Visit our office"
     },
     {
@@ -158,24 +158,14 @@ export default function ContactPage() {
 
   return (
     <div className={`min-h-screen ${themeClasses.mainBg} ${themeClasses.mainText}`}>
-      <div className="container mx-auto px-4 py-8">
-        {/* Back Button */}
-        <div className="mb-6">
-          <Button 
-            variant="ghost" 
-            onClick={() => router.back()}
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </Button>
-        </div>
-
+      <SiteHeader />
+      <div className="container mx-auto px-4 py-10">
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-4">Contact Us</h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            We'd love to hear from you. Send us a message and we'll respond as soon as possible.
+            Send us a message and we&apos;ll reply during business hours. For the fastest answer,{' '}
+            <a href={whatsappLink('Hello Honic, I have a question')} target="_blank" rel="noopener noreferrer" className="font-semibold text-orange-600 hover:underline">chat with us on WhatsApp</a>.
           </p>
         </div>
 
@@ -217,18 +207,17 @@ export default function ContactPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  <div>
-                    <h4 className="font-medium text-sm">Order Issues?</h4>
-                    <p className="text-xs text-muted-foreground">Check your order status in your account</p>
-                  </div>
-                  <div>
-                    <h4 className="font-medium text-sm">Product Questions?</h4>
-                    <p className="text-xs text-muted-foreground">Browse our product catalog or use live chat</p>
-                  </div>
-                  <div>
-                    <h4 className="font-medium text-sm">Technical Support?</h4>
-                    <p className="text-xs text-muted-foreground">Contact our technical team for assistance</p>
-                  </div>
+                  {[
+                    ['/support/order-tracking', 'Where is my order?', 'Track it with your order number'],
+                    ['/support/returns-refunds', 'Return or refund', 'Wrong or faulty item? See how it works'],
+                    ['/support/shipping-info', 'Delivery prices & times', 'Fees for your region'],
+                    ['/support/help-center', 'Questions & answers', 'Payments, account and more'],
+                  ].map(([href, title, text]) => (
+                    <Link key={href} href={href} className="block rounded-lg p-2 -mx-2 hover:bg-orange-50 dark:hover:bg-orange-950/30">
+                      <h4 className="font-medium text-sm">{title}</h4>
+                      <p className="text-xs text-muted-foreground">{text}</p>
+                    </Link>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -386,6 +375,7 @@ export default function ContactPage() {
           </div>
         </div>
       </div>
+      <SiteFooter />
     </div>
   )
 }

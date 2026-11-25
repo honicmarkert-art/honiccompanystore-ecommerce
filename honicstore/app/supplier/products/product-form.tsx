@@ -93,6 +93,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
     inStock: true,
     stockQuantity: "",
     freeDelivery: false,
+    shippingSize: '' as '' | 'small' | 'medium' | 'large',
     sameDayDelivery: false,
     importChina: false,
     variantConfig: {
@@ -117,6 +118,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
     
     if (product && !categoriesLoading && !brandsLoading) {
       
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keeps local state in sync with props/route changes
       setFormData({
         name: product.name ?? "",
         description: product.description ?? "",
@@ -156,6 +158,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
         inStock: product.inStock !== undefined ? product.inStock : true,
         stockQuantity: product.stockQuantity?.toString() ?? "",
         freeDelivery: product.freeDelivery || false,
+        shippingSize: (product.shippingSize || '') as '' | 'small' | 'medium' | 'large',
         importChina: product.importChina || product.import_china || false,
         sameDayDelivery: product.sameDayDelivery || false,
         variantConfig: product.variantConfig || {
@@ -181,7 +184,7 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
 
       // Attributes removed - simplified variant system
     }
-    }, [product, categoriesLoading, brandsLoading])
+    }, [product, categoriesLoading, brandsLoading]) // eslint-disable-line react-hooks/exhaustive-deps -- runs on mount / when the listed values change, on purpose (adding the functions would re-run it every render)
 
   // Attributes removed - simplified variant system
 
@@ -468,22 +471,6 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
   // Removed functions: updateVariantAttribute, updateVariantQuantity, addPrimaryValue, updatePrimaryValue, 
   // removePrimaryValue, addMultiValue, updateSmartAttribute, handleAttributeBlur, updateSmartQuantity
 
-  const _unused = () => {
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((variant, index) => 
-        index === variantIndex 
-          ? { 
-              ...variant, 
-              attributes: { 
-                ...variant.attributes, 
-                [attribute]: value 
-              } 
-            }
-          : variant
-      )
-    }))
-  }
 
   // Separate function for updating quantity fields
   const updateVariantQuantity = (variantIndex: number, attribute: string, quantity: string) => {
@@ -884,6 +871,8 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
           }
         })(),
         freeDelivery: Boolean(formData.freeDelivery),
+        // parcel size for delivery fees; empty = standard parcel
+        shippingSize: formData.shippingSize || null,
         importChina: Boolean(formData.importChina),
         sameDayDelivery: Boolean(formData.sameDayDelivery),
         variantConfig: normalizedVariantConfig,
@@ -1329,6 +1318,21 @@ export function ProductForm({ product, onClose, onSave, autoCloseOnSave = true, 
                     checked={formData.inStock}
                     onCheckedChange={(checked) => handleInputChange("inStock", checked)}
                   />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="shippingSize">Parcel size</Label>
+                  <p className="text-sm text-muted-foreground">Bigger parcels cost more to send by bus or courier. Leave on Standard for most items.</p>
+                  <select
+                    id="shippingSize"
+                    value={formData.shippingSize || ''}
+                    onChange={(e) => handleInputChange("shippingSize", e.target.value)}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="">Standard (fits in a small parcel)</option>
+                    <option value="medium">Medium (e.g. 1 kg filament spool, small tool box)</option>
+                    <option value="large">Large (e.g. 3D printer, water purifier, furniture)</option>
+                  </select>
                 </div>
 
                 <div className="flex items-center justify-between">

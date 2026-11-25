@@ -1,7 +1,10 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { sendExpiredOrderEmails } from "@/lib/customer-emails"
 
-export const AWAITING_CONFIRMATION_MINUTES = 15
-export const EXPIRED_ORDER_REASON = "Expired. Not confirmed within 15 minutes."
+import { UNPAID_ORDER_EXPIRY_MINUTES } from "@/lib/policies"
+
+export const AWAITING_CONFIRMATION_MINUTES = UNPAID_ORDER_EXPIRY_MINUTES
+export const EXPIRED_ORDER_REASON = `Expired. Not confirmed within ${UNPAID_ORDER_EXPIRY_MINUTES} minutes.`
 
 type ExpiredOrder = {
   id: string
@@ -13,18 +16,7 @@ type ExpiredOrder = {
   billing_address?: unknown
 }
 
-export async function expireAwaitingConfirmationOrders(supabase: {
-  from: (table: string) => {
-    update: (values: Record<string, string>) => {
-      eq: (column: string, value: string) => {
-        lt: (column: string, value: string) => {
-          select: (columns: string) => Promise<{ data: ExpiredOrder[] | null; error: unknown }>
-        }
-      }
-    }
-  }
-  auth: { admin: { getUserById: (id: string) => Promise<{ data: { user: { email?: string } | null } }> } }
-}): Promise<number> {
+export async function expireAwaitingConfirmationOrders(supabase: SupabaseClient): Promise<number> {
   const cutoff = new Date(Date.now() - AWAITING_CONFIRMATION_MINUTES * 60 * 1000).toISOString()
   const { data, error } = await supabase
     .from("orders")
@@ -38,6 +30,6 @@ export async function expireAwaitingConfirmationOrders(supabase: {
     .select("id, order_number, user_id, total_amount, payment_status, shipping_address, billing_address")
 
   if (error || !Array.isArray(data)) return 0
-  void sendExpiredOrderEmails(supabase, data)
+  void sendExpiredOrderEmails(supabase, data as ExpiredOrder[])
   return data.length
 }

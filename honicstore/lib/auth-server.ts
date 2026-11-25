@@ -1,10 +1,11 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
-import { logger } from '@/lib/logger'
+import type { User } from '@supabase/supabase-js'
+import { getSupabaseClient } from '@/lib/supabase-server'
 
 // Helper to build a SSR-safe supabase client per request
 export function getSupabase(request: NextRequest) {
-  let response = NextResponse.next()
+  const response = NextResponse.next()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
@@ -32,145 +33,66 @@ export function copyCookies(source: NextResponse, target: NextResponse) {
   })
 }
 
-// Helper to validate authentication in API routes
+// Helper to validate authentication in API routes.
+//
+// SECURITY: a user is only accepted after Supabase has verified it — getUser() on the cookie
+// session, a server-side refresh, or getUser() on a Bearer token. getSession() alone is never
+// trusted: it just decodes the cookie, so a hand-made cookie could claim to be any user (incl. an admin).
 export async function validateAuth(request: NextRequest) {
   const { supabase, response } = getSupabase(request)
   const explicitLogout = request.cookies.get('explicit-logout')?.value === 'true'
-  
-  // First validate user using getUser() for secure authentication
-  let { data: { user }, error: userError } = await supabase.auth.getUser()
-  let session = null
-  
-  if (userError || !user) {
-    // Try to get session for refresh logic
-    const { data: { session: sessionData }, error: sessionError } = await supabase.auth.getSession()
-    
-    if (sessionError || !sessionData) {
-      return { user: null, error: 'Authentication failed', response, supabase }
-    }
-    
-    session = sessionData
-    user = session.user
-    if (!user) {
-      return { user: null, error: 'User not found', response, supabase }
-    }
-  } else {
-    // Get session when user is valid
-    const { data: { session: sessionData } } = await supabase.auth.getSession()
-    session = sessionData
-  }
-
-  // If no session, try to refresh
-  if (!session) {
-    // Respect explicit logout only when there is truly no active session
+  const ok = (user: User, client: typeof supabase) => {
     if (explicitLogout) {
-      logger.log('Explicit logout cookie honored - no active session')
-      return { user: null, error: 'User has explicitly logged out', response, supabase }
+      try { response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 }) } catch {}
     }
+    return { user, error: null, response, supabase: client }
+  }
 
-    const refreshToken = request.cookies.get('sb-refresh-token')?.value
+  // 1. Cookie session, verified by the auth server
+  const { data: { user } } = await supabase.auth.getUser()
+  if (user) return ok(user, supabase)
+
+  // 2. Expired access token: refresh on the server (the refresh token is checked by Supabase)
+  if (!explicitLogout) {
+    const { data: { session } } = await supabase.auth.getSession()
+    const refreshToken = session?.refresh_token || request.cookies.get('sb-refresh-token')?.value
     if (refreshToken) {
-      const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession({
-        refresh_token: refreshToken
-      })
-      
-      if (refreshError || !refreshedSession) {
-        // Fallback: try Authorization Bearer header
-        const authHeader = request.headers.get('authorization') || request.headers.get('Authorization')
-        const bearer = authHeader?.startsWith('Bearer ')
-          ? authHeader.substring('Bearer '.length)
-          : null
-        if (bearer) {
-          try {
-            const headerClient = createServerClient(
-              process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-              {
-                global: { headers: { Authorization: `Bearer ${bearer}` } },
-              }
-            )
-            const { data: userData, error: userErr } = await headerClient.auth.getUser()
-            if (!userErr && userData.user) {
-              // Clear stale explicit-logout if present
-              if (explicitLogout) {
-                try { response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 }) } catch {}
-              }
-              return { user: userData.user, error: null, response, supabase: headerClient as any }
-            }
-          } catch (e) {
-            }
-        }
-        return { user: null, error: 'Authentication failed', response, supabase }
+      const { data: refreshed } = await supabase.auth.refreshSession({ refresh_token: refreshToken })
+      if (refreshed.session?.user) {
+        const { data: { user: verified } } = await supabase.auth.getUser(refreshed.session.access_token)
+        if (verified) return ok(verified, supabase)
       }
-      
-      session = refreshedSession
-    } else {
-      // Final fallback: Authorization header
-      const authHeader = request.headers.get('authorization') || request.headers.get('Authorization')
-      const bearer = authHeader?.startsWith('Bearer ')
-        ? authHeader.substring('Bearer '.length)
-        : null
-      if (bearer) {
-        try {
-          const headerClient = createServerClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-            { global: { headers: { Authorization: `Bearer ${bearer}` } } }
-          )
-          const { data: userData, error: userErr } = await headerClient.auth.getUser()
-          if (!userErr && userData.user) {
-            if (explicitLogout) {
-              try { response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 }) } catch {}
-            }
-            return { user: userData.user, error: null, response, supabase: headerClient as any }
-          }
-        } catch (e) {
-          }
-      }
-      return { user: null, error: 'No valid session', response, supabase }
     }
   }
 
-  // Use session.user if not already set from getUser()
-  if (!user && session) {
-    user = session.user
-  }
-  
-  if (!user) {
-    return { user: null, error: 'User not found', response, supabase }
-  }
-
-  // If we successfully have a session, clear any stale explicit-logout flag
-  if (explicitLogout) {
-    try {
-      response.cookies.set('explicit-logout', '', { path: '/', maxAge: 0 })
-    } catch {}
+  // 3. Authorization: Bearer <access token>, verified by the auth server
+  const bearer = request.headers.get('authorization')?.match(/^Bearers+(.+)$/i)?.[1]
+  if (bearer) {
+    const headerClient = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+      { cookies: { get: () => undefined, set() {}, remove() {} }, global: { headers: { Authorization: `Bearer ${bearer}` } } }
+    )
+    const { data: { user: headerUser } } = await headerClient.auth.getUser(bearer)
+    if (headerUser) return ok(headerUser, headerClient as unknown as typeof supabase)
   }
 
-  return { user, error: null, response, supabase }
+  return { user: null, error: explicitLogout ? 'User has explicitly logged out' : 'Authentication failed', response, supabase }
 }
 
 // Helper to get user and role from database
 export async function getUserAndRole(userId: string) {
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-  )
-
-  const { data: profile, error } = await supabase
+  // Admin client: profiles are private under RLS, so the anon key can't read the admin flag reliably
+  const { data: profile, error } = await getSupabaseClient()
     .from('profiles')
-    .select('*')
+    .select('id, is_admin, is_supplier')
     .eq('id', userId)
-    .single()
+    .maybeSingle()
 
-  if (error) {
+  if (error || !profile) {
     return { role: 'user', profile: null }
   }
-
-  // Determine role from database (handle missing columns gracefully)
-  const userRole = (profile?.role === 'admin' || profile?.is_admin === true) ? 'admin' : 'user'
-
-  return { role: userRole, profile }
+  return { role: profile.is_admin === true ? 'admin' : 'user', profile }
 }
 
 

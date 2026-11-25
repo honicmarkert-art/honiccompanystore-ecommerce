@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { getSupabaseClient } from '@/lib/supabase-server'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 import { enhancedRateLimit, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 import { logAuthFailure } from '@/lib/security-monitor'
 import { logger } from '@/lib/logger'
@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
         email: validatedData.email,
         error: error.message,
         endpoint: '/api/auth/login'
-      }, request.headers.get('x-forwarded-for') || 'unknown', request.headers.get('user-agent'))
+      }, request.headers.get('x-forwarded-for') || 'unknown', request.headers.get('user-agent') ?? undefined)
       
       // Check if error is related to email verification
       const errorMessage = error.message?.toLowerCase() || ''
@@ -189,7 +189,11 @@ export async function POST(request: NextRequest) {
         try {
           // Use admin client to check if user exists and email is not verified
           const adminSupabase = getSupabaseClient()
-          const { data: authUser } = await adminSupabase.auth.admin.getUserByEmail(validatedData.email.toLowerCase())
+          // auth-js has no getUserByEmail: find the id in profiles, then read the login record by id
+          const { data: profileRow } = await adminSupabase.from('profiles').select('id').eq('email', validatedData.email.toLowerCase()).maybeSingle()
+          const { data: authUser } = profileRow?.id
+            ? await adminSupabase.auth.admin.getUserById(profileRow.id)
+            : { data: null }
           
           if (authUser?.user && !authUser.user.email_confirmed_at && !authUser.user.confirmed_at) {
             // User exists but email is not verified
@@ -283,8 +287,6 @@ export async function POST(request: NextRequest) {
     const userRole = profile?.role === 'admin' || profile?.is_admin === true ? 'admin' : 'user'
     const isSupplier = profile?.is_supplier === true
     
-    // Check user's remember me setting from profile, fallback to request parameter
-    const userRememberMe = profile?.settings?.rememberMe ?? remember
 
     logger.log('Login successful for user:', data.user.id)
     logger.log('User role determined as:', userRole)
@@ -338,12 +340,13 @@ export async function POST(request: NextRequest) {
     for (const cookie of cookiesToSet) {
       if (cookie.value) {
         // Set cookie with proper options for development
+        // "Keep me signed in": 30 days. Otherwise a browser-session cookie (no expiry: deleted when the browser closes).
         const cookieOptions = {
           httpOnly: cookie.options?.httpOnly !== false,
           secure: shouldUseSecure, // Force false in development/localhost
           sameSite: (cookie.options?.sameSite ?? 'lax') as 'lax' | 'strict' | 'none',
           path: cookie.options?.path ?? '/',
-          maxAge: cookie.options?.maxAge ?? 60 * 60 * 24 * 7, // 7 days default
+          ...(remember ? { maxAge: 60 * 60 * 24 * 30 } : {}),
         }
         
         response.cookies.set(cookie.name, cookie.value, cookieOptions)

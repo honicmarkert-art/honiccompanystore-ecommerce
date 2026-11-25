@@ -34,6 +34,8 @@ type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug'
 interface LogOptions {
   context?: string
   timestamp?: boolean
+  /** Any other detail worth logging (ids…) */
+  [key: string]: unknown
 }
 class Logger {
   private isDevelopment = process.env.NODE_ENV === 'development'

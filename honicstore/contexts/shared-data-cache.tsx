@@ -16,6 +16,8 @@ interface SharedDataCacheContextType {
   clear: (key?: string) => void
   isExpired: (key: string) => boolean
   getStats: () => { totalEntries: number; validEntries: number; expiredEntries: number }
+  /** Current cache keys (used to clear by prefix) */
+  keys: () => string[]
 }
 
 const SharedDataCacheContext = createContext<SharedDataCacheContextType | null>(null)
@@ -116,12 +118,15 @@ export function SharedDataCacheProvider({ children }: SharedDataCacheProviderPro
     // For now, we'll keep the cache persistent across routes
   }, [pathname])
 
+  const keys = useCallback(() => [...cache.current.keys()], [])
+
   const value: SharedDataCacheContextType = {
     get,
     set,
     clear,
     isExpired,
-    getStats
+    getStats,
+    keys
   }
 
   return (
@@ -162,7 +167,7 @@ export function useApiCache() {
     if (endpoint) {
       // Clear all cache entries for this endpoint
       const keysToDelete: string[] = []
-      for (const key of cache.getStats().totalEntries) {
+      for (const key of cache.keys()) {
         if (key.startsWith(`api:${endpoint}:`)) {
           keysToDelete.push(key)
         }
@@ -171,7 +176,7 @@ export function useApiCache() {
     } else {
       // Clear all API cache
       const keysToDelete: string[] = []
-      for (const key of cache.getStats().totalEntries) {
+      for (const key of cache.keys()) {
         if (key.startsWith('api:')) {
           keysToDelete.push(key)
         }
@@ -210,7 +215,7 @@ export function useUserDataCache() {
     } else {
       // Clear all data for this user
       const keysToDelete: string[] = []
-      for (const key of cache.getStats().totalEntries) {
+      for (const key of cache.keys()) {
         if (key.startsWith(`user:${userId}:`)) {
           keysToDelete.push(key)
         }
@@ -250,7 +255,7 @@ export function usePageDataCache() {
     } else {
       // Clear all data for this page
       const keysToDelete: string[] = []
-      for (const key of cache.getStats().totalEntries) {
+      for (const key of cache.keys()) {
         if (key.startsWith(`page:${pathname}:`)) {
           keysToDelete.push(key)
         }

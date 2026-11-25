@@ -5,32 +5,27 @@ import { useTheme } from '@/hooks/use-theme'
 import { usePublicCompanyContext } from '@/contexts/public-company-context'
 import { useCurrency } from '@/contexts/currency-context'
 import { cn } from '@/lib/utils'
-import { Package, TrendingUp, DollarSign, Shield, Users, CheckCircle, Landmark, Home, ShoppingBag, ChevronLeft, Moon, Sun } from 'lucide-react'
+import { Package, TrendingUp, DollarSign, Shield, Users, CheckCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Skeleton, ShimmerSkeleton } from '@/components/ui/skeleton'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { ShimmerSkeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Eye, EyeOff, Globe } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { useToast } from '@/hooks/use-toast'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
 import { useLanguage } from '@/contexts/language-context'
 import { t } from '@/lib/translations'
-import { UserProfile } from '@/components/user-profile'
 import { validateEmailFormat } from '@/lib/email-validation'
+import { Turnstile, TURNSTILE_SITE_KEY } from '@/components/turnstile'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
 
 interface PlanFeature {
   name: string
@@ -51,19 +46,19 @@ interface SupplierPlan {
 }
 
 export default function BecomeSupplierPage() {
-  const { themeClasses, backgroundColor, setBackgroundColor } = useTheme()
-  const { companyName, companyLogo, companyColor } = usePublicCompanyContext()
-  const { currency, setCurrency, formatPrice: formatCurrencyPrice } = useCurrency()
-  const { signUp, signIn, user, isAuthenticated } = useAuth()
+  const { themeClasses } = useTheme()
+  const { companyName, companyColor } = usePublicCompanyContext()
+  const { currency } = useCurrency()
+  const { signUp, user } = useAuth()
+  // Bot check on sign-up (only when NEXT_PUBLIC_TURNSTILE_SITE_KEY is set); a token works once
+  const [captchaToken, setCaptchaToken] = useState('')
+  const [captchaReset, setCaptchaReset] = useState(0)
   const { toast } = useToast()
-  const { closeAuthModal, openAuthModal } = useGlobalAuthModal()
+  const { openAuthModal } = useGlobalAuthModal()
   const router = useRouter()
   const { language, setLanguage } = useLanguage()
   const translate = t(language)
   
-  // Fallback logo system
-  const fallbackLogo = "/android-chrome-512x512.png"
-  const displayLogo = companyLogo && companyLogo !== fallbackLogo && companyLogo !== "/placeholder-logo.png" ? companyLogo : fallbackLogo
   const [plans, setPlans] = useState<SupplierPlan[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTerm, setSelectedTerm] = useState<'month' | 'year'>('month')
@@ -102,7 +97,7 @@ export default function BecomeSupplierPage() {
   }, [emailCheckTimeout, emailValidationTimeout])
 
   const benefits = [
-    { icon: TrendingUp, title: 'Grow Your Business', description: 'Reach thousands of customers looking for quality products' },
+    { icon: TrendingUp, title: 'Grow Your Business', description: 'Reach shoppers across Tanzania who are already searching for products like yours' },
     { icon: DollarSign, title: 'Fair Pricing', description: 'Competitive commission structure that works for you' },
     { icon: Shield, title: 'Trust & Security', description: 'Secure transactions and reliable payment processing' },
     { icon: Users, title: 'Support Team', description: 'Dedicated support to help you succeed' }
@@ -154,188 +149,10 @@ export default function BecomeSupplierPage() {
 
   return (
     <div className={cn("min-h-screen", themeClasses.mainBg)}>
-      {/* Enhanced Header with Logo and Navigation */}
-      <header className={cn(
-        "fixed top-0 z-40 w-full border-b sm:top-0",
-        "bg-white/95 dark:bg-black/50 backdrop-blur-sm",
-        "border-white dark:border-gray-800",
-        "shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] dark:shadow-[0_15px_30px_-5px_rgba(255,255,255,0.15)]"
-      )}>
-        <div className="container mx-auto px-2 sm:px-4 lg:px-6">
-          <div className="flex items-center h-16 sm:h-20 justify-between">
-            {/* Logo and Company Name */}
-            <Link
-              href="/"
-              className="flex items-center gap-2 sm:gap-3 flex-shrink-0 group"
-            >
-              <div className="relative">
-                <Image
-                  src={displayLogo}
-                  alt={`${companyName} Logo`}
-                  width={48}
-                  height={48}
-                  className="w-10 h-10 sm:w-12 sm:h-12 lg:w-14 lg:h-14 rounded-lg shadow-md group-hover:shadow-lg transition-shadow"
-                />
-              </div>
-              <div className="hidden sm:flex flex-col">
-                <span 
-                  className="text-lg sm:text-xl lg:text-2xl font-bold truncate"
-                  style={{ color: companyColor || '#f97316' }}
-                >
-                  {companyName}
-                </span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Become a Supplier
-                </span>
-              </div>
-              <div className="sm:hidden">
-                <span className="text-base font-bold" style={{ color: companyColor || '#f97316' }}>
-                  Supplier
-                </span>
-              </div>
-            </Link>
-
-            {/* Navigation Links - Desktop */}
-            <nav className="hidden md:flex items-center gap-6 flex-1 justify-center">
-              <Link
-                href="/"
-                className={cn(
-                  "text-sm font-medium transition-colors hover:text-orange-500",
-                  "text-gray-700 dark:text-gray-300"
-                )}
-              >
-                <Home className="w-4 h-4 inline mr-1" />
-                Home
-              </Link>
-              <Link
-                href="/products"
-                className={cn(
-                  "text-sm font-medium transition-colors hover:text-orange-500",
-                  "text-gray-700 dark:text-gray-300"
-                )}
-              >
-                <ShoppingBag className="w-4 h-4 inline mr-1" />
-                Products
-              </Link>
-              <Link
-                href="/become-supplier"
-                className={cn(
-                  "text-sm font-semibold transition-colors",
-                  "text-orange-500 dark:text-orange-400"
-                )}
-              >
-                <Package className="w-4 h-4 inline mr-1" />
-                Become Seller
-              </Link>
-            </nav>
-
-            {/* Right Side Actions */}
-            <div className="flex items-center gap-3">
-              {/* Theme Toggle Button - Switch between White and Dark (Black) */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  // Toggle between white and dark (black) only
-                  const newTheme = (backgroundColor === 'white' || backgroundColor === 'gray') ? 'dark' : 'white'
-                  setBackgroundColor(newTheme)
-                }}
-                className={cn(
-                  "flex items-center gap-2",
-                  "border-gray-300 dark:border-gray-600",
-                  "hover:bg-gray-50 dark:hover:bg-gray-800"
-                )}
-                title={(backgroundColor === 'white' || backgroundColor === 'gray') ? 'Switch to dark theme' : 'Switch to light theme'}
-              >
-                {(backgroundColor === 'white' || backgroundColor === 'gray') ? (
-                  <>
-                    <Moon className="w-4 h-4" />
-                    <span className="hidden sm:inline">Dark</span>
-                  </>
-                ) : (
-                  <>
-                    <Sun className="w-4 h-4" />
-                    <span className="hidden sm:inline">Light</span>
-                  </>
-                )}
-              </Button>
-
-              {/* User Profile or Sign In */}
-              {isAuthenticated && user ? (
-                <div className="flex items-center gap-3">
-                  <UserProfile />
-                </div>
-              ) : (
-                <>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      // Only open login form (no registration, no Google OAuth redirects)
-                      openAuthModal('login', '/supplier/dashboard')
-                    }}
-                    className={cn(
-                      "flex items-center gap-2",
-                      "border-orange-500 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/10",
-                      "dark:border-orange-400 dark:text-orange-400",
-                      "text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2"
-                    )}
-                  >
-                    Sign In
-                  </Button>
-                </>
-              )}
-
-              {/* Currency Switcher */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      "flex items-center gap-2",
-                      "border-gray-300 dark:border-gray-600",
-                      "hover:bg-gray-50 dark:hover:bg-gray-800"
-                    )}
-                  >
-                    {currency === "USD" ? (
-                      <DollarSign className="w-4 h-4" />
-                    ) : (
-                      <Landmark className="w-4 h-4" />
-                    )}
-                    <span className="hidden sm:inline">{currency}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className={cn(
-                  "bg-white text-neutral-900 border border-neutral-200",
-                  "dark:bg-neutral-900 dark:text-neutral-100 dark:border-neutral-800"
-                )}>
-                  <DropdownMenuItem
-                    onClick={() => setCurrency("TZS")}
-                    className={cn(
-                      "cursor-pointer",
-                      currency === "TZS" && "bg-yellow-100 dark:bg-yellow-900/20"
-                    )}
-                  >
-                    <Landmark className="w-4 h-4 mr-2" /> TZS
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setCurrency("USD")}
-                    className={cn(
-                      "cursor-pointer",
-                      currency === "USD" && "bg-yellow-100 dark:bg-yellow-900/20"
-                    )}
-                  >
-                    <DollarSign className="w-4 h-4 mr-2" /> USD
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        </div>
-      </header>
+      <SiteHeader />
 
       {/* Main Content with Top Padding for Fixed Header */}
-      <main className="pt-[6.5rem] sm:pt-[7.5rem] pb-8 md:pb-16 px-4 sm:px-6 md:px-12 lg:px-20 xl:px-24 2xl:px-32">
+      <main className="pt-8 sm:pt-12 pb-8 md:pb-16 px-4 sm:px-6 md:px-12 lg:px-20 xl:px-24 2xl:px-32">
         {/* Enhanced Hero Section */}
         <div className="text-center mb-8 sm:mb-12 md:mb-16 relative overflow-hidden">
           {/* Background Gradient */}
@@ -347,13 +164,13 @@ export default function BecomeSupplierPage() {
           
           <div className="relative z-10 py-8 sm:py-12 md:py-16 px-2 sm:px-4">
             {/* Icon with Animation */}
-            <div className="inline-block p-4 sm:p-5 md:p-6 rounded-2xl bg-gradient-to-r from-yellow-400 via-orange-500 to-yellow-500 mb-4 sm:mb-6 shadow-lg hover:shadow-xl transition-shadow animate-pulse">
+            <div className="inline-block p-4 sm:p-5 md:p-6 rounded-2xl bg-gradient-to-r from-orange-400 via-orange-500 to-orange-500 mb-4 sm:mb-6 shadow-lg hover:shadow-xl transition-shadow animate-pulse">
               <Package className="w-8 h-8 sm:w-10 sm:h-10 md:w-14 md:h-14 text-white" />
             </div>
             
             <h1 className={cn(
               "text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-extrabold mb-4 sm:mb-6",
-              "bg-gradient-to-r from-orange-600 via-yellow-500 to-orange-600 bg-clip-text text-transparent"
+              "bg-gradient-to-r from-orange-600 via-orange-500 to-orange-600 bg-clip-text text-transparent"
             )}>
               Become a Supplier
             </h1>
@@ -367,14 +184,14 @@ export default function BecomeSupplierPage() {
               <span className="font-semibold" style={{ color: companyColor || '#f97316' }}>
                 {companyName}
               </span>
-              . Start selling to thousands of customers today.
+              . Open your shop and start selling across Tanzania.
             </p>
             
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 mt-6 sm:mt-8 px-2">
               <Button
                 size="lg"
-                className="bg-gradient-to-r from-orange-500 to-yellow-500 hover:from-orange-600 hover:to-yellow-600 text-white font-semibold w-full sm:w-auto px-6 sm:px-8 py-5 sm:py-6 text-base sm:text-lg shadow-lg hover:shadow-xl transition-all"
+                className="bg-gradient-to-r from-orange-500 to-orange-500 hover:from-orange-600 hover:to-orange-600 text-white font-semibold w-full sm:w-auto px-6 sm:px-8 py-5 sm:py-6 text-base sm:text-lg shadow-lg hover:shadow-xl transition-all"
                 onClick={() => {
                   const plansSection = document.getElementById('plans-section')
                   plansSection?.scrollIntoView({ behavior: 'smooth' })
@@ -417,7 +234,7 @@ export default function BecomeSupplierPage() {
                   <CardContent className="p-4 sm:p-6">
                     <div className="flex items-start gap-3 sm:gap-4">
                       <div className="p-2 sm:p-3 rounded-lg bg-yellow-100 dark:bg-yellow-900/20 flex-shrink-0">
-                        <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
+                        <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 dark:text-orange-400" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <h3 className={cn("text-base sm:text-lg font-semibold mb-1", themeClasses.mainText)}>
@@ -465,7 +282,7 @@ export default function BecomeSupplierPage() {
                     className={cn(
                       "px-4 py-2 text-sm font-medium rounded-md transition-colors",
                       selectedTerm === 'month'
-                        ? "bg-yellow-500 text-neutral-950"
+                        ? "bg-orange-500 text-neutral-950"
                         : cn(themeClasses.textNeutralSecondary, "hover:bg-gray-100 dark:hover:bg-gray-800")
                     )}
                   >
@@ -477,7 +294,7 @@ export default function BecomeSupplierPage() {
                     className={cn(
                       "px-4 py-2 text-sm font-medium rounded-md transition-colors",
                       selectedTerm === 'year'
-                        ? "bg-yellow-500 text-neutral-950"
+                        ? "bg-orange-500 text-neutral-950"
                         : cn(themeClasses.textNeutralSecondary, "hover:bg-gray-100 dark:hover:bg-gray-800")
                     )}
                   >
@@ -503,7 +320,7 @@ export default function BecomeSupplierPage() {
                     className={cn(
                       "px-4 py-2 text-sm font-medium rounded-md transition-colors",
                       language === 'en'
-                        ? "bg-yellow-500 text-neutral-950"
+                        ? "bg-orange-500 text-neutral-950"
                         : cn(themeClasses.textNeutralSecondary, "hover:bg-gray-100 dark:hover:bg-gray-800")
                     )}
                   >
@@ -515,7 +332,7 @@ export default function BecomeSupplierPage() {
                     className={cn(
                       "px-4 py-2 text-sm font-medium rounded-md transition-colors",
                       language === 'sw'
-                        ? "bg-yellow-500 text-neutral-950"
+                        ? "bg-orange-500 text-neutral-950"
                         : cn(themeClasses.textNeutralSecondary, "hover:bg-gray-100 dark:hover:bg-gray-800")
                     )}
                   >
@@ -564,14 +381,14 @@ export default function BecomeSupplierPage() {
                 const isWinga = plan.slug === 'winga'
                 const isFree = plan.slug === 'free' || plan.slug === '0' || plan.price === 0
                 const isCenter = index === 1
-                const iconColor = isPremium ? 'text-yellow-500' : isWinga ? 'text-purple-500' : 'text-green-500'
+                const iconColor = isPremium ? 'text-orange-500' : isWinga ? 'text-purple-500' : 'text-green-500'
                 
                 return (
                   <Card 
                     key={plan.id} 
                     className={cn(
                       "border-2 cursor-pointer transition-all duration-300 ease-in-out",
-                      cn(themeClasses.cardBorder, "hover:border-yellow-500"),
+                      cn(themeClasses.cardBorder, "hover:border-orange-500"),
                       themeClasses.cardBg,
                       "relative overflow-hidden",
                       "flex-1 min-w-0",
@@ -597,7 +414,7 @@ export default function BecomeSupplierPage() {
                     }}
                   >
                     {isPremium && (
-                      <div className="absolute top-0 right-0 bg-yellow-500 text-neutral-950 px-3 py-1 text-xs font-bold rounded-bl-lg z-10">
+                      <div className="absolute top-0 right-0 bg-orange-500 text-neutral-950 px-3 py-1 text-xs font-bold rounded-bl-lg z-10">
                         POPULAR
                       </div>
                     )}
@@ -639,34 +456,34 @@ export default function BecomeSupplierPage() {
                             <div className="flex justify-center mb-3 sm:mb-4 flex-wrap gap-1">
                               {isPremium ? (
                                 <>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border-r border-yellow-200 dark:border-yellow-800">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border-r border-yellow-200 dark:border-yellow-800">
                                     Best Value
                                   </span>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border-r border-blue-200 dark:border-blue-800">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border-r border-blue-200 dark:border-blue-800">
                                     Medium & Large Business
                                   </span>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300">
                                     Recommended
                                   </span>
                                 </>
                               ) : isWinga ? (
                                 <>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 border-r border-purple-200 dark:border-purple-800">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 border-r border-purple-200 dark:border-purple-800">
                                     Broker/Connector
                                   </span>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-r border-green-200 dark:border-green-800">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-r border-green-200 dark:border-green-800">
                                     Post Your Products
                                   </span>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
                                     No Capital Needed
                                   </span>
                                 </>
                               ) : (
                                 <>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">
                                     Starter Plan
                                   </span>
-                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
+                                  <span className="px-2 sm:px-3 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
                                     Perfect for Small Business
                                   </span>
                                 </>
@@ -696,7 +513,7 @@ export default function BecomeSupplierPage() {
                           <li className="flex items-start gap-2">
                             <CheckCircle className={cn("w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0 mt-0.5", iconColor)} />
                             <span className={cn("text-xs sm:text-sm font-semibold", themeClasses.mainText)}>
-                              {translate('commissionRate')}: <span className="font-bold text-yellow-600 dark:text-yellow-500">{plan.commission_rate}%</span>
+                              {translate('commissionRate')}: <span className="font-bold text-orange-600 dark:text-orange-500">{plan.commission_rate}%</span>
                             </span>
                           </li>
                         )}
@@ -705,7 +522,7 @@ export default function BecomeSupplierPage() {
                         className={cn(
                           "w-full sm:w-auto self-start rounded-full px-4 sm:px-6 py-2 text-xs sm:text-sm font-medium transition-colors",
                           isPremium 
-                            ? "bg-yellow-500 hover:bg-yellow-600 text-neutral-950 border border-yellow-600"
+                            ? "bg-orange-500 hover:bg-orange-600 text-neutral-950 border border-orange-600"
                             : isWinga
                             ? "bg-purple-500 hover:bg-purple-600 text-white border border-purple-600"
                             : "bg-neutral-950 dark:bg-black text-white hover:bg-neutral-800 border border-gray-300 dark:border-gray-600"
@@ -807,7 +624,7 @@ export default function BecomeSupplierPage() {
                     <li>Prohibited items are strictly forbidden</li>
                     <li>Pricing must be competitive and fair</li>
                     <li>You can connect customers to products from other suppliers</li>
-                    <li>You must clearly indicate when you're acting as a broker/middleman</li>
+                    <li>You must clearly indicate when you&apos;re acting as a broker/middleman</li>
                   </ul>
                 </div>
 
@@ -865,7 +682,7 @@ export default function BecomeSupplierPage() {
                   <ul className="list-disc list-inside space-y-2 ml-2">
                     {selectedPlan && selectedPlan.commission_rate !== null && (
                       <li className={cn("font-semibold", themeClasses.mainText)}>
-                        {translate('commissionRateValue')} <span className="font-bold text-yellow-600 dark:text-yellow-500">{selectedPlan.commission_rate}%</span> {translate('commissionRatePerProduct')}
+                        {translate('commissionRateValue')} <span className="font-bold text-orange-600 dark:text-orange-500">{selectedPlan.commission_rate}%</span> {translate('commissionRatePerProduct')}
                       </li>
                     )}
                     <li>{translate('commissionRatesSpecified')}</li>
@@ -951,7 +768,7 @@ export default function BecomeSupplierPage() {
                 }
               }}
               disabled={!declarationAgreed}
-              className={cn("flex-1 bg-yellow-500 hover:bg-yellow-600 text-neutral-950", !declarationAgreed && "opacity-50 cursor-not-allowed")}
+              className={cn("flex-1 bg-orange-500 hover:bg-orange-600 text-neutral-950", !declarationAgreed && "opacity-50 cursor-not-allowed")}
             >
               {translate('iAgreeContinue')}
             </Button>
@@ -1002,6 +819,12 @@ export default function BecomeSupplierPage() {
                 return
               }
 
+              if (TURNSTILE_SITE_KEY && !captchaToken) {
+                setRegistrationError('Please complete the security check.')
+                setIsSubmitting(false)
+                return
+              }
+
               if (registrationForm.password !== registrationForm.confirmPassword) {
                 setRegistrationError('Passwords do not match')
                 setIsSubmitting(false)
@@ -1045,7 +868,8 @@ export default function BecomeSupplierPage() {
                   registrationForm.phone,
                   true, // Set isSupplier to true for registrations from become-seller page
                   true, // Skip opening login modal since we're doing auto-login
-                  selectedPlan?.id as string | undefined // Pass planId to assign during registration
+                  selectedPlan?.id as string | undefined, // Pass planId to assign during registration
+                  captchaToken || undefined
                 )
 
                 if (result.success) {
@@ -1114,6 +938,7 @@ export default function BecomeSupplierPage() {
                 setRegistrationError('An error occurred. Please try again.')
               } finally {
                 setIsSubmitting(false)
+                if (TURNSTILE_SITE_KEY) setCaptchaReset((k) => k + 1)
               }
             }}
             className="space-y-4 pb-4"
@@ -1347,13 +1172,15 @@ export default function BecomeSupplierPage() {
                 I agree to the{' '}
                 <Link
                   href={`/privacy?return=${encodeURIComponent('/become-supplier')}`}
-                  className="text-yellow-500 hover:text-yellow-600 underline"
+                  className="text-orange-500 hover:text-orange-600 underline"
                 >
                   Privacy Policy
                 </Link>
                 {' '}*
               </Label>
             </div>
+
+            <Turnstile onToken={setCaptchaToken} resetKey={captchaReset} className="min-h-[65px]" />
 
             <div className="flex gap-3 pt-2">
               <Button
@@ -1378,7 +1205,7 @@ export default function BecomeSupplierPage() {
               <Button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-neutral-950"
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-neutral-950"
               >
                 {isSubmitting ? 'Creating...' : 'Create Account'}
               </Button>
@@ -1390,7 +1217,7 @@ export default function BecomeSupplierPage() {
                 <Button
                   type="button"
                   variant="link"
-                  className="text-yellow-500 hover:text-yellow-600 p-0 h-auto text-sm font-medium"
+                  className="text-orange-500 hover:text-orange-600 p-0 h-auto text-sm font-medium"
                   onClick={() => {
                     setIsRegistrationOpen(false)
                     // Store redirect for Google OAuth and flag for supplier registration
@@ -1437,6 +1264,7 @@ export default function BecomeSupplierPage() {
           </div>
         </div>
       </div>
+      <SiteFooter />
     </div>
   )
 }

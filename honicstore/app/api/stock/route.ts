@@ -8,7 +8,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Cache for stock data
-let stockCache: Map<number, { stock: any, timestamp: number }> = new Map()
+const stockCache: Map<number, { stock: any, timestamp: number }> = new Map()
 const CACHE_DURATION = 30 * 1000 // 30 seconds cache
 const CACHE_CLEANUP_INTERVAL = 60 * 1000 // 1 minute
 let lastCacheCleanupAt = 0
@@ -24,7 +24,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Product ID(s) required' }, { status: 400 })
     }
 
-    const ids = singleId ? [singleId] : productIds?.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))
+    // Always numbers: a single ?id= used to stay a string, so the number-keyed lookup below found nothing
+    const ids: number[] = (singleId ? [singleId] : (productIds || '').split(','))
+      .map((id) => parseInt(String(id).trim(), 10))
+      .filter((id) => !isNaN(id))
+      .slice(0, 200)
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'Product ID(s) required' }, { status: 400 })
+    }
     
     if (!ids || ids.length === 0) {
       return NextResponse.json({ error: 'Invalid product IDs' }, { status: 400 })

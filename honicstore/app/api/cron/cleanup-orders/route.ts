@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { logger } from '@/lib/logger'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export async function GET(request: NextRequest) {
   try {
-    // Simple authentication check - you can add a secret key for security
+    // Vercel Cron sends 'Authorization: Bearer <CRON_SECRET>'. No secret configured = nobody gets in
+    // (it used to fall back to the guessable 'default-secret').
     const authHeader = request.headers.get('authorization')
-    const expectedToken = process.env.CRON_SECRET || 'default-secret'
-    
-    if (authHeader !== `Bearer ${expectedToken}`) {
+    const expectedToken = process.env.CRON_SECRET
+
+    if (!expectedToken || authHeader !== `Bearer ${expectedToken}`) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }

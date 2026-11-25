@@ -26,6 +26,10 @@ export interface EmailOptions {
   from?: string
   cc?: string | string[]
   bcc?: string | string[]
+  /** Extra headers, e.g. List-Unsubscribe / List-Unsubscribe-Post for one-click unsubscribe */
+  headers?: Record<string, string>
+  /** Files to attach (e.g. the invoice PDF) */
+  attachments?: { filename: string; content: Buffer | Uint8Array; contentType?: string }[]
 }
 
 export interface EmailResult {
@@ -45,7 +49,7 @@ class EmailService {
     if (this.initialized) return
 
     const smtpHost = process.env.SMTP_HOST
-    let smtpUser = process.env.SMTP_USER
+    const smtpUser = process.env.SMTP_USER
     let smtpPassword = process.env.SMTP_PASSWORD
 
     // Handle Resend API key in password field
@@ -173,6 +177,8 @@ class EmailService {
         html: options.html,
         cc: options.cc ? (Array.isArray(options.cc) ? options.cc.join(', ') : options.cc) : undefined,
         bcc: options.bcc ? (Array.isArray(options.bcc) ? options.bcc.join(', ') : options.bcc) : undefined,
+        headers: options.headers,
+        attachments: options.attachments?.map((a) => ({ filename: a.filename, content: Buffer.from(a.content), contentType: a.contentType })),
       }
 
       const info = await this.transporter.sendMail(mailOptions)
@@ -262,6 +268,8 @@ class EmailService {
           subject: options.subject,
           text: options.text,
           html: options.html,
+          ...(options.headers ? { headers: options.headers } : {}),
+          ...(options.attachments?.length ? { attachments: options.attachments.map((a) => ({ filename: a.filename, content: Buffer.from(a.content).toString('base64') })) } : {}),
         }),
       })
       const requestDuration = Date.now() - requestStartTime

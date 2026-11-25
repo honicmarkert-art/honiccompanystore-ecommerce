@@ -21,6 +21,7 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
     const savedCurrency = localStorage.getItem('preferred-currency') as Currency
     // Only use saved currency if it's TZS, otherwise default to TZS
     if (savedCurrency === 'TZS') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser-only data after mount, so the server render matches
       setCurrency('TZS')
     } else {
       // Default to TZS and update localStorage

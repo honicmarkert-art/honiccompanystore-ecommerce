@@ -294,7 +294,7 @@ export function isBlockedIP(ip: string): boolean {
   }
   
   // Block known malicious IPs (in production, use a threat intelligence service)
-  const maliciousIPs = [
+  const maliciousIPs: string[] = [
     // Add known malicious IPs here
   ]
   

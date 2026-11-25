@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
+import { z } from '@/lib/zod'
 
-
-// Force dynamic rendering - don't pre-render during build
-export const dynamic = 'force-dynamic'
+
+// Force dynamic rendering - don't pre-render during build
+export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 const setCookiesSchema = z.object({
   access_token: z.string().min(1, 'Access token is required'),
