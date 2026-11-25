@@ -12,7 +12,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { STORE_ADDRESS, STORE_WHATSAPP, phoneLabel } from '@/lib/contact'
-import { RETURN_DAYS } from '@/lib/policies'
+import { RETURN_DAYS, TOP_UP_LABEL } from '@/lib/policies'
 
 export const COMPANY_NAME = 'Honic Company Limited'
 const SUPPORT_EMAIL = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@honiccompanystore.com'
@@ -246,7 +246,8 @@ export async function buildInvoicePdf(o: InvoiceOrder): Promise<Uint8Array> {
     y -= strong ? 20 : 16
   }
   totalRow('Items', money(subtotal, o.currency))
-  totalRow(pickup ? 'Pickup' : 'Delivery', delivery > 0 ? money(delivery, o.currency) : 'Free')
+  if (pickup) totalRow(delivery > 0 ? TOP_UP_LABEL : 'Pickup', delivery > 0 ? money(delivery, o.currency) : 'Free')
+  else totalRow('Delivery', delivery > 0 ? money(delivery, o.currency) : 'Free')
   page.drawLine({ start: { x: tx, y: y + 8 }, end: { x: W - M, y: y + 8 }, thickness: 0.8, color: INK })
   y -= 4
   page.drawRectangle({ x: tx - 10, y: y - 8, width: W - M - tx + 10, height: 26, color: ORANGE, opacity: 0.1 })

@@ -32,6 +32,7 @@ import {
   Trash2,
   Truck,
   X,
+  HandCoins,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -49,7 +50,8 @@ import { optimizedImg } from '@/lib/image-optimize'
 import { getClientShippingPricing } from "@/lib/shipping-calculator"
 
 /** Snippe (mobile money) refuses payments under TSh 500. */
-const MIN_ORDER_TZS = 500
+import { MIN_PAYMENT_TZS } from "@/lib/policies"
+import { whatsappLink } from "@/lib/contact"
 const noopSubscribe = () => () => {}
 
 type Extra = CartItem & {
@@ -120,6 +122,7 @@ function CartPageContent() {
   const selectedSubtotal = selectedItems.reduce((s, i) => s + (i.totalPrice || 0), 0)
   const selectedQty = selectedItems.reduce((s, i) => s + (i.variants?.reduce((n, v) => n + (v.quantity || 0), 0) || i.totalQuantity || 0), 0)
 
+
   /* ----- promo (valid only for the subtotal it was checked against) ----- */
   const [promoCode, setPromoCode] = useState("")
   const [promoOpen, setPromoOpen] = useState(false)
@@ -129,7 +132,21 @@ function CartPageContent() {
   const promoValid = !!promotion && promotion.forSubtotal === selectedSubtotal
   const discount = promoValid ? promotion!.discountAmount : 0
   const total = Math.max(0, selectedSubtotal - discount)
-  const belowMinimum = selectedItems.length > 0 && total < MIN_ORDER_TZS
+  // under TSh 500 is still allowed: checkout adds a small "Mobile money minimum" top-up if needed
+  const belowMinimum = selectedItems.length > 0 && total > 0 && total < MIN_PAYMENT_TZS
+
+  // "Ask for a better price": the selected items, ready to send on WhatsApp (bargaining for the whole cart)
+  const offerHref = (() => {
+    if (!selectedItems.length) return null
+    const lines = selectedItems.flatMap((it) => {
+      const name = it.product?.name || `Product ${it.productId}`
+      const rows: { qty: number; price: number; option: string }[] = it.variants?.length
+        ? it.variants.map((v) => ({ qty: Number(v.quantity) || 1, price: Number(v.price) || 0, option: String(v.variant_name || '') }))
+        : [{ qty: it.totalQuantity || 1, price: (it.totalPrice || 0) / Math.max(1, it.totalQuantity || 1), option: '' }]
+      return rows.map((r) => `- ${r.qty} × ${name}${r.option && r.option !== 'Default' ? ` (${r.option})` : ''}: ${formatPrice(r.price * r.qty)}`)
+    })
+    return whatsappLink(['Habari Honic, naomba punguzo kwa kikapu changu 🙏', 'Hello Honic, can you give me a better price for my cart?', '', ...lines, '', `Jumla / Total: ${formatPrice(total)}`, 'Bei yangu / My offer: '].join(String.fromCharCode(10)))
+  })()
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -231,10 +248,6 @@ function CartPageContent() {
     const selectedIds = selectedItems.map((i) => i.productId)
     if (selectedIds.length === 0) {
       toast({ title: "Nothing selected", description: "Tick at least one item to check out.", variant: "destructive" })
-      return
-    }
-    if (belowMinimum) {
-      toast({ title: `Minimum order ${formatPrice(MIN_ORDER_TZS)}`, description: `Mobile money can't take payments under ${formatPrice(MIN_ORDER_TZS)}. Add ${formatPrice(MIN_ORDER_TZS - total)} more (another piece or item).`, variant: "destructive" })
       return
     }
     try { 
@@ -371,16 +384,22 @@ function CartPageContent() {
                 </div>
 
       {belowMinimum && (
-        <p className="mx-5 mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Minimum order is <b>{formatPrice(MIN_ORDER_TZS)}</b> (mobile money limit). Add <b className="tabular-nums">{formatPrice(MIN_ORDER_TZS - total)}</b> more to check out.
+        <p className="mx-5 mb-3 rounded-xl bg-stone-50 px-3 py-2 text-xs text-neutral-600">
+          Mobile money payments start at <b>{formatPrice(MIN_PAYMENT_TZS)}</b>. If your total stays under that (for example with store pickup), checkout adds the difference as its own line.
         </p>
+      )}
+
+      {offerHref && (
+        <a href={offerHref} target="_blank" rel="noopener noreferrer" className="mx-5 mb-3 flex items-center justify-center gap-2 rounded-xl bg-orange-50 px-3 py-2.5 text-sm font-bold text-orange-800 ring-1 ring-orange-200 hover:bg-orange-100">
+          <HandCoins className="h-4 w-4" /> Omba punguzo · Ask for a better price
+        </a>
       )}
 
       <div className="hidden px-5 pb-5 lg:block">
         <button
           type="button"
           onClick={checkout}
-          disabled={selectedItems.length === 0 || belowMinimum}
+          disabled={selectedItems.length === 0}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3.5 text-base font-bold text-white shadow-lg shadow-orange-500/30 transition hover:from-orange-600 hover:to-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Checkout {selectedItems.length > 0 && `(${selectedQty})`}
@@ -660,7 +679,7 @@ function CartPageContent() {
 
       {/* phones: sticky checkout bar */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl lg:hidden">
-        {belowMinimum && <p className="mb-2 text-center text-xs text-amber-700">Minimum order {formatPrice(MIN_ORDER_TZS)}: add {formatPrice(MIN_ORDER_TZS - total)} more</p>}
+        {belowMinimum && <p className="mb-2 text-center text-xs text-neutral-500">Under {formatPrice(MIN_PAYMENT_TZS)}? Checkout tops it up to the mobile money minimum.</p>}
         <div className="flex items-center gap-3">
           <div className="shrink-0">
             <p className="text-[11px] font-semibold text-neutral-500">Total ({selectedQty})</p>
@@ -669,7 +688,7 @@ function CartPageContent() {
           <button
             type="button"
             onClick={checkout}
-            disabled={selectedItems.length === 0 || belowMinimum}
+            disabled={selectedItems.length === 0}
             className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3.5 text-base font-bold text-white shadow-lg shadow-orange-500/30 disabled:opacity-50"
           >
             Checkout <ArrowRight className="h-4 w-4" />

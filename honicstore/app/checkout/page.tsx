@@ -55,6 +55,8 @@ import { useTranslation } from "@/hooks/use-translation"
 import { CheckoutLanguageToggle } from "@/components/checkout-language-toggle"
 import { BrandLogo } from "@/components/brand-logo"
 import { safeImageSrc, optimizedImg } from "@/lib/image-optimize"
+import { MIN_PAYMENT_TZS, TOP_UP_LABEL, paymentTopUp } from "@/lib/policies"
+import { DAR_ES_SALAAM_TIERS } from "@/lib/shipping-pricing-config"
 import { BOUGHT_ITEMS_KEY, saveLocalOrder, savePendingOrder, takePendingOrder } from "@/lib/local-orders"
 
 interface Address {
@@ -139,7 +141,6 @@ function friendlyPaymentError(reason: string | undefined, provider: string | und
 }
 
 /** Snippe (mobile money) refuses payments under TSh 500, so smaller orders are stopped before payment. */
-const MIN_ORDER_TZS = 500
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /** Field order used to scroll to the first problem. */
@@ -328,7 +329,10 @@ function CheckoutPageContent() {
   const shippingFee = deliveryOption === "pickup" || deferShippingFee ? 0 : (shippingEstimate?.shipping ?? fallbackShippingFee)
   const shippingFeeLoading = !deferShippingFee && shippingEstimateLoading && deliveryOption === "shipping"
   const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
-  const orderTotal = displaySubtotal + shippingFee - promotionDiscount
+  const baseTotal = displaySubtotal + shippingFee - promotionDiscount
+  // mobile money can't take under TSh 500: very small orders are topped up (shown as its own line)
+  const topUp = deliveryOption === "shipping" && deferShippingFee ? 0 : paymentTopUp(baseTotal)
+  const orderTotal = baseTotal + topUp
 
   const isTz = shippingAddress.country === "Tanzania"
   const estimateBody = (items: { productId: number; variantId: string | null; quantity: number }[]) => ({
@@ -580,8 +584,8 @@ function CheckoutPageContent() {
     if (!s.fullName.trim()) e.shippingFullName = t("checkout.errFullNameRequired")
     if (!s.phone.trim()) e.shippingPhone = t("checkout.errPhoneRequired")
     else if (!validateTanzaniaPhone(s.phone).valid) e.shippingPhone = t("checkout.errInvalidPhoneFormat")
-    if (!s.email.trim()) e.shippingEmail = t("checkout.errEmailRequired")
-    else if (!EMAIL_RE.test(s.email) || !validateEmail(s.email).valid) e.shippingEmail = t("checkout.errEmailInvalid")
+    // email is not required: checked only when the shopper fills it in
+    if (s.email.trim() && (!EMAIL_RE.test(s.email.trim()) || !validateEmail(s.email.trim()).valid)) e.shippingEmail = t("checkout.errEmailInvalid")
 
     if (deliveryOption === "shipping") {
       if (s.country === "Tanzania") {
@@ -600,8 +604,7 @@ function CheckoutPageContent() {
       if (!b.fullName.trim()) e.billingFullName = t("checkout.errFullNameRequired")
       if (!b.phone.trim()) e.billingPhone = t("checkout.errPhoneRequired")
       else if (!validateTanzaniaPhone(b.phone).valid) e.billingPhone = t("checkout.errInvalidPhoneFormat")
-      if (!b.email.trim()) e.billingEmail = t("checkout.errEmailRequired")
-      else if (!EMAIL_RE.test(b.email)) e.billingEmail = t("checkout.errEmailInvalid")
+      if (b.email.trim() && !EMAIL_RE.test(b.email.trim())) e.billingEmail = t("checkout.errEmailInvalid")
       if (!b.city.trim()) e.billingCity = t("checkout.errCityRequired")
       if (!b.streetName?.trim()) e.billingStreet = t("checkout.errStreetRequired")
       if (!b.address1.trim()) e.billingAddress1 = t("checkout.errBillingAddressRequired")
@@ -645,13 +648,6 @@ function CheckoutPageContent() {
         return
       }
 
-    if (orderTotal < MIN_ORDER_TZS) {
-      const msg = `Mobile money can't take payments under ${formatPrice(MIN_ORDER_TZS)}. Add ${formatPrice(MIN_ORDER_TZS - orderTotal)} more (another piece or item) to pay.`
-      setPaymentError(msg)
-      toast({ title: `Minimum order ${formatPrice(MIN_ORDER_TZS)}`, description: msg, variant: "destructive" })
-      return
-    }
-
     setIsProcessingPayment(true)
     setHasTimedOut(false)
     setPaymentError(null)
@@ -684,7 +680,8 @@ function CheckoutPageContent() {
           // fall back to the values above
       }
       }
-      const totalAmount = Math.round(serverSubtotal + serverShippingFee - promotionDiscount)
+      const serverBase = Math.round(serverSubtotal + serverShippingFee - promotionDiscount)
+      const totalAmount = serverBase + paymentTopUp(serverBase)
 
       const orderData = {
         orderNumber,
@@ -807,7 +804,7 @@ function CheckoutPageContent() {
   const paymentPhone = shippingAddress.phone
   const network = detectNetwork(paymentPhone)
   const paying = isProcessingPayment || paymentLinkGenerated || hasTimedOut
-  const contactDone = !!(shippingAddress.fullName.trim() && validateTanzaniaPhone(shippingAddress.phone).valid && EMAIL_RE.test(shippingAddress.email))
+  const contactDone = !!(shippingAddress.fullName.trim() && validateTanzaniaPhone(shippingAddress.phone).valid && (!shippingAddress.email.trim() || EMAIL_RE.test(shippingAddress.email.trim())))
   const deliveryDone =
     deliveryOption === "pickup" ||
     !!((isTz ? shippingAddress.region && shippingAddress.district && shippingAddress.ward : shippingAddress.city.trim()) &&
@@ -837,6 +834,14 @@ function CheckoutPageContent() {
         : shippingFee === 0
           ? t("checkout.free")
           : formatPrice(shippingFee)
+
+  // the "Deliver to me" card shows the real delivery fee even while Store Pickup is selected
+  // (while pickup is selected the estimates are for pickup, so show delivery's real starting price)
+  const deliveryOnlyFee = shippingEstimate?.shipping ?? fallbackShippingFee
+  const lowestDeliveryFee = Math.min(...Object.values(DAR_ES_SALAAM_TIERS).map((tier) => tier.fee))
+  const deliveryBadge = deliveryOption === "pickup"
+    ? (selectedSubtotal >= FREE_SHIPPING_THRESHOLD ? t("checkout.free") : `From ${formatPrice(lowestDeliveryFee)}`)
+    : deferShippingFee ? "Add your region" : shippingFeeLoading ? null : deliveryOnlyFee === 0 ? t("checkout.free") : formatPrice(deliveryOnlyFee)
 
   const payLabel = isProcessingPayment ? "Sending request…" : paymentError ? t("checkout.tryAgain") : `Pay ${formatPrice(orderTotal)}`
 
@@ -945,6 +950,12 @@ function CheckoutPageContent() {
             <dd className="font-semibold tabular-nums">−{formatPrice(promotionDiscount)}</dd>
                   </div>
         )}
+        {topUp > 0 && (
+          <div className="flex justify-between gap-3">
+            <dt className="text-neutral-500">{TOP_UP_LABEL}<span className="block text-[11px] leading-snug text-neutral-400">Mobile money payments start at {formatPrice(MIN_PAYMENT_TZS)}</span></dt>
+            <dd className="font-semibold tabular-nums">+{formatPrice(topUp)}</dd>
+          </div>
+        )}
         <div className="flex items-end justify-between border-t border-neutral-100 pt-3">
           <dt className="font-bold text-neutral-950">Total</dt>
           <dd className="text-right">
@@ -1044,7 +1055,7 @@ function CheckoutPageContent() {
   )
 
   const deliveryChoices: { value: Delivery; icon: ReactNode; title: string; line: string; badge: string }[] = [
-    { value: "shipping", icon: <Truck className="h-5 w-5" />, title: "Deliver to me", line: t("checkout.estDeliveryValue"), badge: feeText ?? "…" },
+    { value: "shipping", icon: <Truck className="h-5 w-5" />, title: "Deliver to me", line: t("checkout.estDeliveryValue"), badge: deliveryBadge ?? "…" },
     { value: "pickup", icon: <Store className="h-5 w-5" />, title: t("checkout.storePickupTitle"), line: "Dar es Salaam · ready same or next day", badge: t("checkout.free") },
   ]
 
@@ -1091,7 +1102,7 @@ function CheckoutPageContent() {
             <p className="mt-1 flex items-center gap-1.5 text-xs text-neutral-400">
               <Clock className="h-3.5 w-3.5" /> {t("checkout.pickupTimeValue")}
             </p>
-            <p className="mt-1 text-xs text-neutral-400">Bring your order number (we send it by SMS/email after payment).</p>
+            <p className="mt-1 text-xs text-neutral-400">Bring your order number. It is shown after you pay (and emailed to you if you gave an email).</p>
                           </div>
                         </div>
                       ) : (

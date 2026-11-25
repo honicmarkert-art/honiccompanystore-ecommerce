@@ -26,3 +26,16 @@ export const NON_RETURNABLE = [
   'Items damaged by wrong wiring, wrong voltage or misuse',
   'Software, licences and digital products',
 ]
+
+/** Mobile money (Snippe) cannot take a payment under this amount, in TZS. */
+export const MIN_PAYMENT_TZS = 500
+
+/**
+ * Orders that would cost less than MIN_PAYMENT_TZS are topped up to it, so the payment can go
+ * through. Shown to the shopper as its own line ("Mobile money minimum"). Same rule on the
+ * checkout page and in the orders API (which stores the final total).
+ */
+export const paymentTopUp = (total: number) => (total > 0 && total < MIN_PAYMENT_TZS ? Math.round(MIN_PAYMENT_TZS - total) : 0)
+
+/** Label for that line everywhere it is shown (checkout, order pages, invoice, email). */
+export const TOP_UP_LABEL = 'Mobile money minimum'

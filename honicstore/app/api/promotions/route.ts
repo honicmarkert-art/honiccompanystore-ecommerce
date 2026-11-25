@@ -13,6 +13,8 @@ export async function GET() {
       .eq('is_active', true)
       .lte('start_date', now)
       .gte('end_date', now)
+      // private one-time codes from accepted price offers are never listed publicly
+      .not('code', 'like', 'OFR-%')
       .order('end_date', { ascending: true })
 
     if (error) return NextResponse.json({ promotions: [] })

@@ -17,7 +17,7 @@ import { OrderStatusChip, orderStatus } from '@/components/account/order-status'
 import { getFriendlyErrorMessage } from '@/lib/friendly-error'
 import { optimizedImg } from '@/lib/image-optimize'
 import { whatsappLink } from '@/lib/contact'
-import { RETURN_DAYS, UNPAID_ORDER_EXPIRY_MINUTES } from '@/lib/policies'
+import { RETURN_DAYS, TOP_UP_LABEL, UNPAID_ORDER_EXPIRY_MINUTES } from '@/lib/policies'
 
 type Address = { fullName?: string; address?: string; address1?: string; streetName?: string; ward?: string; district?: string; address2?: string; city?: string; state?: string; region?: string; country?: string; phone?: string; email?: string }
 type Item = {
@@ -336,7 +336,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             <h2 className="font-bold">Summary</h2>
             <dl className="mt-3 space-y-2 text-sm">
               <div className="flex justify-between gap-3"><dt className="text-neutral-500">Items</dt><dd className="tabular-nums">{formatPrice(subtotal)}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-neutral-500">{pickup ? 'Pickup' : 'Delivery'}</dt><dd className="tabular-nums">{deliveryFee > 0 ? formatPrice(deliveryFee) : 'Free'}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-neutral-500">{pickup ? (deliveryFee > 0 ? TOP_UP_LABEL : 'Pickup') : 'Delivery'}</dt><dd className="tabular-nums">{deliveryFee > 0 ? formatPrice(deliveryFee) : 'Free'}</dd></div>
               <div className="flex justify-between gap-3 border-t border-neutral-100 pt-2 text-base font-black dark:border-neutral-800"><dt>Total</dt><dd className="tabular-nums">{formatPrice(total)}</dd></div>
             </dl>
             {paid && (

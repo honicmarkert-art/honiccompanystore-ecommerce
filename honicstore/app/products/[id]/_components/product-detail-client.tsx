@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { whatsappLink } from '@/lib/contact'
+import { MakeOffer } from '@/components/product/make-offer'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -542,6 +543,22 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
               <SecondaryAction onClick={openBulk} icon={<Users className="h-5 w-5" />} label="Bulk order" />
               <SecondaryAction onClick={share} icon={<Share2 className="h-5 w-5" />} label="Share" />
             </div>
+
+            {/* bargaining: offer -> team replies with a one-time code -> pay here */}
+            {price > 0 && availableStock > 0 && (
+              <MakeOffer
+                productId={product.id}
+                variantId={selectedVariant?.id != null ? Number(selectedVariant.id) : null}
+                productName={selectedVariant?.variant_name ? `${product.name} (${selectedVariant.variant_name})` : product.name}
+                price={price}
+                quantity={quantity}
+                maxQuantity={availableStock}
+                formatPrice={formatPrice}
+                defaultName={user?.name || user?.profile?.full_name || ''}
+                defaultPhone={user?.profile?.phone || ''}
+                defaultEmail={user?.email || ''}
+              />
+            )}
 
             {whatsappHref && (
               <a

@@ -1,6 +1,13 @@
 import { logger } from "@/lib/logger"
 
 export async function processPaidOrderStockAndCart(supabase: any, order: any): Promise<void> {
+  // count the coupon use now that the order is paid (one-time offer codes then stop working)
+  try {
+    const { data: row } = await supabase.from("orders").select("promotion_code").eq("id", order.id).maybeSingle()
+    if (row?.promotion_code) await supabase.rpc("use_promotion", { p_code: row.promotion_code })
+  } catch (e) {
+    logger.error("Counting coupon use failed", e)
+  }
   try {
     const { data: orderItems, error: itemsError } = await supabase
       .from("order_items")

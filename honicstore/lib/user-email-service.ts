@@ -102,7 +102,10 @@ export async function sendPaymentReceivedEmail(userEmail: string, o: {
   orderUrl: string
   invoiceUrl: string
   invoicePdf?: Attachment
+  /** label for the extra amount: 'Delivery' (default) or the mobile money minimum for pickup orders */
+  extraLabel?: string
 }): Promise<Result> {
+  const extraLabel = o.extraLabel || 'Delivery'
   const first = firstName(o.name)
   return deliver({
     to: userEmail,
@@ -114,7 +117,7 @@ export async function sendPaymentReceivedEmail(userEmail: string, o: {
       ${paragraph(`We received <strong style="color:${BRAND.ink}">${esc(tzs(o.total))}</strong> for order <strong style="color:${BRAND.ink}">${esc(o.orderNumber)}</strong>. We are preparing it now.`)}
       ${itemTable(o.items.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price, total: i.totalPrice ?? i.price * i.quantity })), [
         ['Items', tzs(o.subtotal)],
-        ['Delivery', o.shipping > 0 ? tzs(o.shipping) : 'Free'],
+        [extraLabel, o.shipping > 0 ? tzs(o.shipping) : 'Free'],
         ['Total paid', tzs(o.total), true],
       ])}
       ${callout('Delivery', esc(o.deliveryLine), 'slate')}
@@ -132,7 +135,7 @@ export async function sendPaymentReceivedEmail(userEmail: string, o: {
 
 ${o.items.map((i) => `- ${i.quantity} x ${i.name}: ${tzs(i.totalPrice ?? i.price * i.quantity)}`).join('\n')}
 Items: ${tzs(o.subtotal)}
-Delivery: ${o.shipping > 0 ? tzs(o.shipping) : 'Free'}
+${extraLabel}: ${o.shipping > 0 ? tzs(o.shipping) : 'Free'}
 Total paid: ${tzs(o.total)}
 
 ${o.deliveryLine}
@@ -219,6 +222,35 @@ export async function sendDeliveryConfirmationEmail(userEmail: string, o: { orde
       ${o.reviewUrl ? button('Review your purchase', o.reviewUrl) : ''}
       ${callout('Something not right?', `You can ask for a return within ${RETURN_DAYS} days of delivery. <a href="${safeUrl(`${siteUrl()}/support/returns-refunds`)}" style="color:${BRAND.orange}">How returns work</a>`, 'slate')}`,
     text: `Order ${o.orderNumber} is complete. Thank you for shopping with Honic.${o.reviewUrl ? `\nReview your purchase: ${o.reviewUrl}` : ''}\nReturns within ${RETURN_DAYS} days: ${siteUrl()}/support/returns-refunds`,
+    footnote: orderNote,
+  })
+}
+
+/** Order moved: on the way / ready for pickup / delivered (sent once per step). */
+export async function sendOrderStatusEmail(userEmail: string, o: { kind: 'shipped' | 'ready_for_pickup' | 'delivered'; orderNumber: string; orderUrl: string; firstName?: string; pickupId?: string | null; tracking?: string | null }): Promise<Result> {
+  const hi = o.firstName ? `, ${esc(o.firstName)}` : ''
+  const copy = {
+    shipped: {
+      subject: `On the way: order ${o.orderNumber}`, eyebrow: 'On the way', title: `Good news${hi}! Your order is on the way.`,
+      body: paragraph(`Order <strong style="color:${BRAND.ink}">${esc(o.orderNumber)}</strong> has left the seller and is on its way to you.`) + (o.tracking ? details([['Tracking number', o.tracking]]) : ''),
+      cta: 'Follow your order', text: `Your order ${o.orderNumber} is on the way.${o.tracking ? ` Tracking number: ${o.tracking}.` : ''}`,
+    },
+    ready_for_pickup: {
+      subject: `Ready for pickup: order ${o.orderNumber}`, eyebrow: 'Ready for pickup', title: `Your order is ready${hi}!`,
+      body: paragraph(`Order <strong style="color:${BRAND.ink}">${esc(o.orderNumber)}</strong> is waiting for you at our store.`) + details([['Pickup ID', o.pickupId || ''], ['Where', '44 Bibi Titi Road, DIT CEIIT Tower, Dar es Salaam'], ['Opening hours', 'Monday to Saturday, 9:00 to 18:00']]) + callout('Bring with you', 'Your pickup ID (above) and a valid ID card.', 'orange'),
+      cta: 'View your order', text: `Your order ${o.orderNumber} is ready for pickup.${o.pickupId ? ` Pickup ID: ${o.pickupId}.` : ''} Bring a valid ID.`,
+    },
+    delivered: {
+      subject: `Delivered: order ${o.orderNumber}`, eyebrow: 'Delivered', title: `Your order has arrived${hi}`,
+      body: paragraph(`The seller marked order <strong style="color:${BRAND.ink}">${esc(o.orderNumber)}</strong> as delivered. Please check everything and confirm on your order page.`) + callout('Something wrong?', `You can ask for a return within ${RETURN_DAYS} days of delivery.`, 'slate'),
+      cta: 'Confirm or report a problem', text: `Your order ${o.orderNumber} was delivered. Please confirm, or report a problem within ${RETURN_DAYS} days.`,
+    },
+  }[o.kind]
+  return deliver({
+    to: userEmail, subject: copy.subject, preheader: copy.text, eyebrow: copy.eyebrow, title: copy.title,
+    body: `${copy.body}${button(copy.cta, o.orderUrl)}`,
+    text: `${copy.text}
+${o.orderUrl}`,
     footnote: orderNote,
   })
 }

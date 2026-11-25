@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { Check, Copy, Download, Loader2, Store, Truck } from 'lucide-react'
 import { useCurrency } from '@/contexts/currency-context'
 import { optimizedImg } from '@/lib/image-optimize'
+import { TOP_UP_LABEL } from '@/lib/policies'
 
 export type OrderView = {
   orderNumber: string
@@ -126,7 +127,7 @@ export function OrderItemsCard({ order }: { order: OrderView }) {
       <dl className="space-y-2 border-t border-neutral-100 px-5 py-4 text-sm dark:border-neutral-800">
         <div className="flex justify-between gap-3"><dt className="text-neutral-500">Items</dt><dd className="tabular-nums">{formatPrice(order.subtotal)}</dd></div>
         <div className="flex justify-between gap-3">
-          <dt className="flex items-center gap-1.5 text-neutral-500">{pickup ? <Store className="h-3.5 w-3.5" /> : <Truck className="h-3.5 w-3.5" />}{pickup ? 'Store pickup' : `Delivery${order.area ? ` to ${order.area}` : ''}`}</dt>
+          <dt className="flex items-center gap-1.5 text-neutral-500">{pickup ? <Store className="h-3.5 w-3.5" /> : <Truck className="h-3.5 w-3.5" />}{pickup ? (order.deliveryFee > 0 ? TOP_UP_LABEL : 'Store pickup') : `Delivery${order.area ? ` to ${order.area}` : ''}`}</dt>
           <dd className="tabular-nums">{order.deliveryFee > 0 ? formatPrice(order.deliveryFee) : 'Free'}</dd>
         </div>
         <div className="flex justify-between gap-3 border-t border-neutral-100 pt-2 text-base font-black dark:border-neutral-800"><dt>Total</dt><dd className="tabular-nums">{formatPrice(order.total)}</dd></div>

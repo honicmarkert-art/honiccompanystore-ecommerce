@@ -8,6 +8,7 @@ import { validateAuth } from '@/lib/auth-server'
 import { emailService } from '@/lib/email-service'
 import { getAdminNoticeEmails } from '@/lib/user-email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
+import { paymentTopUp } from '@/lib/policies'
 import { calculateShippingFee, getShippingSizes, largestSize, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
 import { ShortTtlCache } from '@/lib/short-ttl-cache'
 
@@ -560,7 +561,10 @@ export async function POST(request: NextRequest) {
 
     // Calculate server-side total
     // Whole shillings: Snippe only accepts integer TZS amounts (a % discount can leave decimals)
-    const serverCalculatedTotal = Math.round(serverCalculatedSubtotal + serverShippingFee - serverPromotionDiscount)
+    // mobile money can't take under TSh 500: very small orders are topped up to it (lib/policies.ts),
+    // the same rule the checkout page shows as "Mobile money minimum"
+    const serverBaseTotal = Math.round(serverCalculatedSubtotal + serverShippingFee - serverPromotionDiscount)
+    const serverCalculatedTotal = serverBaseTotal + paymentTopUp(serverBaseTotal)
     if (serverCalculatedTotal < 500) {
       return NextResponse.json(
         { error: 'Minimum order is TSh 500 (mobile money limit). Add more items to continue.' },
@@ -634,6 +638,8 @@ export async function POST(request: NextRequest) {
       currency: 'TZS', // SECURITY: Snippe settles TZS only; never taken from the client
       payment_method: 'snippe',
       payment_status: 'pending',
+      // coupon used (if it gave a discount); its use is counted when the order is paid (lib/paid-order.ts)
+      promotion_code: serverPromotionDiscount > 0 && orderData.promotionCode ? String(orderData.promotionCode).toUpperCase().trim() : null,
       status: 'pending',
       created_at: new Date().toISOString(), // server time, not client-supplied
       updated_at: new Date().toISOString(),

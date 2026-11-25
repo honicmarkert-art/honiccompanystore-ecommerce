@@ -115,12 +115,11 @@ export async function POST(request: NextRequest) {
 
     const savedAddress = order.billing_address?.phone ? order.billing_address : order.shipping_address || {}
     const phone = snippePhoneDigits(String(savedAddress.phone || customerDetails.phone || ""))
-    const email = String(savedAddress.email || customerDetails.email || "").trim()
+    // email is not required at checkout; the payment provider needs one, so use the store's
+    // no-reply address when the shopper left it empty (their receipt is still on the result page)
+    const email = String(savedAddress.email || customerDetails.email || "").trim() || process.env.NOREPLY_EMAIL || process.env.SMTP_SENDER_EMAIL_NOREPLY || "noreply@honiccompanystore.com"
     if (!phone) {
       return NextResponse.json({ success: false, error: "Enter the mobile money number that should receive the payment request." }, { status: 400 })
-    }
-    if (!email) {
-      return NextResponse.json({ success: false, error: "An email address is required before payment." }, { status: 400 })
     }
 
     if (order.clickpesa_transaction_id && (order.payment_status === "pending" || order.payment_status === "reserved")) {

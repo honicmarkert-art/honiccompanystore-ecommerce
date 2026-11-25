@@ -45,6 +45,8 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   // Newsletter subscription - moderate limits to prevent spam
   // Email links (confirm / unsubscribe / preferences): signed links, so a moderate limit is enough
   '/api/email/': { windowMs: 10 * 60 * 1000, maxRequests: 40, blockDurationMs: 15 * 60 * 1000 },
+  // "Make an offer" requests: enough for real shoppers, too few to flood the team
+  '/api/offers': { windowMs: 60 * 60 * 1000, maxRequests: 6, blockDurationMs: 60 * 60 * 1000 },
   '/api/newsletter/subscribe': { windowMs: 60 * 60 * 1000, maxRequests: 5, blockDurationMs: 60 * 60 * 1000 },
   
   // Public API endpoints - higher limits for products (used for infinite scroll)

@@ -7,6 +7,7 @@ import {
   sendSupplierPremiumReceiptEmail,
 } from '@/lib/user-email-service'
 import { buildInvoicePdf, invoiceFileName, loadInvoiceOrder } from '@/lib/invoice-pdf'
+import { TOP_UP_LABEL } from '@/lib/policies'
 
 type Row = Record<string, unknown>
 
@@ -104,6 +105,7 @@ export async function sendPaidOrderEmails(supabase: Supabase, partial: Row) {
       items,
       subtotal,
       shipping: Math.max(0, total - subtotal),
+      extraLabel: pickup ? (total - subtotal > 0 ? TOP_UP_LABEL : 'Pickup') : 'Delivery',
       total,
       deliveryLine,
       orderUrl,

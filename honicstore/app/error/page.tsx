@@ -1,16 +1,9 @@
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
-import Link from 'next/link'
+import type { Metadata } from 'next'
 import ErrorPageClient from './error-client'
 
-// Force static generation for error page
 export const dynamic = 'force-static'
+export const metadata: Metadata = { title: 'Something went wrong | Honic Store', robots: { index: false, follow: false } }
 
 export default function ErrorPage() {
   return <ErrorPageClient />
 }
-
-
-
-

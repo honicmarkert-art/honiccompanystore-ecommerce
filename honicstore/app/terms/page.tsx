@@ -1,716 +1,189 @@
-"use client"
-
-// Note: ISR (revalidate) cannot be used in client components
-// CPU optimization is handled via API route caching and CDN caching instead
-
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { useCompanyContext } from '@/components/company-provider'
-import { useTheme } from '@/hooks/use-theme'
-import { cn } from '@/lib/utils'
-import { 
-  FileText, 
-  User, 
-  ShoppingCart, 
-  Shield, 
-  AlertTriangle, 
-  CheckCircle,
-  Mail, 
-  Phone, 
-  MapPin,
-  Calendar,
-  ArrowLeft,
-  Scale,
-  CreditCard,
-  Truck,
-} from 'lucide-react'
+/**
+ * Terms of service. Server-rendered (fast, readable by search engines). Numbers come from the real
+ * policies (lib/policies.ts, delivery pricing) so the terms always match how the store works.
+ */
 import Link from 'next/link'
-import { getClientShippingPricing } from '@/lib/shipping-calculator'
-import { NON_RETURNABLE, REFUND_BUSINESS_DAYS, RETURN_DAYS } from '@/lib/policies'
+import { FileText } from 'lucide-react'
+import { SiteHeader } from '@/components/site-header'
+import { SiteFooter } from '@/components/site-footer'
+import { NON_RETURNABLE, REFUND_BUSINESS_DAYS, RETURN_DAYS, UNPAID_ORDER_EXPIRY_MINUTES, MIN_PAYMENT_TZS } from '@/lib/policies'
+import { freeDeliveryThreshold } from '@/lib/shipping-pricing'
+import { STORE_ADDRESS, STORE_WHATSAPP, phoneLabel, whatsappLink } from '@/lib/contact'
 
-export default function TermsOfServicePage() {
-  const { companyName, settings: adminSettings } = useCompanyContext()
-  const { backgroundColor: theme } = useTheme()
-  const [activeSection, setActiveSection] = useState('overview')
+const COMPANY = 'Honic Company Limited'
+const LEGAL_EMAIL = process.env.NEXT_PUBLIC_LEGAL_EMAIL || process.env.LEGAL_EMAIL || process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@honiccompanystore.com'
+const UPDATED = '26 November 2026'
+const tsh = (n: number) => `TSh ${n.toLocaleString('en-US')}`
 
-  const sections = [
-    { id: 'overview', title: 'Overview', icon: FileText },
-    { id: 'acceptance', title: 'Acceptance', icon: CheckCircle },
-    { id: 'user-accounts', title: 'User Accounts', icon: User },
-    { id: 'products-services', title: 'Products & Services', icon: ShoppingCart },
-    { id: 'payments', title: 'Payments', icon: CreditCard },
-    { id: 'shipping-returns', title: 'Shipping & Returns', icon: Truck },
-    { id: 'intellectual-property', title: 'Intellectual Property', icon: Scale },
-    { id: 'prohibited-uses', title: 'Prohibited Uses', icon: AlertTriangle },
-    { id: 'disclaimers', title: 'Disclaimers', icon: Shield },
-    { id: 'contact', title: 'Contact Us', icon: Mail }
-  ]
+const SECTIONS: { id: string; title: string }[] = [
+  { id: 'about', title: 'About these terms' },
+  { id: 'accounts', title: 'Accounts' },
+  { id: 'marketplace', title: 'The marketplace' },
+  { id: 'orders', title: 'Orders and prices' },
+  { id: 'offers', title: 'Price offers and codes' },
+  { id: 'payments', title: 'Payments' },
+  { id: 'delivery', title: 'Delivery and pickup' },
+  { id: 'returns', title: 'Returns and refunds' },
+  { id: 'use', title: 'Acceptable use' },
+  { id: 'ip', title: 'Content and trademarks' },
+  { id: 'liability', title: 'Liability' },
+  { id: 'changes', title: 'Changes and law' },
+  { id: 'contact', title: 'Contact' },
+]
 
-  const themeClasses = {
-    mainText: theme === 'dark' ? 'text-white' : 'text-gray-900',
-    textNeutralSecondary: theme === 'dark' ? 'text-gray-400' : 'text-gray-600',
-    backgroundColor: theme === 'dark' ? 'bg-gray-900' : 'bg-white',
-    borderColor: theme === 'dark' ? 'border-gray-700' : 'border-gray-200'
-  }
-
+function Section({ id, n, title, children }: { id: string; n: number; title: string; children: React.ReactNode }) {
   return (
-    <div className={cn("min-h-screen", themeClasses.backgroundColor)}>
-      {/* Header */}
-      <div className={cn("border-b", themeClasses.borderColor)}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/">
-                <Button variant="ghost" size="sm" className="flex items-center space-x-2">
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Back to Home</span>
-                </Button>
-              </Link>
-              <div>
-                <h1 className={cn("text-3xl font-bold", themeClasses.mainText)}>
-                  Terms of Service
-                </h1>
-                <p className={cn("text-sm mt-1", themeClasses.textNeutralSecondary)}>
-                  Last updated: 25 November 2026
-                </p>
+    <section id={id} className="scroll-mt-24 border-t border-neutral-200 py-8 first:border-t-0 first:pt-0 dark:border-neutral-800">
+      <h2 className="flex items-baseline gap-3 text-xl font-black tracking-tight sm:text-2xl">
+        <span className="text-sm font-bold tabular-nums text-orange-600">{String(n).padStart(2, '0')}</span>{title}
+      </h2>
+      <div className="mt-4 space-y-3 text-[15px] leading-7 text-neutral-700 dark:text-neutral-300 [&_li]:pl-1 [&_strong]:text-neutral-900 dark:[&_strong]:text-white [&_ul]:list-disc [&_ul]:space-y-1.5 [&_ul]:pl-5">{children}</div>
+    </section>
+  )
+}
+
+export default function TermsPage() {
+  const free = freeDeliveryThreshold()
+  return (
+    <div className="min-h-screen bg-white text-neutral-900 dark:bg-neutral-950 dark:text-white">
+      <SiteHeader />
+      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-14">
+        <header className="max-w-3xl">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-orange-600">Legal</p>
+          <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">Terms of service</h1>
+          <p className="mt-3 text-neutral-600 dark:text-neutral-300">The rules for shopping and selling on the Honic marketplace. Plain language, no surprises.</p>
+          <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-stone-100 px-3 py-1.5 text-xs font-semibold text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"><FileText className="h-3.5 w-3.5" /> Last updated {UPDATED}</p>
+        </header>
+
+        <div className="mt-10 grid gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
+          {/* contents */}
+          <nav aria-label="Contents" className="lg:sticky lg:top-24 lg:self-start">
+            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-neutral-500">Contents</p>
+            <ol className="grid grid-cols-1 gap-0.5 text-sm sm:grid-cols-2 lg:grid-cols-1">
+              {SECTIONS.map((s, i) => (
+                <li key={s.id}><a href={`#${s.id}`} className="flex gap-2 rounded-lg px-2 py-1.5 text-neutral-600 hover:bg-orange-50 hover:text-orange-700 dark:text-neutral-300 dark:hover:bg-orange-950/30"><span className="w-5 shrink-0 tabular-nums text-neutral-400">{i + 1}.</span>{s.title}</a></li>
+              ))}
+            </ol>
+          </nav>
+
+          <article className="min-w-0 max-w-3xl">
+            <Section id="about" n={1} title="About these terms">
+              <p>These terms apply when you use honiccompanystore.com and buy or sell on it. The store is run by <strong>{COMPANY}</strong>, {STORE_ADDRESS}. By using the site or placing an order you agree to these terms and to our <Link href="/privacy" className="font-semibold text-orange-600 hover:underline">privacy policy</Link>.</p>
+            </Section>
+
+            <Section id="accounts" n={2} title="Accounts">
+              <ul>
+                <li>You can shop as a guest or with an account. To open an account you must be <strong>18 or older</strong> and give true details.</li>
+                <li>Keep your password private. You are responsible for what happens in your account; tell us straight away if you think someone else used it.</li>
+                <li>You can ask us to delete your account at any time. We keep order and invoice records only as long as the law requires.</li>
+                <li>We may suspend accounts used for fraud, abuse or breaking these terms.</li>
+              </ul>
+            </Section>
+
+            <Section id="marketplace" n={3} title="The marketplace">
+              <p>Honic is a marketplace: products are sold by the <strong>official Honic store</strong> and by <strong>independent sellers</strong>. The product page shows who sells each item.</p>
+              <ul>
+                <li>Sellers are responsible for their listings: descriptions, photos, stock and that the item matches what was shown.</li>
+                <li>Whoever the seller is, you pay Honic at checkout and our returns and refund rules below apply to your order.</li>
+                <li>Sellers agree to the seller terms they accept when they register, in addition to these terms.</li>
+              </ul>
+            </Section>
+
+            <Section id="orders" n={4} title="Orders and prices">
+              <ul>
+                <li>Prices are in Tanzanian shillings and include what you pay for the item. The delivery fee for your address is shown at checkout before you pay.</li>
+                <li>We work to keep prices and stock correct. If a price or stock level was clearly wrong, we will tell you and you can cancel for a full refund.</li>
+                <li>An order is confirmed when the payment succeeds. Unpaid orders are cancelled automatically after {UNPAID_ORDER_EXPIRY_MINUTES} minutes.</li>
+                <li>We may refuse or cancel an order (for example for suspected fraud or an item that cannot be supplied). If you paid, you get a full refund.</li>
+              </ul>
+            </Section>
+
+            <Section id="offers" n={5} title="Price offers and codes">
+              <ul>
+                <li>You can ask for a better price with <strong>Make an offer</strong> or on WhatsApp. We may accept, counter or decline; there is no obligation either way.</li>
+                <li>If we agree a price, you get a <strong>one-time code</strong> for that product and quantity. It works once, for 48 hours, in your cart.</li>
+                <li>Coupon codes have their own conditions (minimum spend, end date, products). Codes cannot be exchanged for cash.</li>
+                <li><strong>Never pay on WhatsApp</strong> or to a personal number. All payments are made through checkout on this website.</li>
+              </ul>
+            </Section>
+
+            <Section id="payments" n={6} title="Payments">
+              <ul>
+                <li>We accept <strong>mobile money</strong>: M-Pesa, Airtel Money, Mixx by Yas and HaloPesa. Card payments are not available yet.</li>
+                <li>You confirm every payment with your own PIN on your phone. We never see or store your PIN.</li>
+                <li>Mobile money cannot take payments under {tsh(MIN_PAYMENT_TZS)}. If an order totals less, checkout adds the difference as its own line (&ldquo;Mobile money minimum&rdquo;) before you pay.</li>
+                <li>Orders are paid in full at checkout. Your invoice (PDF) is available after payment.</li>
+              </ul>
+            </Section>
+
+            <Section id="delivery" n={7} title="Delivery and pickup">
+              <ul>
+                <li>We deliver across Tanzania: usually 1–2 days in Dar es Salaam and 2–6 days to other regions. You can also collect free from our store in Dar es Salaam.</li>
+                <li>The fee depends on your region (and area within Dar es Salaam) and parcel size, and is shown before you pay. Delivery is free when your items add up to {tsh(free)} or more, or for products marked &ldquo;free delivery&rdquo;.</li>
+                <li>Orders outside Tanzania are by arrangement only.</li>
+                <li>Check your parcel when it arrives and tell us about any problem within the return period.</li>
+              </ul>
+            </Section>
+
+            <Section id="returns" n={8} title="Returns and refunds">
+              <ul>
+                <li><strong>Wrong, damaged or faulty item:</strong> tell us within {RETURN_DAYS} days of delivery. We replace or refund in full and pay the return transport.</li>
+                <li><strong>Change of mind:</strong> within {RETURN_DAYS} days, unused and unopened in the original packaging. You pay the return transport; the delivery fee is not refunded.</li>
+                <li>Refunds are sent within {REFUND_BUSINESS_DAYS} business days after we receive and check the item, to the mobile money number used for the order.</li>
+                <li>Paid orders that have not been sent can be cancelled for a full refund.</li>
+              </ul>
+              <p className="font-semibold text-neutral-900 dark:text-white">Not returnable for a change of mind:</p>
+              <ul>{NON_RETURNABLE.map((x) => <li key={x}>{x}</li>)}</ul>
+              <p>Your rights under Tanzanian consumer law are not affected. See <Link href="/support/returns-refunds" className="font-semibold text-orange-600 hover:underline">how returns work</Link>.</p>
+            </Section>
+
+            <Section id="use" n={9} title="Acceptable use">
+              <p>Do not use the site to:</p>
+              <ul>
+                <li>break the law, commit fraud or pay with money that is not yours;</li>
+                <li>try to get into accounts or systems that are not yours, spread malware or overload the site;</li>
+                <li>copy or scrape the site with automated tools, or resell our content without permission;</li>
+                <li>post false, offensive or misleading content, or harass other people.</li>
+              </ul>
+              <p>We may remove content, cancel orders or close accounts that break these rules, and report illegal activity.</p>
+            </Section>
+
+            <Section id="ip" n={10} title="Content and trademarks">
+              <ul>
+                <li>The Honic name, logo, site design and our own texts and photos belong to {COMPANY} or its licensors. Do not copy them without permission.</li>
+                <li>Sellers and shoppers keep ownership of what they post (product details, reviews) and let us show it on the site.</li>
+                <li>Other brand names belong to their owners.</li>
+              </ul>
+            </Section>
+
+            <Section id="liability" n={11} title="Liability">
+              <ul>
+                <li>The website is provided &ldquo;as is&rdquo;. We work to keep it available and correct but cannot promise it is always free of errors or interruptions.</li>
+                <li>Products you buy are covered by the returns rules above. As far as the law allows, we are not liable for indirect losses, and our liability for an order is limited to what you paid for it.</li>
+                <li>We are not responsible for delays caused by events outside our control (for example network outages or extreme weather).</li>
+                <li>Nothing in these terms limits liability that cannot be limited under Tanzanian law.</li>
+              </ul>
+            </Section>
+
+            <Section id="changes" n={12} title="Changes and law">
+              <ul>
+                <li>We may update these terms. The date at the top shows the latest version; important changes are announced on the site or by email. Orders follow the terms that applied when you placed them.</li>
+                <li>These terms are governed by the laws of the United Republic of Tanzania. We will always try to solve problems with you directly first.</li>
+              </ul>
+            </Section>
+
+            <Section id="contact" n={13} title="Contact">
+              <p>Questions about these terms or a legal notice:</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <a href={`mailto:${LEGAL_EMAIL}`} className="rounded-2xl bg-stone-50 p-4 ring-1 ring-neutral-200 hover:ring-orange-400 dark:bg-neutral-900 dark:ring-neutral-800"><span className="block text-xs font-semibold uppercase tracking-wider text-neutral-500">Email</span><span className="font-semibold">{LEGAL_EMAIL}</span></a>
+                <a href={whatsappLink('Hello Honic, a question about your terms')} target="_blank" rel="noopener noreferrer" className="rounded-2xl bg-stone-50 p-4 ring-1 ring-neutral-200 hover:ring-orange-400 dark:bg-neutral-900 dark:ring-neutral-800"><span className="block text-xs font-semibold uppercase tracking-wider text-neutral-500">WhatsApp</span><span className="font-semibold">{phoneLabel(STORE_WHATSAPP)}</span></a>
+                <div className="rounded-2xl bg-stone-50 p-4 ring-1 ring-neutral-200 sm:col-span-2 dark:bg-neutral-900 dark:ring-neutral-800"><span className="block text-xs font-semibold uppercase tracking-wider text-neutral-500">Post / visit</span><span className="font-semibold">{COMPANY}, {STORE_ADDRESS}</span></div>
               </div>
-            </div>
-            <Badge variant="outline" className="hidden items-center space-x-1 sm:flex">
-              <FileText className="w-3 h-3" />
-              <span>Legal Document</span>
-            </Badge>
-          </div>
+            </Section>
+          </article>
         </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Sidebar Navigation */}
-          <div className="lg:col-span-1">
-            <Card className={cn("sticky top-8", themeClasses.backgroundColor, themeClasses.borderColor)}>
-              <CardHeader>
-                <CardTitle className={cn("text-lg", themeClasses.mainText)}>Contents</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {sections.map((section) => {
-                  const Icon = section.icon
-                  return (
-                    <button
-                      key={section.id}
-                      onClick={() => setActiveSection(section.id)}
-                      className={cn(
-                        "w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors",
-                        activeSection === section.id
-                          ? "bg-orange-100 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400"
-                          : cn("hover:bg-gray-100 dark:hover:bg-gray-800", themeClasses.textNeutralSecondary)
-                      )}
-                    >
-                      <Icon className="w-4 h-4" />
-                      <span className="text-sm font-medium">{section.title}</span>
-                    </button>
-                  )
-                })}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Main Content */}
-          <div className="lg:col-span-3">
-            <div className="space-y-8">
-              {/* Overview Section */}
-              {activeSection === 'overview' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <FileText className="w-5 h-5" />
-                      <span>Terms of Service Overview</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <p className={cn("text-sm leading-relaxed", themeClasses.textNeutralSecondary)}>
-                      Welcome to {companyName || 'Honic Co.'}. These Terms of Service (&quot;Terms&quot;) govern your use of our website, products, and services. By accessing or using our services, you agree to be bound by these Terms.
-                    </p>
-                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Important Notice:</h4>
-                      <ul className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                        <li>• Please read these Terms carefully before using our services</li>
-                        <li>• By using our services, you agree to these Terms</li>
-                        <li>• We may update these Terms from time to time</li>
-                        <li>• Continued use constitutes acceptance of updated Terms</li>
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Acceptance Section */}
-              {activeSection === 'acceptance' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <CheckCircle className="w-5 h-5" />
-                      <span>Acceptance of Terms</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Agreement to Terms</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        By accessing and using our website, products, or services, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Eligibility</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• You must be at least 18 years old</li>
-                          <li>• You must have legal capacity to enter contracts</li>
-                          <li>• You must provide accurate information</li>
-                          <li>• You must comply with all applicable laws</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Account Responsibility</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• You are responsible for your account security</li>
-                          <li>• You must notify us of unauthorized access</li>
-                          <li>• You are liable for all account activities</li>
-                          <li>• You must keep information current</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Changes to Terms</h4>
-                      <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                        We reserve the right to modify these Terms at any time. We will notify users of significant changes via email or website notice. Continued use after changes constitutes acceptance.
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* User Accounts Section */}
-              {activeSection === 'user-accounts' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <User className="w-5 h-5" />
-                      <span>User Accounts</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Account Creation</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        To access certain features of our services, you may need to create an account. You agree to provide accurate, current, and complete information during registration.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Account Security</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Keep your password secure and confidential</li>
-                          <li>• Notify us immediately of any security breach</li>
-                          <li>• Use strong, unique passwords</li>
-                          <li>• Enable two-factor authentication when available</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Account Termination</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• You may terminate your account at any time</li>
-                          <li>• We may suspend or terminate accounts for violations</li>
-                          <li>• Termination does not affect accrued obligations</li>
-                          <li>• Some data may be retained for legal compliance</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Prohibited Account Activities</h4>
-                      <ul className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                        <li>• Creating multiple accounts to circumvent restrictions</li>
-                        <li>• Sharing account credentials with others</li>
-                        <li>• Using automated tools to access our services</li>
-                        <li>• Impersonating other users or entities</li>
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Products & Services Section */}
-              {activeSection === 'products-services' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <ShoppingCart className="w-5 h-5" />
-                      <span>Products & Services</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Product Information</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        We strive to provide accurate product descriptions, specifications, and pricing. However, we reserve the right to correct errors and update information without notice.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Pricing & Availability</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Prices are subject to change without notice</li>
-                          <li>• Product availability may vary</li>
-                          <li>• We reserve the right to limit quantities</li>
-                          <li>• Promotional offers have specific terms</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Order Processing</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Orders are subject to acceptance</li>
-                          <li>• We may cancel orders for various reasons</li>
-                          <li>• Processing times may vary</li>
-                          <li>• International orders may have restrictions</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Services</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>Electronics Supply</h5>
-                          <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                            We provide electronic components and supplies for various applications, including prototyping and production.
-                          </p>
-                        </div>
-                        
-                        <div>
-                          <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>Prototyping Services</h5>
-                          <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                            Our prototyping services help bring your ideas to life with professional guidance and support.
-                          </p>
-                        </div>
-                        
-                        <div>
-                          <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>PCB Printing</h5>
-                          <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                            We offer PCB design and printing services for your electronic projects and prototypes.
-                          </p>
-                        </div>
-                        
-                        <div>
-                          <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>AI Consultancy</h5>
-                          <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                            Our AI consultancy services help integrate artificial intelligence into your projects and workflows.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Payments Section */}
-              {activeSection === 'payments' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <CreditCard className="w-5 h-5" />
-                      <span>Payments</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Payment Methods</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        We accept various payment methods including credit cards, debit cards, bank transfers, and mobile money services.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Payment Processing</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Payments are processed securely</li>
-                          <li>• You confirm every payment with your own PIN on your phone</li>
-                          <li>• We never see or store your mobile money PIN</li>
-                          <li>• Third-party processors handle transactions</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Billing & Invoicing</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Invoices are generated automatically</li>
-                          <li>• Payment receipts are provided</li>
-                          <li>• Billing disputes must be reported promptly</li>
-                          <li>• Orders are paid in full at checkout</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Accepted Payment Methods</h4>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3">
-                        {[
-                          ['/payments/mpesa.svg', 'M-Pesa'],
-                          ['/payments/airtel.svg', 'Airtel Money'],
-                          ['/payments/yas.svg', 'Mixx by Yas'],
-                          ['/payments/halotel.png', 'HaloPesa'],
-                        ].map(([src, label]) => (
-                          <div key={label} className="text-center">
-                            <span className="mx-auto mb-1 grid h-8 w-12 place-items-center rounded bg-white p-1 ring-1 ring-neutral-200">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={src} alt="" className="h-full w-full object-contain" />
-                            </span>
-                            <p className={cn("text-xs", themeClasses.textNeutralSecondary)}>{label}</p>
-                          </div>
-                        ))}
-                      </div>
-                      <p className={cn("mt-3 text-xs", themeClasses.textNeutralSecondary)}>Card payments are not available yet.</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Shipping & Returns Section */}
-              {activeSection === 'shipping-returns' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <Truck className="w-5 h-5" />
-                      <span>Shipping & Returns</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Shipping Policy</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        We deliver across Tanzania, or you can collect your order from our store in Dar es Salaam. The delivery fee for your address is shown at checkout before you pay.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Shipping Options</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Home or office delivery across Tanzania</li>
-                          <li>• Usually 1-2 days in Dar es Salaam, 2-6 days to other regions</li>
-                          <li>• Free pickup from our store in Dar es Salaam</li>
-                          <li>• Orders outside Tanzania by arrangement only</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Shipping Costs</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Based on your region (and distance within Dar es Salaam)</li>
-                          <li>• Shown at checkout before you pay</li>
-                          <li>• Free when your items add up to TSh {getClientShippingPricing().freeThresholdTz.toLocaleString('en-US')} or more, or for products marked &quot;free delivery&quot;</li>
-                          <li>• Store pickup is free</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Returns & Refunds</h4>
-                      <div className="space-y-4">
-                        <div>
-                          <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>Return Policy</h5>
-                          <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                            <li>• Wrong, damaged or faulty items: report within {RETURN_DAYS} days of delivery; we replace or refund in full and pay return transport</li>
-                            <li>• Change of mind: within {RETURN_DAYS} days, unused and unopened in original packaging</li>
-                            <li>• Change-of-mind returns: you pay return transport; delivery fee not refunded</li>
-                            <li>• Returns are arranged by WhatsApp or email with your order number</li>
-                          </ul>
-                        </div>
-                        
-                        <div>
-                          <h5 className={cn("font-medium text-sm mb-2", themeClasses.mainText)}>Refund Process</h5>
-                          <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                            <li>• Sent within {REFUND_BUSINESS_DAYS} business days after we receive and check the item</li>
-                            <li>• Paid to the mobile money number used for the order</li>
-                            <li>• Paid, unsent orders can be cancelled for a full refund</li>
-                            <li>• Your rights under Tanzanian consumer law are not affected</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Not returnable for a change of mind</h4>
-                      <ul className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                        {NON_RETURNABLE.map((x) => <li key={x}>• {x}</li>)}
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Intellectual Property Section */}
-              {activeSection === 'intellectual-property' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <Scale className="w-5 h-5" />
-                      <span>Intellectual Property</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Our Intellectual Property</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        All content, trademarks, logos, and intellectual property on our website and services are owned by {companyName || 'Honic Co.'} or our licensors.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Protected Content</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Website design and layout</li>
-                          <li>• Product descriptions and images</li>
-                          <li>• Software and applications</li>
-                          <li>• Trademarks and logos</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>User Content</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• You retain ownership of your content</li>
-                          <li>• You grant us license to use your content</li>
-                          <li>• You represent you have necessary rights</li>
-                          <li>• We may remove content that violates terms</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Prohibited Uses</h4>
-                      <ul className={cn("text-sm space-y-1", themeClasses.textNeutralSecondary)}>
-                        <li>• Copying or reproducing our content without permission</li>
-                        <li>• Using our trademarks without authorization</li>
-                        <li>• Reverse engineering our software</li>
-                        <li>• Creating derivative works without consent</li>
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Prohibited Uses Section */}
-              {activeSection === 'prohibited-uses' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <AlertTriangle className="w-5 h-5" />
-                      <span>Prohibited Uses</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>General Prohibitions</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        You may not use our services for any unlawful purpose or in any way that could damage, disable, overburden, or impair our services.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Illegal Activities</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Violating any applicable laws or regulations</li>
-                          <li>• Infringing on intellectual property rights</li>
-                          <li>• Engaging in fraudulent activities</li>
-                          <li>• Money laundering or tax evasion</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Harmful Activities</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Transmitting viruses or malicious code</li>
-                          <li>• Attempting unauthorized access</li>
-                          <li>• Interfering with service operations</li>
-                          <li>• Harassing other users</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Commercial Restrictions</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Reselling our services without permission</li>
-                          <li>• Using automated tools to access services</li>
-                          <li>• Scraping or harvesting data</li>
-                          <li>• Competing unfairly with our business</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Content Restrictions</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Posting offensive or inappropriate content</li>
-                          <li>• Sharing false or misleading information</li>
-                          <li>• Violating others&apos; privacy rights</li>
-                          <li>• Promoting illegal or harmful activities</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Consequences of Violations</h4>
-                      <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                        Violations of these prohibited uses may result in immediate account suspension, termination of services, and legal action where appropriate.
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Disclaimers Section */}
-              {activeSection === 'disclaimers' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <Shield className="w-5 h-5" />
-                      <span>Disclaimers & Limitations</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Service Disclaimers</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        The website itself is provided &quot;as is&quot;: we work to keep it available and correct, but cannot promise it will always be error-free. Products you buy are covered by our returns policy (wrong, damaged or faulty items are replaced or refunded) and by your rights under Tanzanian consumer law, which these Terms do not limit.
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Limitation of Liability</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• We are not liable for indirect damages</li>
-                          <li>• Liability is limited to service fees paid</li>
-                          <li>• No liability for third-party actions</li>
-                          <li>• Force majeure events excluded</li>
-                        </ul>
-                      </div>
-                      
-                      <div>
-                        <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Service Availability</h4>
-                        <ul className={cn("text-sm space-y-2", themeClasses.textNeutralSecondary)}>
-                          <li>• Services may be temporarily unavailable</li>
-                          <li>• Maintenance windows may occur</li>
-                          <li>• No guarantee of uninterrupted service</li>
-                          <li>• Technical issues may arise</li>
-                        </ul>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Third-Party Services</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        Our services may integrate with third-party services. We are not responsible for the availability, content, or practices of these third-party services.
-                      </p>
-                    </div>
-                    
-                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Important Notice</h4>
-                      <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                        These disclaimers and limitations are subject to applicable law. Some jurisdictions may not allow certain limitations, so they may not apply to you.
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Contact Section */}
-              {activeSection === 'contact' && (
-                <Card className={cn(themeClasses.backgroundColor, themeClasses.borderColor)}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center space-x-2", themeClasses.mainText)}>
-                      <Mail className="w-5 h-5" />
-                      <span>Contact Us</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div>
-                      <h4 className={cn("font-semibold text-sm mb-3", themeClasses.mainText)}>Legal Questions</h4>
-                      <p className={cn("text-sm mb-4", themeClasses.textNeutralSecondary)}>
-                        If you have any questions about these Terms of Service or need legal assistance, please contact us:
-                      </p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-4">
-                        <div className="flex items-center space-x-3">
-                          <Mail className="w-4 h-4 text-orange-500" />
-                          <div>
-                            <p className={cn("text-sm font-medium", themeClasses.mainText)}>Email</p>
-                            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {adminSettings?.contactEmail || process.env.NEXT_PUBLIC_LEGAL_EMAIL || process.env.LEGAL_EMAIL || process.env.NEXT_PUBLIC_CONTACT_EMAIL || process.env.CONTACT_EMAIL || 'legal@honic.co'}
-                            </p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center space-x-3">
-                          <Phone className="w-4 h-4 text-orange-500" />
-                          <div>
-                            <p className={cn("text-sm font-medium", themeClasses.mainText)}>Phone</p>
-                            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {adminSettings?.contactPhone || '+1 (555) 123-4567'}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <div className="flex items-center space-x-3">
-                          <MapPin className="w-4 h-4 text-orange-500" />
-                          <div>
-                            <p className={cn("text-sm font-medium", themeClasses.mainText)}>Address</p>
-                            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              {adminSettings?.address || '123 Business St, City, State 12345'}
-                            </p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center space-x-3">
-                          <Calendar className="w-4 h-4 text-orange-500" />
-                          <div>
-                            <p className={cn("text-sm font-medium", themeClasses.mainText)}>Response Time</p>
-                            <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                              Within 48 hours
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                      <h4 className={cn("font-semibold text-sm mb-2", themeClasses.mainText)}>Legal Department</h4>
-                      <p className={cn("text-sm", themeClasses.textNeutralSecondary)}>
-                        For formal legal notices, disputes, or compliance matters, please address correspondence to our Legal Department.
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      </main>
+      <SiteFooter />
     </div>
   )
 }
