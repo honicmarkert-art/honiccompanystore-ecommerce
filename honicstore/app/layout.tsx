@@ -67,6 +67,10 @@ export const metadata: Metadata = {
       follow: true,
     },
   },
+  // Meta Business Suite → Domains (must be in static <head>, not client-only)
+  other: {
+    'facebook-domain-verification': 'mbqeojnmxlastg6og11vk9qwws4i3f',
+  },
 }
 
 export const viewport = {
