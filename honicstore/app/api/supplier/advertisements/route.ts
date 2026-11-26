@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.is_supplier && !profile?.is_admin) {
+      if (!profile?.is_supplier) {
         logSecurityEvent('FORBIDDEN_ACCESS_ATTEMPT', user.id, {
           endpoint: '/api/supplier/advertisements',
           action: 'GET',
@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.is_supplier && !profile?.is_admin) {
+      if (!profile?.is_supplier) {
         logSecurityEvent('FORBIDDEN_ACCESS_ATTEMPT', user.id, {
           endpoint: '/api/supplier/advertisements',
           action: 'POST',

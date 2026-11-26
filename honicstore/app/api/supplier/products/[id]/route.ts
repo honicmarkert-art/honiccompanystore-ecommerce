@@ -239,7 +239,7 @@ export async function GET(
       .eq('id', user.id)
       .single()
 
-    if (!profile?.is_supplier && !profile?.is_admin) {
+    if (!profile?.is_supplier) {
       return NextResponse.json(
         { success: false, error: 'Access denied' },
         { status: 403 }
@@ -375,7 +375,7 @@ export async function PUT(
       .eq('id', user.id)
       .single()
 
-    if (!profile?.is_supplier && !profile?.is_admin) {
+    if (!profile?.is_supplier) {
       return NextResponse.json(
         { success: false, error: 'Access denied' },
         { status: 403 }
@@ -886,7 +886,7 @@ export async function DELETE(
       .eq('id', user.id)
       .single()
 
-    if (!profile?.is_supplier && !profile?.is_admin) {
+    if (!profile?.is_supplier) {
       return NextResponse.json(
         { success: false, error: 'Access denied' },
         { status: 403 }

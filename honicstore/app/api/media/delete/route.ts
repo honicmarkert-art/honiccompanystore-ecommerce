@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { validateAuth, getUserAndRole } from '@/lib/auth-server'
+import { validateAuth } from '@/lib/auth-server'
 import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
 
 
@@ -82,8 +82,6 @@ export async function DELETE(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const { role } = await getUserAndRole(user.id)
-    
     // Support both JSON body and query params
     let body: any = {}
     try { body = await request.json() } catch {}
@@ -103,10 +101,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'type is required' }, { status: 400 })
     }
 
-    if (!productId && role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden: productId required for non-admin deletion' }, { status: 403 })
+    // no admin shortcut here: admin changes go through /api/admin/* (two-step sign-in)
+    if (!productId || !Number.isInteger(productId) || productId <= 0) {
+      return NextResponse.json({ error: 'Forbidden: productId required' }, { status: 403 })
     }
-    if (productId && role !== 'admin') {
+    {
       const { data: ownedProduct, error: ownErr } = await supabase
         .from('products')
         .select('id')
@@ -156,6 +155,22 @@ export async function DELETE(request: NextRequest) {
     if (!objectNames.length) {
       // cleaned debug logs
       return NextResponse.json({ error: 'No resolvable storage object name(s) found' }, { status: 400 })
+    }
+
+    // Only files that belong to THIS product may be deleted: named for it at upload, or currently
+    // used by it. (Before, any file name in the bucket could be passed, e.g. another seller's photo.)
+    {
+      const { data: media } = await supabase.from('products').select('image, gallery, video, view360, variant_images').eq('id', productId).maybeSingle()
+      const urls: string[] = []
+      const push = (v: unknown) => { if (typeof v === 'string' && v) urls.push(v); else if (v && typeof v === 'object' && typeof (v as { imageUrl?: unknown }).imageUrl === 'string') urls.push((v as { imageUrl: string }).imageUrl) }
+      push(media?.image); push(media?.video); push(media?.view360)
+      if (Array.isArray(media?.gallery)) media.gallery.forEach(push)
+      if (Array.isArray(media?.variant_images)) media.variant_images.forEach(push)
+      const owned = new Set(urls.map((u) => extractObjectNameFromUrl(u, bucket)).filter(Boolean) as string[])
+      const ok = (n: string) => !n.includes('..') && (n.startsWith(`product_${productId}_`) || owned.has(n))
+      if (!objectNames.every(ok)) {
+        return NextResponse.json({ error: 'Forbidden: that file does not belong to this product' }, { status: 403 })
+      }
     }
 
     // Delete from storage

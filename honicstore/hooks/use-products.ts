@@ -202,9 +202,7 @@ export function useProducts(): UseProductsReturn {
       }
 
       // Create new fetch promise with timeout and minimal payload for better performance
-      // For admin pages, we need full data including variants
-      const isAdminPage = pathname.startsWith('/admin')
-      const apiUrl = isAdminPage ? '/api/products' : '/api/products?minimal=true'
+      const apiUrl = '/api/products?minimal=true'
       
       // Use cache-friendly URL (no cache busting) to enable proper client-side caching
       // Browser and Next.js will handle caching based on Cache-Control headers

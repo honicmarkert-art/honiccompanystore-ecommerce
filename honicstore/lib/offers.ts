@@ -2,7 +2,7 @@
  * "Make an offer" (bargaining) helpers, shared by the product page, the offers API and the team page.
  *
  * Flow: shopper sends an offer (saved + opens WhatsApp with a ready message) -> team accepts or
- * counters on /team/offers -> a ONE-TIME coupon for that product and quantity is created -> team
+ * counters on /admin/offers -> a ONE-TIME coupon for that product and quantity is created -> team
  * sends the code on WhatsApp -> shopper pays the agreed price through normal checkout.
  */
 import { randomBytes } from 'crypto'

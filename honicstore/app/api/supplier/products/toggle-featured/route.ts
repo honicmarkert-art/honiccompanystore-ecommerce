@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (!profile?.is_supplier && !profile?.is_admin) {
+    if (!profile?.is_supplier) {
       return NextResponse.json(
         { success: false, error: 'Access denied. Supplier account required.' },
         { status: 403 }

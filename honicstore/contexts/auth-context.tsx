@@ -173,7 +173,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Don't redirect if already on supplier pages or auth pages
             if (!currentPath.startsWith('/supplier') && 
                 !currentPath.startsWith('/auth') && 
-                !currentPath.startsWith('/admin') &&
                 currentPath !== '/supplier/dashboard') {
               // Small delay to prevent redirect loops
               setTimeout(() => {

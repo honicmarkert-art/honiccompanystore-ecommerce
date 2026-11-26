@@ -8,155 +8,7 @@ export async function processPaidOrderStockAndCart(supabase: any, order: any): P
   } catch (e) {
     logger.error("Counting coupon use failed", e)
   }
-  try {
-    const { data: orderItems, error: itemsError } = await supabase
-      .from("order_items")
-      .select("id, product_id, quantity, variant_attributes, variant_id, variant_name")
-      .eq("order_id", order.id)
-
-    if (itemsError) {
-      logger.error("Error fetching order items for stock reduction", itemsError)
-      throw itemsError
-    } else if (orderItems && orderItems.length > 0) {
-      const dirtyVariantProductIds = new Set<number>()
-      const productVariantsCache = new Map<number, Array<{ id: number; primary_values: any }>>()
-      const getProductVariants = async (productId: number) => {
-        const cached = productVariantsCache.get(productId)
-        if (cached) return cached
-        const { data: variants, error: variantsError } = await supabase
-          .from("product_variants")
-          .select("id, primary_values")
-          .eq("product_id", productId)
-        if (variantsError || !variants) return null
-        productVariantsCache.set(productId, variants as Array<{ id: number; primary_values: any }>)
-        return variants as Array<{ id: number; primary_values: any }>
-      }
-
-      for (const item of orderItems) {
-        try {
-          let variantAttributes = item.variant_attributes
-          if (typeof variantAttributes === "string") {
-            try {
-              variantAttributes = JSON.parse(variantAttributes)
-            } catch {
-              logger.warn(`Could not parse variant_attributes for item ${item.product_id}`)
-              variantAttributes = null
-            }
-          }
-
-          if ((!variantAttributes || Object.keys(variantAttributes || {}).length === 0) && item.variant_name) {
-            const productVariants = await getProductVariants(item.product_id)
-            if (productVariants) {
-              for (const variant of productVariants) {
-                let pvArray = variant.primary_values
-                if (typeof pvArray === "string") {
-                  try {
-                    pvArray = JSON.parse(pvArray)
-                  } catch {
-                    continue
-                  }
-                }
-                if (pvArray && Array.isArray(pvArray)) {
-                  const matchingPv = pvArray.find((pv: any) => String(pv.value) === String(item.variant_name))
-                  if (matchingPv) {
-                    variantAttributes = { [matchingPv.attribute]: matchingPv.value }
-                    break
-                  }
-                }
-              }
-            }
-          }
-
-          if (variantAttributes && typeof variantAttributes === "object" && Object.keys(variantAttributes).length > 0) {
-            const variants = await getProductVariants(item.product_id)
-            if (!variants || variants.length === 0) continue
-            for (const variant of variants) {
-              let primaryValues = variant.primary_values
-              if (typeof primaryValues === "string") {
-                try {
-                  primaryValues = JSON.parse(primaryValues)
-                } catch (e) {
-                  logger.error(`Error parsing primary_values for variant ${variant.id}`, e)
-                  continue
-                }
-              }
-              if (!primaryValues || !Array.isArray(primaryValues)) continue
-              let updated = false
-              const updatedPrimaryValues = primaryValues.map((pv: any) => {
-                const matches = Object.entries(variantAttributes).some(
-                  ([key, value]) => pv.attribute === key && String(pv.value) === String(value)
-                )
-                if (!matches) return pv
-                const currentQty = typeof pv.quantity === "number" ? pv.quantity : parseInt(String(pv.quantity)) || 0
-                updated = true
-                return { ...pv, quantity: Math.max(0, currentQty - item.quantity) }
-              })
-              if (!updated) continue
-              const { error: variantUpdateError } = await supabase
-                .from("product_variants")
-                .update({ primary_values: updatedPrimaryValues })
-                .eq("id", variant.id)
-              if (variantUpdateError) {
-                logger.error(`Error updating variant ${variant.id}`, variantUpdateError)
-                continue
-              }
-              const cachedVariants = productVariantsCache.get(item.product_id)
-              if (cachedVariants) {
-                const target = cachedVariants.find((cv) => cv.id === variant.id)
-                if (target) target.primary_values = updatedPrimaryValues
-              }
-              dirtyVariantProductIds.add(item.product_id)
-            }
-          } else {
-            const { data: product, error: fetchError } = await supabase
-              .from("products")
-              .select("stock_quantity, in_stock")
-              .eq("id", item.product_id)
-              .single()
-            if (fetchError) {
-              logger.error("Error fetching product for stock reduction", fetchError)
-              continue
-            }
-            const newStock = Math.max(0, (product.stock_quantity || 0) - item.quantity)
-            const { error: updateError } = await supabase
-              .from("products")
-              .update({ stock_quantity: newStock, in_stock: newStock > 0, updated_at: new Date().toISOString() })
-              .eq("id", item.product_id)
-            if (updateError) logger.error("Error updating product stock", updateError)
-          }
-        } catch (stockError) {
-          logger.error(`Error in stock reduction for product ${item.product_id}`, stockError)
-        }
-      }
-
-      for (const productId of dirtyVariantProductIds) {
-        const allVariants = (await getProductVariants(productId)) || []
-        let totalStock = 0
-        for (const variant of allVariants) {
-          let pvArray = variant.primary_values
-          if (typeof pvArray === "string") {
-            try {
-              pvArray = JSON.parse(pvArray)
-            } catch {
-              continue
-            }
-          }
-          if (Array.isArray(pvArray)) {
-            for (const pv of pvArray) {
-              totalStock += typeof pv.quantity === "number" ? pv.quantity : parseInt(String(pv.quantity)) || 0
-            }
-          }
-        }
-        const { error: productUpdateError } = await supabase
-          .from("products")
-          .update({ stock_quantity: totalStock, in_stock: totalStock > 0, updated_at: new Date().toISOString() })
-          .eq("id", productId)
-        if (productUpdateError) logger.error("Error updating product stock", productUpdateError)
-      }
-    }
-  } catch (stockReductionError) {
-    logger.error("Error in stock reduction process", stockReductionError)
-  }
+  await adjustOrderStock(supabase, order.id, -1)
 
   if (order.user_id) {
     try {
@@ -165,5 +17,58 @@ export async function processPaidOrderStockAndCart(supabase: any, order: any): P
     } catch {
       logger.warn("Error clearing cart after payment")
     }
+  }
+}
+
+type StockItem = { product_id: number; quantity: number; variant_id: number | null; variant_name: string | null }
+
+/**
+ * Change stock for every item of an order: -1 when it is paid (takes stock), +1 when a paid order is
+ * cancelled (puts it back).
+ *  - Item with an option (variant_id, or variant_name matched within the product): that option's
+ *    stock changes, then the product's stock is set to the sum of its options (how the shop shows it).
+ *  - Plain product: the product's own stock changes.
+ * Errors are logged per item and never stop the rest.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function adjustOrderStock(supabase: any, orderId: string, direction: 1 | -1): Promise<void> {
+  const { data: items, error } = await supabase.from("order_items").select("product_id, quantity, variant_id, variant_name").eq("order_id", orderId)
+  if (error) { logger.error("Stock: could not read order items", error); return }
+  const now = new Date().toISOString()
+  const productsWithOptions = new Set<number>()
+
+  for (const item of (items || []) as StockItem[]) {
+    const qty = Math.max(0, Number(item.quantity) || 0)
+    if (!item.product_id || !qty) continue
+    try {
+      let variant: { id: number; stock_quantity: number | null } | null = null
+      if (item.variant_id) {
+        variant = (await supabase.from("product_variants").select("id, stock_quantity").eq("id", item.variant_id).eq("product_id", item.product_id).maybeSingle()).data
+      } else if (item.variant_name) {
+        variant = (await supabase.from("product_variants").select("id, stock_quantity").eq("product_id", item.product_id).eq("variant_name", item.variant_name).limit(1).maybeSingle()).data
+      }
+      if (variant) {
+        const stock = Math.max(0, (Number(variant.stock_quantity) || 0) + direction * qty)
+        const { error: e } = await supabase.from("product_variants").update({ stock_quantity: stock, in_stock: stock > 0, updated_at: now }).eq("id", variant.id)
+        if (e) logger.error(`Stock: option ${variant.id}`, e)
+        productsWithOptions.add(item.product_id)
+        continue
+      }
+      const { data: product } = await supabase.from("products").select("stock_quantity").eq("id", item.product_id).maybeSingle()
+      if (!product) continue
+      const stock = Math.max(0, (Number(product.stock_quantity) || 0) + direction * qty)
+      const { error: e } = await supabase.from("products").update({ stock_quantity: stock, in_stock: stock > 0, updated_at: now }).eq("id", item.product_id)
+      if (e) logger.error(`Stock: product ${item.product_id}`, e)
+    } catch (e) {
+      logger.error(`Stock: item of product ${item.product_id}`, e)
+    }
+  }
+
+  // products with options show the total of their options
+  for (const productId of productsWithOptions) {
+    const { data: rows } = await supabase.from("product_variants").select("stock_quantity").eq("product_id", productId)
+    const total = ((rows || []) as { stock_quantity: number | null }[]).reduce((s, r) => s + (Number(r.stock_quantity) || 0), 0)
+    const { error: e } = await supabase.from("products").update({ stock_quantity: total, in_stock: total > 0, updated_at: now }).eq("id", productId)
+    if (e) logger.error(`Stock: total for product ${productId}`, e)
   }
 }

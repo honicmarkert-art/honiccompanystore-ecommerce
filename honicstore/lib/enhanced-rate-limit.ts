@@ -21,6 +21,8 @@ const rateLimitStore = new Map<string, RateLimitEntry>()
 const rateLimitConfigs: Record<string, RateLimitConfig> = {
   // Authentication endpoints - stricter limits
   '/api/auth/login': { windowMs: 15 * 60 * 1000, maxRequests: 5, blockDurationMs: 30 * 60 * 1000 },
+  // server-to-server calls from the admin app (shared secret): a cap in case the secret leaks
+  '/api/internal/': { windowMs: 60 * 1000, maxRequests: 120, blockDurationMs: 5 * 60 * 1000 },
   // "Is this email registered / verified?" lookups: enough for real forms, too few to harvest emails
   '/api/auth/check-': { windowMs: 10 * 60 * 1000, maxRequests: 20, blockDurationMs: 30 * 60 * 1000 },
   // Order invoice PDFs: generating them costs CPU, so cap per visitor. Must come before '/api/orders/'
@@ -29,7 +31,6 @@ const rateLimitConfigs: Record<string, RateLimitConfig> = {
   // Payment endpoints - very strict
   '/api/payment': { windowMs: 5 * 60 * 1000, maxRequests: 10, blockDurationMs: 60 * 60 * 1000 },
   '/api/checkout': { windowMs: 5 * 60 * 1000, maxRequests: 5, blockDurationMs: 30 * 60 * 1000 },
-  '/api/webhooks/manual-trigger': { windowMs: 60 * 60 * 1000, maxRequests: 3, blockDurationMs: 2 * 60 * 60 * 1000 },
   '/api/media/upload': { windowMs: 60 * 1000, maxRequests: 10, blockDurationMs: 15 * 60 * 1000 },
   '/api/media/delete': { windowMs: 60 * 1000, maxRequests: 20, blockDurationMs: 15 * 60 * 1000 },
   // Guest order tracking (order number + phone/email): tight, so order numbers can't be guessed. Must come before '/api/orders/'

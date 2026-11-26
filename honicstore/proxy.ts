@@ -134,19 +134,17 @@ export function proxy(request: NextRequest) {
     }
   }
   
-  // Security headers for all responses
+  // (The admin dashboard is a separate app: honicstore-admin. Nothing admin is served from the shop.)
   const response = NextResponse.next()
-  
+
+  // Security headers for all responses
   Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
     response.headers.set(key, value)
   })
 
   // Add CSP header
   response.headers.set('Content-Security-Policy', CSP_HEADER)
-  
-  // Block old /admin path - let it show 404 page
-  // Admin pages are handled by app/admin/page.tsx which calls notFound()
-  
+
   // API route protection
   if (isApiRoute(pathname)) {
     // Add API-specific security headers

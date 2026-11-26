@@ -1,7 +1,7 @@
 # WhatsApp Business API: set-up and message templates
 
 The store sends WhatsApp messages through Meta's **WhatsApp Business Cloud API**. Nothing is sent
-until the keys below are set. Team pages: **/team/whatsapp** (status, campaigns) and **/team/offers**.
+until the keys below are set. Admin pages: **/admin/whatsapp** (status, campaigns) and **/admin/offers**.
 
 ## 1. Set up in Meta (once)
 
@@ -96,7 +96,7 @@ Used when the team accepts or counters a "Make an offer" request and the custome
 
 ## 3. Offers / ads (Marketing templates)
 
-Create as many **Marketing** templates as you like (any name); they appear on **/team/whatsapp** once
+Create as many **Marketing** templates as you like (any name); they appear on **/admin/whatsapp** once
 approved. They are sent only to customers who ticked *"Also send me offers on WhatsApp"*. Example:
 
 ### `honic_weekly_offer` · Marketing

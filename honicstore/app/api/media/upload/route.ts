@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 import { enhancedRateLimitDistributed, logSecurityEvent } from '@/lib/enhanced-rate-limit'
-import { validateAuth, getUserAndRole } from '@/lib/auth-server'
+import { validateAuth } from '@/lib/auth-server'
 import { sniffImage, sameImageType } from '@/lib/image-sniff'
 
 
@@ -41,8 +41,6 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const { role } = await getUserAndRole(user.id)
-    
     logger.log('📤 Media upload API called (using service role key)')
     
     // Check for authentication header
@@ -60,15 +58,16 @@ export async function POST(request: NextRequest) {
     if (isAvatar && type !== 'image') {
       return NextResponse.json({ error: 'Profile photos must be images' }, { status: 400 })
     }
-    if (!isAvatar && !productId && role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden: productId required for non-admin upload' }, { status: 403 })
+    // no admin shortcut here: admin uploads go through /api/admin/upload (two-step sign-in)
+    if (!isAvatar && !productId) {
+      return NextResponse.json({ error: 'Forbidden: productId required' }, { status: 403 })
     }
     if (productId && !isAvatar) {
       const pid = Number.parseInt(productId, 10)
       if (Number.isNaN(pid)) {
         return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
       }
-      if (role !== 'admin') {
+      {
         const { data: ownedProduct, error: ownErr } = await supabase
           .from('products')
           .select('id')

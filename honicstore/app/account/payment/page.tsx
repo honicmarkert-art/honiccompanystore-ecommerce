@@ -59,7 +59,7 @@ export default function PaymentsAddressesPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-5 py-4 dark:border-neutral-800">
           <h2 className="flex items-center gap-2 font-bold"><Wallet className="h-5 w-5 text-orange-600" /> Payment history</h2>
           {totalPaid > 0 && <p className="text-sm text-neutral-500">Paid in total <span className="font-bold text-neutral-900 tabular-nums dark:text-white">{formatPrice(totalPaid)}</span></p>}
-        </div>
+            </div>
         {loading && orders.length === 0 ? (
           <div className="space-y-2 p-5">{[0, 1].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-stone-100 dark:bg-neutral-800" />)}</div>
         ) : sorted.length === 0 ? (
@@ -92,7 +92,7 @@ export default function PaymentsAddressesPage() {
         <div className="border-b border-neutral-100 px-5 py-4 dark:border-neutral-800">
           <h2 className="flex items-center gap-2 font-bold"><MapPin className="h-5 w-5 text-orange-600" /> Delivery addresses</h2>
           <p className="mt-1 text-sm text-neutral-500">Addresses from your past orders. Checkout asks where to deliver each time, so you can always use a new one.</p>
-        </div>
+            </div>
         {addresses.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-neutral-500">{loading ? 'Loading…' : 'No delivery addresses yet.'}</p>
         ) : (
@@ -114,4 +114,5 @@ export default function PaymentsAddressesPage() {
       </section>
     </div>
   )
-}
+} 
+ 
