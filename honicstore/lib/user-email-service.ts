@@ -495,6 +495,38 @@ export function getAdminNoticeEmails(): string[] {
   return emails
 }
 
+/**
+ * Tells the team a payment arrived, so the order gets confirmed quickly. Sent once per order (only
+ * by the request that marks it paid). ADMIN_APP_URL links straight to the order in the admin app.
+ */
+export async function sendAdminOrderPaidNotice(input: {
+  orderId: string; orderNumber: string; total: number; customer: string; phone?: string
+  pickup: boolean; items: { name: string; quantity: number }[]
+}): Promise<void> {
+  const admins = getAdminNoticeEmails()
+  if (!admins.length) return
+  const adminUrl = (process.env.ADMIN_APP_URL || '').trim().replace(/\/$/, '')
+  const link = /^https:\/\//.test(adminUrl) ? `${adminUrl}/orders/${encodeURIComponent(input.orderId)}` : ''
+  const amount = `TSh ${Math.round(input.total).toLocaleString('en-US')}`
+  const lines = input.items.slice(0, 20).map((i) => `${i.quantity} × ${i.name}`)
+  const how = input.pickup ? 'Store pickup' : 'Delivery'
+  try {
+    const res = await sendEmail({
+      to: admins,
+      subject: `Paid: order ${input.orderNumber} · ${amount}`,
+      text: `Payment received for order ${input.orderNumber} (${amount}).\n\nCustomer: ${input.customer}${input.phone ? ` · ${input.phone}` : ''}\n${how}\n\n${lines.join('\n')}${link ? `\n\nConfirm it: ${link}` : ''}`,
+      html: `<p><strong>Payment received</strong> for order <strong>${esc(input.orderNumber)}</strong>: ${esc(amount)}.</p>`
+        + `<p>Customer: ${esc(input.customer)}${input.phone ? ` · ${esc(input.phone)}` : ''}<br>${how}</p>`
+        + `<ul>${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`
+        + (link ? `<p><a href="${esc(link)}">Open the order and confirm it</a></p>` : ''),
+      from: from('Honic Orders'),
+    })
+    if (!res.success) logger.error('Admin paid-order notice failed:', res.error)
+  } catch (error) {
+    logger.error('Admin paid-order notice failed:', error)
+  }
+}
+
 export async function sendAccountCreatedNotice(input: { userEmail: string; name: string; isSupplier?: boolean }): Promise<{ userSent: boolean }> {
   const userEmail = input.userEmail.trim()
   const name = input.name.trim() || userEmail.split('@')[0]

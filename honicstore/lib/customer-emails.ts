@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { logger } from '@/lib/logger'
 import {
   sendOrderCancellationEmail,
+  sendAdminOrderPaidNotice,
   sendPaymentReceivedEmail,
   sendSecurityAlertEmail,
   sendSupplierPremiumReceiptEmail,
@@ -119,6 +120,12 @@ export async function sendPaidOrderEmails(supabase: Supabase, partial: Row) {
       orderUrl,
       invoiceUrl,
       invoicePdf,
+    })
+    // the team: payment arrived, confirm the order
+    await sendAdminOrderPaidNotice({
+      orderId: String(order.id), orderNumber, total, pickup,
+      customer: String(shipping.fullName || billing.fullName || "Customer"), phone: String(shipping.phone || billing.phone || "") || undefined,
+      items: items.map((i) => ({ name: i.name, quantity: i.quantity })),
     })
   } catch (error) {
     logger.error('Paid order email failed:', error)
