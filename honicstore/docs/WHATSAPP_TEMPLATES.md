@@ -28,71 +28,35 @@ until the keys below are set. Admin pages: **/admin/whatsapp** (status, campaign
    Verify token = `WHATSAPP_VERIFY_TOKEN`, then **subscribe to `messages`**.
 7. Tell Claude the keys are filled in: they are pushed to Vercel and the site is redeployed.
 
-## 2. Templates to create (WhatsApp Manager → Message templates)
+## 2. Templates (submitted through the API on 2026-11-27)
 
-Create each with **exactly this name**, category as shown, language **English (en)**. The texts are
-bilingual (Swahili + English). `{{n}}` are variables: Meta asks for a sample of each.
-Order templates are **Utility**; they are sent only to customers who ticked *"Send my order updates on WhatsApp"*.
+All are **Utility**, language **en**, bilingual (Swahili + English). Names must match `WA_TEMPLATES` in
+`lib/whatsapp.ts` (shop and admin). Order templates go only to customers who ticked
+*"Send my order updates on WhatsApp"*. Button texts are at most 25 characters (WhatsApp limit).
+Opening hours and the street number are left out on purpose: an approved template cannot be changed quickly.
 
-### `honic_order_paid` · Utility
-- **Header:** Document (sample: any PDF). The store attaches the invoice PDF.
-- **Body:**
-  ```
-  Habari {{1}}, tumepokea malipo ya oda {{2}} ({{3}}). Ankara yako (PDF) imeambatishwa. Tunaandaa oda yako sasa.
+| Template | Sent when | Variables | Button |
+|---|---|---|---|
+| `honic_order_paid` | payment confirmed (shop) | name, order number, total. Header: invoice PDF | Track order / Fuatilia → `/orders/{ref}` |
+| `honic_order_shipped` | admin marks shipped | name, order number, tracking number | Track order / Fuatilia → `/orders/{ref}` |
+| `honic_order_ready_pickup` | admin marks ready for pickup | name, order number, pickup ID | View order / Angalia oda → `/orders/{ref}` |
+| `honic_order_delivered` | admin marks delivered | name, order number | Confirm / Thibitisha → `/orders/{ref}` |
+| `honic_order_expired` | unpaid order cancelled after 15 min | name, order number | Open cart / Fungua kikapu → `/cart` |
+| `honic_offer_reply` | admin accepts or counters a "Make an offer" request (customer silent for 24 h) | name, product, price each, quantity, code, hours valid | View item / Angalia → `/products/{id}-{slug}` |
+| `honic_import_shipping_price` | admin saves the China shipping price of an order | name, order number, price, "ndege / air" or "meli / sea" | View order / Angalia oda → `/orders/{ref}` |
 
-  Hello {{1}}, we received payment for order {{2}} ({{3}}). Your invoice (PDF) is attached. We are preparing your order now.
-  ```
-  Samples: `Asha`, `ORD-1764000000000`, `TSh 98,000`
-- **Button:** Visit website · text `Fuatilia oda / Track order` · URL **dynamic** `https://honiccompanystore.com/orders/{{1}}` (sample `0123456789abcdef0123456789abcdef`)
+Texts:
 
-### `honic_order_shipped` · Utility
-- **Body:**
-  ```
-  Habari {{1}}, oda {{2}} imetumwa na iko njiani. Namba ya mzigo: {{3}}.
+- **order_paid:** Habari {{1}}, tumepokea malipo ya oda {{2}} ({{3}}). Ankara yako (PDF) imeambatishwa. Tunaandaa oda yako sasa. / Hello {{1}}, we received payment for order {{2}} ({{3}}). Your invoice (PDF) is attached. We are preparing your order now.
+- **order_shipped:** Habari {{1}}, oda {{2}} imetumwa na iko njiani. Namba ya mzigo: {{3}}. / Hello {{1}}, order {{2}} is on the way. Tracking number: {{3}}. Tap the button below to follow it.
+- **order_ready_pickup:** Habari {{1}}, oda yako {{2}} iko tayari kuchukuliwa. Namba ya kuchukulia (Pickup ID): {{3}}. Tafadhali leta kitambulisho ukija kuchukua. / Hello {{1}}, your order {{2}} is ready for collection. Pickup ID: {{3}}. Please bring a valid ID when you collect it.
+- **order_delivered:** Habari {{1}}, oda {{2}} imefika. Tafadhali angalia bidhaa na uthibitishe umeipokea. Kuna tatizo? Unaweza kuomba kurudisha ndani ya siku 7. / Hello {{1}}, order {{2}} was delivered. Please check it and confirm you received it. A problem? You can ask for a return within 7 days.
+- **order_expired:** Habari {{1}}, oda {{2}} haikulipwa ndani ya dakika 15, kwa hiyo imesitishwa. Hakuna pesa iliyokatwa. Unaweza kuagiza tena kutoka kwenye kikapu. / Hello {{1}}, order {{2}} was not paid within 15 minutes, so it was cancelled. No money was taken. You can order again from your cart.
+- **offer_reply:** Habari {{1}}, ombi lako la bei ya {{2}} limejibiwa. Bei: {{3}} kwa kila moja, idadi {{4}}. Namba ya ombi lako: {{5}}. Itumie kwenye kikapu ndani ya saa {{6}}. / Hello {{1}}, your price request for {{2}} has been answered. Price: {{3}} each, quantity {{4}}. Your request code: {{5}}. Use it in your cart within {{6}} hours.
+- **import_shipping_price:** Habari {{1}}, bei ya kusafirisha oda {{2}} kutoka China iko tayari: {{3}} ({{4}}). Utalipa gharama hii mzigo ukifika. / Hello {{1}}, the shipping price for order {{2}} from China is ready: {{3}} ({{4}}). You pay it when the parcel arrives.
 
-  Hello {{1}}, order {{2}} is on the way. Tracking number: {{3}}.
-  ```
-  Samples: `Asha`, `ORD-1764000000000`, `TZ123456`
-- **Button:** URL dynamic `https://honiccompanystore.com/orders/{{1}}` · text `Fuatilia oda / Track order`
-
-### `honic_order_ready_pickup` · Utility
-- **Body:**
-  ```
-  Habari {{1}}, oda {{2}} iko tayari kuchukuliwa dukani. Pickup ID: {{3}}. Leta kitambulisho. Duka: 44 Bibi Titi Road, DIT CEIIT Tower, Dar es Salaam (Jumatatu - Jumamosi, 9:00 - 18:00).
-
-  Hello {{1}}, order {{2}} is ready for pickup. Pickup ID: {{3}}. Bring a valid ID.
-  ```
-  Samples: `Asha`, `ORD-1764000000000`, `PK-4821`
-- **Button:** URL dynamic `https://honiccompanystore.com/orders/{{1}}` · text `Angalia oda / View order`
-
-### `honic_order_delivered` · Utility
-- **Body:**
-  ```
-  Habari {{1}}, oda {{2}} imefika. Tafadhali angalia bidhaa na uthibitishe umeipokea. Kuna tatizo? Unaweza kuomba kurudisha ndani ya siku 7.
-
-  Hello {{1}}, order {{2}} was delivered. Please check it and confirm you received it. A problem? You can ask for a return within 7 days.
-  ```
-- **Button:** URL dynamic `https://honiccompanystore.com/orders/{{1}}` · text `Thibitisha / Confirm`
-
-### `honic_order_expired` · Utility
-- **Body:**
-  ```
-  Habari {{1}}, oda {{2}} haikulipwa ndani ya dakika 15, kwa hiyo imesitishwa. Hakuna pesa iliyokatwa. Unaweza kuagiza tena kutoka kwenye kikapu.
-
-  Hello {{1}}, order {{2}} was not paid within 15 minutes, so it was cancelled. No money was taken. You can order again from your cart.
-  ```
-- **Button:** URL **static** `https://honiccompanystore.com/cart` · text `Fungua kikapu / Open cart`
-
-### `honic_offer_reply` · Utility
-Used when the team accepts or counters a "Make an offer" request and the customer has not written in the last 24 h.
-- **Body:**
-  ```
-  Habari {{1}}, kuhusu ofa yako ya {{2}}: bei iliyokubaliwa ni {{3}} kwa kila moja (idadi {{4}}). Kodi yako: {{5}}. Iweke kwenye kikapu, kisha lipa kwa mobile money. Inafanya kazi mara moja ndani ya saa {{6}}.
-
-  Hello {{1}}, about your offer for {{2}}: agreed price {{3}} each (qty {{4}}). Your code: {{5}}. Enter it in your cart and pay with mobile money. Valid once, for {{6}} hours.
-  ```
-  Samples: `Asha`, `Bambu Lab A1 3D Printer`, `TSh 1,700,000`, `1`, `OFR-7K3P9X`, `48`
-- **Button:** URL dynamic `https://honiccompanystore.com/products/{{1}}` · text `Nunua sasa / Buy now` (sample `270`)
+If a number in these texts changes (15-minute payment window, 7-day returns), edit the template in
+WhatsApp Manager too: `lib/policies.ts` does not update approved templates.
 
 ## 3. Offers / ads (Marketing templates)
 

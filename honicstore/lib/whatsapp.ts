@@ -24,6 +24,7 @@ export const WA_TEMPLATES = {
   order_delivered: 'honic_order_delivered',
   order_expired: 'honic_order_expired',
   offer_reply: 'honic_offer_reply',
+  import_shipping_price: 'honic_import_shipping_price',
 } as const
 export type UtilityKind = keyof typeof WA_TEMPLATES
 
