@@ -5,8 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Bell, Bookmark, Camera, ChevronDown, ChevronRight, Clock, Heart, HelpCircle, LayoutGrid, LogIn, LogOut,
-  Menu, MessageSquare, Package, Search, Settings, ShieldCheck, ShoppingCart, Store, Truck, User, X, Zap,
-} from 'lucide-react'
+  Menu, MessageSquare, Package, Search, Settings, ShieldCheck, ShoppingCart, Store, Truck, User, X, Zap, Plane } from 'lucide-react'
 import { optimizedImg } from '@/lib/image-optimize'
 import { useAuth } from '@/contexts/auth-context'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
@@ -170,6 +169,7 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
             <span className="flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-orange-400" />Secure payment</span>
           </div>
           <nav className="flex items-center gap-5">
+            <Link href="/buy-from-china" className="font-semibold text-red-300 hover:text-white">Buy from China</Link>
             <Link href="/support/order-tracking" className="hover:text-white">Track order</Link>
             <Link href="/support" className="flex items-center gap-1 hover:text-white"><HelpCircle className="h-3.5 w-3.5" />Help</Link>
             <Link href="/become-supplier" className="flex items-center gap-1 font-semibold text-orange-400 hover:text-orange-300"><Store className="h-3.5 w-3.5" />Sell on {companyName || 'Honic'}</Link>
@@ -427,6 +427,7 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
                 ))}
               </ul>
               <div className="border-t border-neutral-100 p-4 text-sm dark:border-neutral-800">
+                <Link href="/buy-from-china" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2 font-semibold text-red-600"><Plane className="h-4 w-4" />Buy from China</Link>
                 <Link href="/support/order-tracking" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2"><Truck className="h-4 w-4 opacity-70" />Track order</Link>
                 <Link href="/support" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2"><HelpCircle className="h-4 w-4 opacity-70" />Help & support</Link>
                 <Link href="/become-supplier" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2 font-semibold text-orange-600"><Store className="h-4 w-4" />Sell on {companyName || 'Honic'}</Link>

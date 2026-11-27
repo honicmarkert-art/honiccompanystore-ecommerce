@@ -39,3 +39,7 @@ export const paymentTopUp = (total: number) => (total > 0 && total < MIN_PAYMENT
 
 /** Label for that line everywhere it is shown (checkout, order pages, invoice, email). */
 export const TOP_UP_LABEL = 'Mobile money minimum'
+
+/** Items imported to order from China ("Buy from China", products.import_china): days from payment to arrival. */
+export const IMPORT_DAYS_MIN = 7
+export const IMPORT_DAYS_MAX = 10
