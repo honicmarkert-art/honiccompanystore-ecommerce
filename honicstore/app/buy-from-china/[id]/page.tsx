@@ -1,11 +1,11 @@
 import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
-import { SiteHeader } from '@/components/site-header'
-import { SiteFooter } from '@/components/site-footer'
+import { Suspense } from 'react'
+import { ProductDetailErrorBoundary } from '@/components/product-detail-error-boundary'
+import { ProductDetailFallback } from '@/app/products/[id]/_components/product-detail-client'
 import { getProductDetail } from '@/lib/product-detail'
 import { getFreightSettings } from '@/lib/import-freight-server'
-import { RETURN_DAYS } from '@/lib/policies'
 import { whatsappLink } from '@/lib/contact'
 import { ChinaProduct, type RelatedItem } from './china-product'
 
@@ -72,21 +72,19 @@ export default async function ChinaProductPage({ params }: Props) {
     offers: { '@type': 'Offer', priceCurrency: 'TZS', price: product.price, url, availability: 'https://schema.org/PreOrder' },
   }
 
+  // same layout as the regular product page (header, gallery, buy box, tabs, sticky bar), in China mode
   return (
-    <div className="min-h-screen bg-[#f7f1e8] text-[#1d1210]">
+    <ProductDetailErrorBoundary>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }} />
-      <SiteHeader />
-      <ChinaProduct
-        product={product}
-        size={{ weightKg: size?.weight_kg ?? null, lengthCm: size?.length_cm ?? null, widthCm: size?.width_cm ?? null, heightCm: size?.height_cm ?? null }}
-        settings={settings}
-        related={related}
-        sold={Number(size?.sold_count) || 0}
-        returnDays={RETURN_DAYS}
-        askLink={whatsappLink(`Hello Honic, about this China item: ${product.name} ${url} — what is the shipping price to Tanzania?`)}
-        bulkLink={whatsappLink(`Hello Honic, I would like a bulk price for this China item: ${product.name} ${url}. Quantity: `)}
-      />
-      <SiteFooter />
-    </div>
+      <Suspense fallback={<ProductDetailFallback />}>
+        <ChinaProduct
+          product={product}
+          size={{ weightKg: size?.weight_kg ?? null, lengthCm: size?.length_cm ?? null, widthCm: size?.width_cm ?? null, heightCm: size?.height_cm ?? null }}
+          settings={settings}
+          related={related}
+          askLink={whatsappLink(`Hello Honic, about this China item: ${product.name} ${url} — what is the shipping price to Tanzania?`)}
+        />
+      </Suspense>
+    </ProductDetailErrorBoundary>
   )
 }

@@ -38,11 +38,21 @@ type PendingAction = { type: 'add' | 'buy'; quantity: number; variantId?: string
 
 const BULK_ORDER_MINIMUM = 100
 
-export function ProductDetailClient({ initialProduct, categorySlug = null, returnTo: returnToParam, from }: { initialProduct: ProductDetail; categorySlug?: string | null; returnTo?: string; from?: string }) {
+/**
+ * China mode (Buy from China product page, /buy-from-china/[id]): the same layout and features, with the
+ * breadcrumb to Buy from China, the China shipping card instead of local delivery, and the import shelf
+ * instead of related products. The page itself explains the import, so no import notice pops up.
+ */
+export type ChinaMode = {
+  shipping: (quantity: number) => React.ReactNode
+  related?: React.ReactNode
+}
+
+export function ProductDetailClient({ initialProduct, categorySlug = null, returnTo: returnToParam, from, china }: { initialProduct: ProductDetail; categorySlug?: string | null; returnTo?: string; from?: string; china?: ChinaMode }) {
   const router = useRouter()
   // Only same-site paths are honoured, so returnTo cannot send shoppers off-site
-  const returnTo = returnToParam && returnToParam.startsWith('/') && !returnToParam.startsWith('//') ? returnToParam : '/products'
-  const fromChina = from === 'china'
+  const returnTo = returnToParam && returnToParam.startsWith('/') && !returnToParam.startsWith('//') ? returnToParam : china ? '/buy-from-china' : '/products'
+  const fromChina = from === 'china' || !!china
 
   const { toast } = useToast()
   const { user, isAuthenticated, loading: authLoading } = useAuth() as any
@@ -366,7 +376,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
   const badges = (
     <>
       {discount > 0 && <span className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-bold text-white shadow">-{discount}%</span>}
-      {product.importChina && <span className="rounded-lg bg-white px-2 py-1 text-xs font-semibold text-red-700 shadow ring-1 ring-red-200">Imported from China</span>}
+      {product.importChina && !china && <span className="rounded-lg bg-white px-2 py-1 text-xs font-semibold text-red-700 shadow ring-1 ring-red-200">Imported from China</span>}
     </>
   )
 
@@ -406,8 +416,8 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
         <nav aria-label="Breadcrumb" className="flex items-center gap-1 overflow-x-auto whitespace-nowrap py-1 text-xs text-neutral-500 [scrollbar-width:none] sm:text-sm [&_a]:inline-block [&_a]:py-2.5">
           <Link href="/" className="hover:text-orange-600">Home</Link>
           <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-          <Link href={returnTo} className="hover:text-orange-600">Products</Link>
-          {product.category && (
+          <Link href={returnTo} className="hover:text-orange-600">{china ? 'Buy from China' : 'Products'}</Link>
+          {product.category && !china && (
             <>
               <ChevronRight className="h-3.5 w-3.5 shrink-0" />
               <Link href={categorySlug ? `/products?category=${encodeURIComponent(categorySlug)}` : `/products?search=${encodeURIComponent(product.category)}`} className="hover:text-orange-600">{product.category}</Link>
@@ -580,7 +590,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
             )}
 
             {/* Delivery fee & time for the shopper's area (same calculator as checkout) */}
-            <DeliveryEstimate price={price} quantity={quantity} shippingSize={product.shippingSize} freeDelivery={product.freeDelivery} formatPrice={formatPrice} />
+            {china ? china.shipping(quantity) : <DeliveryEstimate price={price} quantity={quantity} shippingSize={product.shippingSize} freeDelivery={product.freeDelivery} formatPrice={formatPrice} />}
 
             {/* Supplier (phones/tablets; desktop shows it under the gallery) */}
             <div className="mt-6 lg:hidden">{supplierCard}</div>
@@ -591,7 +601,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
           <ProductTabs product={shownProduct} />
         </div>
 
-        <RelatedProducts productId={product.id} categorySlug={categorySlug} productName={product.name} price={product.price} formatPrice={formatPrice} />
+        {china ? china.related : <RelatedProducts productId={product.id} categorySlug={categorySlug} productName={product.name} price={product.price} formatPrice={formatPrice} />}
         <RecentlyViewed excludeId={product.id} formatPrice={formatPrice} />
       </main>
 
