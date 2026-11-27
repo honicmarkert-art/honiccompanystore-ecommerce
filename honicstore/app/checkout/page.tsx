@@ -56,6 +56,7 @@ import { CheckoutLanguageToggle } from "@/components/checkout-language-toggle"
 import { BrandLogo } from "@/components/brand-logo"
 import { safeImageSrc, optimizedImg } from "@/lib/image-optimize"
 import { MIN_PAYMENT_TZS, TOP_UP_LABEL, paymentTopUp } from "@/lib/policies"
+import { MODE_LABEL, type FreightMode, type FreightQuote } from "@/lib/import-freight"
 import { DAR_ES_SALAAM_TIERS } from "@/lib/shipping-pricing-config"
 import { BOUGHT_ITEMS_KEY, saveLocalOrder, savePendingOrder, takePendingOrder } from "@/lib/local-orders"
 
@@ -289,6 +290,10 @@ function CheckoutPageContent() {
   const { freeThresholdTz: FREE_SHIPPING_THRESHOLD } = getClientShippingPricing()
 
   const [deliveryOption, setDeliveryOption] = useState<Delivery>("shipping")
+  // Buy from China items: shipping from China by air or sea (priced by the server: /api/import-freight)
+  const [freightMode, setFreightMode] = useState<FreightMode>("air")
+  const [freight, setFreight] = useState<{ chinaItems: number; air: FreightQuote | null; sea: FreightQuote | null } | null>(null)
+  const [freightLoading, setFreightLoading] = useState(false)
   const [shippingAddress, setShippingAddress] = useState<Address>(EMPTY_ADDRESS)
   const [billingAddress, setBillingAddress] = useState<Address>(EMPTY_ADDRESS)
   const [sameAsShipping, setSameAsShipping] = useState(true)
@@ -331,7 +336,10 @@ function CheckoutPageContent() {
   const shippingFee = deliveryOption === "pickup" || deferShippingFee ? 0 : (shippingEstimate?.shipping ?? fallbackShippingFee)
   const shippingFeeLoading = !deferShippingFee && shippingEstimateLoading && deliveryOption === "shipping"
   const promotionDiscount = appliedPromotion ? appliedPromotion.discountAmount : 0
-  const baseTotal = displaySubtotal + shippingFee - promotionDiscount
+  const hasChina = (freight?.chinaItems ?? 0) > 0
+  const chinaFreight = hasChina ? (freightMode === "air" ? freight!.air : freight!.sea) : null
+  const importFreight = chinaFreight?.tzs || 0
+  const baseTotal = displaySubtotal + shippingFee + importFreight - promotionDiscount
   // mobile money can't take under TSh 500: very small orders are topped up (shown as its own line)
   const topUp = deliveryOption === "shipping" && deferShippingFee ? 0 : paymentTopUp(baseTotal)
   const orderTotal = baseTotal + topUp
@@ -352,6 +360,21 @@ function CheckoutPageContent() {
   const estimateItems = selectedItems.flatMap((item) =>
     (item.variants || []).map((v) => ({ productId: item.productId, variantId: v.variantId ?? null, quantity: v.quantity ?? 1 }))
   )
+
+  // China shipping prices for the selected items (sizes and weights come from the server)
+  const freightKey = JSON.stringify(estimateItems.map((i) => ({ productId: i.productId, quantity: i.quantity })))
+  useEffect(() => {
+    const items = JSON.parse(freightKey) as { productId: number; quantity: number }[]
+    if (!items.length) { setFreight(null); return } // eslint-disable-line react-hooks/set-state-in-effect -- nothing to price
+    let off = false
+    setFreightLoading(true)
+    fetch("/api/import-freight", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) })
+      .then((r) => r.json())
+      .then((d) => { if (!off) setFreight({ chinaItems: Number(d?.chinaItems) || 0, air: d?.air || null, sea: d?.sea || null }) })
+      .catch(() => { if (!off) setFreight(null) })
+      .finally(() => { if (!off) setFreightLoading(false) })
+    return () => { off = true }
+  }, [freightKey])
 
   // Stable key so the estimate is only refetched when items / delivery / location really change.
   const shippingEstimateKey = JSON.stringify(estimateBody(estimateItems))
@@ -682,7 +705,11 @@ function CheckoutPageContent() {
           // fall back to the values above
       }
       }
-      const serverBase = Math.round(serverSubtotal + serverShippingFee - promotionDiscount)
+      if (hasChina && (freightLoading || !chinaFreight)) {
+        toast({ title: "One moment", description: "We are still working out the shipping from China. Try again in a few seconds.", variant: "destructive" })
+        return
+      }
+      const serverBase = Math.round(serverSubtotal + serverShippingFee + importFreight - promotionDiscount)
       const totalAmount = serverBase + paymentTopUp(serverBase)
 
       const orderData = {
@@ -715,6 +742,7 @@ function CheckoutPageContent() {
         shippingFee: serverShippingFee,
         promotionCode: appliedPromotion?.code || null,
         promotionDiscount,
+        importFreightMode: hasChina ? freightMode : undefined,
         totalAmount,
         timestamp: new Date().toISOString(),
       }
@@ -947,6 +975,14 @@ function CheckoutPageContent() {
             {shippingEstimate.delivery.freeReason === "threshold" && <span className="block text-emerald-700">Free delivery on orders over {formatPrice(FREE_SHIPPING_THRESHOLD)}</span>}
             {shippingEstimate.delivery.sizeSurcharge > 0 && <span className="block">Includes {formatPrice(shippingEstimate.delivery.sizeSurcharge)} {shippingEstimate.delivery.size === "large" ? "large-item" : "bigger-item"} handling</span>}
           </p>
+        )}
+        {hasChina && (
+          <div className="flex justify-between gap-3">
+            <dt className="text-neutral-500">Shipping from China ({MODE_LABEL[freightMode]})
+              {(chinaFreight?.unmeasured ?? 0) > 0 && <span className="block text-[11px] leading-snug text-neutral-400">{chinaFreight!.unmeasured} item{chinaFreight!.unmeasured === 1 ? "" : "s"} priced after weighing, paid on arrival</span>}
+            </dt>
+            <dd className="font-semibold tabular-nums">{freightLoading || !chinaFreight ? <span className="inline-block h-3.5 w-14 animate-pulse rounded bg-neutral-200 align-middle" /> : chinaFreight.measured === 0 ? <span className="text-xs font-medium text-neutral-500">After weighing</span> : formatPrice(importFreight)}</dd>
+          </div>
         )}
         {promotionDiscount > 0 && (
           <div className="flex justify-between text-emerald-700">
@@ -1205,8 +1241,31 @@ function CheckoutPageContent() {
     </SectionCard>
   )
 
+  const freightChoice = (m: FreightMode) => {
+    const q = m === "air" ? freight?.air : freight?.sea
+    const on = freightMode === m
+    return (
+      <button type="button" key={m} onClick={() => setFreightMode(m)} aria-pressed={on}
+        className={cn("flex-1 rounded-2xl border-2 p-3 text-left transition", on ? "border-[#c8102e] bg-red-50/60" : "border-neutral-200 hover:border-neutral-400")}>
+        <span className="flex items-center justify-between gap-2"><b className="text-sm">{m === "air" ? "✈ Air" : "🚢 Sea"}</b>{q && <span className="text-sm font-bold tabular-nums">{q.measured ? formatPrice(q.tzs) : "After weighing"}</span>}</span>
+        <span className="mt-0.5 block text-xs text-neutral-500">{q ? `About ${q.daysMin}–${q.daysMax} days` : "…"}{q && q.measured > 0 ? ` · ${q.chargeable} ${q.unit} at ${q.rateUsd}/${q.unit}` : ""}</span>
+      </button>
+    )
+  }
+  const chinaSection = hasChina ? (
+    <SectionCard n={3} icon={<Truck className="h-4 w-4" />} title="Shipping from China" subtitle="Your China items travel together. Choose how.">
+      <div className="flex flex-col gap-2 sm:flex-row">{freightChoice("air")}{freightChoice("sea")}</div>
+      {(chinaFreight?.unmeasured ?? 0) > 0 && (
+        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {chinaFreight!.unmeasured} of your China items {chinaFreight!.unmeasured === 1 ? "has" : "have"} no listed size or weight. You pay for {chinaFreight!.unmeasured === 1 ? "it" : "them"} now; we weigh the parcel when it reaches our warehouse and tell you the {MODE_LABEL[freightMode].toLowerCase()} shipping price, which you pay on delivery or pickup.
+        </p>
+      )}
+      <p className="mt-2 text-[11px] text-neutral-500">Delivery inside Tanzania (above) is separate. Shipping prices follow our published air and sea rates.</p>
+    </SectionCard>
+  ) : null
+
   const paymentSection = (
-    <SectionCard n={3} icon={<Smartphone className="h-4 w-4" />} title="Payment" subtitle="Pay with mobile money. You approve it on your phone.">
+    <SectionCard n={hasChina ? 4 : 3} icon={<Smartphone className="h-4 w-4" />} title="Payment" subtitle="Pay with mobile money. You approve it on your phone.">
       <div className="rounded-2xl border-2 border-orange-500 bg-orange-50/40 p-4">
         <div className="flex items-start gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-orange-500 text-white">
@@ -1481,6 +1540,7 @@ function CheckoutPageContent() {
                 <>
                   {contactSection}
                   {deliverySection}
+                  {chinaSection}
                   {paymentSection}
                 </>
                   )}

@@ -112,7 +112,7 @@ const SLIDE_STYLES = {
 // ---------- helpers ----------
 const slugify = (s: string) =>
   s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'product'
-const productHref = (p: Product) => `/products/${p.id}-${slugify(p.slug || p.name || '')}`
+const productHref = (p: Product) => (p.importChina || p.import_china ? `/buy-from-china/${p.id}` : `/products/${p.id}-${slugify(p.slug || p.name || '')}`)
 
 const categoryHref = (c: Category) =>
   c.is_main || !c.parent_slug

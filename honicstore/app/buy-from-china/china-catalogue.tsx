@@ -50,7 +50,7 @@ export function ChinaCatalogue({ items, days, askLink }: { items: ChinaItem[]; d
           <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-[#c8102e]">The import shelf</p>
           <h2 className="mt-1 text-3xl font-black tracking-tight sm:text-4xl">Order from China</h2>
         </div>
-        <p className="text-sm text-[#1d1210]/60">{shown.length} of {items.length} items · each arrives in about {days} days</p>
+        <p className="text-sm text-[#1d1210]/60">{shown.length} of {items.length} items · {days ? `about ${days}, or cheaper by sea` : 'shipped by air or sea'}</p>
       </div>
 
       {/* controls */}
@@ -87,7 +87,7 @@ export function ChinaCatalogue({ items, days, askLink }: { items: ChinaItem[]; d
         <ul className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
           {shown.map((i) => (
             <li key={i.id}>
-              <Link href={`/products/${i.id}${i.slug ? `-${encodeURIComponent(i.slug)}` : ''}?from=china&returnTo=${encodeURIComponent('/buy-from-china')}`}
+              <Link href={`/buy-from-china/${i.id}`}
                 className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-[#1d1210]/10 bg-white transition hover:-translate-y-0.5 hover:border-[#c8102e]/40 hover:shadow-xl hover:shadow-[#c8102e]/10">
                 <span className="relative block aspect-square bg-[#fbf6ee]">
                   {i.image

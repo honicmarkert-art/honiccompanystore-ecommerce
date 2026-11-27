@@ -9,6 +9,7 @@ import { emailService } from '@/lib/email-service'
 import { getAdminNoticeEmails } from '@/lib/user-email-service'
 import { getSupabaseClient } from '@/lib/supabase-server'
 import { paymentTopUp } from '@/lib/policies'
+import { freightForCart, isFreightMode } from '@/lib/import-freight-server'
 import { recordWaConsent } from '@/lib/whatsapp'
 import { calculateShippingFee, getShippingSizes, largestSize, resolveShippingCoordinatesFromAddress } from '@/lib/shipping-pricing'
 import { ShortTtlCache } from '@/lib/short-ttl-cache'
@@ -409,6 +410,33 @@ export async function POST(request: NextRequest) {
       serverShippingFee = shippingCalc.shippingFee
     }
 
+    // Buy from China: shipping from China by air or sea, priced on the server from the products' sizes
+    // and weights (lib/import-freight.ts). Items without size/weight are priced after weighing and paid on
+    // arrival (status pending_quote), so they add nothing now.
+    let serverImportFreight = 0
+    let importFreightFields: Record<string, unknown> = {}
+    {
+      const freight = await freightForCart(validatedItems.map((i: any) => ({ productId: Number(i.product_id), quantity: Number(i.quantity) })))
+      if (freight.chinaItems > 0) {
+        const mode = orderData.importFreightMode
+        if (!isFreightMode(mode)) {
+          return NextResponse.json({ error: 'Choose how your China items travel: air or sea.' }, { status: 400 })
+        }
+        const q = mode === 'air' ? freight.air : freight.sea
+        if (!q && !freight.settings) {
+          return NextResponse.json({ error: 'Shipping from China is not available right now. Please try again later.' }, { status: 503 })
+        }
+        serverImportFreight = q?.tzs || 0
+        importFreightFields = {
+          import_freight_mode: mode,
+          import_freight_tzs: serverImportFreight,
+          import_freight_status: (q?.unmeasured || 0) > 0 ? 'pending_quote' : 'included',
+          import_freight_details: q ? { chargeable: q.chargeable, unit: q.unit, rateUsd: q.rateUsd, usd: q.usd, usdTzs: freight.settings?.usdTzs, measured: q.measured, unmeasured: q.unmeasured, daysMin: q.daysMin, daysMax: q.daysMax } : null,
+          import_freight_updated_at: new Date().toISOString(),
+        }
+      }
+    }
+
     // SECURITY: Validate and recalculate promotion discount server-side
     let serverPromotionDiscount = 0
     if (orderData.promotionCode) {
@@ -564,7 +592,7 @@ export async function POST(request: NextRequest) {
     // Whole shillings: Snippe only accepts integer TZS amounts (a % discount can leave decimals)
     // mobile money can't take under TSh 500: very small orders are topped up to it (lib/policies.ts),
     // the same rule the checkout page shows as "Mobile money minimum"
-    const serverBaseTotal = Math.round(serverCalculatedSubtotal + serverShippingFee - serverPromotionDiscount)
+    const serverBaseTotal = Math.round(serverCalculatedSubtotal + serverShippingFee + serverImportFreight - serverPromotionDiscount)
     const serverCalculatedTotal = serverBaseTotal + paymentTopUp(serverBaseTotal)
     if (serverCalculatedTotal < 500) {
       return NextResponse.json(
@@ -589,6 +617,7 @@ export async function POST(request: NextRequest) {
         difference: totalDifference,
         subtotal: serverCalculatedSubtotal,
         shipping: serverShippingFee,
+        importFreight: serverImportFreight,
         promotion: serverPromotionDiscount,
         ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
       }, request)
@@ -636,6 +665,7 @@ export async function POST(request: NextRequest) {
       billing_address: orderData.sameAsShipping ? orderData.shippingAddress : (orderData.billingAddress || {}),
       delivery_option: orderData.deliveryOption || 'shipping',
       total_amount: serverCalculatedTotal,
+      ...importFreightFields,
       currency: 'TZS', // SECURITY: Snippe settles TZS only; never taken from the client
       payment_method: 'snippe',
       payment_status: 'pending',

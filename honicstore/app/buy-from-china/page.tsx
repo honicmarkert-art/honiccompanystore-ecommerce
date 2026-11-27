@@ -2,7 +2,9 @@ import type { Metadata } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
-import { IMPORT_DAYS_MAX, IMPORT_DAYS_MIN, MIN_PAYMENT_TZS, RETURN_DAYS } from '@/lib/policies'
+import { MIN_PAYMENT_TZS, RETURN_DAYS } from '@/lib/policies'
+import { getFreightSettings } from '@/lib/import-freight-server'
+import { FreightCalculator } from './freight-calculator'
 import { whatsappLink } from '@/lib/contact'
 import { ChinaCatalogue, type ChinaItem } from './china-catalogue'
 
@@ -15,7 +17,7 @@ export const revalidate = 300
 
 export const metadata: Metadata = {
   title: 'Buy from China | Honic Company Store',
-  description: `Electronics and parts Honic imports to order from China, delivered in about ${IMPORT_DAYS_MIN}–${IMPORT_DAYS_MAX} days. Pay in TSh with mobile money.`,
+  description: 'Electronics and parts Honic imports to order from China, shipped to Tanzania by air or sea. Pay in TSh with mobile money.',
   alternates: { canonical: '/buy-from-china' },
 }
 
@@ -44,8 +46,11 @@ async function loadItems(): Promise<ChinaItem[]> {
 }
 
 export default async function ChinaPage() {
-  const items = await loadItems()
-  const days = `${IMPORT_DAYS_MIN}–${IMPORT_DAYS_MAX}`
+  const [items, settings] = await Promise.all([loadItems(), getFreightSettings()])
+  // air and sea travel times come from the shipping rates set in the admin
+  const air = settings ? `${settings.air.daysMin}–${settings.air.daysMax}` : null
+  const sea = settings ? `${settings.sea.daysMin}–${settings.sea.daysMax}` : null
+  const days = air && sea ? `${air} days by air or ${sea} days by sea` : 'a few weeks'
   const askLink = whatsappLink('Hello Honic, I would like to import an item from China. Here is the link or photo:')
 
   return (
@@ -65,7 +70,7 @@ export default async function ChinaPage() {
                 Buy from China,<br /><span className="text-[#f2c14e]">delivered in Tanzania.</span>
               </h1>
               <p className="mt-4 max-w-xl text-base text-[#f7f1e8]/80 sm:text-lg">
-                Parts and electronics we do not keep in local stock. Order here, pay in TSh with mobile money, and we bring it in for you in about <b className="text-white">{days} days</b>.
+                Parts and electronics we do not keep in local stock. Order here, pay in TSh with mobile money, and we bring it in for you: about <b className="text-white">{air ?? '–'} days by air</b> or <b className="text-white">{sea ?? '–'} days by sea</b>.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <a href="#catalogue" className="rounded-full bg-[#c8102e] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#c8102e]/30 transition hover:bg-[#a50d26]">Browse {items.length} import items</a>
@@ -78,7 +83,7 @@ export default async function ChinaPage() {
               {[
                 { k: '01', t: 'You order and pay', d: 'Same checkout as the rest of the shop, in TSh with mobile money.' },
                 { k: '02', t: 'We order it in China', d: 'Honic buys the item for you once your payment is confirmed.' },
-                { k: '03', t: 'Shipped to Tanzania', d: `Most items arrive in about ${days} days from payment.` },
+                { k: '03', t: 'By air or by sea', d: `You choose at checkout: about ${days}, from payment.` },
                 { k: '04', t: 'Delivered or picked up', d: 'We deliver it to you, or you collect it from our store in Dar es Salaam.' },
               ].map((s, i, all) => (
                 <li key={s.k} className="relative flex gap-4">
@@ -96,21 +101,24 @@ export default async function ChinaPage() {
         {/* three plain facts */}
         <section className="border-b border-[#1d1210]/10 bg-[#fffaf2]">
           <dl className="mx-auto grid max-w-6xl grid-cols-1 divide-y divide-[#1d1210]/10 px-4 sm:grid-cols-3 sm:divide-x sm:divide-y-0 sm:px-6">
-            <div className="py-5 sm:px-6"><dt className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#c8102e]">Arrives in</dt><dd className="mt-1 text-2xl font-black">{days} days</dd><dd className="text-sm text-[#1d1210]/60">counted from your payment</dd></div>
+            <div className="py-5 sm:px-6"><dt className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#c8102e]">Arrives in</dt><dd className="mt-1 text-2xl font-black">{air ?? '–'} days by air</dd><dd className="text-sm text-[#1d1210]/60">or {sea ?? '–'} days by sea, from payment</dd></div>
             <div className="py-5 sm:px-6"><dt className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#c8102e]">You pay</dt><dd className="mt-1 text-2xl font-black">TSh, mobile money</dd><dd className="text-sm text-[#1d1210]/60">full total shown before you pay</dd></div>
             <div className="py-5 sm:px-6"><dt className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#c8102e]">Returns</dt><dd className="mt-1 text-2xl font-black">{RETURN_DAYS} days</dd><dd className="text-sm text-[#1d1210]/60">to report a problem, as in our <a href="/support/returns-refunds" className="underline decoration-[#c8102e] underline-offset-2">returns policy</a></dd></div>
           </dl>
         </section>
 
-        <ChinaCatalogue items={items} days={days} askLink={askLink} />
+        <ChinaCatalogue items={items} days={air ? `${air} days by air` : ''} askLink={askLink} />
+        {settings && <FreightCalculator settings={settings} />}
 
         {/* questions */}
         <section className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
           <h2 className="text-2xl font-black tracking-tight">Before you order</h2>
           <div className="mt-4 divide-y divide-[#1d1210]/10 rounded-2xl border border-[#1d1210]/10 bg-white">
             {[
-              { q: 'How long does it take?', a: `About ${days} days from the moment your payment is confirmed.` },
-              { q: 'Is the price final?', a: 'The price on the item is what you pay for it. Delivery is added at checkout, and you see the full total before you pay.' },
+              { q: 'How long does it take?', a: `About ${days}, counted from the moment your payment is confirmed. You choose air or sea at checkout.` },
+              { q: 'How is shipping priced?', a: 'Air is priced per kilogram (the real weight or the volume weight, whichever is bigger); sea is priced per cubic metre (CBM). The calculator above uses the same rates as checkout. Bigger shipments get a lower rate per kg or CBM.' },
+              { q: 'An item has no size or weight listed', a: 'Ask us for the shipping price first, or buy it now and pay the shipping on arrival: we weigh your parcel at our warehouse and tell you the price before you pay it.' },
+              { q: 'Is the price final?', a: 'The price on the item is what you pay for it. Shipping from China and delivery inside Tanzania are added at checkout, and you see the full total before you pay.' },
               { q: 'How do I pay?', a: `With mobile money in Tanzanian shillings, through the normal checkout (minimum payment TSh ${MIN_PAYMENT_TZS.toLocaleString('en-US')}).` },
               { q: 'Can I mix import items with items in stock?', a: 'Yes. Put them in the same cart. Items in stock follow normal delivery times; import items follow the import time above.' },
               { q: 'What if something is wrong when it arrives?', a: `Report it within ${RETURN_DAYS} days of delivery or pickup. Returns and refunds follow our returns policy (Help → Returns & refunds).` },

@@ -482,7 +482,7 @@ function CartPageContent() {
             ) : null}
             <span className="flex items-center gap-1 text-neutral-500">
               <Truck className="h-3 w-3" />
-              {china ? "Import · about 10 days" : "Dar 1–2 days · regions 2–6 days"}
+              {china ? "From China · air or sea, chosen at checkout" : "Dar 1–2 days · regions 2–6 days"}
               {freeDelivery && <span className="font-semibold text-emerald-600">· free delivery</span>}
             </span>
             {original && original > price && <span className="text-neutral-400 line-through">{formatPrice(original)}</span>}

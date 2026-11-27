@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { ProductDetailErrorBoundary } from '@/components/product-detail-error-boundary'
 import { getProductDetail } from '@/lib/product-detail'
 import { getCategories } from '@/lib/product-search'
@@ -53,6 +53,8 @@ export default async function ProductDetailPage({ params, searchParams }: PagePr
   // A missing product is a 404 (not-found.tsx); a database error is NOT, so it goes to the error page instead
   const product = productId ? await getProductDetail(productId) : null
   if (!product) notFound()
+  // items imported to order from China have their own product page (shipping by air / sea)
+  if (product.importChina) redirect(`/buy-from-china/${product.id}`)
   // Category slug for the breadcrumb / related products. Matched by the category NAME the shopper sees:
   // ~30% of products have a category_id that contradicts their category name (data issue), so the id
   // alone could link to the wrong category. The id is only used when its name agrees.
