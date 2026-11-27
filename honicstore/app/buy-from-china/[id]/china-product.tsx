@@ -277,7 +277,7 @@ export function ChinaProduct({ product, size, settings, related, sold, returnDay
             {related.map((r) => (
               <li key={r.id} className="w-40 shrink-0 sm:w-48">
                 <Link href={`/buy-from-china/${r.id}`} className="group block overflow-hidden rounded-2xl bg-white ring-1 ring-[#1d1210]/10 transition hover:ring-[#c8102e]/40">
-                  <span className="relative block aspect-square overflow-hidden bg-[#fbf6ee]">{r.image && /* eslint-disable-next-line @next/next/no-img-element */ <img src={optimizedImg(r.image, 260)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-2 transition group-hover:scale-[1.04]" />}</span>
+                  <span className="relative block aspect-square overflow-hidden bg-[#fbf6ee]">{r.image && /* eslint-disable-next-line @next/next/no-img-element */ <img src={optimizedImg(r.image, 260)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover transition group-hover:scale-[1.04]" />}</span>
                   <span className="block p-2.5"><span className="line-clamp-2 text-[13px] font-semibold leading-snug">{r.name}</span><b className="mt-1 block text-sm">{tsh(r.price)}</b></span>
                 </Link>
               </li>

@@ -19,7 +19,7 @@ export function ProductTile({ p, priority = false }: { p: HomeProduct; priority?
           alt={p.name}
           loading={priority ? 'eager' : 'lazy'}
           decoding="async"
-          className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
         {off > 0 && <span className="absolute left-1.5 top-1.5 rounded-full bg-red-500 px-1.5 py-0.5 text-[11px] font-bold text-white">−{off}%</span>}
         {p.inStock === false && <span className="absolute inset-x-1.5 bottom-1.5 rounded-lg bg-neutral-950/75 py-0.5 text-center text-[11px] font-semibold text-white">Out of stock</span>}

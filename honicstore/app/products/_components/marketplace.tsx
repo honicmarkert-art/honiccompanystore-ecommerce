@@ -1078,7 +1078,6 @@ function ProductImg({ src, alt, className }: { src?: string | null; alt: string;
  */
 function CardImg({ src, alt, className = '' }: { src?: string | null; alt: string; className?: string }) {
   const [err, setErr] = useState(false)
-  const [fill, setFill] = useState(false)
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
@@ -1087,11 +1086,8 @@ function CardImg({ src, alt, className = '' }: { src?: string | null; alt: strin
       loading="lazy"
       decoding="async"
       onError={() => setErr(true)}
-      onLoad={(e) => {
-        const { naturalWidth: w, naturalHeight: h } = e.currentTarget
-        if (w && h) { const r = w / h; setFill(r < 0.8 || r > 1.25) }
-      }}
-      className={`absolute inset-0 h-full w-full ${fill ? 'object-cover' : 'object-contain p-3'} ${className}`}
+      // every photo fills the square card (tall or wide photos are trimmed at the edges, never shrunk)
+      className={`absolute inset-0 h-full w-full ${!isImageUrl(src) || err ? 'object-contain p-6' : 'object-cover'} ${className}`}
     />
   )
 }
