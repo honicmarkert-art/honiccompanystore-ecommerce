@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enhancedRateLimit } from '@/lib/enhanced-rate-limit'
 import { chinaProducts, findSellers, isSellerId, searchProducts, sellerProducts, type SortBy } from '@/lib/product-search'
+import { getFreightSettings } from '@/lib/import-freight-server'
+
+/** Adds the air travel time (e.g. "7–14 days") to China items, for the import stamp on cards. */
+async function withImportDays<T extends { products: unknown[] }>(r: T): Promise<T> {
+  if (!(r.products as { import_china?: boolean }[]).some((p) => p.import_china)) return r
+  const s = await getFreightSettings().catch(() => null)
+  if (!s) return r
+  const days = `${s.air.daysMin}–${s.air.daysMax} days`
+  return { ...r, products: (r.products as { import_china?: boolean }[]).map((p) => (p.import_china ? { ...p, importDays: days } : p)) }
+}
 
 /**
  * GET /api/search — typed product search (Marketplace page).
@@ -29,7 +39,7 @@ export async function GET(request: NextRequest) {
     offset: Number(sp.get('offset')) || 0,
   }
   try {
-    if (sp.get('china') === 'only') return NextResponse.json(await chinaProducts(Number(sp.get('limit')) || 60), { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
+    if (sp.get('china') === 'only') return NextResponse.json(await withImportDays(await chinaProducts(Number(sp.get('limit')) || 60)), { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
     const seller = sp.get('seller')
     if (seller && !isSellerId(seller)) return NextResponse.json({ error: 'Unknown seller', products: [], total: 0, hasMore: false }, { status: 400 })
     // china=exclude (marketplace feed): keep reading until the page is full of regular items, and say
@@ -56,7 +66,7 @@ export async function GET(request: NextRequest) {
       ? await sellerProducts({ ...params, sellerId: seller })
       : await Promise.all([searchProducts(params), params.offset === 0 && params.q.trim().length >= 3 ? findSellers(params.q) : Promise.resolve([])])
           .then(([r, sellers]) => ({ ...r, sellers }))
-    return NextResponse.json(result, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } })
+    return NextResponse.json(await withImportDays(result), { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } })
   } catch {
     return NextResponse.json({ error: 'Search failed', products: [], total: 0, hasMore: false }, { status: 500 })
   }

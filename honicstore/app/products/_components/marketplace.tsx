@@ -134,19 +134,37 @@ function shuffle<T>(list: T[]): T[] {
   return a
 }
 /** After every 10 regular items, 2 or 3 items from the (already shuffled) pool; each pool item once. */
-function mixIn<T extends { id: number }>(base: T[], pool: T[]): T[] {
+/** Small seeded random numbers, so the mix stays put while more products load. */
+function seeded(seed: number) {
+  let a = seed >>> 0
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }
+}
+/**
+ * 2 or 3 pool items in every block of 10 regular items, at random places inside the block and never
+ * next to each other (each pool item once). Same seed = same layout, so loading more never reshuffles.
+ */
+function mixIn<T extends { id: number }>(base: T[], pool: T[], seed: number): T[] {
   if (!pool.length) return base
   const seen = new Set(base.map((p) => p.id))
   const extra = pool.filter((p) => !seen.has(p.id))
   const out: T[] = []
   let next = 0
-  base.forEach((p, i) => {
-    out.push(p)
-    if ((i + 1) % 10 === 0) {
-      const take = 2 + (((i + 1) / 10) % 2) // 2, 3, 2, 3 ... per block of 10
-      for (let k = 0; k < take && next < extra.length; k++) out.push(extra[next++])
+  for (let start = 0; start < base.length; start += 10) {
+    const block = base.slice(start, start + 10)
+    if (block.length < 10) { out.push(...block); break } // a partial last block waits for the next page
+    const rnd = seeded(seed + start)
+    const take = rnd() < 0.5 ? 2 : 3
+    // insertion points 1..9 (after that many regular items), at least 2 apart
+    const points: number[] = []
+    for (let guard = 0; points.length < take && guard < 50; guard++) {
+      const p = 1 + Math.floor(rnd() * 9)
+      if (points.every((q) => Math.abs(q - p) >= 2)) points.push(p)
     }
-  })
+    block.forEach((p, i) => {
+      out.push(p)
+      if (points.includes(i + 1) && next < extra.length) out.push(extra[next++])
+    })
+  }
   return out
 }
 /** Stock of the variant the card adds, else the product total. */
@@ -409,6 +427,7 @@ function Marketplace() {
 
   // China items: a random few among the regular ones (2-3 in every 10), not all of them in a block
   const [chinaPool, setChinaPool] = useState<Product[]>([])
+  const [mixSeed] = useState(() => Math.floor(Math.random() * 1_000_000)) // a new layout each visit
   useEffect(() => {
     let off = false
     fetch('/api/search?china=only&limit=60')
@@ -420,8 +439,8 @@ function Marketplace() {
   const shownProducts = useMemo(() => {
     const base = activeChip ? products.filter(p => p.category === activeChip) : products
     const pool = activeChip ? chinaPool.filter(p => p.category === activeChip) : chinaPool
-    return mixIn(base, pool)
-  }, [products, chinaPool, activeChip])
+    return mixIn(base, pool, mixSeed)
+  }, [products, chinaPool, activeChip, mixSeed])
 
   // ---- actions ----
   const runSearch = (q?: string) => {
@@ -1154,7 +1173,7 @@ function ProductCard({ p, formatPrice, onOpen, onAdd, qty, onQty }: {
 
   // At most two corner badges, in a fixed order, so cards stay clean (From China always shows)
   const badges = [
-    china && <span key="imp" className="rounded-md bg-[#c8102e] px-1.5 py-0.5 text-[11px] font-bold text-white">From China</span>,
+    china && <span key="imp" className="rotate-[-4deg] rounded-md border-2 border-[#c8102e] bg-white/90 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#c8102e]">{typeof p.importDays === 'string' ? `Import · ${p.importDays}` : 'Import'}</span>,
     off > 0 && <span key="off" className="rounded-md bg-rose-600 px-1.5 py-0.5 text-[11px] font-bold text-white">-{off}%</span>,
     p.is_new && <span key="new" className="rounded-md bg-orange-500 px-1.5 py-0.5 text-[11px] font-bold text-white">NEW</span>,
   ].filter(Boolean).slice(0, 2)

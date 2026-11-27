@@ -89,10 +89,10 @@ export function ChinaCatalogue({ items, days, askLink }: { items: ChinaItem[]; d
             <li key={i.id}>
               <Link href={`/buy-from-china/${i.id}`}
                 className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-[#1d1210]/10 bg-white transition hover:-translate-y-0.5 hover:border-[#c8102e]/40 hover:shadow-xl hover:shadow-[#c8102e]/10">
-                <span className="relative block aspect-square bg-[#fbf6ee]">
+                <span className="relative block aspect-square overflow-hidden bg-[#fbf6ee]">
                   {i.image
-                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={optimizedImg(i.image, 360)} alt="" loading="lazy" decoding="async" className="h-full w-full object-contain p-3 transition duration-300 group-hover:scale-[1.04]" />
-                    : <span className="grid h-full place-items-center text-4xl font-black text-[#c8102e]/20" aria-hidden>进口</span>}
+                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={optimizedImg(i.image, 360)} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-3 transition duration-300 group-hover:scale-[1.04]" />
+                    : <span className="absolute inset-0 grid place-items-center text-4xl font-black text-[#c8102e]/20" aria-hidden>进口</span>}
                 </span>
                 <span className="flex flex-1 flex-col p-3">
                   <span className="line-clamp-2 text-[13px] font-semibold leading-snug sm:text-sm">{i.name}</span>
