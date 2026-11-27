@@ -165,8 +165,11 @@ export default function MarketplacePage() {
 }
 
 type AiGroup = { term: string; matchedTerm?: string; why: string; count: number; exact: boolean; productIds: number[] }
+type SellerChip = { id: string; name: string; verified: boolean; products: number }
 type ResultsState = {
   products: Product[]
+  sellers: SellerChip[] // sellers whose business name matches the search
+  seller: SellerChip | null // set when the list is filtered to one seller
   total: number
   hasMore: boolean
   exact: boolean
@@ -176,7 +179,7 @@ type ResultsState = {
   groups: AiGroup[]
   relaxed: boolean
 }
-const EMPTY_RESULTS: ResultsState = { products: [], total: 0, hasMore: false, exact: true, loading: false, error: null, interpretation: null, groups: [], relaxed: false }
+const EMPTY_RESULTS: ResultsState = { products: [], sellers: [], seller: null, total: 0, hasMore: false, exact: true, loading: false, error: null, interpretation: null, groups: [], relaxed: false }
 
 function Marketplace() {
   const router = useRouter()
@@ -189,7 +192,8 @@ function Marketplace() {
   const urlMin = sp.get('minPrice') || ''
   const urlMax = sp.get('maxPrice') || ''
   const urlStock = sp.get('inStock') === '1'
-  const isResults = !!(urlQ || urlCat || urlSort !== 'relevance')
+  const urlSeller = /^[0-9a-f-]{36}$/i.test(sp.get('seller') || '') ? sp.get('seller')! : ''
+  const isResults = !!(urlQ || urlCat || urlSeller || urlSort !== 'relevance')
   const { formatPrice } = useCurrency()
   const { cartTotalItems, addItem, getItemQuantity, updateItemQuantity, removeItem } = useCart()
   const { toast } = useToast()
@@ -305,7 +309,7 @@ function Marketplace() {
     setResults(r => ({ ...(from === 0 ? EMPTY_RESULTS : r), loading: true, error: null }))
     try {
       let url: string
-      if (urlMode === 'ai' && urlQ) {
+      if (urlMode === 'ai' && urlQ && !urlSeller) {
         url = `/api/search/ai?q=${encodeURIComponent(urlQ)}&limit=${PAGE_SIZE * 2}`
       } else {
         const p = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(from), sort: urlSort })
@@ -314,6 +318,7 @@ function Marketplace() {
         if (urlMin) p.set('minPrice', urlMin)
         if (urlMax) p.set('maxPrice', urlMax)
         if (urlStock) p.set('inStock', '1')
+        if (urlSeller) p.set('seller', urlSeller)
         url = `/api/search?${p}`
       }
       const res = await fetch(url)
@@ -323,6 +328,8 @@ function Marketplace() {
       const list: Product[] = Array.isArray(d?.products) ? d.products : []
       setResults(r => ({
         products: from === 0 ? list : [...r.products, ...list.filter(p => !r.products.some(x => x.id === p.id))],
+        sellers: from === 0 ? (Array.isArray(d?.sellers) ? d.sellers : []) : r.sellers,
+        seller: d?.seller || (from === 0 ? null : r.seller),
         total: Number(d?.total) || 0,
         hasMore: urlMode === 'ai' ? false : !!d?.hasMore,
         exact: d?.exact !== false,
@@ -336,7 +343,7 @@ function Marketplace() {
       if (id !== resultsReq.current) return
       setResults(r => ({ ...r, loading: false, error: e instanceof Error ? e.message : 'Search failed.' }))
     }
-  }, [urlQ, urlMode, urlCat, urlSort, urlMin, urlMax, urlStock])
+  }, [urlQ, urlMode, urlCat, urlSort, urlMin, urlMax, urlStock, urlSeller])
 
   useEffect(() => {
     if (isResults) { loadResults(0); window.scrollTo({ top: 0 }) }
@@ -1472,8 +1479,9 @@ function SearchResults({
 }) {
   const ai = mode === 'ai'
   const it = state.interpretation
-  const title = q ? (ai ? 'AI search' : `Results for “${q}”`) : category?.name || sortTitle || 'All products'
-  const hasFilters = !!(minPrice || maxPrice || inStock || (q && category) || sort !== 'relevance')
+  const seller = state.seller
+  const title = seller ? (q ? `“${q}” from ${seller.name}` : seller.name) : q ? (ai ? 'AI search' : `Results for “${q}”`) : category?.name || sortTitle || 'All products'
+  const hasFilters = !!(minPrice || maxPrice || inStock || (q && category) || sort !== 'relevance' || seller)
 
   return (
     <section className="mx-auto max-w-[1200px] px-3 py-5 sm:px-4 sm:py-8" aria-live="polite">
@@ -1495,6 +1503,35 @@ function SearchResults({
           <X className="h-3.5 w-3.5" /> {q ? 'Clear search' : 'Back to marketplace'}
         </Link>
       </div>
+
+      {/* one seller's shop: who they are, and a way back to everything */}
+      {seller && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-white p-3 ring-1 ring-neutral-200 sm:p-4">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-orange-500 text-lg font-black text-white" aria-hidden>{seller.name.slice(0, 1).toUpperCase()}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-semibold uppercase tracking-wide text-neutral-500">Seller</span>
+            <span className="flex items-center gap-1 truncate font-bold">{seller.name}{seller.verified && <BadgeCheck className="h-4 w-4 shrink-0 text-sky-500" aria-label="Verified seller" />}</span>
+            <span className="block text-xs text-neutral-500">{seller.products.toLocaleString()} {seller.products === 1 ? 'product' : 'products'} on Honic</span>
+          </span>
+          <button type="button" onClick={() => onParams({ seller: null })} className="flex items-center gap-1 rounded-full border border-neutral-300 px-3 py-1.5 text-xs font-semibold hover:border-orange-500 hover:text-orange-600"><X className="h-3.5 w-3.5" /> All sellers</button>
+        </div>
+      )}
+      {/* sellers whose name matches what was typed: tap to see only their products */}
+      {!seller && !ai && state.sellers.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Sellers matching “{q}”</p>
+          <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden">
+            {state.sellers.map((s) => (
+              <button key={s.id} type="button" onClick={() => onParams({ seller: s.id, search: null, q: null })}
+                className="flex shrink-0 items-center gap-2 rounded-full bg-white py-1.5 pl-1.5 pr-3.5 text-sm font-semibold ring-1 ring-neutral-200 transition hover:ring-orange-400">
+                <span className="grid h-7 w-7 place-items-center rounded-full bg-orange-100 text-xs font-black text-orange-700" aria-hidden>{s.name.slice(0, 1).toUpperCase()}</span>
+                <span className="max-w-[180px] truncate">{s.name}</span>{s.verified && <BadgeCheck className="h-4 w-4 text-sky-500" aria-label="Verified seller" />}
+                <span className="text-xs font-normal text-neutral-500">{s.products}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* AI answer: project plan (several parts) or compact bubble (single product) */}
       {ai && it && state.groups.length > 1 && (

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { getCachedData, setCachedData } from '@/lib/database-optimization'
 import { askJson, toListItem } from '@/lib/visual-search'
+import { getSupabaseClient } from '@/lib/supabase-server'
 
 /**
  * Product search for the Marketplace page.
@@ -239,4 +240,60 @@ export async function aiSearch(request: string, limit = 24) {
     groups,
     relaxed,
   }
+}
+
+// ---------------------------------------------------------------- sellers
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export const isSellerId = (v: unknown): v is string => typeof v === 'string' && UUID.test(v)
+export type SellerHit = { id: string; name: string; verified: boolean; products: number }
+
+/** Only what a shopper may see about a seller: business name, verified badge, number of products. */
+async function sellerCards(ids: string[]): Promise<SellerHit[]> {
+  if (!ids.length) return []
+  const admin = getSupabaseClient() // profiles are not public: read on the server, return public fields only
+  const [{ data: people }, { data: prods }] = await Promise.all([
+    admin.from('profiles').select('id, company_name, is_verified').in('id', ids).eq('is_supplier', true).or('is_active.is.null,is_active.eq.true'),
+    db().from('products').select('supplier_id').in('supplier_id', ids).or('is_hidden.is.null,is_hidden.eq.false').limit(5000),
+  ])
+  const count = new Map<string, number>()
+  for (const p of prods || []) count.set(p.supplier_id as string, (count.get(p.supplier_id as string) || 0) + 1)
+  return (people || [])
+    .filter((p) => String(p.company_name || '').trim() && count.get(p.id as string))
+    .map((p) => ({ id: p.id as string, name: String(p.company_name).trim(), verified: !!p.is_verified, products: count.get(p.id as string) || 0 }))
+}
+
+/** Sellers whose business name matches what the shopper typed (3+ letters). */
+export async function findSellers(q: string): Promise<SellerHit[]> {
+  const term = q.replace(/[%_,()*:"'\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)
+  if (term.length < 3) return []
+  const cacheKey = `search:sellers:${term.toLowerCase()}`
+  const cached = getCachedData(cacheKey) as SellerHit[] | null
+  if (cached) return cached
+  const { data } = await getSupabaseClient().from('profiles').select('id').eq('is_supplier', true).or('is_active.is.null,is_active.eq.true').ilike('company_name', `%${term}%`).limit(5)
+  const hits = (await sellerCards((data || []).map((p) => p.id as string))).sort((a, b) => b.products - a.products).slice(0, 4)
+  setCachedData(cacheKey, hits, 5 * 60 * 1000)
+  return hits
+}
+
+/** One seller's products, with the same filters as search (and an optional word to search within them). */
+export async function sellerProducts(p: SearchParams & { sellerId: string }) {
+  const limit = Math.min(Math.max(Number(p.limit) || 24, 1), 60)
+  const offset = Math.max(Number(p.offset) || 0, 0)
+  const [seller] = await sellerCards([p.sellerId])
+  if (!seller) return { products: [], total: 0, hasMore: false, exact: true, seller: null }
+  const ids = await categoryIds(p.categorySlug)
+  let q = db().from('products').select('*, product_variants (*)', { count: 'exact' }).eq('supplier_id', p.sellerId).or('is_hidden.is.null,is_hidden.eq.false')
+  const words = (p.q || '').replace(/[%_,()*:"'\\]/g, ' ').trim().slice(0, 60)
+  if (words) q = q.ilike('name', `%${words}%`)
+  if (ids) q = q.in('category_id', ids)
+  if (num(p.minPrice) != null) q = q.gte('price', num(p.minPrice)!)
+  if (num(p.maxPrice) != null) q = q.lte('price', num(p.maxPrice)!)
+  if (p.inStock) q = q.eq('in_stock', true)
+  const order: Record<SortBy, [string, boolean]> = { relevance: ['sold_count', false], popular: ['sold_count', false], newest: ['created_at', false], rating: ['rating', false], price_asc: ['price', true], price_desc: ['price', false] }
+  const [col, asc] = order[SORTS.includes(p.sort as SortBy) ? (p.sort as SortBy) : 'relevance']
+  const { data, count, error } = await q.order(col, { ascending: asc, nullsFirst: false }).order('id', { ascending: false }).range(offset, offset + limit - 1)
+  if (error) throw new Error(error.message)
+  const products = (data || []).map((row) => { const { match: _m, ...item } = toListItem(row as Parameters<typeof toListItem>[0], 'related'); return item })
+  return { products, total: count || 0, hasMore: offset + products.length < (count || 0), exact: true, seller }
 }
