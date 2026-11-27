@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/auth-context'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
 import { openLens } from '@/components/image-search/lens'
 import { BrandLogo } from '@/components/brand-logo'
+import { ShopSwitch } from '@/components/shop-switch'
 import { useCurrency } from '@/contexts/currency-context'
 import { useCartCount } from '@/hooks/use-cart-count'
 
@@ -386,6 +387,8 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
         </div>
         )}
       </header>
+      {/* the two shops, on every page */}
+      <ShopSwitch />
 
       {/* Phone/tablet drawer */}
       {drawer && (

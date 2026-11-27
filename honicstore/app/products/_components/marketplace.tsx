@@ -38,6 +38,7 @@ import { usePublicCompanyContext } from '@/contexts/public-company-context'
 import { checkProductStock } from '@/utils/stock-validation'
 import { openLens } from '@/components/image-search/lens'
 import { BrandLogo } from '@/components/brand-logo'
+import { ShopSwitch } from '@/components/shop-switch'
 import { readRecentlyViewed, recordView } from '@/lib/recently-viewed'
 
 // ---------- types ----------
@@ -612,6 +613,9 @@ function Marketplace() {
           </Link>
         </div>
       </div>
+
+      {/* the two shops */}
+      <ShopSwitch />
 
       {/* Hero */}
       <header className="relative overflow-hidden bg-[radial-gradient(ellipse_at_top_right,#ffedd5_0%,#ffffff_55%)]">

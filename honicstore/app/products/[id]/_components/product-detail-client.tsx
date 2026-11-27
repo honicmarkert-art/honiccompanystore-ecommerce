@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   BadgeCheck, Bell, MessageCircle, Check, ChevronRight, Eye, Heart, Loader2, MapPin, Minus, Package,
-  Plus, RotateCcw, Share2, ShoppingCart, Star, Truck, Users, Zap, Bookmark,
+  Plus, RotateCcw, Share2, ShoppingCart, Star, Truck, Users, Zap, Bookmark, ArrowLeft,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -50,6 +50,11 @@ export type ChinaMode = {
 
 export function ProductDetailClient({ initialProduct, categorySlug = null, returnTo: returnToParam, from, china }: { initialProduct: ProductDetail; categorySlug?: string | null; returnTo?: string; from?: string; china?: ChinaMode }) {
   const router = useRouter()
+  const goBack = () => {
+    const sameSite = typeof document !== 'undefined' && document.referrer.startsWith(window.location.origin)
+    if (sameSite && window.history.length > 1) router.back()
+    else router.push(china ? '/buy-from-china' : returnToParam && returnToParam.startsWith('/') && !returnToParam.startsWith('//') ? returnToParam : '/products')
+  }
   // Only same-site paths are honoured, so returnTo cannot send shoppers off-site
   const returnTo = returnToParam && returnToParam.startsWith('/') && !returnToParam.startsWith('//') ? returnToParam : china ? '/buy-from-china' : '/products'
   const fromChina = from === 'china' || !!china
@@ -412,8 +417,12 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
       />
 
       <main className="mx-auto max-w-7xl px-4 sm:px-6">
-        {/* Breadcrumbs */}
-        <nav aria-label="Breadcrumb" className="flex items-center gap-1 overflow-x-auto whitespace-nowrap py-1 text-xs text-neutral-500 [scrollbar-width:none] sm:text-sm [&_a]:inline-block [&_a]:py-2.5">
+        {/* Back + breadcrumbs */}
+        <div className="flex items-center gap-2">
+        <button type="button" onClick={goBack} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:border-orange-400 hover:text-orange-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 sm:text-sm" aria-label="Back to the previous page">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap py-1 text-xs text-neutral-500 [scrollbar-width:none] sm:text-sm [&_a]:inline-block [&_a]:py-2.5">
           <Link href="/" className="hover:text-orange-600">Home</Link>
           <ChevronRight className="h-3.5 w-3.5 shrink-0" />
           <Link href={returnTo} className="hover:text-orange-600">{china ? 'Buy from China' : 'Products'}</Link>
@@ -426,6 +435,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
           <ChevronRight className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate text-neutral-800 dark:text-neutral-200">{product.name}</span>
         </nav>
+        </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-10 xl:gap-14">
           <div className="flex min-w-0 flex-col">
@@ -438,7 +448,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {product.brand && <span className="rounded-full bg-neutral-100 px-2.5 py-1 font-semibold dark:bg-neutral-800">{product.brand}</span>}
               {product.category && <span className="text-neutral-500">{product.category}</span>}
-              {product.sku && <span className="text-neutral-400">SKU {product.sku}</span>}
+              {product.sku && !/^taobao/i.test(product.sku) && <span className="text-neutral-400">SKU {product.sku}</span>}
             </div>
 
             <h1 className="mt-2 text-2xl font-black leading-tight tracking-tight sm:text-3xl">{product.name}</h1>
@@ -563,7 +573,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
             </div>
 
             {/* bargaining: offer -> team replies with a one-time code -> pay here */}
-            {price > 0 && availableStock > 0 && (
+            {price > 0 && availableStock > 0 && !china && (
               <MakeOffer
                 productId={product.id}
                 variantId={selectedVariant?.id != null ? Number(selectedVariant.id) : null}

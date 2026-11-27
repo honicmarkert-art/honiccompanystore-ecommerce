@@ -51,6 +51,7 @@ import { getClientShippingPricing } from "@/lib/shipping-calculator"
 
 /** Snippe (mobile money) refuses payments under TSh 500. */
 import { MIN_PAYMENT_TZS } from "@/lib/policies"
+import { ShopSwitch } from "@/components/shop-switch"
 import { whatsappLink } from "@/lib/contact"
 const noopSubscribe = () => () => {}
 
@@ -288,6 +289,7 @@ function CartPageContent() {
 
   /* ----- pieces ----- */
   const header = (
+    <>
     <header className="sticky top-0 z-40 border-b border-neutral-200/70 bg-white/85 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
         <div className="flex min-w-0 items-center gap-2 sm:gap-4">
@@ -308,6 +310,8 @@ function CartPageContent() {
           </div>
         </div>
       </header>
+      <ShopSwitch />
+    </>
   )
 
   const summary = (
