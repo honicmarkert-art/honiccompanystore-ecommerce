@@ -13,6 +13,8 @@ import { optimizedImg } from '@/lib/image-optimize'
 export type ChinaItem = {
   id: number; name: string; slug: string | null; price: number; originalPrice: number | null; image: string | null
   category: string; brand: string | null; rating: number; reviews: number; sold: number; createdAt: string
+  /** number of options (sizes, models...) and the lowest price among them */
+  options: number; fromPrice: number
 }
 const tsh = (n: number) => `TSh ${Math.round(n).toLocaleString('en-US')}`
 type Sort = 'popular' | 'newest' | 'price_asc' | 'price_desc'
@@ -36,7 +38,7 @@ export function ChinaCatalogue({ items, days, askLink }: { items: ChinaItem[]; d
     const list = items.filter((i) => (!cat || i.category === cat) && words.every((w) => `${i.name} ${i.brand || ''} ${i.category}`.toLowerCase().includes(w)))
     const by: Record<Sort, (a: ChinaItem, b: ChinaItem) => number> = {
       popular: (a, b) => b.sold - a.sold, newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
-      price_asc: (a, b) => a.price - b.price, price_desc: (a, b) => b.price - a.price,
+      price_asc: (a, b) => a.fromPrice - b.fromPrice, price_desc: (a, b) => b.fromPrice - a.fromPrice,
     }
     return [...list].sort(by[sort])
   }, [items, q, cat, sort])
@@ -91,15 +93,14 @@ export function ChinaCatalogue({ items, days, askLink }: { items: ChinaItem[]; d
                   {i.image
                     ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={optimizedImg(i.image, 360)} alt="" loading="lazy" decoding="async" className="h-full w-full object-contain p-3 transition duration-300 group-hover:scale-[1.04]" />
                     : <span className="grid h-full place-items-center text-4xl font-black text-[#c8102e]/20" aria-hidden>进口</span>}
-                  {/* stamp */}
-                  <span className="absolute left-2 top-2 rotate-[-4deg] rounded-md border-2 border-[#c8102e] bg-white/90 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#c8102e]">Import · {days} days</span>
                 </span>
                 <span className="flex flex-1 flex-col p-3">
                   <span className="line-clamp-2 text-[13px] font-semibold leading-snug sm:text-sm">{i.name}</span>
                   {i.reviews > 0 && <span className="mt-1 flex items-center gap-1 text-[11px] text-[#1d1210]/60"><Star className="h-3 w-3 fill-[#f2c14e] text-[#f2c14e]" />{i.rating.toFixed(1)} · {i.reviews}</span>}
                   <span className="mt-auto pt-2">
-                    <b className="block text-base font-black text-[#1d1210] sm:text-lg">{tsh(i.price)}</b>
-                    {i.originalPrice && <span className="block text-xs text-[#1d1210]/40 line-through">{tsh(i.originalPrice)}</span>}
+                    {i.options > 1 && <span className="block text-[11px] font-semibold uppercase tracking-wider text-[#c8102e]">From</span>}
+                    <b className="block text-base font-black text-[#1d1210] sm:text-lg">{tsh(i.fromPrice)}</b>
+                    {i.options > 1 ? <span className="block text-xs text-[#1d1210]/60">{i.options} options</span> : i.originalPrice && <span className="block text-xs text-[#1d1210]/40 line-through">{tsh(i.originalPrice)}</span>}
                   </span>
                 </span>
               </Link>

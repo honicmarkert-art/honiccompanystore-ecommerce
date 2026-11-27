@@ -52,7 +52,7 @@ type Category = {
   product_count?: number
 }
 
-type Variant = { id?: number | string; price?: number | string; stock_quantity?: number; stockQuantity?: number; image?: string | null }
+type Variant = { id?: number | string; price?: number | string; stock_quantity?: number; stockQuantity?: number; image?: string | null; variant_name?: string | null }
 
 type Product = {
   id: number
@@ -127,6 +127,28 @@ const MIN_QTY = 1
 /** Old links used ?sortBy=rating / created_at */
 const LEGACY_SORT: Record<string, SortBy> = { rating: 'popular', created_at: 'newest', newest: 'newest', price_asc: 'price_asc', price_desc: 'price_desc', popular: 'popular' }
 const SORT_TITLES: Partial<Record<SortBy, string>> = { popular: 'Best sellers', newest: 'New arrivals', rating: 'Top rated' }
+/** Fisher-Yates shuffle (a new array). */
+function shuffle<T>(list: T[]): T[] {
+  const a = [...list]
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] }
+  return a
+}
+/** After every 10 regular items, 2 or 3 items from the (already shuffled) pool; each pool item once. */
+function mixIn<T extends { id: number }>(base: T[], pool: T[]): T[] {
+  if (!pool.length) return base
+  const seen = new Set(base.map((p) => p.id))
+  const extra = pool.filter((p) => !seen.has(p.id))
+  const out: T[] = []
+  let next = 0
+  base.forEach((p, i) => {
+    out.push(p)
+    if ((i + 1) % 10 === 0) {
+      const take = 2 + (((i + 1) / 10) % 2) // 2, 3, 2, 3 ... per block of 10
+      for (let k = 0; k < take && next < extra.length; k++) out.push(extra[next++])
+    }
+  })
+  return out
+}
 /** Stock of the variant the card adds, else the product total. */
 const stockOf = (p: Product) => {
   const v = p.variants?.[0]
@@ -288,11 +310,11 @@ function Marketplace() {
   const loadProducts = useCallback(async (from: number) => {
     setLoadingProducts(true)
     try {
-      const r = await fetch(`/api/search?sort=popular&limit=${PAGE_SIZE}&offset=${from}`)
+      const r = await fetch(`/api/search?sort=popular&limit=${PAGE_SIZE}&offset=${from}&china=exclude`)
       const d = await r.json()
       const list: Product[] = Array.isArray(d?.products) ? d.products : []
       setProducts(prev => (from === 0 ? list : [...prev, ...list.filter(p => !prev.some(x => x.id === p.id))]))
-      setOffset(from + list.length)
+      setOffset(typeof d?.nextOffset === 'number' ? d.nextOffset : from + list.length)
       setHasMore(!!d?.hasMore)
     } catch {
       setHasMore(false)
@@ -385,10 +407,21 @@ function Marketplace() {
     return picks
   }, [history, products, mainCats])
 
-  const shownProducts = useMemo(
-    () => (activeChip ? products.filter(p => p.category === activeChip) : products),
-    [products, activeChip],
-  )
+  // China items: a random few among the regular ones (2-3 in every 10), not all of them in a block
+  const [chinaPool, setChinaPool] = useState<Product[]>([])
+  useEffect(() => {
+    let off = false
+    fetch('/api/search?china=only&limit=60')
+      .then(r => r.json())
+      .then(d => { if (!off && Array.isArray(d?.products)) setChinaPool(shuffle(d.products as Product[])) })
+      .catch(() => {})
+    return () => { off = true }
+  }, [])
+  const shownProducts = useMemo(() => {
+    const base = activeChip ? products.filter(p => p.category === activeChip) : products
+    const pool = activeChip ? chinaPool.filter(p => p.category === activeChip) : chinaPool
+    return mixIn(base, pool)
+  }, [products, chinaPool, activeChip])
 
   // ---- actions ----
   const runSearch = (q?: string) => {
@@ -426,8 +459,8 @@ function Marketplace() {
       toast({ title: 'Out of stock', description: stock.message || 'This product is currently unavailable.', variant: 'destructive' })
       return false
     }
-    if (p.importChina || p.import_china) {
-      // China imports need the shipping notice on the product page
+    if ((p.variants?.length ?? 0) > 1 || p.importChina || p.import_china) {
+      // several options: the shopper picks one on the product page; China imports need its shipping notice
       openProduct(p)
       router.push(productHref(p))
       return false
@@ -1106,8 +1139,12 @@ function ProductCard({ p, formatPrice, onOpen, onAdd, qty, onQty }: {
   const [adding, setAdding] = useState(false)
   const [hovered, setHovered] = useState(false)
   const orig = Number(p.original_price ?? p.originalPrice ?? 0)
-  const off = orig > p.price ? Math.round((1 - p.price / orig) * 100) : 0
+  const off = !(p.variants && p.variants.length > 1) && orig > p.price ? Math.round((1 - p.price / orig) * 100) : 0
   const china = !!(p.importChina || p.import_china)
+  const optionCount = p.variants?.length ?? 0
+  const multi = optionCount > 1
+  const optionPrices = (p.variants || []).map((v) => Number(v.price)).filter((n) => n > 0)
+  const fromPrice = multi && optionPrices.length ? Math.min(...optionPrices) : p.price
   const sameDay = !!(p.sameDayDelivery || p.same_day_delivery)
   const freeDelivery = !!(p.free_delivery || p.freeDelivery)
   const stock = stockOf(p)
@@ -1115,11 +1152,11 @@ function ProductCard({ p, formatPrice, onOpen, onAdd, qty, onQty }: {
   const hoverImg = hoverImageOf(p)
   const min = MIN_QTY
 
-  // At most two corner badges, in a fixed order, so cards stay clean
+  // At most two corner badges, in a fixed order, so cards stay clean (From China always shows)
   const badges = [
+    china && <span key="imp" className="rounded-md bg-[#c8102e] px-1.5 py-0.5 text-[11px] font-bold text-white">From China</span>,
     off > 0 && <span key="off" className="rounded-md bg-rose-600 px-1.5 py-0.5 text-[11px] font-bold text-white">-{off}%</span>,
     p.is_new && <span key="new" className="rounded-md bg-orange-500 px-1.5 py-0.5 text-[11px] font-bold text-white">NEW</span>,
-    china && <span key="imp" className="rounded-md bg-white px-1.5 py-0.5 text-[11px] font-semibold text-neutral-700 ring-1 ring-neutral-200">Import</span>,
   ].filter(Boolean).slice(0, 2)
 
   const stop = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation() }
@@ -1161,14 +1198,16 @@ function ProductCard({ p, formatPrice, onOpen, onAdd, qty, onQty }: {
         </h3>
         <div className="mt-auto pt-1">
           <div className="flex flex-wrap items-baseline gap-x-1.5">
-            <span className="text-[15px] font-black sm:text-base">{formatPrice(p.price)}</span>
+            {multi && <span className="text-[11px] text-neutral-500">From</span>}
+            <span className="text-[15px] font-black sm:text-base">{formatPrice(fromPrice)}</span>
             {off > 0 && <span className="text-[11px] text-neutral-400 line-through">{formatPrice(orig)}</span>}
           </div>
           <div className="mt-1 flex min-h-[1rem] flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-neutral-500">
             {(p.rating ?? 0) > 0 && (
               <span className="flex items-center gap-0.5"><Star className="h-3 w-3 fill-amber-400 text-amber-400" />{Number(p.rating).toFixed(1)}</span>
             )}
-            {lowStock
+            {multi && <span className="font-medium text-neutral-700">{optionCount} options</span>}
+            {lowStock && !multi
               ? <span className="font-semibold text-amber-600">Only {stock} left</span>
               : (p.sold_count ?? 0) > 0 && <span>{p.sold_count} sold</span>}
             {sameDay
@@ -1177,7 +1216,7 @@ function ProductCard({ p, formatPrice, onOpen, onAdd, qty, onQty }: {
           </div>
         </div>
 
-        {qty > 0 && !china ? (
+        {qty > 0 && !china && !multi ? (
           // In cart: quantity stepper instead of the button
           <div onClick={stop} className="mt-2 flex min-h-9 items-center justify-between rounded-xl bg-orange-50 ring-1 ring-orange-200">
             <button onClick={(e) => step(e, -1)} className="grid h-9 w-9 place-items-center rounded-xl text-orange-700 hover:bg-orange-100" aria-label={qty <= min ? 'Remove from cart' : 'Decrease quantity'}>
@@ -1194,8 +1233,8 @@ function ProductCard({ p, formatPrice, onOpen, onAdd, qty, onQty }: {
             disabled={adding}
             className="mt-2 flex min-h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-orange-500 px-2 py-2 text-xs font-bold text-white shadow-sm hover:bg-orange-600 active:bg-orange-700 sm:text-[13px]"
           >
-            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : china ? <ArrowRight className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            {china ? 'View options' : 'Add to cart'}
+            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : china || multi ? <ArrowRight className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {multi ? 'Choose option' : china ? 'View item' : 'Add to cart'}
           </button>
         )}
       </div>

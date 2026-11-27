@@ -297,3 +297,16 @@ export async function sellerProducts(p: SearchParams & { sellerId: string }) {
   const products = (data || []).map((row) => { const { match: _m, ...item } = toListItem(row as Parameters<typeof toListItem>[0], 'related'); return item })
   return { products, total: count || 0, hasMore: offset + products.length < (count || 0), exact: true, seller }
 }
+
+/** Items imported to order from China (for mixing a few into the marketplace feed). */
+export async function chinaProducts(limit = 60) {
+  const { data, error } = await db()
+    .from('products')
+    .select('*, product_variants (*)')
+    .eq('import_china', true)
+    .or('is_hidden.is.null,is_hidden.eq.false')
+    .limit(Math.min(Math.max(limit, 1), 100))
+  if (error) throw new Error(error.message)
+  const products = (data || []).map((row) => { const { match: _m, ...item } = toListItem(row as Parameters<typeof toListItem>[0], 'related'); return item })
+  return { products, total: products.length, hasMore: false, exact: true }
+}

@@ -270,7 +270,8 @@ Sort the relevant ids into: "e" = the SAME product as the photo, "s" = same kind
 export function toListItem(row: Record<string, any>, match: MatchLevel) {
   const variants = (row.product_variants || []).map((v: any) => ({
     id: v.id,
-    name: v.name,
+    name: v.variant_name || v.name || null,
+    variant_name: v.variant_name || null,
     sku: v.sku,
     price: v.price,
     image: v.image,

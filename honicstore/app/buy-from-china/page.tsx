@@ -23,19 +23,24 @@ async function loadItems(): Promise<ChinaItem[]> {
   const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } })
   const { data, error } = await db
     .from('products')
-    .select('id, name, slug, price, original_price, image, category, brand, rating, reviews, sold_count, created_at')
+    .select('id, name, slug, price, original_price, image, category, brand, rating, reviews, sold_count, created_at, product_variants (price)')
     .eq('import_china', true)
     .or('is_hidden.is.null,is_hidden.eq.false')
     .order('sold_count', { ascending: false, nullsFirst: false })
     .limit(300)
   if (error) throw new Error('Could not load import items')
-  return (data || []).map((p) => ({
+  return (data || []).map((p) => {
+    const optionPrices = ((p.product_variants as { price: number | null }[] | null) || []).map((v) => Number(v.price)).filter((n) => n > 0)
+    const options = optionPrices.length
+    return {
     id: Number(p.id), name: String(p.name || ''), slug: p.slug || null, price: Number(p.price) || 0,
     originalPrice: p.original_price != null && Number(p.original_price) > Number(p.price) ? Number(p.original_price) : null,
     image: typeof p.image === 'string' && /^https:\/\//.test(p.image) ? p.image : null,
     category: String(p.category || '').trim() || 'Other', brand: p.brand || null,
     rating: Number(p.rating) || 0, reviews: Number(p.reviews) || 0, sold: Number(p.sold_count) || 0, createdAt: String(p.created_at || ''),
-  }))
+    options, fromPrice: options > 1 ? Math.min(...optionPrices) : options === 1 ? optionPrices[0] : Number(p.price) || 0,
+  }
+  })
 }
 
 export default async function ChinaPage() {

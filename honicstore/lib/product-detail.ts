@@ -125,6 +125,8 @@ function transformProduct(product: any) {
         inStock: hasStockNumber ? variant.stock_quantity > 0 : true,
         in_stock: hasStockNumber ? variant.stock_quantity > 0 : true,
         variant_name: variant.variant_name || null,
+        originalPrice: variant.original_price != null && Number(variant.original_price) > Number(variant.price) ? Number(variant.original_price) : undefined,
+        specifications: variant.specifications && typeof variant.specifications === 'object' && !Array.isArray(variant.specifications) ? (variant.specifications as Record<string, string>) : {},
       }
     }) || []) as ProductVariantDetail[],
     variantConfig: (() => {
@@ -175,4 +177,6 @@ export type ProductVariantDetail = {
   in_stock: boolean
   variant_name: string | null
   originalPrice?: number
+  /** this option's own specifications (shown over the product's when chosen) */
+  specifications?: Record<string, string>
 }

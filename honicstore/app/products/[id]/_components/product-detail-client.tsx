@@ -53,7 +53,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
   const { companyName, companyLogo } = usePublicCompanyContext()
 
   const [product, setProduct] = useState<ProductDetail>(initialProduct)
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariantDetail | null>(initialProduct.variants?.[0] ?? null)
+  const [selectedVariant, setSelectedVariant] = useState<ProductVariantDetail | null>(initialProduct.variants?.find((v) => variantStock(v) > 0) ?? initialProduct.variants?.[0] ?? null)
   const [quantity, setQuantity] = useState(minQuantityFor(Number(initialProduct.variants?.[0]?.price) || initialProduct.price))
   const [supplier, setSupplier] = useState<SupplierInfo | null>(null)
   const [sold, setSold] = useState<{ soldCount: number; buyersCount: number | null } | null>(null)
@@ -121,6 +121,14 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
   const images = useMemo(() => galleryImages(product), [product])
   const stock = useMemo(() => totalStock(product), [product])
   const hasVariants = (product.variants?.length ?? 0) > 0
+  // options with different prices show their price on every button
+  const optionPricesDiffer = new Set((product.variants || []).map((v) => Number(v.price))).size > 1
+  // specifications: the product's, with the chosen option's own values on top
+  const shownProduct = useMemo(() => {
+    const own = selectedVariant?.specifications
+    if (!own || !Object.keys(own).length) return product
+    return { ...product, specifications: { ...(product.specifications || {}), ...own } }
+  }, [product, selectedVariant])
   const availableStock = selectedVariant ? variantStock(selectedVariant) : stock
   const price = Number(selectedVariant?.price) || product.price || 0
   const originalPrice = Number(selectedVariant?.originalPrice || product.originalPrice || 0)
@@ -501,7 +509,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
                         )}
                         <span>
                           <span className="block font-semibold">{variantLabel(v, i)}</span>
-                          {Number(v.price) !== product.price && <span className="block text-xs text-neutral-500">{formatPrice(Number(v.price))}</span>}
+                          {(optionPricesDiffer || Number(v.price) !== product.price) && <span className="block text-xs text-neutral-500">{formatPrice(Number(v.price))}</span>}
                         </span>
                         {active && <Check className="absolute -right-1.5 -top-1.5 h-5 w-5 rounded-full bg-orange-500 p-0.5 text-white" />}
                       </button>
@@ -580,7 +588,7 @@ export function ProductDetailClient({ initialProduct, categorySlug = null, retur
         </div>
 
         <div className="mt-10 lg:mt-14">
-          <ProductTabs product={product} />
+          <ProductTabs product={shownProduct} />
         </div>
 
         <RelatedProducts productId={product.id} categorySlug={categorySlug} productName={product.name} price={product.price} formatPrice={formatPrice} />
