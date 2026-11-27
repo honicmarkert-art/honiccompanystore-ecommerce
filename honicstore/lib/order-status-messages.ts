@@ -76,7 +76,7 @@ export async function notifyOrderStatus(input: { table: string; id: string | num
     const wa = kind === 'shipped'
       ? await sendUtility('order_shipped', phone, { params: [name, o.order_number, tracking || '-'], button: orderButton(ref), ref: o.order_number })
       : kind === 'ready_for_pickup'
-        ? await sendUtility('order_ready_pickup', phone, { params: [name, o.order_number, o.pickup_id || '-'], button: orderButton(ref), ref: o.order_number })
+        ? await sendUtility('order_ready_pickup', phone, { params: [name, o.order_number], button: orderButton(ref), ref: o.order_number })
         : await sendUtility('order_delivered', phone, { params: [name, o.order_number], button: orderButton(ref), ref: o.order_number })
     viaWhatsApp = wa.ok
     if (wa.ok) sent.push('whatsapp'); else await unclaim(o.order_number, kind, 'whatsapp')

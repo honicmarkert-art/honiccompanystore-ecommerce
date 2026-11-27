@@ -9,7 +9,8 @@ until the keys below are set. Admin pages: **/admin/whatsapp** (status, campaign
 2. **developers.facebook.com** → *Create app* → type *Business* → add the **WhatsApp** product.
 3. WhatsApp → *API Setup* → **add your phone number** and verify it by SMS/call.
    - ⚠️ A number connected to the Cloud API normally **cannot also be used in the WhatsApp Business app**.
-     Either use a **second number** for the API, or onboard with Meta's **"coexistence"** option so the
+     Either use a **second number** for the API, or onboard with Meta's **"coe- **order_ready:** Habari {{1}}, oda {{2}} iko tayari. Unaweza kuichukua sasa. / Hello {{1}}, your order {{2}} is ready. You can pick it up now.
+istence"** option so the
      same number keeps working in the app. Decide before connecting +255 786 957 939.
 4. Business settings → *System users* → create one (Admin) → *Generate token* for the app with
    `whatsapp_business_messaging` and `whatsapp_business_management` → this is the **permanent token**.
@@ -21,7 +22,8 @@ until the keys below are set. Admin pages: **/admin/whatsapp** (status, campaign
 | `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp → API Setup → *Phone number ID* |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | WhatsApp → API Setup → *WhatsApp Business Account ID* |
 | `WHATSAPP_APP_SECRET` | App settings → Basic → *App secret* |
-| `WHATSAPP_VERIFY_TOKEN` | already generated in `.env.local` (any random text) |
+| `WHATSAPP_VERIFY_TOKEN` | already generated in `.env.local` (any random te- **offer_price:** Habari {{1}}, kuhusu ofa yako ya {{2}}: bei iliyokubaliwa ni {{3}} kwa kila moja (idadi {{4}}). Andika {{5}} kwenye kikapu, kisha lipa kwa mobile money. Inatumika mara moja ndani ya saa {{6}}. / Hello {{1}}, about your offer for {{2}}: agreed price {{3}} each (qty {{4}}). Type {{5}} in your cart and pay with mobile money. Valid once, for {{6}} hours.
+t) |
 | `WHATSAPP_TEMPLATE_LANG` | `en` (the language you create the templates in) |
 
 6. WhatsApp → *Configuration* → **Webhook**: Callback URL `https://honiccompanystore.com/api/webhooks/whatsapp`,
@@ -35,14 +37,19 @@ All are **Utility**, language **en**, bilingual (Swahili + English). Names must 
 *"Send my order updates on WhatsApp"*. Button texts are at most 25 characters (WhatsApp limit).
 Opening hours and the street number are left out on purpose: an approved template cannot be changed quickly.
 
+Meta rejected earlier versions as "incorrect category" whenever the text said *Pickup ID* or *Your code* followed by a
+value (it reads them as login codes). Keep words like "ID" and "code" away from variables. Rejected names that
+cannot be reused: honic_order_ready_pickup, honic_offer_reply, honic_pickup_ready, honic_offer_answer,
+honic_collect_order, honic_collect_ready, honic_ready_collect.
+
 | Template | Sent when | Variables | Button |
 |---|---|---|---|
 | `honic_order_paid` | payment confirmed (shop) | name, order number, total. Header: invoice PDF | Track order / Fuatilia → `/orders/{ref}` |
 | `honic_order_shipped` | admin marks shipped | name, order number, tracking number | Track order / Fuatilia → `/orders/{ref}` |
-| `honic_order_ready_pickup` | admin marks ready for pickup | name, order number, pickup ID | View order / Angalia oda → `/orders/{ref}` |
+| `honic_order_ready` | admin marks ready for pickup | name, order number (the pickup number is on the order page) | View order / Angalia oda → `/orders/{ref}` |
 | `honic_order_delivered` | admin marks delivered | name, order number | Confirm / Thibitisha → `/orders/{ref}` |
 | `honic_order_expired` | unpaid order cancelled after 15 min | name, order number | Open cart / Fungua kikapu → `/cart` |
-| `honic_offer_reply` | admin accepts or counters a "Make an offer" request (customer silent for 24 h) | name, product, price each, quantity, code, hours valid | View item / Angalia → `/products/{id}-{slug}` |
+| `honic_offer_price` (**Marketing**) | admin accepts or counters a "Make an offer" request (customer silent for 24 h) | name, product, price each, quantity, code, hours valid | Buy now / Nunua sasa → `/products/{id}-{slug}` |
 | `honic_import_shipping_price` | admin saves the China shipping price of an order | name, order number, price, "ndege / air" or "meli / sea" | View order / Angalia oda → `/orders/{ref}` |
 
 Texts:

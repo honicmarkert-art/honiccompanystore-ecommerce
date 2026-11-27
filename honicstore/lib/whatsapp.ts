@@ -20,10 +20,10 @@ const LANG = () => process.env.WHATSAPP_TEMPLATE_LANG || 'en'
 export const WA_TEMPLATES = {
   order_paid: 'honic_order_paid',
   order_shipped: 'honic_order_shipped',
-  order_ready_pickup: 'honic_order_ready_pickup',
+  order_ready_pickup: 'honic_order_ready',
   order_delivered: 'honic_order_delivered',
   order_expired: 'honic_order_expired',
-  offer_reply: 'honic_offer_reply',
+  offer_reply: 'honic_offer_price',
   import_shipping_price: 'honic_import_shipping_price',
 } as const
 export type UtilityKind = keyof typeof WA_TEMPLATES
