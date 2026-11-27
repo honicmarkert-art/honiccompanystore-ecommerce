@@ -11,7 +11,6 @@ import { useAuth } from '@/contexts/auth-context'
 import { useGlobalAuthModal } from '@/contexts/global-auth-modal'
 import { openLens } from '@/components/image-search/lens'
 import { BrandLogo } from '@/components/brand-logo'
-import { ShopSwitch } from '@/components/shop-switch'
 import { useCurrency } from '@/contexts/currency-context'
 import { useCartCount } from '@/hooks/use-cart-count'
 
@@ -170,7 +169,6 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
             <span className="flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-orange-400" />Secure payment</span>
           </div>
           <nav className="flex items-center gap-5">
-            <Link href="/buy-from-china" className="font-semibold text-red-300 hover:text-white">Buy from China</Link>
             <Link href="/support/order-tracking" className="hover:text-white">Track order</Link>
             <Link href="/support" className="flex items-center gap-1 hover:text-white"><HelpCircle className="h-3.5 w-3.5" />Help</Link>
             <Link href="/become-supplier" className="flex items-center gap-1 font-semibold text-orange-400 hover:text-orange-300"><Store className="h-3.5 w-3.5" />Sell on {companyName || 'Honic'}</Link>
@@ -191,6 +189,12 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
             <BrandLogo size="md" showText={false} className="sm:hidden" />
           )}
           {!returnTo && <span className="hidden sm:block"><BrandLogo size="md" textClassName="hidden xl:flex" /></span>}
+
+          {/* The two shops (desktop) */}
+          <nav aria-label="Shops" className="hidden shrink-0 items-center gap-1 lg:flex">
+            <Link href="/products" className="flex h-10 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-neutral-700 hover:bg-orange-50 hover:text-orange-700 dark:text-neutral-200 dark:hover:bg-neutral-800"><Store className="h-4 w-4" />Marketplace</Link>
+            <Link href="/buy-from-china" className="flex h-10 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-[#c8102e] hover:bg-red-50 dark:text-red-400 dark:hover:bg-neutral-800"><Plane className="h-4 w-4" />Buy from China</Link>
+          </nav>
 
           {/* Categories mega menu (desktop) */}
           <div ref={catRef} className="relative hidden lg:block" onMouseEnter={ensureCategories}>
@@ -387,8 +391,6 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
         </div>
         )}
       </header>
-      {/* the two shops, on every page */}
-      <ShopSwitch />
 
       {/* Phone/tablet drawer */}
       {drawer && (
@@ -409,6 +411,11 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
               <button onClick={() => setDrawer(false)} className="rounded-full p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" aria-label="Close menu"><X className="h-5 w-5" /></button>
             </div>
             <div className="flex-1 overflow-y-auto">
+              {/* The two shops */}
+              <div className="grid grid-cols-2 gap-2 border-b border-neutral-100 p-4 dark:border-neutral-800">
+                <Link href="/products" onClick={() => setDrawer(false)} className="flex items-center gap-2 rounded-xl bg-orange-50 p-3 text-sm font-bold text-orange-700 dark:bg-orange-950/30 dark:text-orange-300"><Store className="h-5 w-5" />Marketplace</Link>
+                <Link href="/buy-from-china" onClick={() => setDrawer(false)} className="flex items-center gap-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-[#c8102e] dark:bg-red-950/30 dark:text-red-300"><Plane className="h-5 w-5" />Buy from China</Link>
+              </div>
               {isAuthenticated && (
                 <div className="grid grid-cols-3 gap-2 border-b border-neutral-100 p-4 dark:border-neutral-800">
                   {accountLinks.slice(0, 6).map(({ href, label, icon: Icon }) => (
@@ -430,7 +437,6 @@ function SiteHeaderImpl({ companyName, cartCount: cartCountProp, wishlistCount =
                 ))}
               </ul>
               <div className="border-t border-neutral-100 p-4 text-sm dark:border-neutral-800">
-                <Link href="/buy-from-china" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2 font-semibold text-red-600"><Plane className="h-4 w-4" />Buy from China</Link>
                 <Link href="/support/order-tracking" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2"><Truck className="h-4 w-4 opacity-70" />Track order</Link>
                 <Link href="/support" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2"><HelpCircle className="h-4 w-4 opacity-70" />Help & support</Link>
                 <Link href="/become-supplier" onClick={() => setDrawer(false)} className="flex items-center gap-3 py-2 font-semibold text-orange-600"><Store className="h-4 w-4" />Sell on {companyName || 'Honic'}</Link>

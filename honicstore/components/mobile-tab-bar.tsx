@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, LayoutGrid, Search, ShoppingBag, User } from 'lucide-react'
+import { Home, Plane, Search, ShoppingBag, User } from 'lucide-react'
 
 /**
  * Site-wide bottom tab bar for phones and tablets (hidden from lg up).
@@ -24,8 +24,8 @@ function isHidden(pathname: string) {
 
 const TABS = [
   { href: '/', label: 'Home', icon: Home, match: (p: string) => p === '/' || p === '/' },
-  { href: '/categories', label: 'Categories', icon: LayoutGrid, match: (p: string) => p.startsWith('/categories') },
-  { href: '/products', label: 'Shop', icon: Search, match: (p: string) => p === '/products' },
+  { href: '/products', label: 'Marketplace', icon: Search, match: (p: string) => p === '/products' || p.startsWith('/categories') },
+  { href: '/buy-from-china', label: 'China', icon: Plane, match: (p: string) => p.startsWith('/buy-from-china') },
   { href: '/cart', label: 'Cart', icon: ShoppingBag, match: (p: string) => p.startsWith('/cart') },
   { href: '/account', label: 'Account', icon: User, match: (p: string) => p.startsWith('/account') || p.startsWith('/orders') },
 ]

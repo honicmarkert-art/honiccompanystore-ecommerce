@@ -27,8 +27,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowRight, BadgeCheck, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
   ClipboardList, FileText, Home, LayoutGrid, Loader2, Menu, MessageCircle, Minus, Plus,
-  ScanSearch, Search, ShieldCheck, ShoppingBag, ShoppingCart, Sparkles, Star, Truck, User, X, Zap,
-} from 'lucide-react'
+  ScanSearch, Search, ShieldCheck, ShoppingBag, ShoppingCart, Sparkles, Star, Truck, User, X, Zap, Plane } from 'lucide-react'
 import { optimizedImg } from '@/lib/image-optimize'
 import { freeDeliveryThreshold } from '@/lib/shipping-pricing'
 import { useCurrency } from '@/contexts/currency-context'
@@ -38,7 +37,6 @@ import { usePublicCompanyContext } from '@/contexts/public-company-context'
 import { checkProductStock } from '@/utils/stock-validation'
 import { openLens } from '@/components/image-search/lens'
 import { BrandLogo } from '@/components/brand-logo'
-import { ShopSwitch } from '@/components/shop-switch'
 import { readRecentlyViewed, recordView } from '@/lib/recently-viewed'
 
 // ---------- types ----------
@@ -614,9 +612,6 @@ function Marketplace() {
         </div>
       </div>
 
-      {/* the two shops */}
-      <ShopSwitch />
-
       {/* Hero */}
       <header className="relative overflow-hidden bg-[radial-gradient(ellipse_at_top_right,#ffedd5_0%,#ffffff_55%)]">
         <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.35] [background-image:radial-gradient(#d4d4d4_1px,transparent_1px)] [background-size:22px_22px] [mask-image:linear-gradient(to_bottom,black,transparent)]" />
@@ -630,6 +625,7 @@ function Marketplace() {
               {logo}
             </div>
             <div className="flex items-center gap-3 text-sm sm:gap-5">
+              <Link href="/buy-from-china" className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-[#c8102e] hover:bg-red-50 sm:text-[13px]"><Plane className="h-3.5 w-3.5" />Buy from China</Link>
               <span className="hidden items-center gap-1.5 text-[13px] text-neutral-600 md:flex"><Truck className="h-4 w-4 text-orange-600" /> Delivery across Tanzania</span>
               <div className="hidden lg:block"><HeaderIcons cartCount={cartTotalItems} /></div>
               <div className="flex items-center gap-3 lg:hidden">
